@@ -6,30 +6,31 @@ You don't need to install dependencies for most of the program.
 This build runs the game's original JAudio sound engine: music, sound
 effects and cinematic audio all play.
 
-New in 0.3.5: permadeath, chosen when you create a file and carried by
-that file thereafter -- lose Olimar and the run ends and its save is
-erased. Photo mode on F3 freezes the world and lets you fly the camera
-anywhere. The Pikmin limit now really reaches its high settings: a second
-fixed pool ran out somewhere past four hundred on screen and took the game
-with it. And the practice stage no longer falls silent when a boss comes
-near.
+New in 0.6: HD texture packs. Dolphin-format packs (DDS in BC7/BC1/BC3,
+or PNG) load from Load/Textures/<GameID>/ next to pikmin_settings.conf;
+enable them under F1 > Graphics > Texture packs, and they apply on the
+next start. The renderer keeps static geometry resident on the GPU and
+skins it in the vertex shader, and caches compiled shader binaries next
+to your saves, so frames are cheaper and the first-sight stutter happens
+once per machine. The same code now runs on Android; that package is
+separate (open_nectar_<version>.apk).
 
-From 0.3.1: the game no longer freezes on startup when the audio device
-is busy or slow to appear. It starts silently and the sound joins in once
-the device opens. Controller sticks no longer invert at the very end of
-their travel, and the F1 menu is navigable with a controller. Two mods
-under Mods in the F1 menu: a Pikmin field limit from 50 to 999, and an
-adjustable day length between 5 and 30 minutes.
-
-From 0.3: the mouse wheel either picks which Pikmin colour to throw or
-zooms the camera, chosen in the F1 menu under Mods. The 120 FPS option now
-really presents at 120 rather than being capped at 60.
+From 0.5: a Hard mode alongside Permadeath (tougher enemies, shorter days,
+80 Pikmin on the field), glossy surfaces on Olimar, the ship and the
+Onions, compressed disc images (RVZ/WIA/GCZ) through a Dolphin converter
+you already have, language selection from F1 on the European disc, the
+F1 menu from the pad's Select/View button, and fixes for PAL saves not
+being recognised. Saves now live in the game's own folder; an older card
+is copied there on first launch.
 
 System requirements:
   - Linux x86-64 with kernel 3.2 or higher.
   - OpenGL driver with libglvnd (present in any distro since 2017).
   - X11 or Wayland session.
-  - Your legal, uncompressed copy of Pikmin USA Rev. 1 (GPIE01), in ISO or GCM format.
+  - Your legal copy of Pikmin USA Rev. 1 (GPIE01) or Pikmin Europe (GPIP01),
+    in ISO or GCM format. RVZ/WIA/GCZ work too if dolphin-tool from a
+    Dolphin installation is on PATH or beside the launcher (about 1.4 GB
+    of temporary space is needed for the conversion).
 
 The ROM and any Nintendo proprietary resources are not included.
 The ROM is not copied or modified during installation.

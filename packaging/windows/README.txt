@@ -5,6 +5,23 @@ A native Windows build. No emulator, no Wine.
 This build runs the game's original JAudio sound engine: music, sound
 effects and cinematic audio all play.
 
+New in 0.6: HD texture packs. Dolphin-format packs (DDS in BC7/BC1/BC3,
+or PNG) load from Load/Textures/<GameID>/ next to pikmin_settings.conf;
+enable them under F1 > Graphics > Texture packs, and they apply on the
+next start. The renderer keeps static geometry resident on the GPU and
+skins it in the vertex shader, and caches compiled shader binaries next
+to your saves, so frames are cheaper and the first-sight stutter happens
+once per machine. The same code now runs on Android; that package is
+separate (open_nectar_<version>.apk).
+
+From 0.5: a Hard mode alongside Permadeath (tougher enemies, shorter days,
+80 Pikmin on the field), glossy surfaces on Olimar, the ship and the
+Onions, compressed disc images (RVZ/WIA/GCZ) through a Dolphin converter
+you already have, language selection from F1 on the European disc, the
+F1 menu from the pad's Select/View button, and fixes for PAL saves not
+being recognised. Saves now live in the game's own folder; an older card
+is copied there on first launch.
+
 
 WHAT YOU NEED
 -------------
@@ -12,9 +29,11 @@ WHAT YOU NEED
   - GPU drivers with OpenGL 3.3 or newer. Intel, NVIDIA and AMD drivers all
     have it. Windows' generic "Basic Display Adapter" driver does NOT, and
     the game will not start on it.
-  - Your legal, uncompressed copy of Pikmin USA Rev. 1 (GPIE01) or
-    Pikmin Europe (GPIP01), as ISO or GCM. The package includes both
-    game executables; the launcher copies the one your disc needs.
+  - Your legal copy of Pikmin USA Rev. 1 (GPIE01) or Pikmin Europe
+    (GPIP01), as ISO or GCM. RVZ/WIA/GCZ work too if DolphinTool.exe from
+    a Dolphin installation is on PATH or beside the launcher (about 1.4 GB
+    of temporary space is needed for the conversion). The package includes
+    both game executables; the launcher copies the one your disc needs.
 
 The ROM and any Nintendo proprietary resources are not included. Your image
 is neither copied nor modified during installation.

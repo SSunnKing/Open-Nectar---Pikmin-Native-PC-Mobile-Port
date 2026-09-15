@@ -7,7 +7,21 @@ Requisitos del sistema:
   - Linux x86-64 con kernel 3.2 o superior.
   - Driver OpenGL con libglvnd (presente en cualquier distro desde 2017).
   - Sesión X11 o Wayland.
-  - Tu copia legal y sin comprimir de Pikmin USA Rev. 1 (GPIE01), en ISO o GCM.
+  - Tu copia legal de Pikmin USA Rev. 1 (GPIE01) o Pikmin Europa (GPIP01),
+    en ISO o GCM (RVZ/WIA/GCZ si tienes dolphin-tool de Dolphin en el PATH).
+
+Novedades de la 0.6: packs de texturas HD en formato Dolphin (DDS BC7/BC1/
+BC3 o PNG) desde Load/Textures/<GameID>/ junto a pikmin_settings.conf,
+activables en F1 > Gráficos > Texture packs (se aplican al reiniciar);
+geometría residente en GPU y caché de shaders compilados junto a las
+partidas, con lo que el juego va más ligero. El mismo código corre ahora
+en Android, en un paquete aparte (open_nectar_<versión>.apk).
+
+Desde la 0.5: modo Difícil además de Permadeath, reflejos en Olimar, la
+nave y las cebollas, imágenes RVZ/WIA/GCZ mediante el dolphin-tool de una
+instalación de Dolphin, idioma desde F1 en el disco europeo, menú F1 con
+el botón Select/View del mando y arreglo de las partidas PAL no
+reconocidas. Las partidas viven ahora en la carpeta del juego.
 
 No se incluye la ROM ni ningún recurso propiedad de Nintendo.
 La ROM no se copia ni se modifica durante la instalación.
