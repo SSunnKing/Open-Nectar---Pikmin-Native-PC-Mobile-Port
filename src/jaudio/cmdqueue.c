@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include "jaudio/cmdqueue.h"
 
 #include "jaudio/audiomesg.h"
@@ -115,7 +116,7 @@ static s32 Jal_FrameWork(void* callbackArg)
 #endif
 		{
 			if (Jac_ReceiveMessage_Fast(&curr->msgQueue, &message) == 1) {
-				result = Jam_WritePortAppDirect(curr->track, curr->mPortId, (u16)message);
+				result = Jam_WritePortAppDirect(curr->track, curr->mPortId, (u16)(uintptr_t)message);
 			}
 		}
 	}

@@ -27,6 +27,13 @@ int pc_photo_mode_active(void);
 
 /// Edge-detected toggle key. Call once per frame.
 int pc_photo_mode_poll_toggle(void);
+/// Toggle from elsewhere (touch button): consumed by the next poll.
+void pc_photo_mode_request_toggle(void);
+/// Touch input, same axes as the keys: move (stick, -1..1, y forward) is
+/// held state set every frame; look deltas (fraction of screen height) are
+/// accumulated by drags and consumed by the next update.
+void pc_photo_mode_set_touch_move(float x, float y);
+void pc_photo_mode_add_touch_look(float dx, float dy);
 
 /// Seeds the free camera from the pose the game camera currently holds.
 void pc_photo_mode_enter(float posX, float posY, float posZ,

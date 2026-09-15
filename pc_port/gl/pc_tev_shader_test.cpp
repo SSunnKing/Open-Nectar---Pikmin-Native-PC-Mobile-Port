@@ -303,6 +303,17 @@ void test_fog()
 
 int main()
 {
+	{
+		const std::string src = pc_tev_build_fragment_source(modulate_key());
+#if PIKI_USE_GLES
+		check(src.rfind("#version 300 es\n", 0) == 0, "GLES emits GLSL ES 3.00");
+		check(contains(src, "precision highp float;"), "GLES declares float precision");
+		check(contains(src, "precision highp int;"), "GLES declares integer precision");
+#else
+		check(src.rfind("#version 140\n", 0) == 0, "desktop emits GLSL 1.40");
+		check(!contains(src, "precision highp"), "desktop emits no ES precision qualifiers");
+#endif
+	}
 	test_uniform_names_are_a_subset_of_the_ubershader();
 	test_determinism();
 	test_unused_stage_tail_is_ignored();

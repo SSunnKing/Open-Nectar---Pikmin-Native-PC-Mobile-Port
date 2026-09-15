@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include "jaudio/aramcall.h"
 
 #include "jaudio/dummyrom.h"
@@ -99,7 +100,7 @@ void Init_AramMotherHeap(void)
 		inited = TRUE;
 
 		void* alloc = ARAllocFull(&outSize);
-		Jac_InitMotherHeap(&aram_mother, (u32)alloc, outSize, 0);
+		Jac_InitMotherHeap(&aram_mother, (u32)(uintptr_t)alloc, outSize, 0);
 	}
 }
 

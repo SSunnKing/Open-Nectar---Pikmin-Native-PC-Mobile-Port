@@ -13,6 +13,9 @@
 #include "Geometry.h"
 #include "pc_gfx.h"
 #endif
+#if PIKI_PC_TOUCH
+#include "touch/pc_touch.h"
+#endif
 #include "zen/Math.h"
 #include "zen/Number.h"
 #include "zen/ogSub.h"
@@ -89,6 +92,24 @@ struct PikiIconCallBack : public P2DPaneCallBack {
 		mNextThrowType = zen::pGameInfo->mEncodedNextThrowType;
 		return true;
 	}
+
+#if PIKI_PC_TOUCH
+	virtual bool draw(P2DPane* pane) // _0C
+	{
+		// Se llama justo después de drawSelf, con la matriz del pane aún
+		// cargada: el cuadrado (0,0)-(w,h) es exactamente lo que se ha
+		// pintado, escala incluida. Proyectado a ventana, la capa táctil lo
+		// usa como zona de toque para cambiar de color.
+		if (zen::pGameInfo->mEncodedNextThrowType != 0) {
+			float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+			if (pc_gfx_project_current(0.0f, 0.0f, 0.0f, &x0, &y0)
+			    && pc_gfx_project_current(f32(pane->getWidth()), f32(pane->getHeight()), 0.0f, &x1, &y1)) {
+				pc_touch_mark_color_icon(x0, y0, x1, y1);
+			}
+		}
+		return true;
+	}
+#endif
 
 	static const f32 frameMax;
 

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "CardUtil.h"
 
 #include "DebugLog.h"

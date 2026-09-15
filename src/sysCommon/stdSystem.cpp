@@ -131,6 +131,10 @@ void StdSystem::resetHeap(int heapIdx, int flag)
  */
 void StdSystem::invalidateObjsForHeap(int heapIdx)
 {
+#if defined(PIKI_PC_PORT)
+	// Meshes cached from display lists that lived in this heap die with it.
+	pc_gfx_invalidate_resident_meshes();
+#endif
 	GfxobjInfo* next;
 	for (GfxobjInfo* c = mGfxobjInfo.mNext; c != &mGfxobjInfo;) {
 		next = c->mNext;

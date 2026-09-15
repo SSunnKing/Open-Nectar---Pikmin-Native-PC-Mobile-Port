@@ -1,8 +1,12 @@
 #include "Colour.h"
+#include <cstdint>
 #include "DebugLog.h"
 #include "Dolphin/gx.h"
 #include "P2D/Font.h"
 #include "P2D/Print.h"
+#if PIKI_PC_TOUCH
+#include "touch/pc_touch.h"
+#endif
 #include <stddef.h>
 #include <stdlib.h>
 
@@ -181,7 +185,7 @@ f32 P2DPrint::parse(const u8* textBuffer, int textLen, int maxWidth, u16* outXPo
 
 	while (true) {
 		bool isDrawableChar = true;
-		if (currChar == 0 || (u32)textBuffer - (u32)textStart > textLen) {
+		if (currChar == 0 || (u32)((uintptr_t)textBuffer - (uintptr_t)textStart) > textLen) {
 			if (!doDraw && outXPosBuffer) {
 				outXPosBuffer[charNum] = (currLineWidth + 0.5f);
 			}
@@ -189,6 +193,29 @@ f32 P2DPrint::parse(const u8* textBuffer, int textLen, int maxWidth, u16* outXPo
 		}
 
 		if (!mSkipEscCtrlCodes && currChar < ASCII_PRINTABLE_MIN) {
+#if PIKI_PC_TOUCH
+			// "TI[k]": icono táctil en línea (port). Ocupa un hueco cuadrado
+			// del alto de la letra; el dibujo lo hace la capa táctil sobre la
+			// ventana, en la posición proyectada de ese hueco.
+			if (currChar == 0x1B && textBuffer[0] == 'T' && textBuffer[1] == 'I' && textBuffer[2] == '[' && textBuffer[3] != 0 && textBuffer[4] == ']') {
+				const char tag = (char)textBuffer[3];
+				textBuffer += 5;
+				const f32 iconSize = (f32)mCharHeight * 1.3f; // hueco algo mayor que la letra
+				if (doDraw) {
+					f32 x = mCursorX;
+					if (outXPosBuffer) x += ((s16*)outXPosBuffer)[charNum];
+					pc_touch_mark_inline_icon(tag, x, mCursorY, iconSize);
+				}
+				mCurrCharWidth = iconSize;
+				mCursorX += iconSize;
+				// Contabilizar como carácter dibujable (ancho de línea, spacing).
+				if (mCursorX - startX > currLineWidth) currLineWidth = mCursorX - startX;
+				mCursorX += mCharSpacing;
+				if (mCursorX > maxX) maxX = mCursorX;
+				currChar = *textBuffer++;
+				continue;
+			}
+#endif
 			if (currChar == 0x1B) { // escape character
 				u16 escCode = doEscapeCode(&textBuffer);
 				if (escCode == 'HM') {
@@ -218,7 +245,7 @@ f32 P2DPrint::parse(const u8* textBuffer, int textLen, int maxWidth, u16* outXPo
 			bool isMultiByteChar = false;
 			if (mFont->getFontType() == OS_FONT_ENCODE_SJIS) {
 				currChar = (currChar << 8) | *textBuffer++;
-				if ((u32)textBuffer - (u32)textStart <= textLen) {
+				if ((u32)((uintptr_t)textBuffer - (uintptr_t)textStart) <= textLen) {
 					isMultiByteChar = true;
 				} else {
 					continue;
@@ -229,7 +256,7 @@ f32 P2DPrint::parse(const u8* textBuffer, int textLen, int maxWidth, u16* outXPo
 			} else if (mFont->getFontType() == OS_FONT_ENCODE_UNK2 && currChar >= ASCII_PRINTABLE_MAX && *textBuffer != 0) {
 #endif
 				currChar = (currChar << 8) | *textBuffer++;
-				if ((u32)textBuffer - (u32)textStart <= textLen) {
+				if ((u32)((uintptr_t)textBuffer - (uintptr_t)textStart) <= textLen) {
 					isMultiByteChar = true;
 				} else {
 					continue;
@@ -520,9 +547,9 @@ s32 P2DPrint::getNumber(const u8** strPtr, s32 defaultValue, s32 invalidValue, i
 		value = strtoul((char*)*strPtr, &endStr, base);
 
 		// RBGA is valid length 8 format.
-		if ((u32)endStr - (u32)*strPtr != 8) {
+		if ((u32)((uintptr_t)endStr - (uintptr_t)*strPtr) != 8) {
 			// only other valid format is RGB, length 6.
-			if ((u32)endStr - (u32)*strPtr == 6) {
+			if ((u32)((uintptr_t)endStr - (uintptr_t)*strPtr) == 6) {
 				value = (value << 8) | 0xFF; // set alpha to max
 			} else {
 				// invalid format!

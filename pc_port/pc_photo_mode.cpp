@@ -37,6 +37,17 @@ extern "C" {
 
 int pc_photo_mode_active(void) { return sActive ? 1 : 0; }
 
+static bool sToggleRequested = false;
+static float sTouchMoveX = 0.0f, sTouchMoveY = 0.0f;
+static float sTouchLookDX = 0.0f, sTouchLookDY = 0.0f;
+// Un arrastre de toda la altura de la pantalla gira ~150 grados.
+static const float kTouchLookGain = 2.6f;
+
+void pc_photo_mode_set_touch_move(float x, float y) { sTouchMoveX = x; sTouchMoveY = y; }
+void pc_photo_mode_add_touch_look(float dx, float dy) { sTouchLookDX += dx; sTouchLookDY += dy; }
+
+void pc_photo_mode_request_toggle(void) { sToggleRequested = true; }
+
 int pc_photo_mode_poll_toggle(void)
 {
 	int numKeys        = 0;
@@ -44,7 +55,9 @@ int pc_photo_mode_poll_toggle(void)
 	const bool nowDown = keyDown(keys, numKeys, SDL_SCANCODE_F3);
 	const bool edge    = nowDown && !sTogglePrev;
 	sTogglePrev        = nowDown;
-	return edge ? 1 : 0;
+	const bool requested = sToggleRequested;
+	sToggleRequested     = false;
+	return (edge || requested) ? 1 : 0;
 }
 
 void pc_photo_mode_enter(float posX, float posY, float posZ,
@@ -128,6 +141,10 @@ void pc_photo_mode_update(float dt,
 
 	sYaw += lookX * kLookSpeed * dt;
 	sPitch += lookY * kLookSpeed * dt;
+	// Arrastre táctil: derecha gira a la derecha, arriba mira hacia arriba.
+	sYaw += sTouchLookDX * kTouchLookGain;
+	sPitch -= sTouchLookDY * kTouchLookGain;
+	sTouchLookDX = sTouchLookDY = 0.0f;
 	if (sPitch > kPitchLimit) sPitch = kPitchLimit;
 	if (sPitch < -kPitchLimit) sPitch = -kPitchLimit;
 	while (sYaw > kPi) sYaw -= 2.0f * kPi;
@@ -149,6 +166,9 @@ void pc_photo_mode_update(float dt,
 	if (keyDown(keys, numKeys, SDL_SCANCODE_A)) moveR -= 1.0f;
 	if (keyDown(keys, numKeys, SDL_SCANCODE_SPACE)) moveU += 1.0f;
 	if (keyDown(keys, numKeys, SDL_SCANCODE_LCTRL)) moveU -= 1.0f;
+	// Stick táctil: adelante/atrás y lateral, proporcional.
+	moveF += sTouchMoveY;
+	moveR += sTouchMoveX;
 
 	float speed = kMoveSpeed;
 	if (keyDown(keys, numKeys, SDL_SCANCODE_LSHIFT)) speed *= kFastFactor;

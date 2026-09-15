@@ -51,9 +51,18 @@ const char* pc_tick_region_name(PcTickRegion region)
 	case kPcTickRenderAll:  return "renderall";
 	case kPcTickDoneRender: return "doneRender";
 	case kPcTickWhole:      return "tick";
+	case kPcTickWorldSim:   return "  world sim";
 	case kPcTickGfxUniforms:     return "  gl:uniforms";
 	case kPcTickGfxVbo:          return "  gl:vbo";
 	case kPcTickGfxDraw:         return "  gl:draw";
+	case kPcTickGfxDisplayList:  return "  gl:dl parse+xform";
+	case kPcTickGfxStateKey:     return "    gl:statekey";
+	case kPcTickGfxProgram:      return "    gl:program";
+	case kPcTickGfxTexBind:      return "    gl:texbind";
+	case kPcTickGfxMeshDraws:    return "  gl:mesh draws/frame";
+	case kPcTickGfxMeshVerts:    return "  gl:mesh verts/frame";
+	case kPcTickGfxShaderBuild:  return "  gl:shader build";
+	case kPcTickGfxMeshBuilds:   return "  gl:mesh builds/frame";
 	case kPcTickGfxDrawCount:    return "  gl:draws/frame";
 	case kPcTickGfxVertsPerDraw: return "  gl:verts/draw";
 	case kPcTickGfxPrimCount:    return "  gl:prims/frame";
@@ -63,6 +72,8 @@ const char* pc_tick_region_name(PcTickRegion region)
 	case kPcTickGxDlDesync:      return "  gx:dl DESYNC/frame";
 	case kPcTickGxBadMtxIdx:     return "  gx:bad mtxidx/frame";
 	case kPcTickGxWildVerts:     return "  gx:wild verts/frame";
+	case kPcTickGpuScene:        return "gpu:scene";
+	case kPcTickGpuBlit:         return "gpu:blit";
 	default:                return "?";
 	}
 }
@@ -73,6 +84,15 @@ bool pc_tick_profiler_enabled()
 	// per frame and became the cost it was measuring.
 	static const bool enabled = [] {
 		const char* value = getenv("PIKMIN_TICK_STATS");
+		return (value != nullptr && value[0] == '1') || pc_tick_profiler_hud_enabled();
+	}();
+	return enabled;
+}
+
+bool pc_tick_profiler_hud_enabled()
+{
+	static const bool enabled = [] {
+		const char* value = getenv("PIKMIN_PERF_HUD");
 		return value != nullptr && value[0] == '1';
 	}();
 	return enabled;
@@ -103,7 +123,7 @@ void pc_tick_profiler_reset()
 	}
 }
 
-PcTickStats pc_tick_profiler_stats(PcTickRegion region, double budgetMs)
+PcTickStats pc_tick_profiler_stats(PcTickRegion region, double budgetMs, size_t lastN)
 {
 	PcTickStats stats;
 	if (region < 0 || region >= kPcTickRegionCount) {
@@ -115,7 +135,16 @@ PcTickStats pc_tick_profiler_stats(PcTickRegion region, double budgetMs)
 		return stats;
 	}
 
-	std::vector<double> sorted(s.values, s.values + s.count);
+	std::vector<double> sorted;
+	if (lastN == 0 || lastN >= s.count) {
+		sorted.assign(s.values, s.values + s.count);
+	} else {
+		// The ring's write cursor is one past the newest sample; walk back.
+		sorted.reserve(lastN);
+		for (size_t i = 0; i < lastN; i++) {
+			sorted.push_back(s.values[(s.next + kWindow - 1 - i) % kWindow]);
+		}
+	}
 	double sum   = 0.0;
 	size_t over  = 0;
 	for (double value : sorted) {
@@ -126,13 +155,13 @@ PcTickStats pc_tick_profiler_stats(PcTickRegion region, double budgetMs)
 	}
 	std::sort(sorted.begin(), sorted.end());
 
-	stats.samples    = static_cast<uint32_t>(s.count);
-	stats.mean       = sum / static_cast<double>(s.count);
+	stats.samples    = static_cast<uint32_t>(sorted.size());
+	stats.mean       = sum / static_cast<double>(sorted.size());
 	stats.median     = percentile(sorted, 0.50);
 	stats.p95        = percentile(sorted, 0.95);
 	stats.p99        = percentile(sorted, 0.99);
 	stats.worst      = sorted.back();
-	stats.overBudget = static_cast<double>(over) / static_cast<double>(s.count);
+	stats.overBudget = static_cast<double>(over) / static_cast<double>(sorted.size());
 	return stats;
 }
 

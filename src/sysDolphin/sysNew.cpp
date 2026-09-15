@@ -1,3 +1,12 @@
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#undef ERROR
+#undef near
+#undef far
+#undef small
+#endif
 #include "sysNew.h"
 
 #include "DebugLog.h"
@@ -9,6 +18,9 @@
 #include <limits>
 #include <mutex>
 #include <new>
+#ifndef _WIN32
+#include <sys/mman.h>
+#endif
 
 /**
  * @todo: Documentation
@@ -43,6 +55,19 @@ struct alignas(std::max_align_t) BootBlockHeader {
 };
 
 static const u32 BOOT_MAGIC = 0x50694B31; // "PiK1"
+static constexpr size_t kMapThreshold = 64u << 20;
+
+#ifdef _WIN32
+static void* map_zero_pages(size_t bytes) { return VirtualAlloc(nullptr, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE); }
+static void unmap_pages(void* p, size_t) { VirtualFree(p, 0, MEM_RELEASE); }
+#else
+static void* map_zero_pages(size_t bytes)
+{
+	void* p = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+	return p == MAP_FAILED ? nullptr : p;
+}
+static void unmap_pages(void* p, size_t bytes) { munmap(p, bytes); }
+#endif
 static constexpr size_t BOOT_BUCKET_COUNT = 4096;
 
 static std::mutex sAllocMutex;
@@ -116,7 +141,24 @@ void* piki_pc_alloc(size_t size)
 		throw std::bad_alloc();
 	}
 
-	void* raw = std::malloc(sizeof(BootBlockHeader) + size);
+	// Zeroed memory is part of the contract (the console heaps zeroed every
+	// block). For big blocks calloc keeps it without touching the pages: a
+	// fresh mapping is already zero and stays non-resident until written.
+	// memset here made the unused 253 MB "ovl" and 245 MB "app" heap buffers
+	// resident on Android (500 MB of PSS for nothing).
+	// scudo (Android's malloc) still touches huge calloc blocks, so those go
+	// to mmap directly: the kernel hands out zero pages lazily. The header
+	// remembers the mapping so piki_pc_free can munmap it.
+	const bool bigBlock = size >= (256u << 10);
+	const bool mapped = size >= kMapThreshold;
+	const size_t mappedBytes = mapped ? ((sizeof(BootBlockHeader) + size + 4095) & ~size_t(4095)) : 0;
+	void* raw = nullptr;
+	if (mapped) {
+		raw = map_zero_pages(mappedBytes);
+	} else {
+		raw = bigBlock ? std::calloc(1, sizeof(BootBlockHeader) + size)
+		               : std::malloc(sizeof(BootBlockHeader) + size);
+	}
 	if (!raw) {
 		ERROR("allocation of %zu bytes failed", size);
 		throw std::bad_alloc();
@@ -126,6 +168,7 @@ void* piki_pc_alloc(size_t size)
 	header->mMagic          = BOOT_MAGIC;
 	header->mNext           = nullptr;
 	header->mSize           = size;
+	header->mPad2           = mappedBytes; // non-zero: whole block is one mapping
 
 	void* result = header + 1;
 	{
@@ -140,7 +183,13 @@ void* piki_pc_alloc(size_t size)
 			sClassBytes[cls] += size;
 			sClassCount[cls]++;
 			if (size > sLargestBlock) sLargestBlock = size;
-
+			// Fase 7: name the big ones as they happen so the log around them
+			// says what was loading. Reported once per size class step.
+			// getenv here, not once: the first big blocks predate env.txt.
+			if (size >= (4u << 20) && getenv("PIKMIN_ALLOC_TRACE")) {
+				fprintf(stderr, "[PC Alloc] big block %zu MB (live now %zu MB in %zu blocks)\n",
+				        size >> 20, (sLiveBytes) >> 20, sLiveAllocations);
+			}
 		}
 		sTotalAllocations++;
 		if (sLiveAllocations > sPeakAllocations) sPeakAllocations = sLiveAllocations;
@@ -150,7 +199,7 @@ void* piki_pc_alloc(size_t size)
 			sDumpRegistered = true;
 		}
 	}
-	std::memset(result, 0, size);
+	if (!bigBlock) std::memset(result, 0, size);
 	return result;
 }
 
@@ -175,7 +224,8 @@ void piki_pc_free(void* ptr)
 				sClassCount[cls]--;
 			}
 			sTotalFrees++;
-			std::free(header);
+			if (header->mPad2) unmap_pages(header, header->mPad2);
+			else std::free(header);
 			return;
 		}
 	}
@@ -250,8 +300,8 @@ void* System::alloc(size_t size)
 			info = static_cast<MemInfo*>(info->mParent);
 		}
 
-		if ((u32)result & 0x3) {
-			ERROR("acquired memory not long aligned %08x!!\n", (u32)result);
+		if ((u32)(uintptr_t)result & 0x3) {
+			ERROR("acquired memory not long aligned %08x!!\n", (u32)(uintptr_t)result);
 		}
 
 		u32* resPtr = (u32*)result;

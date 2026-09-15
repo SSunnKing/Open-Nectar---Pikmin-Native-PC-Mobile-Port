@@ -349,6 +349,11 @@ public:
 	void start() { mControlFlags &= ~PTCLCTRL_Stop; }
 	void stop() { mControlFlags |= PTCLCTRL_Stop; }
 	void startGen() { mControlFlags &= ~PTCLCTRL_GenStopped; }
+	// PC: tinte del generador. Sustituye el tono de cada partícula por este
+	// color conservando su brillo y su alfa animados (estela del cursor).
+	void setTint(immut Colour& c) { mTint = c; mHasTint = true; }
+	void clearTint() { mHasTint = false; }
+	void applyTint(Colour& col);
 	void stopGen() { mControlFlags |= PTCLCTRL_GenStopped; }
 	void finish() { mControlFlags |= PTCLCTRL_Finished; }
 	void visible() { mControlFlags |= PTCLCTRL_Visible; }
@@ -515,6 +520,8 @@ protected:
 	f32 mChildAlphaMultiplier;                               // _118
 	f32 mChildPosJitter;                                     // _11C
 	Colour mChildColor;                                      // _120
+	Colour mTint;                                            // PC
+	bool mHasTint = false;                                   // PC
 	u8 _124;                                                 // _124
 	u8 mChildSpawnInterval;                                  // _125
 	u8 _126[0x6];                                            // _126, unknown

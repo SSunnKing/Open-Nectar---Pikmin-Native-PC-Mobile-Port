@@ -23,6 +23,7 @@ build/
 build-*/
 /packaging/linux/out/
 /packaging/windows/out/
+/packaging/android/out/
 /packaging.zip
 /save/
 .ninja_*
@@ -101,3 +102,12 @@ third_party/SDL2-mingw64/
 /README-WINDOWS.md
 /PLAN_WINDOWS.md
 /docs/
+
+# APKs copiados a la raíz para el usuario
+/open_nectar_*.apk*
+
+# Caché de binarios de shader generada al jugar
+/shader_cache/
+
+# Gradle wrapper para Windows (la regla *.bat es para los .bat del decomp)
+!android/gradlew.bat

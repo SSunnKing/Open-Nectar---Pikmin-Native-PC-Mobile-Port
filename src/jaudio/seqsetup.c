@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "jaudio/seqsetup.h"
 
 #include "jaudio/driverinterface.h"
@@ -383,7 +384,7 @@ s32 Jaq_SetSeqData_Limit(seqp_* track, u8* sequenceData, u32 sequenceSize, u32 s
 	}
 	case 2:
 	{
-		track->fileHandle = (u8)sequenceData;
+		track->fileHandle = (u8)(uintptr_t)sequenceData;
 		trackData         = NULL;
 		break;
 	}
@@ -613,6 +614,23 @@ static s32 Jaq_RootCallback(void* VOID_track)
 		}
 
 		track->tempoAccumulator += track->tempoFactor;
+#if PIKI_PC_PORT
+		// El bucle de abajo resta 1 por tick de secuencia hasta agotar el
+		// acumulador: con un factor de tempo desorbitado (o infinito/NaN) son
+		// millones de ticks -- o infinitos -- dentro del callback de audio, y
+		// el juego se congela (visto en Android). Ningún tempo legítimo pide
+		// más de unos pocos ticks por frame de audio; se acota y se avisa.
+		if (!(track->tempoAccumulator <= 64.0f)) {
+			static int reported = 0;
+			if (reported < 8) {
+				reported++;
+				printf("[jaudio] tempo runaway: accumulator=%g factor=%g tempo=%u timeBase=%u outerTempo=%g\n",
+				       (double)track->tempoAccumulator, (double)track->tempoFactor, (unsigned)track->tempo,
+				       (unsigned)track->timeBase, track->outerParams ? (double)track->outerParams->tempo : -1.0);
+			}
+			track->tempoAccumulator = 64.0f;
+		}
+#endif
 		if (track->tempoAccumulator < 1.0f) {
 			SeqUpdate(track, 0);
 		} else {

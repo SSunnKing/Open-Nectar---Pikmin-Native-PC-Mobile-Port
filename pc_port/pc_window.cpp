@@ -2,7 +2,13 @@
 #include "port/jaudio_host.h"
 #endif
 #include "pc_window.h"
-#ifdef __linux__
+#if PIKI_PC_TOUCH
+#include "gl/pc_gfx.h"
+#include "touch/pc_touch.h"
+#endif
+#if defined(__ANDROID__)
+#include "android/pc_android.h"
+#elif defined(__linux__)
 #include "pc_gpu_preference.h"
 #include <X11/Xlib.h>
 #endif
@@ -46,6 +52,8 @@ static int sLogicalRetraceInterval = 1;
 // so they have to be banked here until a logical tick collects them, exactly
 // like the pad's edge-shaped buttons.
 static int sMouseWheelSteps = 0;
+static float sTouchZoomDelta = 0.0f;
+static float sTouchCameraDrag = 0.0f;
 static double sTargetRefreshRate = 60.0;
 static std::chrono::steady_clock::time_point sNextPresentDeadline;
 
@@ -433,7 +441,7 @@ bool pc_window_init(const char* title, int width, int height) {
     sWindowHeight = height;
     sShouldClose = false;
 
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     // NVIDIA GLX on Xwayland raises BadValue from X_GLXCreateContext and the
     // default handler aborts before SDL can return an error. Swallow it so we
     // can drop the vendor and try again.
@@ -450,10 +458,19 @@ bool pc_window_init(const char* title, int width, int height) {
     // features (GLSL 1.20 attribute/varying syntax and GL_QUADS). A Core
     // profile accepts the context but rejects every draw, producing a black
     // window without an SDL error.
+    //
+    // GLES mode (PIKI_USE_GLES) requests an ES 3.0 context instead, which has
+    // no compatibility/core distinction.
     auto applyGlAttrs = []() {
+#if PIKI_USE_GLES
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+#else
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+#endif
         SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
         SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
@@ -469,13 +486,18 @@ bool pc_window_init(const char* title, int width, int height) {
             sWindowWidth,
             sWindowHeight,
             SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
+#ifdef __ANDROID__
+                // Modo inmersivo: SDLActivity oculta la barra de estado y los
+                // botones de navegación solo si la ventana es FULLSCREEN.
+                | SDL_WINDOW_FULLSCREEN
+#endif
         );
         if (sWindow) {
             break;
         }
         printf("[PC Port Error] SDL_CreateWindow failed: %s\n", SDL_GetError());
         fflush(stdout);
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
         if (!retriedGpu) {
             retriedGpu = true;
             printf("[PC Port] Retrying without NVIDIA EGL/GLX pins\n");
@@ -498,11 +520,15 @@ bool pc_window_init(const char* title, int width, int height) {
 
     sGLContext = SDL_GL_CreateContext(sWindow);
     if (!sGLContext) {
+#if !PIKI_USE_GLES
         printf("[PC Port Warning] SDL_GL_CreateContext Compatibility Profile failed: %s. Retrying with default profile...\n", SDL_GetError());
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, 0);
         sGLContext = SDL_GL_CreateContext(sWindow);
+#else
+        printf("[PC Port Error] SDL_GL_CreateContext ES 3.0 failed: %s\n", SDL_GetError());
+#endif
     }
 
     if (!sGLContext) {
@@ -557,7 +583,7 @@ bool pc_window_init(const char* title, int width, int height) {
         }
     }
 
-    printf("[PC Port] SDL2 Window & OpenGL Context initialized successfully (%dx%d)\n", sWindowWidth, sWindowHeight);
+    printf("[PC Port] SDL2 window and GL context initialized successfully (%dx%d)\n", sWindowWidth, sWindowHeight);
     return true;
 }
 
@@ -579,6 +605,47 @@ void pc_window_poll_events(PADStatus* pad) {
             case SDL_QUIT:
                 sShouldClose = true;
                 break;
+#ifdef __ANDROID__
+            // Ciclo de vida de la actividad. SDL bloquea el bucle mientras la
+            // app está en segundo plano (SDL_ANDROID_BLOCK_ON_PAUSE) y pausa el
+            // audio por su cuenta; aquí sólo queda dejar constancia y cerrar
+            // limpiamente cuando el sistema lo pide. Si el contexto GL se
+            // perdiera (SDL_RENDER_DEVICE_RESET) habría que recrear texturas y
+            // shaders; queda registrado para verlo en un dispositivo real.
+            case SDL_APP_TERMINATING:
+                printf("[Android] app terminating\n");
+                sShouldClose = true;
+                break;
+            case SDL_APP_WILLENTERBACKGROUND:
+                printf("[Android] entering background\n");
+                break;
+            case SDL_APP_DIDENTERFOREGROUND:
+                printf("[Android] back in foreground\n");
+                // La superficie puede ser nueva: repetir la geometría.
+                pc_android_reapply_surface();
+                break;
+            case SDL_RENDER_DEVICE_RESET:
+                printf("[Android] WARNING: GL context was lost; GPU resources are stale\n");
+                break;
+            case SDL_APP_LOWMEMORY:
+                printf("[Android] WARNING: low memory\n");
+                break;
+#endif
+#if PIKI_PC_TOUCH
+            case SDL_FINGERDOWN:
+            case SDL_FINGERMOTION:
+            case SDL_FINGERUP: {
+                // SDL normaliza a 0..1 sobre la ventana; la capa trabaja en
+                // píxeles de la superficie dibujable, que en Android coincide.
+                int dw = 0, dh = 0;
+                pc_gfx_get_drawable_size(&dw, &dh);
+                const PcTouchPhase phase = event.type == SDL_FINGERDOWN ? PC_TOUCH_DOWN
+                                         : event.type == SDL_FINGERUP ? PC_TOUCH_UP : PC_TOUCH_MOVE;
+                pc_touch_on_finger((long long)event.tfinger.fingerId, phase,
+                                   event.tfinger.x * (float)dw, event.tfinger.y * (float)dh);
+                break;
+            }
+#endif
             case SDL_MOUSEWHEEL: {
                 // SDL reports natural-scroll flipping through the direction
                 // field; undo it so a notch away from the user is always
@@ -813,6 +880,16 @@ void pc_window_poll_events(PADStatus* pad) {
         sLastInputIsGamepad = true;
     else if (usedKeyboard)
         sLastInputIsGamepad = false;
+#if PIKI_PC_TOUCH
+    // La capa táctil se suma al mando: cualquier toque la enseña, y cualquier
+    // uso del mando la esconde.
+    if (pc_touch_merge_pad(&button, &stickX, &stickY, &substickX, &substickY)) {
+        sLastInputIsGamepad = false;
+        pc_touch_set_visible(true);
+    } else if (usedGamepad) {
+        pc_touch_set_visible(false);
+    }
+#endif
 
     // ── Mouse Input (Virtual Cursor) ──
     // In mouse modes: mouse controls virtual cursor (separate from movement stick)
@@ -969,7 +1046,7 @@ void pc_window_shutdown(void) {
         sWindow = nullptr;
     }
     SDL_Quit();
-    printf("[PC Port] SDL2 Window & OpenGL Context shut down\n");
+    printf("[PC Port] SDL2 window and GL context shut down\n");
 }
 
 bool pc_window_should_close(void) {
@@ -1024,6 +1101,21 @@ int pc_window_get_display_mode(void) {
 void pc_window_set_window_size(int w, int h) {
     if (!sWindow) return;
     if (w <= 0 || h <= 0) return;
+#ifdef __ANDROID__
+    // Android no implementa SetWindowSize: SDL solo cambia window->w/h, y
+    // como GL_GetDrawableSize cae en ese valor, el juego acababa pintado en
+    // un rectángulo de WxH en la esquina de la superficie real. Aquí la
+    // superficie es siempre la pantalla entera; la "resolución" elegida pasa
+    // a ser la del render interno, que el present estira a toda la pantalla
+    // respetando la relación de aspecto.
+    sWindowWidth = w;
+    sWindowHeight = h;
+    pc_gfx_set_render_resolution(w, h);
+    // La superficie nativa también: presentar a 3216×1440 lo que se dibuja a
+    // 2144×960 solo cuesta memoria y blit.
+    pc_android_request_surface_size(w, h);
+    return;
+#endif
     if (SDL_GetWindowFlags(sWindow) & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP)) {
         // Store the desired windowed size but don't fight fullscreen; it is
         // applied when switching back to windowed mode.
@@ -1146,4 +1238,30 @@ extern "C" float pc_window_get_mouse_cursor_delta_y(void) {
 extern "C" void pc_window_clear_mouse_cursor_delta(void) {
     sMouseCursorDeltaX = 0.0f;
     sMouseCursorDeltaY = 0.0f;
+}
+
+extern "C" void pc_window_add_cursor_delta(float dx, float dy) {
+    constexpr float kMaxPendingDelta = 4096.0f;
+    sMouseCursorDeltaX = std::clamp(sMouseCursorDeltaX + dx, -kMaxPendingDelta, kMaxPendingDelta);
+    sMouseCursorDeltaY = std::clamp(sMouseCursorDeltaY + dy, -kMaxPendingDelta, kMaxPendingDelta);
+}
+
+extern "C" void pc_window_add_touch_zoom(float delta) {
+    sTouchZoomDelta = std::clamp(sTouchZoomDelta + delta, -2.0f, 2.0f);
+}
+
+extern "C" float pc_window_take_touch_zoom(void) {
+    const float delta = sTouchZoomDelta;
+    sTouchZoomDelta = 0.0f;
+    return delta;
+}
+
+extern "C" void pc_window_add_touch_camera_drag(float normalizedDx) {
+    sTouchCameraDrag = std::clamp(sTouchCameraDrag + normalizedDx, -1.0f, 1.0f);
+}
+
+extern "C" float pc_window_take_touch_camera_drag(void) {
+    const float delta = sTouchCameraDrag;
+    sTouchCameraDrag = 0.0f;
+    return delta;
 }

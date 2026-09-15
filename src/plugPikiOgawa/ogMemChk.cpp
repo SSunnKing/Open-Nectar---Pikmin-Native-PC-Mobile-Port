@@ -1,4 +1,5 @@
 #include "zen/ogMemChk.h"
+#include "pc_gfx.h"
 #include "DebugLog.h"
 #include "Dolphin/card.h"
 #include "P2D/Graph.h"
@@ -915,6 +916,9 @@ void zen::ogScrMemChkMgr::draw(Graphics& gfx)
 	case NoCard:
 	default:
 	{
+#if defined(PIKI_PC_PORT)
+		pc_gfx_note_menu_tap_space(640, 480);
+#endif
 		mMainScreen->draw(0, 0, &graf);
 		mEfxMgr->draw(gfx);
 		break;

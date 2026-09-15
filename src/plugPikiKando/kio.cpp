@@ -1,4 +1,5 @@
 #include "KIO.h"
+#include <cstdint>
 #include "DebugLog.h"
 #include "Dolphin/hio.h"
 #include "Dolphin/os.h"
@@ -194,7 +195,7 @@ void KIOContext::write()
 		HIOWriteMailbox(0x100000 | 0x4);
 
 		// Move the buffer pointer and decrease the buffer size
-		mBufferStart = (void*)((u32)mBufferStart + writeSize);
+		mBufferStart = (void*)((u32)(uintptr_t)mBufferStart + writeSize);
 		mBufferSize -= writeSize;
 	}
 }

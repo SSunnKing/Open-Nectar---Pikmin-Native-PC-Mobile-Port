@@ -7,6 +7,9 @@
 #include "nlib/Math.h"
 #include "system.h"
 #include "types.h"
+#if PIKI_PC_TOUCH
+#include "touch/pc_touch.h"
+#endif
 
 class Controller;
 class Graphics;
@@ -106,6 +109,16 @@ private:
 	Colour mHighlightBlackColor;                 // _C8
 	int _CC;                                     // _CC
 	bool mIsColorInverted;                       // _D0
+#if PIKI_PC_TOUCH
+	// Versión táctil de la página: se ocultan el mando de GameCube, sus
+	// botones y las líneas, y cada ventana lleva el icono táctil en lugar
+	// del del botón. Se conmuta cada frame según la última entrada usada.
+	void collectGamecubeArt(P2DPane* pane);
+	void applyTouchLayout(bool touch);
+	P2DPane* mGamecubeArtPanes[40];
+	int mGamecubeArtCount;
+	bool mTouchLayoutApplied;
+#endif
 };
 
 /**
@@ -185,7 +198,17 @@ public:
 		_0C = mScreen->search('ya_r', true);
 		_08->hide();
 		_0C->hide();
+#if PIKI_PC_TOUCH
+		pcInitTouchHints();
+#endif
 	}
+#if PIKI_PC_TOUCH
+	void pcInitTouchHints();
+	void pcApplyTouchHints(bool touch);
+	P2DPane* mPcLetterPanes[4];
+	int mPcLetterCount;
+	bool mPcTouchHintsApplied;
+#endif
 
 	void draw() { mScreen->draw(0, 0, nullptr); }
 	void setAct_L(bool set)
@@ -218,6 +241,9 @@ public:
 	void update()
 	{
 		f32 time = gsys->getFrameTime();
+#if PIKI_PC_TOUCH
+		pcApplyTouchHints(pc_touch_visible());
+#endif
 		_14      = NMathF::sin(-_10) * 0.25f + 0.75f;
 		_18      = NMathF::sin(-_10) * 0.25f + 0.75f;
 		_1C      = NMathF::cos(-_10) * 0.125f + 0.875f;

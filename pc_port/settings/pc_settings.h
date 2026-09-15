@@ -21,6 +21,13 @@ void pc_settings_init(void);
 // Handles the F1 toggle and navigation. If the menu is open it consumes the
 // pad (returns true) so the game does not react to the same input.
 bool pc_settings_consume_game_input(void);
+/// Pide abrir/cerrar el menú desde fuera del teclado (botón táctil). Se
+/// atiende en la siguiente lectura de entrada, como si fuera F1.
+void pc_settings_request_toggle(void);
+/// Entrada de los controles táctiles. Los botones se consumen en el siguiente
+/// frame; el toque usa coordenadas normalizadas de la ventana (0..1).
+void pc_settings_touch_buttons(unsigned short pressed);
+void pc_settings_touch_tap(float x, float y);
 
 // Draws the overlay through the game's GX/GL stack. Called from VIWaitForRetrace
 // just before the framebuffer is blitted to the window, so it appears on top.
@@ -100,6 +107,19 @@ unsigned char pc_settings_startup_language(void);
 /// start: the screens the game has already loaded belong to the old one.
 unsigned char pc_settings_get_language(void);
 void pc_settings_set_language(unsigned char language);
+
+/**
+ * @brief Resultado de la instalación de un pack de texturas (plan TEXTURAS_HD,
+ * fase 2), entregado por el selector de archivos de Android.
+ *
+ * Se llama desde un hilo Java mientras el juego corre; guarda el mensaje y el
+ * estado para que el submenú F1 los pinte durante unos segundos. `ok` true
+ * significa que el pack quedó en Load/Textures/ (aún inactivo: hay que
+ * activarlo y reiniciar).
+ */
+void pc_texpack_install_finished(bool ok, const char* message);
+// Ficheros extraídos hasta ahora por la instalación en curso (hilo Java).
+void pc_texpack_install_progress(int files);
 
 #ifdef __cplusplus
 }

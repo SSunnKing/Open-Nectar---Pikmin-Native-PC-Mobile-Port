@@ -1,4 +1,5 @@
 #include "DebugLog.h"
+#include <cstdint>
 #include "Generator.h"
 #include "OnePlayerSection.h"
 #include "Pellet.h"
@@ -638,7 +639,7 @@ void GeneratorCache::prepareUfoParts(GeneratorCache::Cache* cache)
 void GeneratorCache::loadUfoParts(GeneratorCache::Cache* cache)
 {
 	void* heap = mCacheHeap + cache->mCacheHeapOffset + cache->mGenCacheSize + cache->mCreatureCacheSize;
-	PRINT("load from %x : %d ufo parts\n", (u32)heap, cache->mUfoPartsCount);
+	PRINT("load from %x : %d ufo parts\n", (u32)(uintptr_t)heap, cache->mUfoPartsCount);
 	CheckedRamStream stream(heap, cache->mUfoPartsCacheSize);
 	PRINT("********* LOAD UFO PARTS (%d)*************************\n", cache->mUfoPartsCount);
 

@@ -5,6 +5,10 @@
 #include "jaudio/verysimple.h"
 #include "sysNew.h"
 #include "zen/TextColorCallBack.h"
+#if PIKI_PC_TOUCH
+#include "pc_gfx.h"
+#include "touch/pc_touch.h"
+#endif
 
 /**
  * @todo: Documentation
@@ -195,6 +199,31 @@ zen::ogNitakuMgr::NitakuStatus zen::ogNitakuMgr::update(Controller* input)
 	}
 	case Status_3:
 	{
+		bool touchDecide = false;
+#if PIKI_PC_TOUCH
+		pc_touch_claim_game_menu();
+#if !(defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01))
+		{
+			float nx = 0.0f, ny = 0.0f, tx = 0.0f, ty = 0.0f;
+			if (pc_touch_take_game_menu_tap(&nx, &ny) && pc_gfx_menu_tap_to_graph(nx, ny, &tx, &ty)) {
+				P2DTextBox* boxes[2] = { mTextBoxA, mTextBoxB };
+				for (int i = 0; i < 2; i++) {
+					if (!boxes[i]) continue;
+					const PUTRect& b = boxes[i]->getGlobalBounds();
+					constexpr float margin = 14.0f;
+					if (tx >= b.mMinX - margin && tx <= b.mMaxX + margin && ty >= b.mMinY - margin && ty <= b.mMaxY + margin) {
+						const bool wantYes = i == 0;
+						if (wantYes != mIsYes) {
+							if (wantYes) MoveCursorYes(0.25f); else MoveCursorNo(0.25f);
+						}
+						touchDecide = true;
+						break;
+					}
+				}
+			}
+		}
+#endif
+#endif
 		if (input->keyClick(KBBTN_MSTICK_UP)) {
 			if (mIsYes) {
 				MoveCursorNo(0.25f);
@@ -209,7 +238,7 @@ zen::ogNitakuMgr::NitakuStatus zen::ogNitakuMgr::update(Controller* input)
 				MoveCursorYes(0.25f);
 			}
 			seSystem->playSysSe(ogEnumFix(SYSSE_MOVE1, JACSYS_Move1));
-		} else if (input->keyClick(KBBTN_START | KBBTN_A)) {
+		} else if (input->keyClick(KBBTN_START | KBBTN_A) || touchDecide) {
 			if (mIsYes) {
 				mStatus2 = ExitSuccess;
 			} else {

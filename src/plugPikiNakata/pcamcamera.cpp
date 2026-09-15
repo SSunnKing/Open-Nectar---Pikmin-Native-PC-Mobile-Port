@@ -212,18 +212,31 @@ void PcamCamera::control(Controller& controller)
 	// in getGoalDistance(); the original sets it to 1.0 once and never touches
 	// it again, so it is free to drive from here without disturbing the
 	// existing zoom levels or the smoothing that reads it.
+	bool zoomChanged = false;
 	if (pc_settings_get_mouse_wheel_action() == 1) {
 		const int steps = pc_window_take_wheel_steps();
 		if (steps != 0) {
 			// Away from the user pulls the camera back.
 			mDistanceMultiplier += 0.08f * static_cast<f32>(steps);
-			if (mDistanceMultiplier < 0.45f) mDistanceMultiplier = 0.45f;
-			if (mDistanceMultiplier > 2.50f) mDistanceMultiplier = 2.50f;
+			zoomChanged = true;
 		}
-	} else if (mDistanceMultiplier != 1.0f) {
+	}
+#if PIKI_PC_TOUCH
+	const float touchZoom = pc_window_take_touch_zoom();
+	if (touchZoom != 0.0f) {
+		mDistanceMultiplier += touchZoom;
+		zoomChanged = true;
+	}
+#else
+	else if (mDistanceMultiplier != 1.0f) {
 		// Switching the wheel back to picking Pikmin leaves the camera where
 		// the player last put it otherwise, which reads as a stuck zoom.
 		mDistanceMultiplier = 1.0f;
+	}
+#endif
+	if (zoomChanged) {
+		if (mDistanceMultiplier < 0.45f) mDistanceMultiplier = 0.45f;
+		if (mDistanceMultiplier > 2.50f) mDistanceMultiplier = 2.50f;
 	}
 #endif
 
@@ -240,6 +253,14 @@ void PcamCamera::control(Controller& controller)
 	info.init(true, doRotate, controller.keyClick(KBBTN_L) != 0, controller.keyClick(KBBTN_R) && !controller.keyDown(KBBTN_X), isZClick,
 	          false, false, controller.getMainStickX(), xSubY, controller.getSubStickY());
 	control(info);
+#if PIKI_PC_TOUCH
+	const float touchCameraDrag = pc_window_take_touch_camera_drag();
+	if (mIsActive && mControlsEnabled && touchCameraDrag != 0.0f) {
+		// Aproximadamente media vuelta por una pasada de un ancho de pantalla.
+		mPolarDir.rotateAzimuth(touchCameraDrag * 3.2f);
+		mPolarDir.roundAzimuth();
+	}
+#endif
 }
 
 /**

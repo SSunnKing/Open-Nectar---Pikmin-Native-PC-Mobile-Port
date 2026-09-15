@@ -108,7 +108,7 @@ public:
  */
 class SRTNode : public Node {
 public:
-	SRTNode(immut char* name); // unused/inlined
+	SRTNode(immut char* name = "<SRTNode>"); // unused/inlined
 
 	virtual void update();                                    // _10
 	virtual void concat(Matrix4f&) { }                        // _28 (weak)

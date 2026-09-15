@@ -5,6 +5,14 @@
 
 namespace {
 
+#if PIKI_USE_GLES
+const char* kGlslVersion = "#version 300 es\n";
+const char* kGlslPrecision = "precision highp float;\nprecision highp int;\n";
+#else
+const char* kGlslVersion = "#version 140\n";
+const char* kGlslPrecision = "";
+#endif
+
 // Combiner operand ids, named to keep the generator readable.
 enum : uint8_t {
 	CC_CPREV = 0, CC_APREV, CC_C0, CC_A0, CC_C1, CC_A1, CC_C2, CC_A2,
@@ -328,7 +336,8 @@ std::string pc_tev_build_fragment_source(const PcTevShaderKey& key)
 
 	std::string out;
 	out.reserve(4096);
-	out += "#version 140\n";
+	out += kGlslVersion;
+	out += kGlslPrecision;
 	out += "in vec3 vLit0;\n";
 	if (usesChannel1) out += "in vec3 vLit1;\n";
 	out += "in vec4 vColor;\n";

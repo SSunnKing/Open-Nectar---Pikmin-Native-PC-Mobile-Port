@@ -116,6 +116,18 @@ static inline void readDDF_Colour(Colour* outColour, u8*& data, u32 size)
 /**
  * @todo: Documentation
  */
+// PC: el tono del tinte con el brillo (componente máxima) de la partícula.
+void zen::particleGenerator::applyTint(Colour& col)
+{
+	if (!mHasTint) return;
+	int bright = col.r;
+	if (col.g > bright) bright = col.g;
+	if (col.b > bright) bright = col.b;
+	col.r = u8((int(mTint.r) * bright) / 255);
+	col.g = u8((int(mTint.g) * bright) / 255);
+	col.b = u8((int(mTint.b) * bright) / 255);
+}
+
 void zen::particleGenerator::init(u8* data, Texture* tex1, Texture* tex2, immut Vector3f& pos, zen::particleMdlManager* mdlMgr,
                                   zen::CallBack1<zen::particleGenerator*>* cb1,
                                   zen::CallBack2<zen::particleGenerator*, zen::particleMdl*>* cb2)
@@ -1016,6 +1028,7 @@ void zen::particleGenerator::drawPtclBillboard(Graphics& gfx)
 
 			Colour col(ptcl->mPrimaryColor.r, ptcl->mPrimaryColor.g, ptcl->mPrimaryColor.b,
 			           RoundOff(ptcl->mPrimaryColor.a * ptcl->mAlphaFactor));
+			applyTint(col);
 			gfx.setPrimEnv(&col, &ptcl->mEnvColor);
 			gfx.drawRotParticle(*gfx.mCamera, ptcl->mLocalPosition + ptcl->mGlobalPosition, -ptcl->mRotAngle,
 			                    ptcl->mSize * ptcl->mScaleFactor * 25.0f);
@@ -1080,6 +1093,7 @@ void zen::particleGenerator::drawPtclOriented(Graphics& gfx)
 		particleMdl* ptcl = (particleMdl*)list;
 
 		col.set(ptcl->mPrimaryColor.r, ptcl->mPrimaryColor.g, ptcl->mPrimaryColor.b, RoundOff(ptcl->mPrimaryColor.a * ptcl->mAlphaFactor));
+		applyTint(col);
 		gfx.setPrimEnv(&col, &ptcl->mEnvColor);
 
 		MTXIdentity(mtx2);
@@ -1123,40 +1137,91 @@ void zen::particleGenerator::drawPtclOriented(Graphics& gfx)
 			vec1.normalize();
 #if defined(PIKI_PC_PORT)
 			{
+				// Misma base que el original (abajo), pero aplicada en CPU a
+				// un quad en espacio mundo: el camino indexado del FIFO no
+				// llega al backend GL. Se conserva la normal orientada, así
+				// las ondas en el agua (normal hacia arriba) quedan planas;
+				// la versión anterior encaraba siempre a cámara y las ponía
+				// de pie.
 				Vector3f worldPos = ptcl->mLocalPosition + ptcl->mGlobalPosition;
-				Vector3f toCam    = gfx.mCamera->mPosition - worldPos;
-				vec2.cross(toCam, vec1);
+				vec2.cross(vec1, ptcl->mOrientedNormal);
 				f32 width2 = vec2.x * vec2.x + vec2.y * vec2.y + vec2.z * vec2.z;
 				if (width2 < 1.0e-8f) {
-					vec2 = gfx.mCamera->mViewXAxis;
-					width2 = vec2.x * vec2.x + vec2.y * vec2.y + vec2.z * vec2.z;
-				}
-				if (width2 < 1.0e-8f) {
+					if (pc_render_is_authoritative()) {
+						ptcl->mAgeTimer = ptcl->mLifeTime;
+						ptcl->mAge      = ptcl->mLifeTime;
+					}
 					continue;
 				}
 				vec2.normalize();
-				// Keep the streak along velocity. Rotating width into length
-				// made each particle a spoke of a spinning cross.
-				if (vec2.DP(ptcl->mOrientedNormal) < 0.0f) {
-					vec2.x = -vec2.x;
-					vec2.y = -vec2.y;
-					vec2.z = -vec2.z;
+				if (mOrientedDrawConfig.mFlipNormal) {
+					vec3 = ptcl->mOrientedNormal;
+					vec1.cross(vec3, vec2);
+					vec1.normalize();
+				} else {
+					vec3.cross(vec2, vec1);
+					vec3.normalize();
 				}
 				if (pc_render_is_authoritative()) {
-					ptcl->mOrientedNormal = vec2;
+					ptcl->mOrientedNormal = vec3;
 				}
-				f32 hx = 25.0f * a;
-				f32 hy = 25.0f * v;
-				f32 py = 25.0f * mPivotOffsetY;
-				Vector3f axisW = vec2;
-				Vector3f axisL = vec1;
+				// Dos usos legítimos y contrarios: las ondas del agua quieren
+				// el plano orientado (normal hacia arriba, vistas desde
+				// arriba: quedan planas), y los rayos del portal de la intro
+				// quieren encarar a la cámara (con la normal orientada quedan
+				// de canto y la rotación de mtx3 los convierte en radios
+				// finos: fue el primer fallo del portal). El criterio es
+				// geométrico: si el plano orientado queda de canto respecto
+				// a la línea de vista, se encara a cámara con el ancho
+				// perpendicular a la velocidad y sin rotación (la versión
+				// que arregló el portal la primera vez).
+				Vector3f toCam  = gfx.mCamera->mPosition - worldPos;
+				f32 toCamLen2   = toCam.x * toCam.x + toCam.y * toCam.y + toCam.z * toCam.z;
+				bool faceCamera = false;
+				if (toCamLen2 > 1.0e-8f) {
+					Vector3f viewDir = toCam;
+					viewDir.normalize();
+					const f32 facing = vec3.x * viewDir.x + vec3.y * viewDir.y + vec3.z * viewDir.z;
+					// Estrecho a propósito: de lejos el agua se mira casi
+					// rasante y sus ondas deben seguir planas (0,3 las ponía
+					// de pie a distancia).
+					faceCamera       = facing > -0.1f && facing < 0.1f;
+				}
 				const f32 sx[4] = { -1.0f, 1.0f, 1.0f, -1.0f };
 				const f32 sy[4] = { 1.0f, 1.0f, -1.0f, -1.0f };
 				const f32 tu[4] = { 0.0f, 1.0f, 1.0f, 0.0f };
 				const f32 tv[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
+				if (faceCamera) {
+					Vector3f axisW;
+					axisW.cross(toCam, vec1);
+					f32 w2 = axisW.x * axisW.x + axisW.y * axisW.y + axisW.z * axisW.z;
+					if (w2 < 1.0e-8f) {
+						axisW = gfx.mCamera->mViewXAxis;
+					} else {
+						axisW.normalize();
+					}
+					const f32 hx = 25.0f * a;
+					const f32 hy = 25.0f * v;
+					const f32 py = 25.0f * mPivotOffsetY;
+					GXBegin(GX_QUADS, GX_VTXFMT0, 4);
+					for (int vi = 0; vi < 4; vi++) {
+						Vector3f p = worldPos + axisW * (sx[vi] * hx) + vec1 * (sy[vi] * hy + py);
+						GXPosition3f32(p.x, p.y, p.z);
+						GXTexCoord2f32(tu[vi], tv[vi]);
+					}
+					GXEnd();
+					continue;
+				}
+				// Quad ±25 en la base orientada (vec2*a, vec1*v) con el
+				// pivote de mtx3 pero sin su rotación: rotar el quad antes
+				// de la escala anisótropa (a frente a v) convierte cada
+				// partícula en un radio fino girado, y una onda circular no
+				// cambia al girar.
 				GXBegin(GX_QUADS, GX_VTXFMT0, 4);
 				for (int vi = 0; vi < 4; vi++) {
-					Vector3f p = worldPos + axisW * (sx[vi] * hx) + axisL * (sy[vi] * hy + py);
+					const f32 lx = sx[vi] * 25.0f;
+					const f32 ly = sy[vi] * 25.0f + mtx3[1][3];
+					Vector3f p = worldPos + vec2 * (lx * a) + vec1 * (ly * v);
 					GXPosition3f32(p.x, p.y, p.z);
 					GXTexCoord2f32(tu[vi], tv[vi]);
 				}

@@ -14,6 +14,9 @@ class CPlate;
 struct BurnEffect;
 struct RippleEffect;
 struct PermanentEffect;
+// PC: la estela del cursor usa el resplandor de la antena, ampliado para
+// cubrir el anillo del cursor.
+constexpr f32 kCursorTrailScale = 1.5f;
 struct SlimeEffect;
 struct Kontroller;
 struct NaviDrawer;
@@ -205,8 +208,9 @@ public:
 	u32 _770;                             // _770, unused
 	PermanentEffect* mNaviLightEfx;       // _774
 	PermanentEffect* mNaviLightGlowEfx;   // _778
-	PermanentEffect* _77C;                // _77C, unused
+	PermanentEffect* mCursorTrailEfx;     // _77C, unused in retail; PC: estela del cursor (nav_blur)
 	PermanentEffect* _780;                // _780, unused
+	Vector3f mCursorTrailLastPos;         // PC: última posición con la que emitió la estela
 	Vector3f mNaviLightPosition;          // _784
 	Vector3f mDayEndPosition;             // _790
 	Vector3f mWalkAnimPrevPos;            // _79C

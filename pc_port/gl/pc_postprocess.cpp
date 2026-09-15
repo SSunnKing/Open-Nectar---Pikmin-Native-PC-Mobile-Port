@@ -3,6 +3,16 @@
 #include <cmath>
 #include <cstdio>
 
+namespace {
+#if PIKI_USE_GLES
+const char* kGlslVersion = "#version 300 es\n";
+const char* kGlslPrecision = "precision highp float;\nprecision highp int;\n";
+#else
+const char* kGlslVersion = "#version 330 core\n";
+const char* kGlslPrecision = "";
+#endif
+}
+
 bool pc_post_bloom_active(const PcPostEffects& fx)
 {
 	// Zero intensity is the same picture, and bloom is the one effect here
@@ -103,7 +113,7 @@ std::string pc_post_build_ssao_shader()
 	const int kSamples = 12;
 
 	std::string src;
-	src += "#version 330 core\n";
+	src += kGlslVersion; src += kGlslPrecision;
 	src += "in vec2 vUV;\n";
 	src += "out vec4 oColour;\n";
 	src += "uniform sampler2D uDepth;\n";
@@ -207,7 +217,7 @@ std::string pc_post_build_ao_blur_shader()
 	// blur left in foliage. Weighting each tap by how close it is in depth
 	// keeps the average inside one surface.
 	std::string src;
-	src += "#version 330 core\n";
+	src += kGlslVersion; src += kGlslPrecision;
 	src += "in vec2 vUV;\n";
 	src += "out vec4 oColour;\n";
 	src += "uniform sampler2D uSource;\n";
@@ -250,7 +260,7 @@ std::string pc_post_build_brightpass_shader()
 	// Runs at half resolution, so each fetch already averages four scene
 	// pixels through bilinear filtering -- a free first blur step.
 	std::string src;
-	src += "#version 330 core\n";
+	src += kGlslVersion; src += kGlslPrecision;
 	src += "in vec2 vUV;\n";
 	src += "out vec4 oColour;\n";
 	src += "uniform sampler2D uScene;\n";
@@ -274,7 +284,7 @@ std::string pc_post_build_dof_coc_shader()
 	// because they read the same texel: splitting them would double the
 	// bandwidth to produce the same answer.
 	std::string src;
-	src += "#version 330 core\n";
+	src += kGlslVersion; src += kGlslPrecision;
 	src += "in vec2 vUV;\n";
 	src += "out vec4 oColour;\n";
 	src += "uniform sampler2D uScene;\n";
@@ -301,7 +311,7 @@ std::string pc_post_build_dof_blur_shader()
 	// first axis, leaving the second to divide by a constant 1.0 -- which is
 	// exactly the halo the premultiplication exists to prevent.
 	std::string src;
-	src += "#version 330 core\n";
+	src += kGlslVersion; src += kGlslPrecision;
 	src += "in vec2 vUV;\n";
 	src += "out vec4 oColour;\n";
 	src += "uniform sampler2D uSource;\n";
@@ -328,7 +338,7 @@ std::string pc_post_build_blur_shader()
 	// which is nine taps instead of the eighty-one a single two-dimensional
 	// kernel of the same width would need.
 	std::string src;
-	src += "#version 330 core\n";
+	src += kGlslVersion; src += kGlslPrecision;
 	src += "in vec2 vUV;\n";
 	src += "out vec4 oColour;\n";
 	src += "uniform sampler2D uSource;\n";
@@ -357,7 +367,13 @@ const char* pc_post_vertex_shader()
 	// would need a buffer and would rasterise its diagonal twice; this needs
 	// neither a vertex buffer nor an attribute set, so the pass cannot be
 	// disturbed by whatever vertex state the scene left behind.
+#if PIKI_USE_GLES
+	return "#version 300 es\n"
+	       "precision highp float;\n"
+	       "precision highp int;\n"
+#else
 	return "#version 330 core\n"
+#endif
 	       "out vec2 vUV;\n"
 	       "void main() {\n"
 	       "    vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);\n"
@@ -369,7 +385,7 @@ const char* pc_post_vertex_shader()
 std::string pc_post_build_fragment_shader(const PcPostEffects& fx)
 {
 	std::string src;
-	src += "#version 330 core\n";
+	src += kGlslVersion; src += kGlslPrecision;
 	src += "in vec2 vUV;\n";
 	src += "out vec4 oColour;\n";
 	src += "uniform sampler2D uScene;\n";

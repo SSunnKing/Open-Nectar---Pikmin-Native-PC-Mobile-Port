@@ -1,4 +1,7 @@
 #include "zen/ogMessage.h"
+#if PIKI_PC_TOUCH
+#include "touch/pc_touch.h"
+#endif
 #include "DebugLog.h"
 #include "Font.h"
 #include "P2D/Graph.h"
@@ -354,6 +357,13 @@ void zen::ogScrMessageMgr::cnvButtonIcon(char* str)
 			// The two-byte GameCube button glyphs are not in the PC font
 			// (English drew '@'; PAL hit the wrong kanji). Print the F1 binding.
 			pc_window_message_control_label(c, tmp1, sizeof(tmp1));
+#if PIKI_PC_TOUCH
+			// Con la capa táctil activa, el icono del botón táctil en línea
+			// (P2DPrint entiende "TI[k]"), en vez del nombre de la tecla.
+			if (pc_touch_has_icon_for_tag(c)) sprintf(tmp1, "%cTI[%c]", 0x1B, c);
+			else if (pc_touch_visible() && c == 'c') sprintf(tmp1, "%cTI[x]+drag", 0x1B); // mover al grupo: disolver mantenido y arrastrar
+			else if (pc_touch_visible() && c == 'r') sprintf(tmp1, "pinch");              // zoom: pellizcar
+#endif
 #else
 			char* a = &mButtonTagIconStrings[2 * offset];
 			tmp1[0] = a[0];

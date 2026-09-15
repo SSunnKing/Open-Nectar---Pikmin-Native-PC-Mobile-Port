@@ -1,4 +1,5 @@
 #include "zen/ogFileSelect.h"
+#include <algorithm>
 #include "DebugLog.h"
 #include "Graphics.h"
 #include "P2D/Graph.h"
@@ -18,6 +19,10 @@
 #include "P2D/Pane.h"
 #include "settings/pc_settings.h"
 #include "pc_gfx.h"
+#if PIKI_PC_TOUCH
+#include "touch/pc_touch.h"
+#include "Dolphin/pad.h"
+#endif
 
 static f32 filesel_fx_x(int slot, P2DPane* pane)
 {
@@ -1287,6 +1292,9 @@ zen::ogScrFileSelectMgr::returnStatusFlag zen::ogScrFileSelectMgr::update(Contro
 	if (mSelectState == Inactive) {
 		return mSelectState;
 	}
+#if PIKI_PC_TOUCH
+	pc_touch_claim_game_menu();
+#endif
 
 	cardInfo = mCardInfo[mCurrSlotIdx];
 	mFxMgr->update();
@@ -1414,6 +1422,46 @@ zen::ogScrFileSelectMgr::returnStatusFlag zen::ogScrFileSelectMgr::update(Contro
 	}
 
 	if (mMainInteractTimer > 1.0f) {
+#if PIKI_PC_TOUCH
+		if (mOperation == Normal) {
+			float touchX = 0.0f, touchY = 0.0f;
+			if (pc_touch_take_game_menu_tap(&touchX, &touchY)) {
+				const float menuX = touchX * float(pc_gfx_menu_virt_width());
+				const float menuY = touchY * 480.0f;
+				for (int i = 0; i < 3; ++i) {
+					// Los paneles raíz de los tres BLO cubren toda la pantalla. La
+					// tarjeta real es la envolvente de sus iconos, que sí es única.
+					P2DPane* panes[4] = { mIconOnyonPanes[i], mIconPikminPanes[i],
+					                         mIconNewPanes[i], mIconEmptyPanes[i] };
+					int minX = 32767, minY = 32767, maxX = -32768, maxY = -32768;
+					for (P2DPane* pane : panes) {
+						if (!pane) continue;
+						const PUTRect& bounds = pane->getGlobalBounds();
+						minX = std::min(minX, int(bounds.mMinX));
+						minY = std::min(minY, int(bounds.mMinY));
+						maxX = std::max(maxX, int(bounds.mMaxX));
+						maxY = std::max(maxY, int(bounds.mMaxY));
+					}
+					constexpr float marginX = 36.0f;
+					constexpr float marginY = 28.0f;
+					const bool hit = menuX >= minX - marginX && menuX <= maxX + marginX
+					              && menuY >= minY - marginY && menuY <= maxY + marginY;
+					if (hit) {
+						// Primer toque: seleccionar la tarjeta; segundo toque
+						// sobre la misma: entrar (como mover y pulsar A).
+						if (mCurrSlotIdx != i) {
+							SeSystem::playSysSe(ogEnumFix(SYSSE_MOVE1, JACSYS_Move1));
+							mCurrSlotIdx = i;
+							setDataNumber(i);
+						} else {
+							pc_touch_queue_game_button(PAD_BUTTON_A);
+						}
+						break;
+					}
+				}
+			}
+		}
+#endif
 		switch (mOperation) {
 		case Normal:
 		{

@@ -43,6 +43,26 @@ bool zen::DamageEffect::update()
  */
 void zen::DamageEffect::draw(Graphics& gfx)
 {
+#if defined(PIKI_PC_PORT)
+	// El efecto original tiñe de rojo la escena desenfocada del frame
+	// anterior (mBlurResultTexture). En el port el blur está desactivado
+	// (GXCopyTex es un stub), así que esa textura nunca se rellena y su
+	// memoria trae lo que hubiera antes: en Android salía la textura del
+	// silbato a pantalla completa. En su lugar, un tinte rojo plano que se
+	// apaga con la misma curva.
+	if (mDamageAlpha > 0.0f) {
+		const int screenW = pc_gfx_get_hud_wide() ? pc_gfx_get_hud_virtual_width() : gfx.mScreenWidth;
+		const bool lighting = gfx.setLighting(false, nullptr);
+		gfx.setFog(false);
+		const int blend = gfx.setCBlending(BLEND_Alpha);
+		gfx.setColour(Colour(235, 96, 96, RoundOff(56.0f * mDamageAlpha)), true);
+		gfx.useTexture(nullptr, GX_TEXMAP0);
+		gfx.fillRectangle(RectArea(0, 0, screenW, gfx.mScreenHeight));
+		gfx.setCBlending(blend);
+		gfx.setLighting(lighting, nullptr);
+	}
+	return;
+#endif
 	if (mDamageAlpha > 0.0f) {
 		gfx.useTexture(mapMgr->mBlurResultTexture, GX_TEXMAP0);
 		GXSetTevSwapModeTable(GX_TEV_SWAP0, GX_CH_RED, GX_CH_GREEN, GX_CH_BLUE, GX_CH_ALPHA);

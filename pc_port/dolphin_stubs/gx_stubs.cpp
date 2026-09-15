@@ -28,7 +28,11 @@ extern "C" {
 GXFifoObj* GXInit(void* base, u32 size) {
     (void)base; (void)size;
     pc_gfx_init();
-    printf("[PC Port] GXInit() - OpenGL 3.3 Backend Initialized\n");
+#if PIKI_USE_GLES
+    printf("[PC Port] GXInit() - OpenGL ES 3.0 backend initialized\n");
+#else
+    printf("[PC Port] GXInit() - OpenGL 3.3 backend initialized\n");
+#endif
     return nullptr;
 }
 void __GXInitGX()  { }

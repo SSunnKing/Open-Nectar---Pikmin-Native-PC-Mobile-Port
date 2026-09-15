@@ -146,6 +146,48 @@ void PlugPikiApp::draw(Graphics& gfx)
 		gfx.texturePrintf(gsys->mConsFont, TIMER_STATE_X, TIMER_STATE_Y + 6 * TIMER_STATE_LINE_HEIGHT, "%d light sets", gsys->mLightSetNum);
 	}
 
+	// PIKMIN_PERF_HUD=1: CPU and GPU milliseconds in the corner, so a phone
+	// can be profiled without a logcat attached. Percentiles over the last
+	// 120 ticks, refreshed twice a second: the eye wants "now", not the
+	// minute-long window the console report uses.
+	if (pc_tick_profiler_hud_enabled()) {
+		static char hudLine[3][96] = { "perf hud: waiting for samples", "", "" };
+		static int hudRefresh      = 0;
+		if (++hudRefresh >= 30) {
+			hudRefresh                  = 0;
+			const double budget         = 1000.0 / 60.0;
+			const size_t recent         = 120;
+			const PcTickStats tick      = pc_tick_profiler_stats(kPcTickWhole, budget, recent);
+			const PcTickStats update    = pc_tick_profiler_stats(kPcTickUpdate, budget, recent);
+			const PcTickStats render    = pc_tick_profiler_stats(kPcTickRenderAll, budget, recent);
+			const PcTickStats done      = pc_tick_profiler_stats(kPcTickDoneRender, budget, recent);
+			const PcTickStats gpuScene  = pc_tick_profiler_stats(kPcTickGpuScene, budget, recent);
+			const PcTickStats gpuBlit   = pc_tick_profiler_stats(kPcTickGpuBlit, budget, recent);
+			const PcTickStats draws     = pc_tick_profiler_stats(kPcTickGfxDrawCount, budget, recent);
+			const PcTickStats sim       = pc_tick_profiler_stats(kPcTickWorldSim, budget, recent);
+			const PcTickStats uniforms  = pc_tick_profiler_stats(kPcTickGfxUniforms, budget, recent);
+			const PcTickStats dl        = pc_tick_profiler_stats(kPcTickGfxDisplayList, budget, recent);
+			const PcTickStats meshDraws = pc_tick_profiler_stats(kPcTickGfxMeshDraws, budget, recent);
+			snprintf(hudLine[0], sizeof hudLine[0], "%.0f fps  cpu %.1f ms (p99 %.1f)  %.0f draws (%.0f mesh)", gsys->getFrameRate(),
+			         tick.median, tick.p99, draws.mean, meshDraws.mean);
+			// renderall includes the world simulation (see newPikiGame.cpp);
+			// "gx" is what remains of it: the GX translation.
+			snprintf(hudLine[1], sizeof hudLine[1], "sim %.1f  gx %.1f (dl %.1f uni %.1f)  ren %.1f/%.1f  done %.1f", sim.median,
+			         render.median - sim.median, dl.median, uniforms.median, render.median, render.p99, done.median);
+			(void)update;
+			if (gpuScene.samples != 0) {
+				snprintf(hudLine[2], sizeof hudLine[2], "gpu scene %.1f/%.1f  blit %.1f/%.1f", gpuScene.median, gpuScene.p99,
+				         gpuBlit.median, gpuBlit.p99);
+			} else {
+				snprintf(hudLine[2], sizeof hudLine[2], "gpu: no timer queries");
+			}
+		}
+		gfx.setColour(COLOUR_WHITE, true);
+		for (int i = 0; i < 3; i++) {
+			gfx.texturePrintf(gsys->mConsFont, 16, 400 + i * TIMER_STATE_LINE_HEIGHT, "%s", hudLine[i]);
+		}
+	}
+
 	// print load text after we finish a section transition (only if it's meant to be visible, or is fading out)
 	// NB: the code in retail and the DLL do all the preparation to print, but never actually print the text.
 	if (gameflow.mCurrLoadTextAlpha > 0.0f || gameflow.mTargetLoadTextAlpha > 0.0f) {

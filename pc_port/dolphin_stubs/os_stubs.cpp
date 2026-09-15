@@ -7,6 +7,7 @@
  * Each stub is marked with a TODO comment indicating the future
  * real implementation it will need in later port stages.
  */
+#include "../gl/pc_gfx.h"
 #include "Dolphin/os.h"
 #include "Dolphin/ar.h"
 #include "audio/pc_aram.h"
@@ -96,7 +97,12 @@ OSTick OSGetTick() {
     auto now = std::chrono::steady_clock::now();
     // 1 microsecond = 40.5 ticks (GameCube timebase is 40.5MHz)
     auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(now - start).count();
-    return (OSTick)(microseconds * 40.5);
+    // Entero de 64 bits truncado a 32, nunca double -> u32: pasados 106 s el
+    // valor supera 2^32 y esa conversión es UB. En x86-64 trunca (y el
+    // contador da la vuelta como en la consola); en ARM64 satura a
+    // 0xFFFFFFFF y se queda ahí: el delta pasa a 0 y el juego se para
+    // aunque siga dibujando (primer "cuelgue" en Android).
+    return (OSTick)(((u64)microseconds * 81u) / 2u);
 }
 
 OSTime OSGetTime() {
@@ -410,11 +416,13 @@ u32 OSGetConsoleSimulatedMem() { return 256 * 1024 * 1024; }
 /* ──────────────────────────────────────────────
  *  Cache operations → no-ops on PC
  * ────────────────────────────────────────────── */
+// Flush/store are what the game does right before the GP reads memory it
+// just wrote: on PC that is the resident-mesh cache's invalidation signal.
 void DCInvalidateRange(void* addr, u32 nBytes) { (void)addr; (void)nBytes; }
-void DCFlushRange(void* addr, u32 nBytes)      { (void)addr; (void)nBytes; }
-void DCStoreRange(void* addr, u32 nBytes)      { (void)addr; (void)nBytes; }
-void DCFlushRangeNoSync(void* addr, u32 nBytes){ (void)addr; (void)nBytes; }
-void DCStoreRangeNoSync(void* addr, u32 nBytes){ (void)addr; (void)nBytes; }
+void DCFlushRange(void* addr, u32 nBytes)      { pc_gfx_invalidate_cpu_range(addr, nBytes); }
+void DCStoreRange(void* addr, u32 nBytes)      { pc_gfx_invalidate_cpu_range(addr, nBytes); }
+void DCFlushRangeNoSync(void* addr, u32 nBytes){ pc_gfx_invalidate_cpu_range(addr, nBytes); }
+void DCStoreRangeNoSync(void* addr, u32 nBytes){ pc_gfx_invalidate_cpu_range(addr, nBytes); }
 void DCZeroRange(void* addr, u32 nBytes)       { memset(addr, 0, nBytes); }
 void DCTouchRange(void* addr, u32 nBytes)      { (void)addr; (void)nBytes; }
 void ICInvalidateRange(void* addr, u32 nBytes) { (void)addr; (void)nBytes; }

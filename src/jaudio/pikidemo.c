@@ -990,7 +990,13 @@ void __Loaded(u32 a)
  */
 void __Prepare_BGM(u32 cinID)
 {
-	int set;
+	// Los valores 2, 3 y 4 de mAudioConfig (cinemáticas 9-11: el primer
+	// Pikmin) no tienen caso en el switch de abajo y `set` quedaba sin
+	// inicializar: GCC/x86 solía dejar basura distinta de 0 y seguía; Clang/
+	// ARM64 dejaba 0, marcaba "no cargado" y el juego se quedaba 5 s
+	// esperando una carga inexistente (Android). Sin escena de ondas que
+	// cargar no hay nada que esperar: TRUE.
+	int set = TRUE;
 	u8 flag;
 	DemoStatus* status = &DEMO_STATUS[cinID];
 

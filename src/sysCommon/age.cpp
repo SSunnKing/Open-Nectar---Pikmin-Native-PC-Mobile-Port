@@ -1,4 +1,5 @@
 #include "Age.h"
+#include <cstdint>
 
 #include "DebugLog.h"
 
@@ -81,7 +82,7 @@ void AgeServer::readPropValue(PROP_TYPE type, void* val)
 void AgeServer::writeProp(PROP_TYPE type, void* data)
 {
 	writeInt(type);
-	writeInt(reinterpret_cast<int>(data));
+	writeInt(static_cast<int>(reinterpret_cast<intptr_t>(data)));
 	writePropValue(type, data);
 }
 
@@ -233,7 +234,7 @@ int AgeServer::update()
 void AgeServer::setSectionRefresh(IDelegate1<AgeServer&>* cmd)
 {
 	writeInt(AGE_CMD_208);
-	writeInt(reinterpret_cast<int>(cmd));
+	writeInt(static_cast<int>(reinterpret_cast<intptr_t>(cmd)));
 }
 
 /**
@@ -243,7 +244,7 @@ void AgeServer::setOnChange(IDelegate1<AgeServer&>* cmd)
 {
 	writeInt(AGE_CMD_SET_ON_CHANGE);
 	writeInt(1);
-	writeInt(reinterpret_cast<int>(cmd));
+	writeInt(static_cast<int>(reinterpret_cast<intptr_t>(cmd)));
 }
 
 /**
@@ -253,7 +254,7 @@ void AgeServer::setOnChange(IDelegate* cmd)
 {
 	writeInt(AGE_CMD_SET_ON_CHANGE);
 	writeInt(0);
-	writeInt(reinterpret_cast<int>(cmd));
+	writeInt(static_cast<int>(reinterpret_cast<intptr_t>(cmd)));
 }
 
 /**
@@ -328,7 +329,7 @@ bool AgeServer::getSaveFilename(String& path, char* option)
 void AgeServer::NewNode(char* name, ANode* node)
 {
 	writeInt(AGE_CMD_NEW_NODE);
-	writeInt(reinterpret_cast<int>(node));
+	writeInt(static_cast<int>(reinterpret_cast<intptr_t>(node)));
 	writeString(name);
 	writeInt(node->getAgeNodeType());
 }
@@ -609,7 +610,7 @@ void AgeServer::NewButton(char* name, IDelegate1<AgeServer&>* cmd, int a)
 	writeString(name);
 	writeInt(a);
 	writeInt(1);
-	writeInt(reinterpret_cast<int>(cmd));
+	writeInt(static_cast<int>(reinterpret_cast<intptr_t>(cmd)));
 }
 
 /**
@@ -621,5 +622,5 @@ void AgeServer::NewButton(char* name, IDelegate* cmd, int a)
 	writeString(name);
 	writeInt(a);
 	writeInt(0);
-	writeInt(reinterpret_cast<int>(cmd));
+	writeInt(static_cast<int>(reinterpret_cast<intptr_t>(cmd)));
 }

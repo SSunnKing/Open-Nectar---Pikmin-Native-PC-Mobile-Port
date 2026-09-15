@@ -126,6 +126,15 @@ struct EffectMgr2D {
 	particleManager mParticleManager;        // _10
 	EffectRegister2D* mEffects[EFF2D_COUNT]; // _AC
 	Camera mCamera;                          // _17C
+#if defined(PIKI_PC_PORT)
+	// En el marco ancho de los menús el 640x480 original va centrado. Los
+	// efectos cuyo dueño ya suma pc_gfx_menu_shift_center() a cada posición
+	// (selector de fichero) se dibujan con la cámara en el centro del marco;
+	// los que siguen usando coordenadas 0..640 sin tocar (mapa del mundo)
+	// activan esto y la cámara se queda en x=320, que es lo mismo que
+	// desplazar todos sus efectos.
+	bool mPcKeep640Origin = false;
+#endif
 };
 
 } // namespace zen

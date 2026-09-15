@@ -127,6 +127,13 @@ extern "C" s8 pc_window_get_virtual_cursor_y(void);
 extern "C" float pc_window_get_mouse_cursor_delta_x(void);
 extern "C" float pc_window_get_mouse_cursor_delta_y(void);
 extern "C" void pc_window_clear_mouse_cursor_delta(void);
+extern "C" void pc_window_add_cursor_delta(float dx, float dy);
+// Resolution-independent camera zoom requested by a touch pinch. Positive
+// pulls the camera back; negative brings it closer.
+extern "C" void pc_window_add_touch_zoom(float delta);
+extern "C" float pc_window_take_touch_zoom(void);
+extern "C" void pc_window_add_touch_camera_drag(float normalizedDx);
+extern "C" float pc_window_take_touch_camera_drag(void);
 
 #ifdef __cplusplus
 }

@@ -16,6 +16,7 @@
 // it can be tested without one: call sites time the span and hand over the
 // milliseconds.
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -25,12 +26,27 @@ enum PcTickRegion {
 	kPcTickDoneRender,     // submitting them and presenting
 	kPcTickWhole,          // the three above end to end, per tick
 
+	// The world simulation (Node::update + GameCore::updateAI) runs from
+	// GameCoreSection::draw, i.e. inside renderall, so kPcTickUpdate is near
+	// zero in play. This is the game logic proper: what update would be if
+	// the original had split them. Counted inside renderall, not on top.
+	kPcTickWorldSim,
+
 	// Inside renderall, where the cost turned out to be. Per frame, summed
 	// over every GX primitive: the port emits one draw per primitive, each
 	// preceded by ~150 uniform writes.
 	kPcTickGfxUniforms,    // ms/frame writing uniforms
 	kPcTickGfxVbo,         // ms/frame uploading vertices
 	kPcTickGfxDraw,        // ms/frame in glDrawArrays itself
+	kPcTickGfxDisplayList, // ms/frame parsing + transforming display lists on the CPU (excludes the three above)
+	// Inside gl:uniforms, which parts of a state change cost what.
+	kPcTickGfxStateKey,    // ms/frame hashing the state key (every primitive, batched or not)
+	kPcTickGfxProgram,     // ms/frame choosing/binding the program for the state
+	kPcTickGfxTexBind,     // ms/frame binding textures
+	kPcTickGfxMeshDraws,   // resident-mesh draws per frame (count): display lists served from the GPU arena
+	kPcTickGfxMeshVerts,   // vertices per frame drawn from the arena (count)
+	kPcTickGfxShaderBuild, // ms/frame building programs (compile+link, or binary load)
+	kPcTickGfxMeshBuilds,  // resident meshes built (first parse + upload) per frame (count)
 	kPcTickGfxDrawCount,   // draws per frame — a count, not milliseconds
 	kPcTickGfxVertsPerDraw,// mean vertices per draw — a count, not milliseconds
 
@@ -55,14 +71,27 @@ enum PcTickRegion {
 	// triangles stretching off screen -- 3D wrecked, 2D overlays untouched.
 	kPcTickGxWildVerts,
 
+	// GPU time per frame from asynchronous timer queries (EXT_disjoint_timer_
+	// query on GLES, ARB on desktop). Recorded a few frames late, when the
+	// result becomes available, so the window is offset from the CPU rows by
+	// the depth of the query ring; p50/p99 are unaffected. Zero samples means
+	// the driver has no timer queries.
+	kPcTickGpuScene,       // ms/frame the GPU spent on the 3D scene + UI
+	kPcTickGpuBlit,        // ms/frame in post-process and the blit to screen
+
 	kPcTickRegionCount,
 };
 
 const char* pc_tick_region_name(PcTickRegion region);
 
-// Reads PIKMIN_TICK_STATS once. Call sites test this before timing anything so
+// Reads PIKMIN_TICK_STATS once (PIKMIN_PERF_HUD=1 implies it: the on-screen
+// HUD reads the same samples). Call sites test this before timing anything so
 // the profiler costs nothing when it is off.
 bool pc_tick_profiler_enabled();
+
+// PIKMIN_PERF_HUD=1: draw CPU/GPU milliseconds in a corner of the screen, for
+// devices where nobody is watching the console.
+bool pc_tick_profiler_hud_enabled();
 
 void pc_tick_profiler_record(PcTickRegion region, double milliseconds);
 void pc_tick_profiler_reset();
@@ -79,7 +108,9 @@ struct PcTickStats {
 };
 
 // budgetMs is what a tick is allowed to cost: 16.6 for 60 Hz, 33.3 for 30 Hz.
-PcTickStats pc_tick_profiler_stats(PcTickRegion region, double budgetMs);
+// lastN limits the statistics to the most recent samples (0 = the whole
+// window): the HUD wants "now", the report wants the last minute.
+PcTickStats pc_tick_profiler_stats(PcTickRegion region, double budgetMs, size_t lastN = 0);
 
 // One block of text for the console, including the verdict against budgetMs.
 std::string pc_tick_profiler_report(double budgetMs);

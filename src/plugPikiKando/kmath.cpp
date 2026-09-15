@@ -22,11 +22,13 @@ DEFINE_PRINT("kmath")
  */
 bool isNan(f32 value)
 {
-	if ((u32)value == (u32)NAN) {
-		return true;
-	}
-
-	return false;
+	// El original hacía `(u32)value == (u32)NAN`: convertir NaN a entero es
+	// comportamiento indefinido. Clang lo toma por inalcanzable y no emite el
+	// retorno, así que la ejecución caía en la función siguiente
+	// (makePostureMatrix) y reventaba al recargar piezas de nave guardadas
+	// (Android). En x86 con GCC daba `(u32)NAN == 0`, es decir, isNan(0.0f)
+	// era true. NaN es el único valor distinto de sí mismo.
+	return value != value;
 }
 
 /**

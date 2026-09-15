@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <istream>
 #include <string>
 
 namespace pikmin {
@@ -37,12 +38,19 @@ using ProgressCallback = std::function<void(std::uint32_t current, std::uint32_t
 
 bool inspectGameCubeImage(const std::filesystem::path& image, DiscIdentity& identity,
                           std::string& error);
+// Sobre un stream ya abierto y posicionable: en Android la imagen llega como
+// descriptor del selector de archivos, que no se puede reabrir por ruta.
+bool inspectGameCubeImage(std::istream& input, DiscIdentity& identity, std::string& error);
 
 // `verifyWrites` relee cada archivo tras escribirlo y compara su contenido con
 // el que salió de la imagen. Detecta daños del medio de destino, que producen
 // archivos del tamaño correcto con contenido incorrecto. Cuesta una lectura
 // extra por archivo, casi siempre servida por la caché del sistema.
 bool extractGameCubeImage(const std::filesystem::path& image,
+                          const std::filesystem::path& destination,
+                          std::string& error, ProgressCallback progress = {},
+                          bool verifyWrites = true);
+bool extractGameCubeImage(std::istream& input, std::uint64_t imageSize,
                           const std::filesystem::path& destination,
                           std::string& error, ProgressCallback progress = {},
                           bool verifyWrites = true);

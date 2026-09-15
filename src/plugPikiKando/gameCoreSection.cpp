@@ -236,6 +236,9 @@ void GameCoreSection::startMovie(u32 flags, bool useMovieBackCamera)
 	if (orima) {
 		orima->mNaviLightEfx->changeEffect(EffectMgr::EFF_Navi_Light);
 		orima->mNaviLightGlowEfx->changeEffect(EffectMgr::EFF_Navi_LightGlow);
+		orima->mCursorTrailEfx->changeEffect(EffectMgr::EFF_Navi_LightGlow);
+		orima->mCursorTrailEfx->scaleSize(kCursorTrailScale);
+		orima->mCursorTrailEfx->setEmitting(false);
 		if (orima->mDamageEfxA) {
 			orima->mDamageEfxA->invisible();
 		}

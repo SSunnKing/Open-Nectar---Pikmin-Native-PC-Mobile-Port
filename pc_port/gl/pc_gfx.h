@@ -19,6 +19,9 @@ void pc_gfx_perf_scope_end(void);
 // Internal 3D render resolution scale (multiplier on the native 640x480).
 // begin_frame picks the change up and resizes the internal framebuffer.
 void pc_gfx_set_render_scale(float scale);
+// Resolución base del render interno (0,0 = la del área de salida). Se encaja
+// en la relación de aspecto de salida y se multiplica por el render scale.
+void pc_gfx_set_render_resolution(int width, int height);
 float pc_gfx_get_render_scale(void);
 
 // Aspect ratio support.
@@ -107,6 +110,10 @@ void pc_gfx_set_tev_swap_mode_table(GXTevSwapSel table, GXTevColorChan red, GXTe
 // Texture Management
 void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, GXTexFmt format, GXTexWrapMode wrapS, GXTexWrapMode wrapT, GXBool mipmap);
 
+/// Vuelca en texture_names.log el nombre tex1_* que Dolphin daría a cada
+/// textura subida (PLAN_TEXTURAS_HD fase 0). Lo activa --dump-texture-names.
+void pc_gfx_set_dump_texture_names(int enabled);
+
 /// A texture whose pixels are already RGBA, row by row, with no GameCube
 /// tiling. Nothing on the console could do this; it exists so the H4M player
 /// can hand over a finished picture instead of encoding one into a hardware
@@ -193,6 +200,18 @@ void pc_gfx_set_anisotropy(int samples);
  */
 void pc_gfx_release_texture(void* gxTexObj);
 
+/// Resident-mesh cache (PLAN_RENDIMIENTO fase 1). The game flushes the CPU
+/// cache over any vertex data it rewrites, which is exactly when a mesh built
+/// from that data is stale; a heap reset means every mesh may be.
+void pc_gfx_invalidate_cpu_range(const void* addr, size_t bytes);
+void pc_gfx_invalidate_resident_meshes(void);
+
+/// Toques sobre menús 2D: la pantalla anota su espacio de dibujo (ancho y
+/// alto de su P2DGrafContext) justo después de setPort(); un toque
+/// normalizado sobre la ventana se convierte a ese espacio.
+void pc_gfx_note_menu_tap_space(int graphWidth, int graphHeight);
+bool pc_gfx_menu_tap_to_graph(float nx, float ny, float* x, float* y);
+
 /// Live texture count, bytes held, peak bytes, and lifetime created/released.
 void pc_gfx_get_texture_stats(size_t* live, size_t* liveBytes, size_t* peakBytes,
                               size_t* created, size_t* released);
@@ -247,9 +266,32 @@ void pc_gfx_filesel_debug_note_ptcl(unsigned blendFactor, unsigned zMode, unsign
 // black while the centre is not — the failure, not the first N events.
 void pc_gfx_title_debug_probe(const char* tag);
 
+}
+// Fuera del bloque extern "C": devuelve una referencia a un tipo C++, y Clang
+// lo rechaza con enlace C (GCC sólo avisaba).
 class PcRenderPacketStore;
 PcRenderPacketStore& pc_gfx_get_packet_store();
-}
+
+// ── Capa de sprites en coordenadas de ventana ────────────────────────────────
+// Para la interfaz táctil (pc_port/touch): cuadrados con textura dibujados
+// directamente sobre el framebuffer de la ventana, después del blit del juego,
+// en píxeles de ventana con el origen arriba a la izquierda. No usa VBO ni
+// atributos: el vértice se construye en el shader.
+unsigned pc_gfx_overlay_texture_create(int width, int height, const unsigned char* rgba);
+void pc_gfx_overlay_texture_destroy(unsigned texture);
+// Prepara el estado GL (framebuffer 0, viewport de la ventana, blending).
+void pc_gfx_overlay_begin(void);
+// Dibuja `texture` en el rectángulo dado (píxeles de ventana, y hacia abajo),
+// multiplicada por el color y girada `angleRadians` sobre su centro.
+void pc_gfx_overlay_sprite(unsigned texture, float x, float y, float w, float h,
+                           float r, float g, float b, float a, float angleRadians);
+// Devuelve el estado GL al framebuffer nativo del juego.
+void pc_gfx_overlay_end(void);
+void pc_gfx_get_drawable_size(int* width, int* height);
+// Proyecta un punto en el espacio de dibujo actual del juego (matriz de
+// posición y proyección GX vigentes) a píxeles de ventana. Sirve para
+// colocar sprites de la capa sobre texto o paneles P2D. false si no se puede.
+bool pc_gfx_project_current(float x, float y, float z, float* winX, float* winY);
 #endif
 
 #endif // PC_GFX_H

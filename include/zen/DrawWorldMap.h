@@ -203,6 +203,7 @@ public:
 		RET_EnterLast,      // ...
 		RET_Active,         // See `DrawWorldMap::start`
 		RET_ReturnToTitle,  // See `DrawWorldMap::update`
+		RET_ReturnToCardSelect, // Port táctil: atrás desde el mapa vuelve al selector de partida
 	};
 
 	DrawWorldMap();

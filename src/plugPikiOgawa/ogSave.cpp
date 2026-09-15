@@ -1,4 +1,5 @@
 #include "zen/ogSave.h"
+#include "pc_gfx.h"
 #include "DebugLog.h"
 #include "P2D/Graph.h"
 #include "P2D/Picture.h"
@@ -468,6 +469,9 @@ void zen::ogSaveMgr::draw(Graphics& gfx)
 
 	P2DPerspGraph graf(0, 0, 640, 480, 30.0f, 1.0f, 5000.0f);
 	graf.setPort();
+#if defined(PIKI_PC_PORT)
+	pc_gfx_note_menu_tap_space(640, 480);
+#endif
 
 #if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01)
 	if (!mFileChkSelected) {

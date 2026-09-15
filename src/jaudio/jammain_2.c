@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include "jaudio/jammain_2.h"
 
 #include "jaudio/bankdrv.h"
@@ -2644,7 +2645,7 @@ static u32 Cmd_Printf()
 	for (i = 0; i < fmtCount; ++i) {
 		fmtParms[i] = __ByteRead(SEQ_P);
 		if (fmtFlags[i] == 2) {
-			fmtParms[i] = (u32)Jam_OfsToAddr(SEQ_P, fmtParms[i]);
+			fmtParms[i] = (u32)(uintptr_t)Jam_OfsToAddr(SEQ_P, fmtParms[i]);
 		} else if (fmtFlags[i] == 5) {
 			fmtParms[i] = SEQ_P->trackId;
 		} else if (fmtFlags[i] >= 3) {

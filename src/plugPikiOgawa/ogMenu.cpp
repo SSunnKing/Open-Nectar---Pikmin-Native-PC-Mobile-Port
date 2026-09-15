@@ -1,4 +1,10 @@
 #include "zen/ogMenu.h"
+#if PIKI_PC_TOUCH
+#include "touch/pc_touch.h"
+#include "pc_gfx.h"
+#include <cmath>
+#include <cstring>
+#endif
 #include "BaseInf.h"
 #include "Camera.h"
 #include "DebugLog.h"
@@ -152,8 +158,128 @@ bool zen::ogDrawScrMenu::draw(Graphics& gfx)
 	P2DPerspGraph graf(0, 0, 640, 480, 30.0f, 1.0f, 5000.0f);
 	graf.setPort();
 	mScreen->draw(0, 0, &graf);
-	return /* nothing, because they forgot to. */;
+	return false; // the original forgot to return anything (unused function)
 }
+
+#if PIKI_PC_TOUCH
+namespace {
+/// Icono táctil sobre el hueco del botón de GameCube de cada ventana. Se
+/// registra al dibujar el pane (con su matriz cargada, escala del carrusel
+/// incluida) y la capa táctil lo pinta al final del frame.
+struct TouchHelpIconCallBack : public P2DPaneCallBack {
+	TouchHelpIconCallBack(P2DPane* pane, char tag)
+	    : P2DPaneCallBack(pane, PANETYPE_Picture)
+	    , mTag(tag)
+	{
+	}
+	virtual bool invoke(P2DPane*) { return true; }
+	virtual bool draw(P2DPane* pane)
+	{
+		if (!pc_touch_visible()) return true;
+		float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+		if (pc_gfx_project_current(0.0f, 0.0f, 0.0f, &x0, &y0)
+		    && pc_gfx_project_current(f32(pane->getWidth()), f32(pane->getHeight()), 0.0f, &x1, &y1)) {
+			pc_touch_mark_help_icon(mTag, (x0 + x1) * 0.5f, (y0 + y1) * 0.5f, std::fabs(x1 - x0));
+		}
+		return true;
+	}
+	char mTag;
+};
+} // namespace
+
+/// Gesto de deslizar sobre la flecha L/R del menú, donde iba la letra.
+struct TouchSwipeHintCallBack : public P2DPaneCallBack {
+	TouchSwipeHintCallBack(P2DPane* pane, char tag)
+	    : P2DPaneCallBack(pane, PANETYPE_Picture)
+	    , mTag(tag)
+	{
+	}
+	virtual bool invoke(P2DPane*) { return true; }
+	virtual bool draw(P2DPane* pane)
+	{
+		if (!pc_touch_visible()) return true;
+		// La letra ocupa (21,27)-(49,59) dentro de la flecha de 50x80; el
+		// gesto se centra ahí y se hace algo mayor que la letra.
+		const f32 w = f32(pane->getWidth());
+		float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+		if (pc_gfx_project_current(w * 0.5f - 14.0f, 27.0f, 0.0f, &x0, &y0)
+		    && pc_gfx_project_current(w * 0.5f + 14.0f, 59.0f, 0.0f, &x1, &y1)) {
+			pc_touch_mark_help_icon(mTag, (x0 + x1) * 0.5f, (y0 + y1) * 0.5f, std::fabs(x1 - x0) * 1.9f);
+		}
+		return true;
+	}
+	char mTag;
+};
+
+void zen::ogDrawLR::pcInitTouchHints()
+{
+	mPcLetterCount = 0;
+	mPcTouchHintsApplied = false;
+	P2DPane* arrows[2] = { _08, _0C };
+	const char tags[2] = { 'L', 'R' };
+	for (int a = 0; a < 2; a++) {
+		// Las letras (y su sombra) son las cajas de texto hijas de la flecha.
+		PSUTreeIterator<P2DPane> iter(arrows[a]->getFirstChild());
+		while (iter != arrows[a]->getEndChild()) {
+			P2DPane* child = iter.getObject();
+			if (child->getTypeID() == PANETYPE_TextBox && mPcLetterCount < 4) mPcLetterPanes[mPcLetterCount++] = child;
+			++iter;
+		}
+		arrows[a]->setCallBack(new TouchSwipeHintCallBack(arrows[a], tags[a]));
+	}
+}
+
+void zen::ogDrawLR::pcApplyTouchHints(bool touch)
+{
+	if (touch == mPcTouchHintsApplied) return;
+	mPcTouchHintsApplied = touch;
+	for (int i = 0; i < mPcLetterCount; i++) {
+		if (touch) mPcLetterPanes[i]->hide();
+		else mPcLetterPanes[i]->show();
+	}
+}
+
+void zen::ogDrawScrController::collectGamecubeArt(P2DPane* pane)
+{
+	PSUTreeIterator<P2DPane> iter(pane->getFirstChild());
+	while (iter != pane->getEndChild()) {
+		P2DPane* child = iter.getObject();
+		if (child->getTypeID() == PANETYPE_Picture) {
+			immut char* tex = static_cast<P2DPicture*>(child)->getTexName();
+			// El dibujo del mando (control*.bti) y las líneas que lo unen
+			// con las ventanas (p2b_c_4.bti).
+			if (tex && (strstr(tex, "control") || strstr(tex, "p2b_c_4")) && mGamecubeArtCount < 40) {
+				mGamecubeArtPanes[mGamecubeArtCount++] = child;
+			}
+		}
+		collectGamecubeArt(child);
+		++iter;
+	}
+}
+
+void zen::ogDrawScrController::applyTouchLayout(bool touch)
+{
+	if (touch == mTouchLayoutApplied) return;
+	mTouchLayoutApplied = touch;
+	for (int i = 0; i < mGamecubeArtCount; i++) {
+		if (touch) mGamecubeArtPanes[i]->hide();
+		else mGamecubeArtPanes[i]->show();
+	}
+	P2DScreen* screen = mControllerScreenMenu.getPsc();
+	if (P2DPane* start = screen->search('st', false)) {
+		if (touch) start->hide();
+		else start->show();
+	}
+	for (int i = 0; i < 9; i++) {
+		// Los botones sobre el mando desaparecen; el icono de cada ventana
+		// se vuelve invisible pero se sigue dibujando, que es lo que dispara
+		// el callback del icono táctil.
+		if (touch) mButtonBasePanes[i]->hide();
+		else mButtonBasePanes[i]->show();
+		mButtonMaskPanes[i]->setAlpha(touch ? 0 : 255);
+	}
+}
+#endif
 
 /**
  * @todo: Documentation
@@ -183,6 +309,16 @@ zen::ogDrawScrController::ogDrawScrController()
 	mCurrentButtonIndex = 0;
 	mCycleTimer         = 1.0f;
 	mIsColorInverted    = true;
+#if PIKI_PC_TOUCH
+	mGamecubeArtCount   = 0;
+	mTouchLayoutApplied = false;
+	collectGamecubeArt(screen);
+	// Mismo orden que pane_name: L, R, Z, Y, X, A, B, C, stick.
+	static const char touchTags[9] = { 'l', 'r', 'z', 'y', 'x', 'a', 'b', 'c', 's' };
+	for (int i = 0; i < 9; i++) {
+		mButtonMaskPanes[i]->setCallBack(new TouchHelpIconCallBack(mButtonMaskPanes[i], touchTags[i]));
+	}
+#endif
 }
 
 /**
@@ -232,6 +368,9 @@ void zen::ogDrawScrController::setHantenColor()
  */
 void zen::ogDrawScrController::update()
 {
+#if PIKI_PC_TOUCH
+	applyTouchLayout(pc_touch_visible());
+#endif
 	mCycleTimer -= gsys->getFrameTime();
 	if (mCycleTimer <= 0.0f) {
 		mCycleTimer = 1.0f;
@@ -550,6 +689,11 @@ zen::ogScrMenuMgr::returnStatusFlag zen::ogScrMenuMgr::update(Controller* input)
 	if (mStatus == STATE_Inactive) {
 		return mStatus;
 	}
+#if PIKI_PC_TOUCH
+	// Mientras el menú de mapa/controles está en pantalla, la capa táctil
+	// pasa a modo menú: deslizar horizontalmente equivale a L/R (páginas).
+	pc_touch_claim_game_menu();
+#endif
 
 	for (int i = 0; i < 3; i++) {
 		mScreenMenus[i]->update(input, mSwitchLeftRequested, mSwitchRightRequested);

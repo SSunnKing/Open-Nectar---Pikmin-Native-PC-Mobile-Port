@@ -12,6 +12,9 @@
 
 #if defined(PIKI_PC_PORT) && defined(PIKI_PC_SETTINGS_MENU)
 #include "settings/pc_settings.h"
+#if PIKI_PC_TOUCH
+#include "touch/pc_touch.h"
+#endif
 #endif
 
 static u32 sRetraceCount = 0;
@@ -36,6 +39,9 @@ void VIWaitForRetrace(void)    {
     pc_settings_draw();
 #endif
     pc_gfx_present();
+#if PIKI_PC_TOUCH
+    pc_touch_draw();
+#endif
     pc_window_swap_buffers();
     pc_window_poll_events(nullptr);
 }

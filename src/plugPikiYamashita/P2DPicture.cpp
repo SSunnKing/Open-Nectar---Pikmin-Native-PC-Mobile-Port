@@ -5,6 +5,11 @@
 #include "P2D/Util.h"
 #include "Texture.h"
 #include "zen/ogSub.h"
+#if PIKI_PC_TOUCH
+#include "touch/pc_touch.h"
+#include "pc_gfx.h"
+#include <cmath>
+#endif
 
 /**
  * @todo: Documentation
@@ -368,6 +373,23 @@ void P2DPicture::drawTexCoord(int x, int y, int width, int height, f32 uBL, f32 
 	Matrix4f mtx1;
 	mtx->multiplyTo(mWorldMtx, mtx1);
 	GXLoadPosMtxImm(mtx1.mMtx, 0);
+
+#if PIKI_PC_TOUCH
+	// Con la capa táctil activa, los dibujos de botón de GameCube (el "A"
+	// que parpadea en los mensajes, los X/Y de copiar/borrar partida...) se
+	// sustituyen por el icono táctil correspondiente, que se pinta al final
+	// del frame con el mismo alpha que tendría el pane.
+	if (pc_touch_visible()) {
+		if (const char tag = pc_touch_button_tag_for_texture(mTexName)) {
+			float wx0 = 0, wy0 = 0, wx1 = 0, wy1 = 0;
+			if (mAlpha > 0 && pc_gfx_project_current(f32(x), f32(y), 0.0f, &wx0, &wy0)
+			    && pc_gfx_project_current(f32(xEnd), f32(yEnd), 0.0f, &wx1, &wy1)) {
+				pc_touch_mark_button_icon(tag, (wx0 + wx1) * 0.5f, (wy0 + wy1) * 0.5f, std::fabs(wx1 - wx0), f32(mAlpha) / 255.0f);
+			}
+			return;
+		}
+	}
+#endif
 
 	setTevMode();
 

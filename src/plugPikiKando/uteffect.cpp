@@ -237,6 +237,23 @@ void PermanentEffect::restart()
 	}
 }
 
+void PermanentEffect::setTint(immut Colour& c)
+{
+	if (mPtclGen) mPtclGen->setTint(c);
+}
+
+void PermanentEffect::scaleSize(f32 mul)
+{
+	if (mPtclGen) mPtclGen->setScaleSize(mPtclGen->getScaleSize() * mul);
+}
+
+void PermanentEffect::setEmitting(bool emitting)
+{
+	if (!mPtclGen) return;
+	if (emitting) mPtclGen->startGen();
+	else mPtclGen->stopGen();
+}
+
 /**
  * @todo: Documentation
  */

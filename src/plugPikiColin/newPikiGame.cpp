@@ -23,6 +23,8 @@
 #include "Section.h"
 #include "SoundMgr.h"
 #include "gameflow.h"
+#include "timing/pc_tick_profiler.h"
+#include <chrono>
 
 #include "settings/pc_settings.h"
 #include "jaudio/piki_scene.h"
@@ -2237,6 +2239,12 @@ public:
 		if (!mIsInitialSetup) {
 			// check if we should advance the time of day
 			if (!gsys->resetPending() && (!mActiveMenu || gameflow.mMoviePlayer->mIsActive)) {
+				// PIKMIN_TICK_STATS: the world simulation lives here, inside
+				// the draw, so time it apart from the GX translation.
+				const bool profiling = pc_tick_profiler_enabled();
+				const double simStart
+				    = profiling ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count()
+				                : 0.0;
 				if (!gameflow.mPauseAll && !gameflow.mIsUIOverlayActive) {
 					if (!gameflow.mMoviePlayer->mIsActive && (mUpdateFlags & UPDATE_WORLD_CLOCK) && !playerState->isTutorial()) {
 						f32 tod = gameflow.mWorldClock.mTimeOfDay;
@@ -2251,6 +2259,12 @@ public:
 				if (mUpdateFlags & UPDATE_AI && !(gameflow.mDemoFlags & CinePlayerFlags::NonGameMovie)) {
 					// update enemy/boss/pikmin/etc AI
 					gamecore->updateAI();
+				}
+				if (profiling) {
+					pc_tick_profiler_record(
+					    kPcTickWorldSim,
+					    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count()
+					        - simStart);
 				}
 			}
 		} else {

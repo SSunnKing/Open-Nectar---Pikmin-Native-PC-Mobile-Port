@@ -42,6 +42,7 @@ public:
 	void setScale(f32 xScale, f32 yScale);
 
 	bool getActiveSw() { return mIsActive; }
+	const PUTRect& getTouchBounds();
 
 	void setActiveSw(bool isActive) { mIsActive = isActive; }
 
@@ -113,6 +114,7 @@ public:
 	int getIconRPosV() { return mIconRPane->getPosV(); }
 
 	bool getActiveSw() { return mText->getActiveSw(); }
+	const PUTRect& getTouchBounds() { return mText->getTouchBounds(); }
 	void setActiveSw(bool isActive) { mText->setActiveSw(isActive); }
 
 	void setScale(f32 xScale, f32 yScale) { mText->setScale(xScale, yScale); }

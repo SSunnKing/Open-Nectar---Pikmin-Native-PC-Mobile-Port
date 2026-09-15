@@ -9,6 +9,10 @@
 #include "zen/DrawCM.h"
 #include "zen/ogMessage.h"
 #include "zen/ogResult.h"
+#include "pc_gfx.h"
+#if PIKI_PC_TOUCH
+#include "touch/pc_touch.h"
+#endif
 #include "zen/ogSave.h"
 #include "zen/ogSub.h"
 
@@ -636,7 +640,14 @@ zen::ogScrResultMgr::returnStatusFlag zen::ogScrResultMgr::update(Controller* in
 			mPendingStatus = RESULT_ExitToCardSelect;
 			mStatus        = RESULT_FadeOut;
 		} else if (mSaveStatus == -1) {
-			if (input->keyClick(KBBTN_START | KBBTN_A | KBBTN_B)) {
+			bool touchGo = false;
+#if PIKI_PC_TOUCH
+			// Pantalla de resultados: cualquier toque equivale a "seguir".
+			pc_touch_claim_game_menu();
+			float nx = 0.0f, ny = 0.0f;
+			if (pc_touch_take_game_menu_tap(&nx, &ny)) touchGo = true;
+#endif
+			if (input->keyClick(KBBTN_START | KBBTN_A | KBBTN_B) || touchGo) {
 				seSystem->playSysSe(ogEnumFix(SYSSE_DECIDE1, JACSYS_Decide1));
 				mWaitTimer = 0.0f;
 				mSaveMgr->start();
@@ -669,6 +680,9 @@ void zen::ogScrResultMgr::draw(Graphics& gfx)
 
 		P2DPerspGraph graf(0, 0, 640, 480, 30.0f, 1.0f, 5000.0f);
 		graf.setPort();
+#if defined(PIKI_PC_PORT)
+		pc_gfx_note_menu_tap_space(640, 480);
+#endif
 #if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01)
 		mMainScreen->draw(0, 0, &graf);
 		mGraphMgr->draw(mGraphAlpha);

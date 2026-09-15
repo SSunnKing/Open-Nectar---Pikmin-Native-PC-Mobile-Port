@@ -445,6 +445,12 @@ struct PermanentEffect {
 	void stop();
 	void restart();
 	void kill();
+	// PC: solo la emisión, sin tocar las partículas vivas (la estela del
+	// cursor se apaga cuando deja de moverse y se desvanece sola).
+	void setEmitting(bool emitting);
+	void setTint(immut Colour& c);
+	/// Multiplica el tamaño de emisión del efecto actual (llamar tras changeEffect).
+	void scaleSize(f32 mul);
 
 	Vector3f mPosition;               // _00
 	zen::particleGenerator* mPtclGen; // _0C

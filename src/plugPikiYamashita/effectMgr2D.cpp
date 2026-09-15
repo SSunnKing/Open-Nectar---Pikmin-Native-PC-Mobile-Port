@@ -128,7 +128,7 @@ void zen::EffectMgr2D::draw(Graphics& gfx)
 {
 #if defined(PIKI_PC_PORT)
 	const int virtW = pc_gfx_get_hud_wide() ? pc_gfx_get_hud_virtual_width() : gfx.mScreenWidth;
-	const f32 cx    = f32(virtW) * 0.5f;
+	const f32 cx    = mPcKeep640Origin ? 320.0f : f32(virtW) * 0.5f;
 	const f32 dist  = NMathF::cos(15.0f * PI / 180.0f) / NMathF::sin(15.0f * PI / 180.0f) * 240.0f;
 	Vector3f eyePos(cx, 240.0f, dist);
 	Vector3f targetPos(cx, 240.0f, 0.0f);

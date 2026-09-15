@@ -86,7 +86,7 @@ std::uint32_t readBe32(const std::uint8_t* bytes)
          | (std::uint32_t(bytes[2]) << 8) | std::uint32_t(bytes[3]);
 }
 
-bool readAt(std::ifstream& input, std::uint64_t offset, void* output, std::size_t size)
+bool readAt(std::istream& input, std::uint64_t offset, void* output, std::size_t size)
 {
     if (offset > std::uint64_t(std::numeric_limits<std::streamoff>::max())) return false;
     input.clear();
@@ -111,7 +111,7 @@ struct FstEntry {
     std::uint32_t sizeOrNext = 0;
 };
 
-bool parseFst(std::ifstream& input, std::uint64_t imageSize, std::uint64_t& fstOffset,
+bool parseFst(std::istream& input, std::uint64_t imageSize, std::uint64_t& fstOffset,
               std::vector<FstEntry>& entries, std::vector<std::uint8_t>& fst,
               std::string& error)
 {
@@ -177,6 +177,11 @@ bool inspectGameCubeImage(const fs::path& image, DiscIdentity& identity, std::st
         error = "Could not open the disc image.";
         return false;
     }
+    return inspectGameCubeImage(input, identity, error);
+}
+
+bool inspectGameCubeImage(std::istream& input, DiscIdentity& identity, std::string& error)
+{
     std::array<std::uint8_t, 8> header {};
     if (!readAt(input, 0, header.data(), header.size())) {
         error = "That file is too small to be a GameCube disc.";
@@ -327,7 +332,18 @@ bool extractGameCubeImage(const fs::path& image, const fs::path& destination,
         error = "The disc image is empty.";
         return false;
     }
-    const std::uint64_t imageSize = static_cast<std::uint64_t>(endPos);
+    return extractGameCubeImage(input, static_cast<std::uint64_t>(endPos), destination, error,
+                                std::move(progress), verifyWrites);
+}
+
+bool extractGameCubeImage(std::istream& input, std::uint64_t imageSize,
+                          const fs::path& destination, std::string& error,
+                          ProgressCallback progress, bool verifyWrites)
+{
+    if (imageSize == 0) {
+        error = "The disc image is empty.";
+        return false;
+    }
 
     std::uint64_t fstOffset = 0;
     std::vector<FstEntry> entries;

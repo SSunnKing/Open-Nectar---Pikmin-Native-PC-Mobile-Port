@@ -160,6 +160,35 @@ To move the installation elsewhere, copy the folder. To remove it, delete it.
 | The image is rejected | It must be Pikmin USA Rev 1 or Pikmin Europe. RVZ/WIA/GCZ also needs the Dolphin converter; ISO/GCM does not |
 | Disc conversion fails | Check the temporary folder's free space and select the converter from a complete Dolphin installation, or use ISO/GCM |
 
+### Android
+
+**What you need**
+
+- Android 10 or newer on a 64-bit (arm64) device with OpenGL ES 3.0 — in
+  practice, any phone or tablet from 2019 on
+- About 1 GB free in internal storage
+- Your disc image in ISO/GCM. Compressed images (RVZ/WIA/GCZ) are not
+  supported on Android: convert them to ISO with Dolphin on a computer first
+
+**Installing**
+
+1. Download `open_nectar_<version>.apk` from [Releases](../../releases) and
+   open it on the device (from the browser's downloads or the Files app).
+   Android asks once to allow installs from that app.
+2. Open Nectar. The first screen asks for your disc image: pick it with the
+   system file picker from wherever it is (internal storage, SD card, USB).
+3. It verifies the image, extracts the assets into the app's private storage
+   and starts the game. From then on the app opens straight into the game.
+
+One APK carries both the USA Rev. 1 and European builds; the installer picks
+the one your disc needs. Touch controls are drawn on screen (every button
+the game mentions appears in the layout, and the **layout** button lets you
+move and resize them); Bluetooth and USB controllers work too. The
+**settings** button opens the same menu as F1 on desktop.
+
+To update, install the new APK over the old one — assets and saves stay.
+Uninstalling deletes them.
+
 ### Both platforms
 
 The launcher asks for your disc image, extracts the assets it needs and starts the
@@ -268,6 +297,28 @@ Or, for development directly against a checked-out asset tree in `./assets/`:
 ```sh
 ./build/bin/nectar
 ```
+
+### Android (APK)
+
+The Android project lives in `android/` and builds the game through the same
+root `CMakeLists.txt` (both disc versions, GLES, arm64 only). It needs Android
+Studio's JDK and SDK with NDK 28 and CMake 3.22; `android/local.properties`
+points at the SDK.
+
+```sh
+cd android
+JAVA_HOME=$HOME/Android/jdk ./gradlew assembleDebug   # debug-signed, for adb
+```
+
+A release APK is signed with the project key, which is kept outside the
+repository (see `packaging/android/README-firma.txt`). With the key in place:
+
+```sh
+./packaging/android/package-apk.sh
+```
+
+produces `packaging/android/out/open_nectar_<version>.apk`, its SHA-256 and
+the README that goes with it.
 
 ## Project structure
 

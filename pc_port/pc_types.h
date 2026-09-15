@@ -143,15 +143,11 @@ static unsigned int __pc_rlwinm(unsigned int value, unsigned int shift, unsigned
 /* ──────────────────────────────────────────────
  *  Stack padding macros
  * ────────────────────────────────────────────── */
-#ifdef __cplusplus
-#define STACK_PAD_VAR(n) \
-    char __stack_pad_##n[16 * (n)]; \
-    (void)__stack_pad_##n;
-#else
-#define STACK_PAD_VAR(n) \
-    char __stack_pad_##n[16 * (n)]; \
-    (void)__stack_pad_##n;
-#endif
+// Sin efecto en el port: el relleno de pila sólo importaba para igualar el
+// binario original. Declarar una variable por macro además rompe con Clang
+// cuando una función usa STACK_PAD_VAR(1) dos veces en el mismo ámbito (GCC
+// lo dejaba pasar con -fpermissive). Coincide con include/types.h.
+#define STACK_PAD_VAR(n) ((void)0)
 
 /* ──────────────────────────────────────────────
  *  Function attributes

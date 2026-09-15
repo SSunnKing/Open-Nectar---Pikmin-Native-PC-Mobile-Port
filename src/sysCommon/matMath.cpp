@@ -5,7 +5,7 @@
 
 f32 sintable[0x1000];
 f32 costable[0x1000];
-immut Matrix4f Matrix4f::ident;
+Matrix4f Matrix4f::ident;
 
 /**
  * @todo: Documentation

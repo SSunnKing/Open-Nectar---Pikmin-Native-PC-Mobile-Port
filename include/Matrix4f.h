@@ -103,7 +103,11 @@ public:
 		mMtx[2][3] = z;
 	}
 
-	static immut Matrix4f ident;
+	// No es const aunque el original lo declare así: Graphics::Graphics() la
+	// rellena con makeIdentity() a través de un const_cast. Con Clang un objeto
+	// const de inicialización trivial acaba en .rodata y esa escritura es un
+	// SIGSEGV (primer arranque en Android); GCC lo dejaba en memoria escribible.
+	static Matrix4f ident;
 
 	Mtx44 mMtx; // _00-_40
 };

@@ -153,7 +153,7 @@ void Node::render(Graphics& gfx)
  * @todo: Documentation
  * @note UNUSED Size: 000128 (Matching by size)
  */
-SRTNode::SRTNode(immut char* name = "<SRTNode>")
+SRTNode::SRTNode(immut char* name)
     : Node(name)
 {
 	setPosition(Vector3f(0.0f, 0.0f, 0.0f));

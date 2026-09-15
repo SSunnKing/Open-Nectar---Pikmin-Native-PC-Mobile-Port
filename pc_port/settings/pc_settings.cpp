@@ -14,6 +14,10 @@
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2d.h"
 #include "pc_menu_repeat.h"
+#ifdef __ANDROID__
+#include "android/pc_texpack_android.h"
+#endif
+#include "gl/pc_texpack.h"
 
 #include <SDL2/SDL.h>
 #include <cstdio>
@@ -25,9 +29,15 @@
 #include <fstream>
 #include <algorithm>
 #include <vector>
+#include <atomic>
+#include <filesystem>
+#include <mutex>
 
 #include "pc_window.h"
 #include "pc_permadeath.h"
+#if PIKI_PC_TOUCH
+#include "touch/pc_touch.h"
+#endif
 #include "gl/pc_gfx.h"
 #include "gl/pc_postprocess.h"
 #include "Graphics.h"
@@ -110,6 +120,11 @@ struct PcConfig {
     // variable: the launcher starts the game as a child process, so an
     // exported variable does not reliably reach it.
     int debugKeys = 0;
+    // Texture pack (PLAN_TEXTURAS_HD fase 2): nombre de carpeta bajo
+    // Load/Textures/ que se indexa al arrancar. Se aplica reiniciando: el
+    // índice del pack se construye una sola vez, en pc_texpack_init.
+    std::string texturePack;
+    int texturePackEnabled = 0;
 
     void applyDefaults() {
         windowWidth = 1280;
@@ -141,6 +156,8 @@ struct PcConfig {
         brightness    = 0.0f;
         saturation    = 1.0f;
         debugKeys = 0;
+        texturePack.clear();
+        texturePackEnabled = 0;
         for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
             keyboardBindings[i] = kDefaultKeyBindings[i];
             gamepadBindings[i] = -1; // -1 = not remapped (use default)
@@ -281,7 +298,31 @@ constexpr int kAdvancedRowCount = 4;
 // reference machine is a GTX 1050 -- so nothing here may be mandatory.
 bool sInGraphicsSubmenu = false;
 int sGraphicsSelection = 0;
-constexpr int kGraphicsRowCount = 10;
+constexpr int kGraphicsRowCount = 11;
+
+// Texture packs submenu state (PLAN_TEXTURAS_HD fase 2). La instalación la
+// hace el selector de archivos de Android y termina en un hilo Java; el
+// resultado llega por pc_texpack_install_finished() y se pinta aquí.
+bool sInTexturePacksSubmenu = false;
+int sTexturePacksSelection = 0;      // 0 = instalar, 1.. = packs instalados
+bool sTexturePackPickerActive = false;  // picker abierto o extracción en curso
+std::atomic<int> sTexturePackInstallFiles{0};  // ficheros extraídos (hilo Java)
+// Mensaje de la última acción (instalación o aviso de sobremesa).
+bool sTexturePackRestartPrompt = false; // modal "reiniciar para aplicar"
+constexpr int kTexturePackInstallRow = 0;
+std::mutex sTexturePackNoticeMutex;
+char sTexturePackNotice[256] = {};
+bool sTexturePackNoticeError = false;
+Uint32 sTexturePackNoticeMs = 0;
+constexpr Uint32 kTexturePackNoticeTimeoutMs = 6000;
+
+void texturePackNotice(bool error, const char* message)
+{
+    std::lock_guard<std::mutex> lock(sTexturePackNoticeMutex);
+    snprintf(sTexturePackNotice, sizeof(sTexturePackNotice), "%s", message ? message : "");
+    sTexturePackNoticeError = error;
+    sTexturePackNoticeMs = SDL_GetTicks();
+}
 
 // Colour grading stops. Neutral is in every list, and the pass is skipped
 // entirely when all three sit there.
@@ -563,6 +604,8 @@ void closeMenu() {
     // No dejar el menu memorizado dentro de la lista: al reabrir F1 se espera
     // la pagina principal.
     sInResolutionSubmenu = false;
+    sInTexturePacksSubmenu = false;
+    sTexturePackRestartPrompt = false;
     sMenuOpen = false;
     pc_window_set_settings_menu_open(false);
 }
@@ -704,6 +747,8 @@ void saveConfig() {
     out << "brightness = " << sConfig.brightness << "\n";
     out << "saturation = " << sConfig.saturation << "\n";
     out << "debugKeys = " << sConfig.debugKeys << "\n";
+    out << "texturePack = " << sConfig.texturePack << "\n";
+    out << "texturePackEnabled = " << sConfig.texturePackEnabled << "\n";
     out << "controlMode = " << sConfig.controlMode << "\n";
     out << "mouseSensitivity = " << sConfig.mouseSensitivity << "\n";
     out << "stickDeadZone = " << sConfig.stickDeadZone << "\n";
@@ -843,6 +888,16 @@ void loadConfig() {
         else if (key == "debugKeys") {
             sConfig.debugKeys = atoi(val.c_str()) ? 1 : 0;
         }
+        else if (key == "texturePack") {
+            const bool safe = !val.empty() && val.size() < 64
+                && val.find('/') == std::string::npos
+                && val.find('\\') == std::string::npos
+                && val.find("..") == std::string::npos;
+            sConfig.texturePack = safe ? val : std::string();
+        }
+        else if (key == "texturePackEnabled") {
+            sConfig.texturePackEnabled = atoi(val.c_str()) ? 1 : 0;
+        }
         else if (key == "stickInvert") sConfig.stickInvert = atoi(val.c_str()) & 3;
         else if (key == "cStickInvert") sConfig.cStickInvert = atoi(val.c_str()) & 3;
         else if (key.rfind("key_", 0) == 0) {
@@ -880,6 +935,8 @@ void loadConfig() {
 // ---------------------------------------------------------------------------
 
 namespace {
+static u16 sTouchButtons = 0;
+static u16 sTouchFrameButtons = 0;
 /// Menu input repeat lives in pc_menu_repeat so its timing can be tested
 /// without a controller and without waiting. See that header.
 bool padEdge(bool pressed, int slot) { return pc_menu_edge(pressed, slot, SDL_GetTicks()); }
@@ -892,26 +949,26 @@ bool menuStickHorizontal(SDL_GameController* c, int sign);
 
 bool padNavUp(SDL_GameController* c)
 {
-	return padEdge(SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_UP)
-	                   || menuStickVertical(c, -1), 0);
+	return padEdge((c && (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_UP)
+	                       || menuStickVertical(c, -1))) || (sTouchFrameButtons & PAD_BUTTON_UP), 0);
 }
 bool padNavDown(SDL_GameController* c)
 {
-	return padEdge(SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_DOWN)
-	                   || menuStickVertical(c, 1), 1);
+	return padEdge((c && (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_DOWN)
+	                   || menuStickVertical(c, 1))) || (sTouchFrameButtons & PAD_BUTTON_DOWN), 1);
 }
 bool padNavLeft(SDL_GameController* c)
 {
-	return padEdge(SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_LEFT)
-	                   || menuStickHorizontal(c, -1), 2);
+	return padEdge((c && (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_LEFT)
+	                   || menuStickHorizontal(c, -1))) || (sTouchFrameButtons & PAD_BUTTON_LEFT), 2);
 }
 bool padNavRight(SDL_GameController* c)
 {
-	return padEdge(SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)
-	                   || menuStickHorizontal(c, 1), 3);
+	return padEdge((c && (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)
+	                   || menuStickHorizontal(c, 1))) || (sTouchFrameButtons & PAD_BUTTON_RIGHT), 3);
 }
-bool padNavA(SDL_GameController* c) { return padEdge(SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_A), 4); }
-bool padNavB(SDL_GameController* c) { return padEdge(SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_B), 5); }
+bool padNavA(SDL_GameController* c) { return padEdge((c && SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_A)) || (sTouchFrameButtons & PAD_BUTTON_A), 4); }
+bool padNavB(SDL_GameController* c) { return padEdge((c && SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_B)) || (sTouchFrameButtons & PAD_BUTTON_B), 5); }
 
 // The new-game prompt is a game-facing dialog rather than the F1 settings
 // menu. Its accept/cancel actions follow the configured A/B bindings, which
@@ -971,8 +1028,16 @@ void latchKeys() {
 // after it returns, so anything polling later in the frame sees no edges.
 void pcNewGamePromptInput();
 
+static bool sToggleRequested = false;
+static bool sTouchTapPending = false;
+static float sTouchTapX = 0.0f, sTouchTapY = 0.0f;
+
 void pollMenuInput() {
+    sTouchFrameButtons = sTouchButtons;
+    sTouchButtons = 0;
     SDL_GameController* ctl = pc_window_get_controller();
+    const bool toggleRequested = sToggleRequested;
+    sToggleRequested = false;
     const bool menuToggleHeld = ctl && SDL_GameControllerGetButton(
         ctl, SDL_CONTROLLER_BUTTON_BACK) != 0;
     const bool menuTogglePressed = menuToggleHeld && !sPrevMenuToggleHeld;
@@ -982,6 +1047,9 @@ void pollMenuInput() {
     sPrevMenuToggleHeld = menuToggleHeld;
 
     if (pc_newgame_prompt_active()) {
+#if PIKI_PC_TOUCH
+        pc_touch_claim_game_menu();
+#endif
         // The prompt owns input while it is up, including F1: opening the
         // settings menu over a modal that is deciding a save file's rules
         // would leave two menus fighting for the same keys.
@@ -1003,7 +1071,7 @@ void pollMenuInput() {
 
     // F1 always toggles. Select/View can open the menu while it is closed;
     // closing is handled after video confirmation has had first refusal.
-    if (keyWentDown(SDL_SCANCODE_F1)) {
+    if (keyWentDown(SDL_SCANCODE_F1) || toggleRequested) {
         if (sMenuOpen) closeMenu();
         else openMenu();
         return;
@@ -1013,7 +1081,16 @@ void pollMenuInput() {
         return;
     }
 
-    if (!sMenuOpen) return;
+    if (!sMenuOpen) {
+        // No arrastrar a un menú futuro un toque hecho durante el juego.
+        sTouchTapPending = false;
+        sTouchButtons = 0;
+        return;
+    }
+
+#if PIKI_PC_TOUCH
+    pc_touch_claim_port_menu();
+#endif
 
     // Modal video-confirm dialog.
     if (sVideoConfirmActive) {
@@ -1026,11 +1103,11 @@ void pollMenuInput() {
         }
         if (keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE) ||
             keyWentDown(SDL_SCANCODE_J) ||
-            (ctl && padNavA(ctl))) {
+            padNavA(ctl)) {
             confirmVideoSettings();
         } else if (keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
                    keyWentDown(SDL_SCANCODE_B) ||
-                   (ctl && padNavB(ctl))) {
+                   padNavB(ctl)) {
             revertVideoSettings();
         }
         return;
@@ -1049,7 +1126,7 @@ void pollMenuInput() {
     // Controls submenu (key capture mode).
     if (sInControlsSubmenu) {
         if (sWaitingForKey) {
-            if (keyWentDown(SDL_SCANCODE_ESCAPE) || (ctl && padNavB(ctl))) {
+            if (keyWentDown(SDL_SCANCODE_ESCAPE) || padNavB(ctl)) {
                 sWaitingForKey = false;
                 sCaptureWaitRelease = false;
                 return;
@@ -1078,7 +1155,7 @@ void pollMenuInput() {
         bool right = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
         bool ok = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
 
-        if (ctl) {
+        if (ctl || sTouchFrameButtons) {
             if (padNavUp(ctl))
                 up = true;
             if (padNavDown(ctl))
@@ -1111,7 +1188,7 @@ void pollMenuInput() {
         }
         // B / ESC exits submenu.
         if (keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
-            keyWentDown(SDL_SCANCODE_B) || (ctl && padNavB(ctl))) {
+            keyWentDown(SDL_SCANCODE_B) || padNavB(ctl)) {
             sInControlsSubmenu = false;
             sWaitingForKey = false;
             sCaptureWaitRelease = false;
@@ -1133,7 +1210,7 @@ void pollMenuInput() {
                     sCaptureWaitRelease = false;
                 return;
             }
-            if (ctl) {
+            if (ctl || sTouchFrameButtons) {
                 const int bind = pc_window_gamepad_first_held_binding(ctl);
                 if (bind >= 0) {
                     sPending.gamepadBindings[sGamepadSelection] = bind;
@@ -1158,7 +1235,7 @@ void pollMenuInput() {
         bool right = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
         bool ok = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
 
-        if (ctl) {
+        if (ctl || sTouchFrameButtons) {
             if (padNavUp(ctl))
                 up = true;
             if (padNavDown(ctl))
@@ -1189,7 +1266,7 @@ void pollMenuInput() {
             return;
         }
         if (keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
-            keyWentDown(SDL_SCANCODE_B) || (ctl && padNavB(ctl))) {
+            keyWentDown(SDL_SCANCODE_B) || padNavB(ctl)) {
             sInGamepadSubmenu = false;
             sWaitingForButton = false;
             sCaptureWaitRelease = false;
@@ -1207,7 +1284,7 @@ void pollMenuInput() {
         bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
                       keyWentDown(SDL_SCANCODE_B);
 
-        if (ctl) {
+        if (ctl || sTouchFrameButtons) {
             if (padNavUp(ctl))
                 up = true;
             if (padNavDown(ctl))
@@ -1270,7 +1347,7 @@ void pollMenuInput() {
         bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
                       keyWentDown(SDL_SCANCODE_B);
 
-        if (ctl) {
+        if (ctl || sTouchFrameButtons) {
             if (padNavUp(ctl))
                 up = true;
             if (padNavDown(ctl))
@@ -1308,20 +1385,122 @@ void pollMenuInput() {
         return;
     }
 
+    // Texture packs submenu. The restart prompt owns input while it is up:
+    // activating a pack asks for a restart, and the choice must not leak into
+    // the pack list underneath as a stray press.
+    if (sTexturePackRestartPrompt) {
+        bool accept = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
+        bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
+                      keyWentDown(SDL_SCANCODE_B);
+        if (ctl || sTouchFrameButtons) {
+            if (padNavA(ctl)) accept = true;
+            if (padNavB(ctl)) cancel = true;
+        }
+        // Esc also never leaves a confirm dialog answered.
+        if (accept && !cancel) {
+            sTexturePackRestartPrompt = false;
+#ifdef __ANDROID__
+            pc_texpack_android_restart();
+#else
+            texturePackNotice(true, "Packs de texturas activos. Reinicia el juego para aplicarlos.");
+            sInTexturePacksSubmenu = false;
+#endif
+        } else if (cancel) {
+            sTexturePackRestartPrompt = false;
+        }
+        return;
+    }
+
+    if (sInTexturePacksSubmenu) {
+        bool up = keyWentDown(SDL_SCANCODE_UP) || keyWentDown(SDL_SCANCODE_W);
+        bool down = keyWentDown(SDL_SCANCODE_DOWN) || keyWentDown(SDL_SCANCODE_S);
+        bool left = keyWentDown(SDL_SCANCODE_LEFT) || keyWentDown(SDL_SCANCODE_A);
+        bool right = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
+        bool ok = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
+        bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
+                      keyWentDown(SDL_SCANCODE_B);
+
+        if (ctl || sTouchFrameButtons) {
+            if (padNavUp(ctl)) up = true;
+            if (padNavDown(ctl)) down = true;
+            if (padNavLeft(ctl)) left = true;
+            if (padNavRight(ctl)) right = true;
+            if (padNavA(ctl)) ok = true;
+            if (padNavB(ctl)) cancel = true;
+        }
+
+        // Lista de packs desde el disco: muestra una instalación recién hecha
+        // sin reiniciar. La fila 0 es "instalar"; las siguientes son packs.
+        std::vector<std::string> packs = pc_texpack_list_packs();
+        const int rowCount = 1 + static_cast<int>(packs.size());
+        if (sTexturePacksSelection >= rowCount) sTexturePacksSelection = rowCount - 1;
+
+        if (up) { sTexturePacksSelection = (sTexturePacksSelection + rowCount - 1) % rowCount; return; }
+        if (down) { sTexturePacksSelection = (sTexturePacksSelection + 1) % rowCount; return; }
+        if (cancel) { sInTexturePacksSubmenu = false; return; }
+
+        if (sTexturePacksSelection == kTexturePackInstallRow) {
+            if ((ok || left || right) && !sTexturePackPickerActive) {
+#ifdef __ANDROID__
+                sTexturePackPickerActive = true;
+                pc_texpack_android_open_picker();
+#else
+                texturePackNotice(true,
+                    "En escritorio, descomprime el pack en Load/Textures/ y reinicia. (En Android se elige el .zip/.rar aquí.)");
+#endif
+            }
+            return;
+        }
+
+        const int packIndex = sTexturePacksSelection - kTexturePackInstallRow - 1;
+        if (packIndex >= 0 && packIndex < static_cast<int>(packs.size())) {
+            const std::string folder = packs[packIndex];
+            const bool active = sConfig.texturePackEnabled && folder == sConfig.texturePack;
+            if ((ok || left || right) && sTexturePackPickerActive) {
+                // Con el zip a medio extraer, activar y reiniciar mataría la
+                // instalación: es justo lo que dejaba packs con 126 ficheros
+                // de 3000 y el menú diciendo "Active".
+                texturePackNotice(true, "Wait: the pack is still being installed.");
+            } else if (ok || left || right) {
+                if (active) {
+                    // Retirar el pack: también requiere reinicio para reconstruir
+                    // el índice sin él, pero no merece un modal: ya está visible
+                    // en marcha, solo seguirá indexándolo hasta el próximo arranque.
+                    sConfig.texturePackEnabled = 0;
+                    sConfig.texturePack.clear();
+                    sPending.texturePackEnabled = 0;
+                    sPending.texturePack.clear();
+                    saveConfig();
+                    texturePackNotice(false, "Pack desactivado. Se aplica al reiniciar.");
+                } else {
+                    sConfig.texturePack = folder;
+                    sConfig.texturePackEnabled = 1;
+                    sPending.texturePack = folder;
+                    sPending.texturePackEnabled = 1;
+                    saveConfig();
+                    sTexturePackRestartPrompt = true;
+                }
+            }
+        }
+        return;
+    }
+
     // Graphics submenu.
     if (sInGraphicsSubmenu) {
         bool up = keyWentDown(SDL_SCANCODE_UP) || keyWentDown(SDL_SCANCODE_W);
         bool down = keyWentDown(SDL_SCANCODE_DOWN) || keyWentDown(SDL_SCANCODE_S);
         bool left = keyWentDown(SDL_SCANCODE_LEFT) || keyWentDown(SDL_SCANCODE_A);
         bool right = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
+        bool ok = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
         bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
                       keyWentDown(SDL_SCANCODE_B);
 
-        if (ctl) {
+        if (ctl || sTouchFrameButtons) {
             if (padNavUp(ctl)) up = true;
             if (padNavDown(ctl)) down = true;
             if (padNavLeft(ctl)) left = true;
             if (padNavRight(ctl)) right = true;
+            if (padNavA(ctl)) ok = true;
             if (padNavB(ctl)) cancel = true;
         }
 
@@ -1335,6 +1514,17 @@ void pollMenuInput() {
         }
         if (cancel) {
             sInGraphicsSubmenu = false;
+            return;
+        }
+
+        // Texture packs lives in the Graphics page: it is a rendering choice,
+        // it needs restarting to take effect, and it is opened rather than
+        // cycled so the install entry has room next to the pack list.
+        if (sGraphicsSelection == 10) {
+            if (ok) {
+                sInTexturePacksSubmenu = true;
+                sTexturePacksSelection = 0;
+            }
             return;
         }
 
@@ -1399,7 +1589,7 @@ void pollMenuInput() {
         bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
                       keyWentDown(SDL_SCANCODE_B);
 
-        if (ctl) {
+        if (ctl || sTouchFrameButtons) {
             if (padNavUp(ctl))
                 up = true;
             if (padNavDown(ctl))
@@ -1484,7 +1674,38 @@ void pollMenuInput() {
     bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
                   keyWentDown(SDL_SCANCODE_B);
 
-    if (ctl) {
+    // Los botones táctiles sintetizados llegan después de este poll en el
+    // frame que los genera; se guardan y se consumen aquí en el siguiente.
+    const u16 touchButtons = sTouchFrameButtons;
+    up |= (touchButtons & PAD_BUTTON_UP) != 0;
+    down |= (touchButtons & PAD_BUTTON_DOWN) != 0;
+    left |= (touchButtons & PAD_BUTTON_LEFT) != 0;
+    right |= (touchButtons & PAD_BUTTON_RIGHT) != 0;
+    ok |= (touchButtons & PAD_BUTTON_A) != 0;
+    cancel |= (touchButtons & PAD_BUTTON_B) != 0;
+
+    if (sTouchTapPending) {
+        sTouchTapPending = false;
+        // El panel F1 está en un lienzo lógico 640x480 centrado en la ventana.
+        int dw = 0, dh = 0;
+        pc_gfx_get_drawable_size(&dw, &dh);
+        const float aspect = dh > 0 ? float(dw) / float(dh) : 4.0f / 3.0f;
+        const float logicalX = sTouchTapX * aspect * 480.0f
+                             - (aspect * 480.0f - 640.0f) * 0.5f;
+        const float logicalY = sTouchTapY * 480.0f;
+        const int rowH = pc_settings_p2d_active() ? 20 : 18;
+        const int panelY = pc_settings_p2d_active() ? 52 : 64;
+        const int row = int((logicalY - (panelY + 34 + 12)) / float(rowH));
+        if (logicalX >= 74.0f && logicalX <= 566.0f && row >= 0 && row < ROW_COUNT) {
+            sSelection = row;
+            // Tocar una fila de valor avanza su valor; tocar una acción o
+            // submenú equivale a A. Así el texto visible es el control.
+            if (row < ROW_CONTROLS) right = true;
+            else ok = true;
+        }
+    }
+
+    if (ctl || sTouchFrameButtons) {
         if (padNavUp(ctl))
             up = true;
         if (padNavDown(ctl))
@@ -1665,8 +1886,7 @@ void pollMenuInput() {
     }
 
     // Esc / B closes the menu (reverting unconfirmed changes).
-    if (keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
-        keyWentDown(SDL_SCANCODE_B)) {
+    if (cancel) {
         closeMenu();
     }
 }
@@ -1877,6 +2097,20 @@ void drawSubmenuRow(DGXGraphics* gfx, int x, int y, int w,
 // Public API
 // ---------------------------------------------------------------------------
 
+void pc_settings_request_toggle(void) {
+    sToggleRequested = true;
+}
+
+void pc_settings_touch_buttons(unsigned short pressed) {
+    sTouchButtons |= pressed;
+}
+
+void pc_settings_touch_tap(float x, float y) {
+    sTouchTapX = x;
+    sTouchTapY = y;
+    sTouchTapPending = true;
+}
+
 void pc_settings_init(void) {
     loadConfig();
     sPending = sConfig;
@@ -1903,6 +2137,16 @@ void pc_settings_init(void) {
     pc_gfx_set_aspect_ratio_mode(sPending.aspectRatioMode);
     applyControls(sConfig);
     applyGraphics(sConfig);
+    // PLAN_TEXTURAS_HD fase 2: si hay un pack activo, solicitar su
+    // indexación antes de que pc_texpack_init() construya el mapa en
+    // pc_gfx_init(). pc_texpack_select_pack() se llama aquí para que el
+    // menú pueda mostrar la carpeta activa sin depender del orden entre
+    // pc_settings_init y el arranque de GL.
+    if (sConfig.texturePackEnabled && !sConfig.texturePack.empty()) {
+        pc_texpack_select_pack(sConfig.texturePack.c_str());
+        pc_texpack_request_enable();
+        printf("[PC Settings] Texture pack active: %s\n", sConfig.texturePack.c_str());
+    }
     printf("[PC Settings] Init complete.\n");
 }
 
@@ -1923,6 +2167,19 @@ void pc_settings_apply_video(void) {
 
 bool pc_settings_has_pending_video(void) {
     return sVideoConfirmActive;
+}
+
+// Llega desde el hilo Java que instaló el pack (selector F1 → Android).
+// Guarda el resultado para que el submenú de packs lo pinte; el picker se
+// considera cerrado y el pack aparece en la lista en el siguiente dibujo.
+void pc_texpack_install_progress(int files) {
+    sTexturePackInstallFiles.store(files);
+}
+
+void pc_texpack_install_finished(bool ok, const char* message) {
+    sTexturePackPickerActive = false;
+    sTexturePackInstallFiles.store(0);
+    texturePackNotice(!ok, message ? message : (ok ? "Pack instalado." : "No se pudo instalar el pack."));
 }
 
 // ─── Permadeath badge on the file-select screen ───
@@ -2026,6 +2283,32 @@ void pcNewGamePromptInput() {
     bool right  = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
     bool accept = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
     bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE);
+
+    left |= (sTouchFrameButtons & PAD_BUTTON_LEFT) != 0;
+    right |= (sTouchFrameButtons & PAD_BUTTON_RIGHT) != 0;
+    accept |= (sTouchFrameButtons & PAD_BUTTON_A) != 0;
+    cancel |= (sTouchFrameButtons & PAD_BUTTON_B) != 0;
+
+    if (sTouchTapPending) {
+        sTouchTapPending = false;
+        int dw = 0, dh = 0;
+        pc_gfx_get_drawable_size(&dw, &dh);
+        const float aspect = dh > 0 ? float(dw) / float(dh) : 4.0f / 3.0f;
+        const float screenW = aspect * 480.0f;
+        const float x = sTouchTapX * screenW;
+        const float y = sTouchTapY * 480.0f;
+        const float panelX = screenW * 0.5f - 310.0f;
+        const float panelY = 110.0f;
+        const float optY = panelY + 108.0f;
+        for (int i = 0; i < 2; ++i) {
+            const float boxX = panelX + 40.0f + i * 270.0f;
+            if (x >= boxX && x <= boxX + 230.0f && y >= optY - 8.0f && y <= optY + 52.0f) {
+                sNewGamePromptChoice = i;
+                accept = true;
+                break;
+            }
+        }
+    }
 
     SDL_GameController* ctl = pc_window_get_controller();
     if (ctl) {
@@ -2499,6 +2782,138 @@ void pc_settings_draw(void) {
         return; // Don't draw footer when submenu is open.
     }
 
+    // Texture packs submenu overlay.
+    if (sInTexturePacksSubmenu) {
+        const int subX = px1 + 18, subY = py1 + 44;
+        const int subW = panelW - 36, subH = panelH - 58;
+        drawSubmenuSurface(gfx, subX, subY, subW, subH, "Texture Packs",
+                           "A: activate / deactivate",
+                           "Up/Down: select   Esc/B: back");
+
+        std::vector<std::string> packs = pc_texpack_list_packs();
+        const int rowCount = 1 + static_cast<int>(packs.size());
+        const int listStartY = subY + 62;
+        const int itemH = packs.empty() ? 26 : 22;
+        // 9 filas caben cómodas; más se desplazan marcando la fila activa abajo.
+        const int visibleItems = 9;
+        int startIdx = 0;
+        if (sTexturePacksSelection >= visibleItems)
+            startIdx = sTexturePacksSelection - visibleItems + 1;
+        else if (rowCount < visibleItems)
+            startIdx = 0;
+
+        const int fromRow = startIdx;
+        const int toRow = std::min(rowCount, startIdx + visibleItems);
+
+        // Instalar desde fichero.
+        if (fromRow <= kTexturePackInstallRow && kTexturePackInstallRow < toRow) {
+            const int itemY = listStartY + (kTexturePackInstallRow - fromRow) * itemH;
+            const bool selected = (sTexturePacksSelection == kTexturePackInstallRow);
+            char value[96];
+            if (sTexturePackPickerActive && sTexturePackInstallFiles.load() > 0)
+                snprintf(value, sizeof(value), "Installing... %d files", sTexturePackInstallFiles.load());
+            else if (sTexturePackPickerActive)
+                snprintf(value, sizeof(value), "Selecting file...");
+            else
+#ifdef __ANDROID__
+                snprintf(value, sizeof(value), "Android picker");
+#else
+                snprintf(value, sizeof(value), "manual");
+#endif
+            drawSubmenuRow(gfx, subX + 20, itemY, subW - 40,
+                           "Install from file (ZIP / RAR)", value, selected);
+        }
+
+        // Packs instalados.
+        for (int r = std::max(fromRow, kTexturePackInstallRow + 1); r < toRow; r++) {
+            const int idx = r - kTexturePackInstallRow - 1;
+            const int itemY = listStartY + (r - fromRow) * itemH;
+            const bool selected = (sTexturePacksSelection == r);
+            const std::string& folder = packs[idx];
+            const bool active = sConfig.texturePackEnabled && folder == sConfig.texturePack;
+            // "Active" solo si este arranque lo indexó de verdad; si es el
+            // elegido pero el cargador no pudo con él, decirlo, no fingir.
+            const bool loadedNow = pc_texpack_enabled() && folder == pc_texpack_selected_pack();
+            const bool chosenAtBoot = !pc_texpack_selected_pack().empty()
+                && folder == pc_texpack_selected_pack();
+            std::error_code markerEc;
+            const bool incomplete = !sTexturePackPickerActive
+                && std::filesystem::exists(std::filesystem::path("Load") / "Textures" / ".incomplete", markerEc);
+            const char* state = incomplete ? "INCOMPLETE: install again"
+                : !active ? "Inactive"
+                : loadedNow ? "Active"
+                : chosenAtBoot ? "Failed to load (see below)"
+                : "Active  (on restart)";
+            drawSubmenuRow(gfx, subX + 20, itemY, subW - 40, folder.c_str(), state, selected);
+        }
+
+        if (packs.empty()) {
+            const int itemY = listStartY + itemH;
+            const bool selected = false;
+            drawSubmenuRow(gfx, subX + 20, itemY, subW - 40,
+                           "No packs installed", "install one above", selected);
+        }
+
+        if (rowCount > visibleItems) {
+            char hint[64];
+            snprintf(hint, sizeof(hint), "%d / %d", sTexturePacksSelection + 1, rowCount);
+            drawTextOutline(subX + subW - 12 - menuTextWidth(hint),
+                            subY + 12, "%s",
+                            Colour(180, 180, 200, 255), Colour(10, 16, 36, 255), hint);
+        }
+
+        // Estado real del cargador en este arranque (qué indexó y cómo sube
+        // los DDS): es lo que distingue "activo en el .conf" de "en uso".
+        {
+            char status[200];
+            snprintf(status, sizeof(status), "Loader: %s", pc_texpack_status());
+            drawTextOutline(subX + subW / 2 - menuTextWidth(status) / 2, subY + subH - 48,
+                            "%s", Colour(180, 190, 215, 255), Colour(10, 16, 36, 255), status);
+            size_t replaced = 0, missing = 0, failed = 0;
+            pc_texpack_stats(&replaced, &missing, &failed);
+            char counts[120];
+            snprintf(counts, sizeof(counts), "Textures: %zu replaced, %zu not in pack, %zu failed",
+                     replaced, missing, failed);
+            drawTextOutline(subX + subW / 2 - menuTextWidth(counts) / 2, subY + subH - 30,
+                            "%s", Colour(180, 190, 215, 255), Colour(10, 16, 36, 255), counts);
+        }
+
+        // Aviso de la última instalación o acción, con su color.
+        {
+            std::lock_guard<std::mutex> lock(sTexturePackNoticeMutex);
+            const bool fresh = SDL_GetTicks() - sTexturePackNoticeMs < kTexturePackNoticeTimeoutMs;
+            if (fresh && sTexturePackNotice[0]) {
+                char msg[sizeof(sTexturePackNotice)];
+                snprintf(msg, sizeof(msg), "%s", sTexturePackNotice);
+                const Colour colour = sTexturePackNoticeError ? Colour(255, 140, 140, 255)
+                                                              : Colour(150, 235, 170, 255);
+                const int msgY = subY + subH - 8;
+                drawTextOutline(subX + subW / 2 - menuTextWidth(msg) / 2, msgY,
+                                "%s", colour, Colour(10, 16, 36, 255), msg);
+            }
+        }
+
+        // Modal de reinicio: se dibuja sobre el submenú, con prioridad.
+        if (sTexturePackRestartPrompt) {
+            const int boxW = 560, boxH = 150;
+            const int boxX = screenW / 2 - boxW / 2;
+            const int boxY = screenH / 2 - boxH / 2;
+            drawPikminPanel(gfx, boxX, boxY, boxW, boxH, 18);
+            const int ty = boxY + 42;
+            const char* line1 = "Texture pack active.";
+            const char* line2 = "Restart now so it takes effect.";
+            drawTextOutline(boxX + boxW / 2 - menuTextWidth(line1) / 2, ty, "%s",
+                            Colour(255, 240, 180, 255), Colour(18, 26, 56, 255), line1);
+            drawTextOutline(boxX + boxW / 2 - menuTextWidth(line2) / 2, ty + 26, "%s",
+                            Colour(255, 240, 180, 255), Colour(18, 26, 56, 255), line2);
+            const char* prompt = "A: Restart now   B: Not yet";
+            drawTextOutline(boxX + boxW / 2 - menuTextWidth(prompt) / 2, ty + 64, "%s",
+                            Colour(255, 255, 255, 255), Colour(18, 26, 56, 255), prompt);
+        }
+
+        return; // Don't draw footer when texture packs submenu is open.
+    }
+
     // Graphics submenu overlay.
     if (sInGraphicsSubmenu) {
         const int subX = px1 + 18, subY = py1 + 44;
@@ -2518,6 +2933,7 @@ void pc_settings_draw(void) {
             "Gamma",
             "Brightness",
             "Saturation",
+            "Texture Packs",
         };
 
         const int listStartY = subY + 62;
@@ -2552,6 +2968,10 @@ void pc_settings_draw(void) {
                 else snprintf(value, sizeof(value), "Anisotropic %dx", sPending.anisotropy);
             } else if (i == 6) {
                 snprintf(value, sizeof(value), "%s", gradingOn ? "On" : "Off");
+            } else if (i == 10) {
+                // Rowing into a submenu rather than cycling a value. Mirror the
+                // main-list convention so the row reads like the others.
+                snprintf(value, sizeof(value), "Manage >");
             } else if (!gradingOn) {
                 // The three sliders do nothing while grading is off. Saying so
                 // beats letting someone move them and conclude it is broken.

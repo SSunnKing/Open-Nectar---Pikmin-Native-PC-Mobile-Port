@@ -90,6 +90,16 @@ int main()
 		}
 		check(contains(vert, "gl_VertexID"), "the pass builds its own geometry");
 		check(contains(frag, "oColour"), "the fragment stage writes its output");
+#if PIKI_USE_GLES
+		check(vert.rfind("#version 300 es\n", 0) == 0, "GLES vertex stage uses GLSL ES 3.00");
+		check(frag.rfind("#version 300 es\n", 0) == 0, "GLES fragment stage uses GLSL ES 3.00");
+		check(contains(vert, "precision highp float;"), "GLES vertex stage declares precision");
+		check(contains(frag, "precision highp int;"), "GLES fragment stage declares integer precision");
+#else
+		check(vert.rfind("#version 330 core\n", 0) == 0, "desktop vertex stage uses GLSL 3.30");
+		check(frag.rfind("#version 330 core\n", 0) == 0, "desktop fragment stage uses GLSL 3.30");
+		check(!contains(frag, "precision highp"), "desktop stage emits no ES precision qualifiers");
+#endif
 	}
 
 	// Depth is not always available -- the port falls back to a renderbuffer

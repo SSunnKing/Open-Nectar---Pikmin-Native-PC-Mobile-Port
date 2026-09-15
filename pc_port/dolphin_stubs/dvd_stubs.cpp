@@ -135,7 +135,9 @@ s32  DVDConvertPathToEntrynum(const char* path) {
 void __DVDLowSetWAType(u32 type, u32 location) { (void)type; (void)location; }
 s32  DVDGetTransferredSize(DVDFileInfo* fileInfo) { (void)fileInfo; return 0; }
 
-static DVDDiskID sDummyDiskID = { "GPIE", "01", 0, 1, 0, 0, {0} };
+// Los campos son char[4]/char[2] sin terminador: un literal "GPIE" no cabe
+// en C++ estricto (Clang lo rechaza; GCC lo dejaba pasar con -fpermissive).
+static DVDDiskID sDummyDiskID = { { 'G', 'P', 'I', 'E' }, { '0', '1' }, 0, 1, 0, 0, { 0 } };
 DVDDiskID* DVDGetCurrentDiskID() { return &sDummyDiskID; }
 BOOL DVDCompareDiskID(DVDDiskID* id1, DVDDiskID* id2) {
     return memcmp(id1, id2, sizeof(DVDDiskID)) == 0;

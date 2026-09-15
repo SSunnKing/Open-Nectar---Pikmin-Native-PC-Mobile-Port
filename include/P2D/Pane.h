@@ -132,6 +132,7 @@ public:
 	int getPosV() { return mBounds.mMinY; }
 
 	const PUTRect& getBounds() { return mBounds; }
+	const PUTRect& getGlobalBounds() { return mGlobalBounds; }
 
 	// these seem to genuinely be the same
 	void place(const PUTRect& bounds) { mBounds = bounds; }

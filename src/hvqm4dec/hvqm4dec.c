@@ -2277,7 +2277,7 @@ void HVQM4DecodeIpic(SeqObj* obj, void* code, void* outbuf)
 	MakeNest(ws, read16(code, 4), read16(code, 6));
 
 	for (i = 0; i < HVQM_PLANE_COUNT; i++) {
-		IpicPlaneDec(ws, i, outbuf);
+		IpicPlaneDec(ws, i, (u8*)outbuf);
 		outbuf = (u8*)outbuf + ws->pln[i].plane_size;
 	}
 }
@@ -2337,5 +2337,5 @@ void HVQM4DecodeBpic(SeqObj* obj, void* code, void* outbuf, void* ref2, void* re
 	ws->dc_max = +0x7F << read8(code, 0);
 	ws->dc_min = -0x80 << read8(code, 0);
 
-	BpicPlaneDec(obj, outbuf, ref2, ref1);
+	BpicPlaneDec(obj, (u8*)outbuf, (u8*)ref2, (u8*)ref1);
 }

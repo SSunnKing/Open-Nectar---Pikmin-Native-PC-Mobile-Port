@@ -5,6 +5,9 @@
 #include "pc_permadeath.h"
 #include "pc_window.h"
 #include "settings/pc_settings.h"
+#if PIKI_PC_TOUCH
+#include "touch/pc_touch.h"
+#endif
 static f32 pcNaviHurt(f32 damage) { return pc_hardmode_navi_damage(damage); }
 #else
 static f32 pcNaviHurt(f32 damage) { return damage; }
@@ -139,6 +142,7 @@ void Navi::startMovie(bool doStopEffects)
 	if (doStopEffects) {
 		mNaviLightEfx->stop();
 		mNaviLightGlowEfx->stop();
+		mCursorTrailEfx->stop();
 	}
 
 	if (state != NAVISTATE_DemoInf && state != NAVISTATE_Starting) {
@@ -469,7 +473,8 @@ Navi::Navi(CreatureProp* props, int naviID)
 	mRippleEffect     = new RippleEffect();
 	mNaviLightEfx     = new PermanentEffect();
 	mNaviLightGlowEfx = new PermanentEffect();
-	_77C              = new PermanentEffect();
+	mCursorTrailEfx   = new PermanentEffect();
+	mCursorTrailLastPos.set(0.0f, 0.0f, 0.0f);
 	_780              = new PermanentEffect();
 	mSlimeEffect      = new SlimeEffect();
 	memStat->end("naviEff");
@@ -573,6 +578,7 @@ void Navi::rideUfo()
 	mIsRidingUfo = true;
 	mNaviLightEfx->kill();
 	mNaviLightGlowEfx->kill();
+	mCursorTrailEfx->kill();
 }
 
 /**
@@ -626,6 +632,11 @@ void Navi::reset()
 	mNextThrowPiki   = nullptr;
 	mNaviLightEfx->changeEffect(EffectMgr::EFF_Navi_Light);
 	mNaviLightGlowEfx->changeEffect(EffectMgr::EFF_Navi_LightGlow);
+	// Estela del cursor: el mismo resplandor que deja la antena, emitido
+	// solo mientras el cursor se mueve.
+	mCursorTrailEfx->changeEffect(EffectMgr::EFF_Navi_LightGlow);
+	mCursorTrailEfx->scaleSize(kCursorTrailScale);
+	mCursorTrailEfx->setEmitting(false);
 }
 
 /**
@@ -688,8 +699,13 @@ static bool pcSquadHasColor(int color)
  */
 static void pcUpdatePreferredThrowColor()
 {
-	if (pc_settings_get_mouse_wheel_action() != 0) {
-		sPreferredThrowColor = -1;
+	// Tocar el icono del HUD cuenta como una muesca, y funciona aunque la
+	// rueda esté asignada al zoom: en pantalla táctil no hay rueda.
+	int touchSteps = 0;
+#if PIKI_PC_TOUCH
+	touchSteps = pc_touch_take_color_taps();
+#endif
+	if (pc_settings_get_mouse_wheel_action() != 0 && touchSteps == 0 && sPreferredThrowColor < 0) {
 		return;
 	}
 
@@ -714,7 +730,10 @@ static void pcUpdatePreferredThrowColor()
 		}
 	}
 
-	const int steps = pc_window_take_wheel_steps();
+	int steps = touchSteps;
+	if (pc_settings_get_mouse_wheel_action() == 0) {
+		steps += pc_window_take_wheel_steps();
+	}
 	if (steps != 0) {
 		index = ((index + steps) % presentCount + presentCount) % presentCount;
 	}
@@ -1663,22 +1682,29 @@ void Navi::bounceCallback()
 void Navi::letPikiWork()
 {
 	Iterator iter(mPlateMgr);
-	// this sure is one way to get the first piki in mPlateMgr
-	iter.first();
-	Piki* piki = static_cast<Piki*>(*iter);
-	if (piki) {
-		if (mCollidedWorkObj->mObjType == OBJTYPE_WorkObject) {
-			WorkObject* obj = static_cast<WorkObject*>(mCollidedWorkObj);
-			if (obj->isBridge()) {
-				Bridge* bridge = static_cast<Bridge*>(obj);
-				Vector3f zVec(bridge->getBridgeZVec());
-				zVec.multiply(-1.0f);
-				piki->checkBridgeWall(obj, zVec);
-				return;
+		// this sure is one way to get the first piki in mPlateMgr
+		iter.first();
+		Piki* piki = static_cast<Piki*>(*iter);
+		if (piki) {
+			if (mCollidedWorkObj->mObjType == OBJTYPE_WorkObject) {
+				WorkObject* obj = static_cast<WorkObject*>(mCollidedWorkObj);
+				if (obj->isBridge()) {
+					Bridge* bridge = static_cast<Bridge*>(obj);
+					Vector3f zVec(bridge->getBridgeZVec());
+					zVec.multiply(-1.0f);
+					piki->checkBridgeWall(obj, zVec);
+					return;
+				}
 			}
-		}
-		CollPart* part;
-		if (mCollidedWorkObj->isSluice()) {
+			// part must always hold a sane value: it is handed to CollEvent and
+		// then to the Piki, so leaving it uninitialised when the collided work
+		// object is not a sluice would read garbage on the next callback.  It
+		// also stays null when the object claims to be a sluice but has no
+		// collision parts installed yet, which is exactly the state of the dead
+		// creature a blue Piki has just picked up: letPikiWork ran before the
+		// corpse was fully set up.
+		CollPart* part = nullptr;
+		if (mCollidedWorkObj->isSluice() && mCollidedWorkObj->mCollInfo) {
 			part = mCollidedWorkObj->mCollInfo->getSphere('gate');
 		}
 
@@ -1903,7 +1929,9 @@ void Navi::makeVelocity(bool isSunset)
 
 	// Use virtual cursor (mouse) in PC mouse modes, otherwise use movement stick
 	#ifdef PIKI_PC_PORT
-	if (pc_window_get_control_mode() == PC_CONTROL_MOUSE_CURSOR) {
+	if (pc_window_get_control_mode() == PC_CONTROL_MOUSE_CURSOR
+	    || pc_window_get_mouse_cursor_delta_x() != 0.0f
+	    || pc_window_get_mouse_cursor_delta_y() != 0.0f) {
 		// Direct mouse delta mode: use raw deltas, no normalization or frame time scaling
 		// SDL already provides distance since last poll
 		static const float kMouseCursorWorldScale = 0.5f; // Convert SDL counts to world units
@@ -2259,6 +2287,24 @@ void Navi::refresh(Graphics& gfx)
 
 		mWorldMtx = orientMatrix;
 		mWorldMtx.setTranslation(mCursorWorldPos);
+
+		// Estela: emite mientras el cursor se desplaza; quieto, deja de emitir
+		// y las partículas que quedan se desvanecen solas.
+		{
+			const bool cursorShown = mIsCursorVisible && getCurrState()->getID() != NAVISTATE_DemoSunset;
+			Vector3f trailPos(mCursorWorldPos.x, mCursorWorldPos.y + 2.0f, mCursorWorldPos.z);
+			Vector3f moved = trailPos - mCursorTrailLastPos;
+			const bool moving = cursorShown && moved.length() > 0.5f;
+			if (moving) {
+				mCursorTrailEfx->updatePos(trailPos);
+				mCursorTrailEfx->restart();
+			}
+			// Del color del anillo del cursor sobre el suelo (magenta).
+			const Colour trailColour(235, 70, 235, 255);
+			mCursorTrailEfx->setTint(trailColour);
+			mCursorTrailEfx->setEmitting(moving);
+			if (cursorShown) mCursorTrailLastPos = trailPos;
+		}
 
 		if (mIsCursorVisible && getCurrState()->getID() != NAVISTATE_DemoSunset) {
 			gfx.useMatrix(Matrix4f::ident, 0);

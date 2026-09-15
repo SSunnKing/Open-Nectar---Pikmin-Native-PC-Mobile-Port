@@ -1,4 +1,5 @@
 #include "GameStat.h"
+#include <cstdint>
 #include "DebugLog.h"
 
 GameStat::ColCounter GameStat::deadPikis;
@@ -94,7 +95,7 @@ void GameStat::Counter::dump(immut char* name)
  */
 void GameStat::ColCounter::dump(immut char* name)
 {
-	PRINT("<%s> %d (%d + %d + %d)\n", name, int(mCounts), mCounts[Blue], mCounts[Red], mCounts[Yellow]);
+	PRINT("<%s> %d (%d + %d + %d)\n", name, int((intptr_t)mCounts), mCounts[Blue], mCounts[Red], mCounts[Yellow]);
 }
 
 /**

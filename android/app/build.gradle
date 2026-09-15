@@ -1,0 +1,105 @@
+apply plugin: 'com.android.application'
+
+// Open Nectar para Android (fase 4 de docs/ANDROID_PLAN.md).
+//
+// El juego se compila desde el CMakeLists.txt de la raíz del repositorio a
+// través de jni/CMakeLists.txt, que primero añade SDL2 (third_party/SDL2-android)
+// y luego el proyecto dos veces con -DPIKMIN_GLES=ON, una por versión del
+// disco: libnectar.so (USA Rev 1) y libnectar-pal.so (Europa).
+
+dependencies {
+    // Desempaquetado de packs de texturas en .rar (PLAN_TEXTURAS_HD fase 2).
+    // JunRAR lee RAR4 y RAR5 en Java puro. Trae transitive commons-compress.
+    implementation 'com.github.junrar:junrar:7.5.5'
+}
+
+// Firma de release (fase 8). La clave vive fuera del repositorio; se busca
+// en android/keystore.properties o, si no existe, en
+// ~/.config/opennectar/keystore.properties (storeFile, storePassword,
+// keyAlias, keyPassword). Sin ninguno de los dos, el release se firma con la
+// clave debug (sirve para adb, no para publicar) y Gradle lo avisa.
+def keystoreProps = new Properties()
+def keystoreFile = [rootProject.file('keystore.properties'),
+                    new File(System.getProperty('user.home'), '.config/opennectar/keystore.properties')]
+                   .find { it.isFile() }
+if (keystoreFile != null) {
+    keystoreFile.withInputStream { keystoreProps.load(it) }
+} else {
+    logger.warn('Open Nectar: sin keystore.properties, el release se firmara con la clave debug')
+}
+
+android {
+    namespace 'org.opennectar'
+    compileSdk 35
+    ndkVersion '28.2.13676358'
+
+    defaultConfig {
+        applicationId 'org.opennectar'
+        minSdk 29
+        targetSdk 35
+        versionCode 3
+        versionName '0.6'
+        externalNativeBuild {
+            cmake {
+                // libc++ estática, no compartida: el juego sustituye los
+                // operator new/delete globales (src/sysDolphin/sysNew.cpp) y
+                // con libc++_shared.so la STL asigna con su new y el juego
+                // libera con el suyo (o al revés): heap corrupto y SIGSEGV en
+                // el primer std::filesystem (CARDProbe). SDL2 es C puro y no
+                // la necesita.
+                arguments '-DANDROID_STL=c++_static',
+                          '-DANDROID_PLATFORM=android-29',
+                          '-DPIKMIN_NATIVE_JAUDIO=ON',
+                          '-DPIKMIN_NATIVE_OPTIMIZE=OFF'
+                targets 'SDL2', 'pikmin_pc', 'pikmin_pc_pal', 'nectar_installer'
+            }
+        }
+        ndk { abiFilters 'arm64-v8a' }
+    }
+    signingConfigs {
+        if (keystoreFile != null) {
+            release {
+                storeFile file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+                enableV1Signing false // minSdk 29: v2+v3 bastan
+                enableV2Signing true
+                enableV3Signing true
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig keystoreFile != null ? signingConfigs.release : signingConfigs.debug
+            // Nombre de fichero con versión, que es lo que se publica.
+            applicationVariants.all { variant ->
+                if (variant.buildType.name == 'release') {
+                    variant.outputs.all { outputFileName = "open_nectar_${variant.versionName}.apk" }
+                }
+            }
+        }
+        debug {
+            // El CMake de la raíz ya pone RelWithDebInfo si no se dice nada;
+            // AGP fuerza Debug en esta variante y el juego iría a -O0.
+            externalNativeBuild { cmake { arguments '-DCMAKE_BUILD_TYPE=RelWithDebInfo' } }
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path 'jni/CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+    sourceSets {
+        // Arte de la capa táctil: pc_port/touch/assets/art/*.png se lee desde
+        // el APK como "art/<nombre>.png" (SDL_RWFromFile).
+        main.assets.srcDirs += ['../../pc_port/touch/assets']
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    lint { abortOnError false }
+}
