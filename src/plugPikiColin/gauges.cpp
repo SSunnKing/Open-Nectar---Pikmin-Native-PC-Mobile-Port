@@ -115,17 +115,24 @@ void GaugeInfo::update()
 }
 
 /**
- * @brief Queues a number (0-99) to the light flare manager to be drawn.
+ * @brief Queues a nonnegative number to the light flare manager to be drawn.
  *
  * @param centerPos Center position of the total number to be drawn.
  * @param colour Colour of the number.
- * @param number Number to draw, between 0 and 99. Numbers above 99 will be clamped to 99 (except in demo and JP).
+ * @param number Number to draw. PC supports multiple digits; retail console builds retain their original limits.
  * @param digitHalfWidth The half-width size to draw each digit as.
  * @param digitHalfHeight The half-height size to draw each digit as.
  */
 void GaugeInfo::showDigits(Vector3f centerPos, immut Colour& colour, int number, f32 digitHalfWidth, f32 digitHalfHeight)
 {
-#if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01_01)
+#if defined(PIKI_PC_PORT)
+	// Weighted carriers and imported treasures can exceed the original two-digit range.
+	int num = number < 0 ? 0 : number;
+	int numDigits = 1;
+	for (int remaining = num / 10; remaining; remaining /= 10) {
+		++numDigits;
+	}
+#elif defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01_01)
 	STACK_PAD_VAR(2);
 	// NB: if number = 100, digits will start overlapping
 	int num = number;
@@ -135,16 +142,18 @@ void GaugeInfo::showDigits(Vector3f centerPos, immut Colour& colour, int number,
 	int num = number > 99 ? 99 : number;
 #endif
 
+#if !defined(PIKI_PC_PORT)
 	int numDigits = num >= 10 ? 2 : 1;
+#endif
 
-	// if 2 digits, move the "ones" digit position to the right (since we draw that first)
-	if (numDigits == 2) {
+	// Start at the rightmost digit, centering the entire number.
+	if (numDigits >= 2) {
 		// this ends up overlapping the digits very slightly, so they read as one number
 		// (width of overlap is 1/4 of a digit)
-		centerPos.x += digitHalfWidth * 1.5f * 0.5f;
+		centerPos.x += digitHalfWidth * 1.5f * 0.5f * (numDigits - 1);
 	}
 
-	// draw the digits - ones first (then tens if 2-digit)
+	// Draw ones first, then successive higher places.
 	for (int i = 0; i < numDigits; i++) {
 		f32 texEntryWidth = 1 / 11.0f; // 11 entries in the bti (0,1,2,3,4,5,6,7,8,9,-), each unit width
 
@@ -156,10 +165,10 @@ void GaugeInfo::showDigits(Vector3f centerPos, immut Colour& colour, int number,
 		lgMgr->mDigitFlareGroup->addLFlare(colour, centerPos, Vector2f(digitHalfWidth, digitHalfHeight), stack_new(Vector2f)(uvStart, 0.0f),
 		                                   stack_new(Vector2f)(uvEnd, 1.0f));
 
-		// get tens digit, in case it's a 2-digit number
+		// Advance to the next higher place.
 		num /= 10;
 
-		// adjust left to draw tens digit if required
+		// Adjust left for the next digit.
 		centerPos.x -= digitHalfWidth * 1.5f;
 	}
 	FORCE_DONT_INLINE;
