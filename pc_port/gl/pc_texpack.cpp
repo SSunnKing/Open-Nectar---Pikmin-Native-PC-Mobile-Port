@@ -523,12 +523,30 @@ static bool make_uploadable(PackImage& image)
     return true;
 }
 
+#ifdef _WIN32
+#include <SDL2/SDL.h>
+// opengl32.dll solo exporta GL 1.1; glCompressedTexImage2D es de 1.3 y hay
+// que pedirla al driver, como hace pc_gfx.cpp con el resto de funciones
+// modernas.
+static PFNGLCOMPRESSEDTEXIMAGE2DPROC compressed_tex_image_2d()
+{
+    static PFNGLCOMPRESSEDTEXIMAGE2DPROC fn =
+        reinterpret_cast<PFNGLCOMPRESSEDTEXIMAGE2DPROC>(SDL_GL_GetProcAddress("glCompressedTexImage2D"));
+    return fn;
+}
+#else
+static inline void (*compressed_tex_image_2d())(GLenum, GLint, GLenum, GLsizei, GLsizei, GLint, GLsizei, const void*)
+{
+    return glCompressedTexImage2D;
+}
+#endif
+
 static void upload_level(const PackImage& image, int level, uint32_t w, uint32_t h,
                          const std::vector<uint8_t>& data)
 {
-    if (image.compressed)
-        glCompressedTexImage2D(GL_TEXTURE_2D, level, image.internalFormat, w, h, 0,
-                               static_cast<GLsizei>(data.size()), data.data());
+    if (image.compressed && compressed_tex_image_2d())
+        compressed_tex_image_2d()(GL_TEXTURE_2D, level, image.internalFormat, w, h, 0,
+                                  static_cast<GLsizei>(data.size()), data.data());
     else
         glTexImage2D(GL_TEXTURE_2D, level, image.internalFormat, w, h, 0,
                      image.sourceFormat, GL_UNSIGNED_BYTE, data.data());
