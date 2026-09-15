@@ -3,6 +3,7 @@
 #if defined(PIKI_PC_PORT)
 #include "GameStat.h"
 #include "pc_permadeath.h"
+#include "pc_swarm.h"
 #include "pc_window.h"
 #include "settings/pc_settings.h"
 static f32 pcNaviHurt(f32 damage) { return pc_hardmode_navi_damage(damage); }
@@ -2069,6 +2070,20 @@ void Navi::makeCStick(bool isSunset)
 	transform.inputAxisAngle(axisAngle);
 
 	NVector3f cStickInput(mKontroller->getSubStickX(), 0.0f, -mKontroller->getSubStickY());
+
+#if defined(PIKI_PC_PORT)
+	// Wii-style swarm is a held command: the whole formation follows the
+	// cursor direction while the button is down. Feed it through the same
+	// formation path so analog control and release behavior stay unchanged.
+	if (!isSunset && mKontroller->keyDown(KBBTN_SWARM)) {
+		Vector3f cursorDelta = mCursorWorldPos - mSRT.t;
+		float swarmX = 0.0f;
+		float swarmZ = 0.0f;
+		if (pc_swarm_cursor_direction(cursorDelta.x, cursorDelta.z, cameraYaw, &swarmX, &swarmZ)) {
+			cStickInput.set(swarmX, 0.0f, swarmZ);
+		}
+	}
+#endif
 
 	if (isSunset) {
 		cStickInput.set(0.0f, 0.0f, 0.0f);

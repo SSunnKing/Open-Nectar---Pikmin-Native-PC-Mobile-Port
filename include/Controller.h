@@ -29,10 +29,11 @@ enum KeyboardButtons {
 	KBBTN_MSTICK_DOWN  = 1 << 21, // 0x200000
 	KBBTN_MSTICK_LEFT  = 1 << 22, // 0x400000
 	KBBTN_START        = 1 << 24, // 0x1000000 (1 << 23 is skipped)
+	KBBTN_SWARM        = 1 << 23, // 0x800000, PC/Wii-style cursor swarm
 
 	KBBTN_NONE       = 0x0,
 	KBBTN_ANY        = 0xffffffff,
-	KBBTN_ANY_BUTTON = KBBTN_A | KBBTN_B | KBBTN_X | KBBTN_Y | KBBTN_Z | KBBTN_L | KBBTN_R | KBBTN_START,
+	KBBTN_ANY_BUTTON = KBBTN_A | KBBTN_B | KBBTN_X | KBBTN_Y | KBBTN_Z | KBBTN_L | KBBTN_R | KBBTN_START | KBBTN_SWARM,
 };
 
 /**

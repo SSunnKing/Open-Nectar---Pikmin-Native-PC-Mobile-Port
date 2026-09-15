@@ -135,6 +135,9 @@ void ControllerMgr::updateController(Controller* controller)
 	if (sControllerPad[controller->mPlayerNum - 1].button & PAD_BUTTON_START) {
 		keyStatus |= KBBTN_START;
 	}
+	if (sControllerPad[controller->mPlayerNum - 1].button & PAD_BUTTON_SWARM) {
+		keyStatus |= KBBTN_SWARM;
+	}
 
 	// import analog and trigger values
 	controller->mAnalogA  = sControllerPad[controller->mPlayerNum - 1].analogA;

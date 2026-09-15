@@ -52,6 +52,7 @@ enum {
     PC_KEY_ACT_CSTICK_DOWN  = 17,
     PC_KEY_ACT_CSTICK_LEFT  = 18,
     PC_KEY_ACT_CSTICK_RIGHT = 19,
+    PC_KEY_ACT_SWARM        = 20,
     PC_KEY_ACT_COUNT
 };
 void pc_window_set_key_binding(int action, SDL_Scancode scancode);

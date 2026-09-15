@@ -106,6 +106,7 @@ const SDL_Scancode kDefaultKeyBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_CSTICK_DOWN */ SDL_SCANCODE_G,
     /* PC_KEY_ACT_CSTICK_LEFT */ SDL_SCANCODE_F,
     /* PC_KEY_ACT_CSTICK_RIGHT*/ SDL_SCANCODE_H,
+    /* PC_KEY_ACT_SWARM       */ SDL_SCANCODE_V,       // Swarm Pikmin to cursor
 };
 
 // Default gamepad bindings (SDL_GameControllerButton).
@@ -130,6 +131,7 @@ const int kDefaultGamepadBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_CSTICK_DOWN */ -1,
     /* PC_KEY_ACT_CSTICK_LEFT */ -1,
     /* PC_KEY_ACT_CSTICK_RIGHT*/ -1,
+    /* PC_KEY_ACT_SWARM       */ SDL_CONTROLLER_BUTTON_RIGHTSTICK,
 };
 
 // Action names for UI display.
@@ -138,6 +140,7 @@ static const char* kKeyActionNames[PC_KEY_ACT_COUNT] = {
     "D-Pad Up", "D-Pad Down", "D-Pad Left", "D-Pad Right",
     "Stick Up", "Stick Down", "Stick Left", "Stick Right",
     "C-Stick Up", "C-Stick Down", "C-Stick Left", "C-Stick Right",
+    "Swarm",
 };
 
 static void initKeyBindings() {
@@ -697,6 +700,7 @@ void pc_window_poll_events(PADStatus* pad) {
     if (state[sKeyBindings[PC_KEY_ACT_DPAD_DOWN]])  button |= PAD_BUTTON_DOWN;
     if (state[sKeyBindings[PC_KEY_ACT_DPAD_LEFT]])  button |= PAD_BUTTON_LEFT;
     if (state[sKeyBindings[PC_KEY_ACT_DPAD_RIGHT]]) button |= PAD_BUTTON_RIGHT;
+    if (state[sKeyBindings[PC_KEY_ACT_SWARM]])       button |= PAD_BUTTON_SWARM;
 
     // Analog Triggers (Keyboard)
     if (state[sKeyBindings[PC_KEY_ACT_L]]) {
@@ -757,6 +761,7 @@ void pc_window_poll_events(PADStatus* pad) {
         if (boundButtonPressed(PC_KEY_ACT_DPAD_DOWN))  button |= PAD_BUTTON_DOWN;
         if (boundButtonPressed(PC_KEY_ACT_DPAD_LEFT))  button |= PAD_BUTTON_LEFT;
         if (boundButtonPressed(PC_KEY_ACT_DPAD_RIGHT)) button |= PAD_BUTTON_RIGHT;
+        if (boundButtonPressed(PC_KEY_ACT_SWARM))       button |= PAD_BUTTON_SWARM;
 
         // Triggers
         Sint16 axisL = SDL_GameControllerGetAxis(sController, SDL_CONTROLLER_AXIS_TRIGGERLEFT);
@@ -805,6 +810,7 @@ void pc_window_poll_events(PADStatus* pad) {
             || boundButtonPressed(PC_KEY_ACT_R) || boundButtonPressed(PC_KEY_ACT_START)
             || boundButtonPressed(PC_KEY_ACT_DPAD_UP) || boundButtonPressed(PC_KEY_ACT_DPAD_DOWN)
             || boundButtonPressed(PC_KEY_ACT_DPAD_LEFT) || boundButtonPressed(PC_KEY_ACT_DPAD_RIGHT)
+            || boundButtonPressed(PC_KEY_ACT_SWARM)
             || axisL > noticeZone || axisR > noticeZone
             || abs(lx) > noticeZone || abs(ly) > noticeZone
             || abs(rx) > noticeZone || abs(ry) > noticeZone;
