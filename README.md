@@ -9,12 +9,12 @@ This project builds upon the decompilation by [projectPiki/pikmin](https://githu
 ## Project Status
 
 **Functional:**
-- Native builds for Linux x86-64 and Windows x86-64, from the same source
+- Native builds for Linux x86-64 and Windows x86-64, Android from the same source
 - Most of the game playable from start to finish
 - 30, 60 or 120 FPS gameplay, selectable in-game
 - Full audio: the game's original JAudio engine, with a software DSP
 - TEV specialization for optimal performance
-- Controller, keyboard and mouse support
+- Controller, keyboard and mouse support, touch controls
 - **Both retail discs**: Pikmin USA Rev 1 and Pikmin Europe. The European disc
   carries five languages — English, French, German, Spanish and Italian — and
   the installer asks which one you want to play in
@@ -23,10 +23,11 @@ This project builds upon the decompilation by [projectPiki/pikmin](https://githu
   3D view culls to the same shape, so nothing pops in and out at the sides
 - Post-processing: antialiasing, restored fog, bloom, ambient occlusion, depth
   of field, texture filtering and colour grading — every one of them optional
+- Custom texture packs
 
 **In development:**
 - Some minor graphical differences
-- Ports to other operating systems
+- Planning multiplayer coop mode
 
 ## Play directly (without compiling)
 
