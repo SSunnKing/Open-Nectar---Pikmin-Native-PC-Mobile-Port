@@ -110,6 +110,16 @@ void pc_texpack_android_open_picker(void)
 	if (env && open && gActivity) env->CallVoidMethod(gActivity, open);
 }
 
+JavaVM* pc_android_jni_vm(void)
+{
+	return gVm;
+}
+
+jobject pc_android_jni_activity(void)
+{
+	return gActivity;
+}
+
 void pc_texpack_android_restart(void)
 {
 	JNIEnv* env = jni_env();

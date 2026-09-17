@@ -16,6 +16,7 @@
 #include "pc_menu_repeat.h"
 #ifdef __ANDROID__
 #include "android/pc_texpack_android.h"
+#include "android/pc_save_android.h"
 #endif
 #include "gl/pc_texpack.h"
 
@@ -221,6 +222,7 @@ enum Row {
     ROW_ADVANCED,
     ROW_GRAPHICS,
     ROW_MODS,
+    ROW_SAVE_DATA,
     ROW_RESET,
     ROW_SAVE,
     ROW_CLOSE,
@@ -305,7 +307,7 @@ constexpr int kGraphicsRowCount = 11;
 // resultado llega por pc_texpack_install_finished() y se pinta aquí.
 bool sInTexturePacksSubmenu = false;
 int sTexturePacksSelection = 0;      // 0 = instalar, 1.. = packs instalados
-bool sTexturePackPickerActive = false;  // picker abierto o extracción en curso
+std::atomic<bool> sTexturePackPickerActive{false}; // picker abierto o extracción en curso (hilo Java)
 std::atomic<int> sTexturePackInstallFiles{0};  // ficheros extraídos (hilo Java)
 // Mensaje de la última acción (instalación o aviso de sobremesa).
 bool sTexturePackRestartPrompt = false; // modal "reiniciar para aplicar"
@@ -315,6 +317,13 @@ char sTexturePackNotice[256] = {};
 bool sTexturePackNoticeError = false;
 Uint32 sTexturePackNoticeMs = 0;
 constexpr Uint32 kTexturePackNoticeTimeoutMs = 6000;
+
+// Submenú "Save Data" (issue #36): exportar/importar la tarjeta de memoria en
+// Android a través del selector SAF. El .zip lo escribe Java en un hilo; el
+// resultado llega por pc_save_transfer_finished() y se pinta aquí.
+bool sInSaveDataSubmenu = false;
+int sSaveDataSelection = 0;         // 0 = exportar, 1 = importar
+std::atomic<bool> sSaveTransferActive{false}; // picker abierto o transferencia en curso (hilo Java)
 
 void texturePackNotice(bool error, const char* message)
 {
@@ -606,6 +615,7 @@ void closeMenu() {
     sInResolutionSubmenu = false;
     sInTexturePacksSubmenu = false;
     sTexturePackRestartPrompt = false;
+    sInSaveDataSubmenu = false;
     sMenuOpen = false;
     pc_window_set_settings_menu_open(false);
 }
@@ -1445,8 +1455,20 @@ void pollMenuInput() {
                 sTexturePackPickerActive = true;
                 pc_texpack_android_open_picker();
 #else
-                texturePackNotice(true,
-                    "En escritorio, descomprime el pack en Load/Textures/ y reinicia. (En Android se elige el .zip/.rar aquí.)");
+                // Desktop has no in-app zip extractor; say exactly where the
+                // pack has to go, as an absolute path, because "Load/Textures"
+                // is relative to the game folder and finding it was the part
+                // the report could not manage (issue #35). Create it too, so
+                // the instruction points at a folder that exists.
+                std::error_code locEc;
+                std::filesystem::path texRoot = std::filesystem::absolute(
+                    std::filesystem::path("Load") / "Textures", locEc);
+                std::filesystem::create_directories(texRoot, locEc);
+                char tip[256];
+                snprintf(tip, sizeof(tip),
+                         "Unzip the pack into:  %s  then restart.",
+                         locEc ? "Load/Textures" : texRoot.string().c_str());
+                texturePackNotice(static_cast<bool>(locEc), tip);
 #endif
             }
             return;
@@ -1522,6 +1544,13 @@ void pollMenuInput() {
         // cycled so the install entry has room next to the pack list.
         if (sGraphicsSelection == 10) {
             if (ok) {
+#if !defined(__ANDROID__)
+                // Create the folder the manual-install instruction names, so a
+                // user who goes looking for it finds it (issue #35).
+                std::error_code shareEc;
+                std::filesystem::create_directories(
+                    std::filesystem::path("Load") / "Textures", shareEc);
+#endif
                 sInTexturePacksSubmenu = true;
                 sTexturePacksSelection = 0;
             }
@@ -1661,6 +1690,56 @@ void pollMenuInput() {
         // Debug shortcuts.
         else if (sModsSelection == 6) {
             if (left || right) sPending.debugKeys = sPending.debugKeys ? 0 : 1;
+        }
+        return;
+    }
+
+    // Save Data submenu (issue #36). Android opens the SAF picker to export or
+    // import the memory card as a .zip. Desktop has no in-app picker: the card
+    // is plain files already, so the rows just say where instead of being
+    // buttons that appear to do nothing.
+    if (sInSaveDataSubmenu) {
+        bool up = keyWentDown(SDL_SCANCODE_UP) || keyWentDown(SDL_SCANCODE_W);
+        bool down = keyWentDown(SDL_SCANCODE_DOWN) || keyWentDown(SDL_SCANCODE_S);
+        bool left = keyWentDown(SDL_SCANCODE_LEFT) || keyWentDown(SDL_SCANCODE_A);
+        bool right = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
+        bool ok = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
+        bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
+                      keyWentDown(SDL_SCANCODE_B);
+
+        if (ctl || sTouchFrameButtons) {
+            if (padNavUp(ctl)) up = true;
+            if (padNavDown(ctl)) down = true;
+            if (padNavLeft(ctl)) left = true;
+            if (padNavRight(ctl)) right = true;
+            if (padNavA(ctl)) ok = true;
+            if (padNavB(ctl)) cancel = true;
+        }
+
+        constexpr int kSaveDataRowCount = 2; // 0 = export, 1 = import
+
+        if (up) { sSaveDataSelection = (sSaveDataSelection + kSaveDataRowCount - 1) % kSaveDataRowCount; return; }
+        if (down) { sSaveDataSelection = (sSaveDataSelection + 1) % kSaveDataRowCount; return; }
+        // Closing the submenu must not mark a background copy as finished:
+        // reopening it while the Java thread is still writing would start a
+        // second transfer over the first one. Only the JNI completion callback
+        // clears sSaveTransferActive.
+        if (cancel) { sInSaveDataSubmenu = false; return; }
+
+        if (ok || left || right) {
+#ifdef __ANDROID__
+            if (sSaveTransferActive) {
+                texturePackNotice(true, "Wait: a transfer is already running.");
+            } else {
+                sSaveTransferActive = true;
+                if (sSaveDataSelection == 0) pc_save_android_open_backup();
+                else pc_save_android_open_restore();
+            }
+#else
+            texturePackNotice(false,
+                "Desktop saves live in the game's 'save' folder (card0 / card1). "
+                "Copy that folder to transfer.");
+#endif
         }
         return;
     }
@@ -1859,6 +1938,12 @@ void pollMenuInput() {
         if (ok) {
             sInModsSubmenu = true;
             sModsSelection = 0;
+        }
+        break;
+    case ROW_SAVE_DATA:
+        if (ok) {
+            sInSaveDataSubmenu = true;
+            sSaveDataSelection = 0;
         }
         break;
     case ROW_RESET:
@@ -2091,6 +2176,20 @@ void drawSubmenuRow(DGXGraphics* gfx, int x, int y, int w,
     drawTextOutline(split + 14, y, "%s", main, shadow, value);
 }
 
+// Aviso temporal de la última acción (instalación de packs, transferencia de
+// guardado) centrado en (centerX, y), con el color según el resultado.
+void drawTimedNotice(int centerX, int y) {
+    std::lock_guard<std::mutex> lock(sTexturePackNoticeMutex);
+    const bool fresh = SDL_GetTicks() - sTexturePackNoticeMs < kTexturePackNoticeTimeoutMs;
+    if (!fresh || !sTexturePackNotice[0]) return;
+    char msg[sizeof(sTexturePackNotice)];
+    snprintf(msg, sizeof(msg), "%s", sTexturePackNotice);
+    const Colour colour = sTexturePackNoticeError ? Colour(255, 140, 140, 255)
+                                                  : Colour(150, 235, 170, 255);
+    drawTextOutline(centerX - menuTextWidth(msg) / 2, y, "%s",
+                    colour, Colour(10, 16, 36, 255), msg);
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -2180,6 +2279,14 @@ void pc_texpack_install_finished(bool ok, const char* message) {
     sTexturePackPickerActive = false;
     sTexturePackInstallFiles.store(0);
     texturePackNotice(!ok, message ? message : (ok ? "Pack instalado." : "No se pudo instalar el pack."));
+}
+
+// Llega desde el hilo Java que exportó/importó la partida (submenú F1 → Android,
+// SaveTransfer.java). Cierra la transferencia en curso y deja el mensaje pintado
+// unos segundos por drawTimedNotice.
+void pc_save_transfer_finished(bool ok, const char* message) {
+    sSaveTransferActive = false;
+    texturePackNotice(!ok, message ? message : (ok ? "Save transfer complete." : "Save transfer failed."));
 }
 
 // ─── Permadeath badge on the file-select screen ───
@@ -2495,7 +2602,7 @@ void pc_settings_draw(void) {
 #if defined(VERSION_GPIP01)
         "Language",
 #endif
-        "Controls", "Gamepad", "Advanced Settings", "Graphics", "Mods",
+        "Controls", "Gamepad", "Advanced Settings", "Graphics", "Mods", "Save Data",
         "Reset to Defaults", "Save", "Close",
     };
     bool actionRow[ROW_COUNT] = {};
@@ -2879,19 +2986,7 @@ void pc_settings_draw(void) {
         }
 
         // Aviso de la última instalación o acción, con su color.
-        {
-            std::lock_guard<std::mutex> lock(sTexturePackNoticeMutex);
-            const bool fresh = SDL_GetTicks() - sTexturePackNoticeMs < kTexturePackNoticeTimeoutMs;
-            if (fresh && sTexturePackNotice[0]) {
-                char msg[sizeof(sTexturePackNotice)];
-                snprintf(msg, sizeof(msg), "%s", sTexturePackNotice);
-                const Colour colour = sTexturePackNoticeError ? Colour(255, 140, 140, 255)
-                                                              : Colour(150, 235, 170, 255);
-                const int msgY = subY + subH - 8;
-                drawTextOutline(subX + subW / 2 - menuTextWidth(msg) / 2, msgY,
-                                "%s", colour, Colour(10, 16, 36, 255), msg);
-            }
-        }
+        drawTimedNotice(subX + subW / 2, subY + subH - 8);
 
         // Modal de reinicio: se dibuja sobre el submenú, con prioridad.
         if (sTexturePackRestartPrompt) {
@@ -3059,6 +3154,41 @@ void pc_settings_draw(void) {
         }
 
         return; // Don't draw footer when mods submenu is open.
+    }
+
+    // Save Data submenu overlay (issue #36). Android picks a .zip through the
+    // SAF; desktop has no picker, so the rows point at the plain files.
+    if (sInSaveDataSubmenu) {
+        const int subX = px1 + 18, subY = py1 + 44;
+        const int subW = panelW - 36, subH = panelH - 58;
+        drawSubmenuSurface(gfx, subX, subY, subW, subH, "Save Data",
+                           "A: choose a file",
+                           "Up/Down: select   Esc/B: back");
+
+        const char* saveLabels[2] = { "Export save to ZIP", "Import save from ZIP" };
+        const int listStartY = subY + 62;
+        const int itemH = 28;
+
+        for (int i = 0; i < 2; i++) {
+            const int itemY = listStartY + i * itemH;
+            const bool selected = (i == sSaveDataSelection);
+            char value[96];
+#ifdef __ANDROID__
+            if (sSaveTransferActive && selected)
+                snprintf(value, sizeof(value), "Opening picker...");
+            else
+                snprintf(value, sizeof(value), "System picker");
+#else
+            snprintf(value, sizeof(value), "card0 / card1");
+#endif
+            drawSubmenuRow(gfx, subX + 20, itemY, subW - 40,
+                           saveLabels[i], value, selected);
+        }
+
+        // Aviso de la última exportación/importación, con su color.
+        drawTimedNotice(subX + subW / 2, subY + subH - 8);
+
+        return; // Don't draw footer when save data submenu is open.
     }
 
     // Footer / help.

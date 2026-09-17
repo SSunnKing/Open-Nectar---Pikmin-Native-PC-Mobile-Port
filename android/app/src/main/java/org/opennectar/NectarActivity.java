@@ -9,6 +9,7 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 
 import org.libsdl.app.SDLActivity;
+import org.opennectar.SaveTransfer;
 import org.opennectar.TexturePack;
 
 /**
@@ -76,18 +77,49 @@ public class NectarActivity extends SDLActivity {
         TexturePack.restartTexturePacks(this);
     }
 
+    // ─── Copia de seguridad de partidas (issue #36) ─────────────────────────
+
+    /** Lo llama pc_save_android_open_backup() desde el menú F1. */
+    public void openSaveBackupPicker() {
+        runOnUiThread(() -> SaveTransfer.openBackupPicker(this));
+    }
+
+    /** Lo llama pc_save_android_open_restore() desde el menú F1. */
+    public void openSaveRestorePicker() {
+        runOnUiThread(() -> SaveTransfer.openRestorePicker(this));
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != TexturePack.REQ_TEXTURE_PACK) return;
-        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
-            TexturePack.nativeInstallFinished(false, "No file selected.");
+        if (requestCode == TexturePack.REQ_TEXTURE_PACK) {
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+                TexturePack.nativeInstallFinished(false, "No file selected.");
+            } else {
+                final android.net.Uri uri = data.getData();
+                // La extracción de cientos de MB no puede bloquear el hilo de UI; el
+                // juego puede seguir corriendo mientras tanto.
+                new Thread(() -> TexturePack.install(this, uri), "nectar-texture-pack").start();
+            }
             return;
         }
-        final android.net.Uri uri = data.getData();
-        // La extracción de cientos de MB no puede bloquear el hilo de UI; el
-        // juego puede seguir corriendo mientras tanto.
-        new Thread(() -> TexturePack.install(this, uri), "nectar-texture-pack").start();
+        if (requestCode == SaveTransfer.REQ_SAVE_BACKUP) {
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+                SaveTransfer.nativeSaveTransferFinished(false, "No destination selected.");
+            } else {
+                final android.net.Uri uri = data.getData();
+                new Thread(() -> SaveTransfer.backup(this, uri), "nectar-save-backup").start();
+            }
+            return;
+        }
+        if (requestCode == SaveTransfer.REQ_SAVE_RESTORE) {
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+                SaveTransfer.nativeSaveTransferFinished(false, "No file selected.");
+            } else {
+                final android.net.Uri uri = data.getData();
+                new Thread(() -> SaveTransfer.restore(this, uri), "nectar-save-restore").start();
+            }
+        }
     }
 
     @Override

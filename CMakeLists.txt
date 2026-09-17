@@ -271,7 +271,8 @@ set(PC_PORT_SOURCES
 if (ANDROID)
     list(APPEND PC_PORT_SOURCES
         pc_port/android/pc_android.cpp
-        pc_port/android/pc_texpack_android.cpp)
+        pc_port/android/pc_texpack_android.cpp
+        pc_port/android/pc_save_android.cpp)
 endif()
 if (PIKMIN_TOUCH)
     list(APPEND PC_PORT_SOURCES pc_port/touch/pc_touch.cpp)

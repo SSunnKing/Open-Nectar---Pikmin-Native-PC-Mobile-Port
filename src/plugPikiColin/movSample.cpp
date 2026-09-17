@@ -19,6 +19,14 @@ GXTexObj UVtexObj;
 OSThread playbackThread;
 u8 playbackThreadStack[0x1000];
 bool finishPlayback;
+#if defined(PIKI_PC_PORT)
+// OSCancelThread is a no-op in this port (os_stubs.cpp). The movie decode
+// thread is stopped cooperatively through `finishPlayback`, but the handle has
+// to live here so teardown can join it: otherwise the thread from the previous
+// attract keeps running into the next one and both race over the same H4M
+// globals, which crashed on the second attract movie (issue #27).
+static std::thread* sPlaybackThread = nullptr;
+#endif
 
 /**
  * @todo: Documentation
@@ -222,7 +230,10 @@ static void* playbackFunc(void*)
 	// once every couple of seconds is enough to tell alive from wedged.
 	unsigned long long spins = 0;
 	std::chrono::steady_clock::time_point lastBeat = std::chrono::steady_clock::now();
-	while (!finishPlayback) {
+	// Relaxed atomic: a plain bool let the compiler hoist the load out of this
+	// loop under LTO and turn the stop into a spin that never ends, the same
+	// trap CardUtilIsCardBusy documents.
+	while (!__atomic_load_n(&finishPlayback, __ATOMIC_RELAXED)) {
 		Jac_StreamMovieUpdate();
 		++spins;
 		// Hand the core back. On the console this loop was paced by waiting for
@@ -298,10 +309,17 @@ struct MovSampleSetupSection : public Node {
 			memset(chromaBuffer, 0x80, (ImgW / 2) * (ImgH / 2) * 2);
 		}
 		if (hvqmDebugLogging()) { printf("[PC Port] H4M: buffers ready, starting decode thread\n"); fflush(stdout); }
+#if defined(PIKI_PC_PORT)
+		// A real host thread we own, so teardown can join it. The console path
+		// keeps the SDK thread API, whose cancel is a no-op here.
+		__atomic_store_n(&finishPlayback, false, __ATOMIC_RELAXED);
+		sPlaybackThread = new std::thread(playbackFunc, nullptr);
+#else
 		OSCreateThread(&playbackThread, &playbackFunc, 0, playbackThreadStack + sizeof(playbackThreadStack), sizeof(playbackThreadStack),
 		               0x14, OS_THREAD_ATTR_DETACH);
 		finishPlayback = false;
 		OSResumeThread(&playbackThread);
+#endif
 		if (hvqmDebugLogging()) { printf("[PC Port] H4M: decode thread resumed, leaving setup\n"); fflush(stdout); }
 #endif
 	}
@@ -391,7 +409,18 @@ struct MovSampleSetupSection : public Node {
 #endif
 			{
 				Jac_StreamMovieStop();
+#if defined(PIKI_PC_PORT)
+				// Stop the decode thread and wait for it before the next movie
+				// reinitialises the H4M globals. See sPlaybackThread.
+				__atomic_store_n(&finishPlayback, true, __ATOMIC_RELAXED);
+				if (sPlaybackThread) {
+					if (sPlaybackThread->joinable()) sPlaybackThread->join();
+					delete sPlaybackThread;
+					sPlaybackThread = nullptr;
+				}
+#else
 				OSCancelThread(&playbackThread);
+#endif
 			}
 
 			if (flowCont.mEndingType != ENDING_None) {
@@ -527,6 +556,21 @@ struct MovSampleSetupSection : public Node {
 		GXSetTevKColor(GX_KCOLOR3, (GXColor) { 0, 255, 0, 0 });
 #endif
 	}
+
+#if defined(PIKI_PC_PORT)
+	~MovSampleSetupSection()
+	{
+		// If the section is torn down without passing through update() the
+		// decode thread must still be stopped and joined: it would otherwise
+		// outlive its movie buffers and race the next attract movie.
+		__atomic_store_n(&finishPlayback, true, __ATOMIC_RELAXED);
+		if (sPlaybackThread) {
+			if (sPlaybackThread->joinable()) sPlaybackThread->join();
+			delete sPlaybackThread;
+			sPlaybackThread = nullptr;
+		}
+	}
+#endif
 
 	// _00     = VTBL
 	// _00-_20 = Node

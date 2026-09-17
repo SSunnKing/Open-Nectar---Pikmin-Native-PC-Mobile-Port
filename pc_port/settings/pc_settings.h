@@ -121,6 +121,11 @@ void pc_texpack_install_finished(bool ok, const char* message);
 // Ficheros extraídos hasta ahora por la instalación en curso (hilo Java).
 void pc_texpack_install_progress(int files);
 
+/* Copia de seguridad de partidas (issue #36): resultado de la exportación o
+   importación Android (SaveTransfer.java), entregado desde un hilo Java para
+   que el submenú F1 Save Data lo pinte unos segundos. */
+void pc_save_transfer_finished(bool ok, const char* message);
+
 #ifdef __cplusplus
 }
 #endif
