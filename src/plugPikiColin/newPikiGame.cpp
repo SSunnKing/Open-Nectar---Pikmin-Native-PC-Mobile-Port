@@ -49,6 +49,10 @@
 #include "pc_permadeath.h"
 #endif
 #endif
+#if defined(PIKI_PC_VR)
+#include "gl/pc_gfx.h"
+#include "vr/pc_vr.h"
+#endif
 
 //////////////////////////////////////////////////////
 //////////////// FORWARD DECLARATIONS ////////////////
@@ -158,6 +162,103 @@ DEFINE_ERROR(61)
  * @note UNUSED Size: 0000F4
  */
 DEFINE_PRINT("newPikiGame");
+
+#if defined(PIKI_PC_VR)
+//////////////////////////////////////////////////////
+////////////////////// VR HOOKS //////////////////////
+//////////////////////////////////////////////////////
+
+/**
+ * @brief Replaces the camera this frame is about to draw with the headset's head pose.
+ *
+ * Runs after the game has settled on its camera (Pcam, or a cutscene's) and before anything is drawn. The pose the
+ * game chose is what the rig follows in a cutscene and what it faces at recentre; the captain is what it follows
+ * otherwise. The matrices are rebuilt through CullFrustum::update so the view axes -- which set the stick's movement
+ * direction and face billboards -- agree with the new view.
+ *
+ * @param gfx Graphics context whose camera is replaced.
+ * @param cutscene Whether the camera belongs to a cutscene rather than Pcam.
+ */
+static void vrApplyCamera(Graphics& gfx, bool cutscene)
+{
+	Camera* cam = gfx.mCamera;
+	if (!cam) {
+		return;
+	}
+
+	// Position and facing come from the matrices, not mPosition/mFocus: Pcam never writes mFocus, and cutscene cameras
+	// only build their look-at matrix.
+	PcVrSceneInput in;
+	in.cameraPos[0]     = cam->mInverseLookAtMtx.mMtx[0][3];
+	in.cameraPos[1]     = cam->mInverseLookAtMtx.mMtx[1][3];
+	in.cameraPos[2]     = cam->mInverseLookAtMtx.mMtx[2][3];
+	in.cameraForward[0] = -cam->mLookAtMtx.mMtx[2][0];
+	in.cameraForward[1] = -cam->mLookAtMtx.mMtx[2][1];
+	in.cameraForward[2] = -cam->mLookAtMtx.mMtx[2][2];
+	Navi* navi          = naviMgr ? naviMgr->getNavi() : nullptr;
+	in.focusPos[0]      = navi ? navi->mSRT.t.x : in.cameraPos[0];
+	in.focusPos[1]      = navi ? navi->mSRT.t.y : in.cameraPos[1];
+	in.focusPos[2]      = navi ? navi->mSRT.t.z : in.cameraPos[2];
+	// The captain's facing, in the game's convention (see Navi::makeVelocity, where a direction becomes
+	// atan2(x, z)). The snap-behind button looks along it.
+	in.focusForward[0]  = navi ? sinf(navi->mFaceDirection) : in.cameraForward[0];
+	in.focusForward[1]  = 0.0f;
+	in.focusForward[2]  = navi ? cosf(navi->mFaceDirection) : in.cameraForward[2];
+	in.cutscene         = cutscene;
+
+	PcVrSceneView view;
+	if (!pc_vr_scene_view(&in, &view)) {
+		return;
+	}
+
+	for (int row = 0; row < 3; row++) {
+		for (int col = 0; col < 4; col++) {
+			cam->mLookAtMtx.mMtx[row][col] = view.view[row][col];
+		}
+	}
+	cam->mLookAtMtx.mMtx[3][0] = 0.0f;
+	cam->mLookAtMtx.mMtx[3][1] = 0.0f;
+	cam->mLookAtMtx.mMtx[3][2] = 0.0f;
+	cam->mLookAtMtx.mMtx[3][3] = 1.0f;
+	cam->mLookAtMtx.inverse(&cam->mInverseLookAtMtx);
+	cam->mPosition.set(view.position[0], view.position[1], view.position[2]);
+	cam->mFocus.set(view.position[0] - view.view[2][0] * 100.0f, view.position[1] - view.view[2][1] * 100.0f,
+	                view.position[2] - view.view[2][2] * 100.0f);
+	// Cull against what the headset can see, not against the narrow frustum the flat camera used: too narrow blanks
+	// whatever the player turns towards, and not culling at all costs far more than it saves -- on a standalone
+	// headset most of all, where it was the difference between a steady frame rate and a slideshow.
+	cam->update(view.aspect, view.fovDegrees, view.nearZ, view.farZ);
+
+	// PIKMIN_VR_NO_CULL=1 turns culling off again, to tell a culling fault from a material one: anything that appears
+	// only with this set was being culled when it should not have been.
+	static const bool noCull = getenv("PIKMIN_VR_NO_CULL") != nullptr;
+	if (noCull) {
+		cam->mActivePlaneCount = 0;
+	}
+}
+
+/**
+ * @brief Draws the pointing hand's laser from the controller to the ground it meets.
+ * @param gfx Graphics context, inside the VR world span.
+ */
+static void vrDrawLaser(Graphics& gfx)
+{
+	f32 from[3], to[3];
+	if (!pc_vr_laser(from, to)) {
+		return;
+	}
+
+	bool lighting = gfx.setLighting(false, nullptr);
+	gfx.useMatrix(gfx.mCamera->mLookAtMtx, 0);
+	gfx.useTexture(nullptr, GX_TEXMAP0);
+	gfx.setColour(Colour(140, 240, 255, 255), true);
+	gfx.setAuxColour(Colour(140, 240, 255, 255));
+	f32 width = gfx.setLineWidth(3.0f);
+	gfx.drawLine(Vector3f(from[0], from[1], from[2]), Vector3f(to[0], to[1], to[2]));
+	gfx.setLineWidth(width);
+	gfx.setLighting(lighting, nullptr);
+}
+#endif
 
 //////////////////////////////////////////////////////
 /////////////////// MOVIE MESSAGES ///////////////////
@@ -2155,6 +2256,10 @@ public:
 			mGameCamera.update(f32(gfx.mScreenWidth) / f32(gfx.mScreenHeight), mGameCamera.mFov, 100.0f, mCameraFarClip);
 		}
 
+#if defined(PIKI_PC_VR)
+		vrApplyCamera(gfx, gfx.mCamera != &mGameCamera);
+#endif
+
 		// do any pre-rendering, assuming we're not in a cutscene
 		if (!(gameflow.mDemoFlags & CinePlayerFlags::NonGameMovie)) {
 			gsys->mTimer->start("preRender", true);
@@ -2164,6 +2269,9 @@ public:
 
 		// do the main frame render
 
+#if defined(PIKI_PC_VR)
+		pc_gfx_vr_world_begin();
+#endif
 		MATCHING_START_TIMER("mainRender", true);
 		mainRender(gfx);
 		MATCHING_STOP_TIMER("mainRender");
@@ -2188,6 +2296,11 @@ public:
 			effectMgr->draw(gfx);
 			MATCHING_STOP_TIMER("eff draw");
 		}
+
+#if defined(PIKI_PC_VR)
+		vrDrawLaser(gfx);
+		pc_gfx_vr_world_end();
+#endif
 
 		// do any 2D post-rendering (for overlays and windows)
 		if (!(gameflow.mDemoFlags & CinePlayerFlags::NonGameMovie)) {

@@ -985,19 +985,23 @@ bool padNavB(SDL_GameController* c) { return padEdge((c && SDL_GameControllerGet
 // may be either SDL buttons or the axis encodings used by the remapping page.
 // Keep these separate from padNavA/B: F1 navigation deliberately retains its
 // physical A/B convention.
-bool promptPadBinding(SDL_GameController* c, int action, int edgeSlot)
+bool promptPadBinding(SDL_GameController* c, int action, int edgeSlot, u16 otherButton)
 {
-	return c && padEdge(pc_window_gamepad_bind_held(c, pc_window_get_gamepad_binding(action)), edgeSlot);
+	// Sources that are not an SDL gamepad -- the touch layer, VR controllers --
+	// publish their buttons through the same mask the F1 navigation reads.
+	const bool held = (c && pc_window_gamepad_bind_held(c, pc_window_get_gamepad_binding(action)))
+	               || (sTouchFrameButtons & otherButton) != 0;
+	return padEdge(held, edgeSlot);
 }
 
 bool promptPadA(SDL_GameController* c)
 {
-	return promptPadBinding(c, PC_KEY_ACT_A, 4);
+	return promptPadBinding(c, PC_KEY_ACT_A, 4, PAD_BUTTON_A);
 }
 
 bool promptPadB(SDL_GameController* c)
 {
-	return promptPadBinding(c, PC_KEY_ACT_B, 5);
+	return promptPadBinding(c, PC_KEY_ACT_B, 5, PAD_BUTTON_B);
 }
 
 bool captureConfirmHeld(SDL_GameController* ctl)
@@ -2418,7 +2422,7 @@ void pcNewGamePromptInput() {
     }
 
     SDL_GameController* ctl = pc_window_get_controller();
-    if (ctl) {
+    if (ctl || sTouchFrameButtons) {
         if (padNavLeft(ctl))  left   = true;
         if (padNavRight(ctl)) right  = true;
         if (promptPadA(ctl))  accept = true;

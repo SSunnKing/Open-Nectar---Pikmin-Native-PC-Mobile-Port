@@ -13,6 +13,12 @@ extern "C" {
 void pc_gfx_init(void);
 void pc_gfx_begin_frame(void);
 void pc_gfx_present(void);
+
+// VR (PIKMIN_VR): brackets the 3D world of a gameplay frame. Draws in between
+// go to both eyes; everything outside is the interface panel. No-ops when the
+// frame is not going to the headset. See pc_port/vr/pc_vr.h.
+void pc_gfx_vr_world_begin(void);
+void pc_gfx_vr_world_end(void);
 void pc_gfx_perf_scope_begin(const char* name);
 void pc_gfx_perf_scope_end(void);
 

@@ -11,6 +11,12 @@ dependencies {
     // Desempaquetado de packs de texturas en .rar (PLAN_TEXTURAS_HD fase 2).
     // JunRAR lee RAR4 y RAR5 en Java puro. Trae transitive commons-compress.
     implementation 'com.github.junrar:junrar:7.5.5'
+
+    // OpenXR loader for Android (Khronos), the one a Quest headset expects:
+    // it carries libopenxr_loader.so and, through prefab, the headers and the
+    // OpenXR::openxr_loader target the root CMakeLists links against for the
+    // VR mode (pc_port/vr).
+    implementation 'org.khronos.openxr:openxr_loader_for_android:1.1.+'
 }
 
 // Firma de release (fase 8). La clave vive fuera del repositorio; se busca
@@ -32,6 +38,9 @@ android {
     namespace 'org.opennectar'
     compileSdk 35
     ndkVersion '28.2.13676358'
+
+    // Hands the native build the OpenXR loader package from the AAR above.
+    buildFeatures { prefab true }
 
     defaultConfig {
         applicationId 'org.opennectar'

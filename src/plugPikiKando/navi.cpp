@@ -8,6 +8,9 @@
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
 #endif
+#if defined(PIKI_PC_VR)
+#include "vr/pc_vr.h"
+#endif
 static f32 pcNaviHurt(f32 damage) { return pc_hardmode_navi_damage(damage); }
 #else
 static f32 pcNaviHurt(f32 damage) { return damage; }
@@ -79,6 +82,54 @@ DEFINE_ERROR(89)
  * @note UNUSED Size: 0000F0
  */
 DEFINE_PRINT("navi");
+
+#if defined(PIKI_PC_VR)
+/**
+ * @brief Finds where a ray first passes below the map's ground.
+ *
+ * The map has no ray query of its own, only heights under a point, so the ray is marched with steps that grow with
+ * distance (fine near the hand, coarse towards the horizon) and the crossing is bisected. getMinY reports the highest
+ * surface under a point, which is the one a pointing player means.
+ *
+ * @param origin Ray start, in world units.
+ * @param dir Unit direction.
+ * @param hit Output point on the ground.
+ * @return Whether the ground was reached within range.
+ */
+static bool vrRaycastGround(immut Vector3f& origin, immut Vector3f& dir, Vector3f& hit)
+{
+	const f32 maxDistance = 9000.0f;
+	Vector3f above(origin);
+	bool haveAbove = origin.y > mapMgr->getMinY(origin.x, origin.z, true);
+
+	for (f32 t = 10.0f; t <= maxDistance; t += 10.0f + t * 0.03f) {
+		Vector3f point(origin.x + dir.x * t, origin.y + dir.y * t, origin.z + dir.z * t);
+		if (point.y > mapMgr->getMinY(point.x, point.z, true)) {
+			above     = point;
+			haveAbove = true;
+			continue;
+		}
+		if (!haveAbove) {
+			// The hand started under the ground (below the table, say): keep going until the ray comes out.
+			continue;
+		}
+
+		Vector3f below(point);
+		for (int i = 0; i < 10; i++) {
+			Vector3f mid((above.x + below.x) * 0.5f, (above.y + below.y) * 0.5f, (above.z + below.z) * 0.5f);
+			if (mid.y > mapMgr->getMinY(mid.x, mid.z, true)) {
+				above = mid;
+			} else {
+				below = mid;
+			}
+		}
+		hit   = below;
+		hit.y = mapMgr->getMinY(hit.x, hit.z, true);
+		return true;
+	}
+	return false;
+}
+#endif
 
 /**
  * @todo: Documentation
@@ -1929,6 +1980,43 @@ void Navi::makeVelocity(bool isSunset)
 
 	// Use virtual cursor (mouse) in PC mouse modes, otherwise use movement stick
 	#ifdef PIKI_PC_PORT
+	#if defined(PIKI_PC_VR)
+	{
+		// VR: the cursor is wherever the pointing hand's laser meets the ground, held to the same radius as ever.
+		f32 origin[3], dir[3];
+		Vector3f hit;
+		if (pc_vr_aim_ray(origin, dir)
+		    && vrRaycastGround(Vector3f(origin[0], origin[1], origin[2]), Vector3f(dir[0], dir[1], dir[2]), hit)) {
+			f32 hitArray[3] = { hit.x, hit.y, hit.z };
+			pc_vr_set_aim_hit(hitArray, 1);
+
+			Vector3f offset(hit.x - mSRT.t.x, 0.0f, hit.z - mSRT.t.z);
+			if (offset.length() > NAVI_PARM(mCursorMaxRadius)) {
+				offset.normalise();
+				offset = offset * NAVI_PARM(mCursorMaxRadius);
+			}
+			mCursorPosition       = offset;
+			mCursorTargetPosition = offset;
+			mCursorNaviDist       = offset.length();
+
+			// Standing still, the captain turns to face where the player points, as he turns to the cursor on GC.
+			if (stickMag > NAVI_PARM(mNeutralStickThreshold)) {
+				mNeutralTime = 0.0f;
+				resetCreatureFlag(CF_UsePriorityFaceDir);
+			} else if (mCursorNaviDist > 20.0f) {
+				mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+				mFaceDirection += 0.2f * angDist(roundAng(atan2f(offset.x, offset.z)), mFaceDirection);
+				mFaceDirection = roundAng(mFaceDirection);
+				mSRT.r.set(0.0f, mFaceDirection, 0.0f);
+				setCreatureFlag(CF_UsePriorityFaceDir);
+			}
+
+			makeCStick(false);
+			return;
+		}
+		pc_vr_set_aim_hit(nullptr, 0);
+	}
+	#endif
 	if (pc_window_get_control_mode() == PC_CONTROL_MOUSE_CURSOR
 	    || pc_window_get_mouse_cursor_delta_x() != 0.0f
 	    || pc_window_get_mouse_cursor_delta_y() != 0.0f) {

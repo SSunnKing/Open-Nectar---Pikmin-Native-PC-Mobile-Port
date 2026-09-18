@@ -54,6 +54,9 @@ __declspec(dllexport) int           AmdPowerXpressRequestHighPerformance = 1;
 #endif
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2d.h"
+#if PIKI_PC_VR
+#include "vr/pc_vr.h"
+#endif
 
 int main(int argc, char* argv[])
 {
@@ -110,7 +113,7 @@ int main(int argc, char* argv[])
     // Initialize SDL2 Window and OpenGL Context FIRST
     printf("[PC Port] Initializing SDL2 window and GL context...\n");
     fflush(stdout);
-    if (!pc_window_init("Open Nectar", 1280, 720)) {
+    if (!pc_window_init("Pikmin VR", 1280, 720)) {
         printf("[PC Port Fatal Error] Could not initialize window/OpenGL!\n");
         fflush(stdout);
         return 1;
@@ -124,6 +127,12 @@ int main(int argc, char* argv[])
     fflush(stdout);
     gsys->Initialise();
     pc_settings_p2d_init();
+
+#if PIKI_PC_VR
+    // After GX: the session is created against the GL context it set up.
+    printf("[PC Port] Looking for a VR headset...\n");
+    pc_vr_init();
+#endif
 
     printf("[PC Port] Creating node manager...\n");
     nodeMgr = new NodeMgr();

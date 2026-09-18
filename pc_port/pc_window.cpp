@@ -6,6 +6,9 @@
 #include "gl/pc_gfx.h"
 #include "touch/pc_touch.h"
 #endif
+#if PIKI_PC_VR
+#include "vr/pc_vr.h"
+#endif
 #if defined(__ANDROID__)
 #include "android/pc_android.h"
 #elif defined(__linux__)
@@ -890,6 +893,54 @@ void pc_window_poll_events(PADStatus* pad) {
         pc_touch_set_visible(false);
     }
 #endif
+#if PIKI_PC_VR
+    // Touch controllers join the pad like any other source: buttons are OR'ed
+    // in, and a deflected stick or pressed trigger takes over from the others.
+    {
+        PcVrPad vr;
+        pc_vr_read_pad(&vr);
+        if (vr.active) {
+            auto axis = [](float value) { return (s8)std::clamp((int)lroundf(value * 127.0f), -127, 127); };
+            if (vr.a) button |= PAD_BUTTON_A;
+            if (vr.b) button |= PAD_BUTTON_B;
+            if (vr.x) button |= PAD_BUTTON_X;
+            if (vr.y) button |= PAD_BUTTON_Y;
+            if (vr.z) button |= PAD_TRIGGER_Z;
+            if (vr.l) button |= PAD_TRIGGER_L;
+            if (vr.r) button |= PAD_TRIGGER_R;
+            if (vr.start) button |= PAD_BUTTON_START;
+            if (vr.dpadUp) button |= PAD_BUTTON_UP;
+            if (vr.dpadDown) button |= PAD_BUTTON_DOWN;
+            if (vr.dpadLeft) button |= PAD_BUTTON_LEFT;
+            if (vr.dpadRight) button |= PAD_BUTTON_RIGHT;
+            if (vr.stickX != 0.0f || vr.stickY != 0.0f) {
+                stickX = axis(vr.stickX);
+                stickY = axis(vr.stickY);
+            }
+            if (vr.substickX != 0.0f || vr.substickY != 0.0f) {
+                substickX = axis(vr.substickX);
+                substickY = axis(vr.substickY);
+            }
+            triggerL = std::max<u8>(triggerL, (u8)std::clamp((int)lroundf(vr.triggerL * 255.0f), 0, 255));
+            triggerR = std::max<u8>(triggerR, (u8)std::clamp((int)lroundf(vr.triggerR * 255.0f), 0, 255));
+#if defined(PIKI_PC_SETTINGS_MENU)
+            // The port's own dialogs -- the new-game prompt, the F1 menu -- read
+            // SDL directly rather than the pad, so they never see a headset's
+            // controllers. Publish to them the way the touch layer does, with
+            // the move stick standing in for the D-pad.
+            u16 menuButtons = 0;
+            if (vr.a) menuButtons |= PAD_BUTTON_A;
+            if (vr.b) menuButtons |= PAD_BUTTON_B;
+            if (vr.dpadUp || vr.stickY > 0.55f) menuButtons |= PAD_BUTTON_UP;
+            if (vr.dpadDown || vr.stickY < -0.55f) menuButtons |= PAD_BUTTON_DOWN;
+            if (vr.dpadLeft || vr.stickX < -0.55f) menuButtons |= PAD_BUTTON_LEFT;
+            if (vr.dpadRight || vr.stickX > 0.55f) menuButtons |= PAD_BUTTON_RIGHT;
+            if (menuButtons) pc_settings_touch_buttons(menuButtons);
+            if (vr.settingsToggle) pc_settings_request_toggle();
+#endif
+        }
+    }
+#endif
 
     // ── Mouse Input (Virtual Cursor) ──
     // In mouse modes: mouse controls virtual cursor (separate from movement stick)
@@ -984,7 +1035,13 @@ void pc_window_swap_buffers(void) {
         SDL_GL_SwapWindow(sWindow);
         // VSync Off must not retain the software presentation limiter. Game
         // simulation uses the fixed-step scheduler independently.
+#if PIKI_PC_VR
+        // With a headset the compositor paces frames (xrWaitFrame); a second
+        // limiter here would drop every other headset frame.
+        if (sVsyncEnabled && !pc_vr_session_running()) {
+#else
         if (sVsyncEnabled) {
+#endif
             // The interval is the game's setFrameClamp: retraces per logical
             // frame against a 60 Hz base, so 1 is 60 Hz and 2 is 30 Hz. The
             // port adds 0 for 120 Hz, which has no 60 Hz divisor. Mirror
@@ -1029,6 +1086,10 @@ void pc_window_set_swap_interval(int interval) {
 }
 
 void pc_window_shutdown(void) {
+#if PIKI_PC_VR
+    // Before the GL context goes: the session's swapchains live in it.
+    pc_vr_shutdown();
+#endif
 #if PIKI_USE_JAUDIO
     StopAudioThread();
 #endif

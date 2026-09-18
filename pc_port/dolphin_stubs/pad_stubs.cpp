@@ -5,6 +5,9 @@
  */
 #include "Dolphin/pad.h"
 #include "pc_window.h"
+#if PIKI_PC_VR
+#include "vr/pc_vr.h"
+#endif
 
 #include <cstdio>
 #include <cstring>
@@ -40,7 +43,13 @@ void PADSetSamplingRate(u32 msec)             { (void)msec; }
 void PADClamp(PADStatus* status)              { (void)status; }
 void PADClampCircle(PADStatus* status)        { (void)status; }
 void PADControlAllMotors(const u32* cmdArray) { (void)cmdArray; }
+#if PIKI_PC_VR
+// The game pulses the motor on and off to make intensity; the controllers'
+// haptics follow the same pulses.
+void PADControlMotor(s32 chan, u32 command)    { if (chan == 0) pc_vr_set_rumble(command == PAD_MOTOR_RUMBLE); }
+#else
 void PADControlMotor(s32 chan, u32 command)    { (void)chan; (void)command; }
+#endif
 BOOL PADRecalibrate(u32 mask)                 { (void)mask; return TRUE; }
 BOOL PADSync(void)                            { return TRUE; }
 void PADSetAnalogMode(u32 mode)               { (void)mode; }

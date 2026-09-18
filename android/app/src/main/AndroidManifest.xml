@@ -7,6 +7,9 @@
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
     <uses-feature android:name="android.hardware.type.pc" android:required="false" />
+    <!-- VR: a headset has head tracking and a 6DoF controller. Not required, so
+         the same APK still installs on a phone, where the game runs flat. -->
+    <uses-feature android:name="android.hardware.vr.headtracking" android:required="false" android:version="1" />
 
     <uses-permission android:name="android.permission.VIBRATE" />
 
@@ -25,24 +28,35 @@
              juego lo tome por un mando. -->
         <meta-data android:name="SDL_ENV.SDL_ACCELEROMETER_AS_JOYSTICK" android:value="0" />
 
+        <!-- Which headsets this build is for. -->
+        <meta-data android:name="com.oculus.supportedDevices" android:value="quest2|quest3|questpro" />
+
         <!-- Primera ejecución: instala los assets desde la imagen del disco
-             (o pasa directo al juego si ya están). -->
+             (o pasa directo al juego si ya están). En un visor se abre a mano
+             (adb shell am start -n org.opennectar/.InstallerActivity); el
+             icono arranca el juego en VR. -->
         <activity android:name="org.opennectar.InstallerActivity"
             android:label="@string/app_name"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:exported="true" />
 
+        <!-- The game. On a headset this is the launcher entry and starts
+             immersive; on a phone it is an ordinary landscape activity and the
+             VR layer turns itself off for want of a runtime. -->
         <activity android:name="org.opennectar.NectarActivity"
             android:label="@string/app_name"
             android:alwaysRetainTaskState="true"
             android:launchMode="singleInstance"
             android:screenOrientation="sensorLandscape"
-            android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
+            android:configChanges="density|layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
             android:preferMinimalPostProcessing="true"
-            android:exported="false" />
+            android:exported="true">
+            <meta-data android:name="com.oculus.vr.focusaware" android:value="true" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="com.oculus.intent.category.VR" />
+                <category android:name="org.khronos.openxr.intent.category.IMMERSIVE_HMD" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>
