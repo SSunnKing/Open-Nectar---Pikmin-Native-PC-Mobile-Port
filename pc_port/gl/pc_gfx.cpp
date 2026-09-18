@@ -33,6 +33,9 @@
 #include "pc_texpack.h"
 #include "../timing/pc_render_phase.h"
 #include "../timing/pc_tick_profiler.h"
+#if PIKI_PC_VR
+#include "../vr/pc_vr.h"
+#endif
 
 #include "pc_opengl.h"
 #ifdef __ANDROID__
@@ -97,6 +100,10 @@ static bool sAnisotropySupported = false;
 static bool sFilteringReported = false;
 static PFNGLBINDVERTEXARRAYPROC glBindVertexArray_ptr = nullptr;
 static PFNGLBLENDEQUATIONPROC glBlendEquation_ptr = nullptr;
+// VR only: the interface is composited over the world by the headset, so its
+// alpha has to come out as coverage rather than as alpha squared.
+static PFNGLBLENDFUNCSEPARATEPROC glBlendFuncSeparate_ptr = nullptr;
+static PFNGLBLENDEQUATIONSEPARATEPROC glBlendEquationSeparate_ptr = nullptr;
 static PFNGLGENBUFFERSPROC glGenBuffers_ptr = nullptr;
 static PFNGLBINDBUFFERPROC glBindBuffer_ptr = nullptr;
 static PFNGLBUFFERDATAPROC glBufferData_ptr = nullptr;
@@ -172,6 +179,8 @@ static void load_gl_functions() {
     }
     glBindVertexArray_ptr = (PFNGLBINDVERTEXARRAYPROC)SDL_GL_GetProcAddress("glBindVertexArray");
     glBlendEquation_ptr = (PFNGLBLENDEQUATIONPROC)SDL_GL_GetProcAddress("glBlendEquation");
+    glBlendFuncSeparate_ptr = (PFNGLBLENDFUNCSEPARATEPROC)SDL_GL_GetProcAddress("glBlendFuncSeparate");
+    glBlendEquationSeparate_ptr = (PFNGLBLENDEQUATIONSEPARATEPROC)SDL_GL_GetProcAddress("glBlendEquationSeparate");
     glGenBuffers_ptr = (PFNGLGENBUFFERSPROC)SDL_GL_GetProcAddress("glGenBuffers");
     glBindBuffer_ptr = (PFNGLBINDBUFFERPROC)SDL_GL_GetProcAddress("glBindBuffer");
     glBufferData_ptr = (PFNGLBUFFERDATAPROC)SDL_GL_GetProcAddress("glBufferData");
@@ -1001,6 +1010,57 @@ static bool sAlphaUpdate = true;
 static float sCopyClearColor[4] = { 0.1f, 0.1f, 0.15f, 1.0f };
 static float sCopyClearDepth = 1.0f;
 static u8 sNumTevStages = 1;
+
+// ── VR: the world span ──────────────────────────────────────────────────────
+//
+// Between pc_gfx_vr_world_begin and _end every draw goes to both eyes instead
+// of the internal target. The game has already put vertices in the head's view
+// space -- it multiplies by the camera on the CPU, and the camera was set to the
+// headset's head pose before the world was drawn -- so each eye needs only its
+// offset from the head and its lens. Both are folded into the projection
+// uniform, the one matrix every path goes through: CPU-pretransformed vertices,
+// the skinning palette, view-space quads.
+//
+// Everything else about a draw is shared between the eyes: program, uniforms,
+// textures, vertex buffer. A second eye costs a draw call, not a second run of
+// the game's renderer, which the game could not survive: its world simulation
+// runs inside the draw.
+#if PIKI_PC_VR
+static bool sVrWorldActive = false;
+static bool sVrWorldDrawn = false;
+static bool sVrProjPerspective = false;
+static float sVrEyeProj[2][16];
+// What the open batch was built with. Uniforms are written when a batch opens
+// and the draw happens later (see the batching invariant), so the eye matrices
+// are captured then too, not read at draw time.
+static bool sVrDrawPerspective = false;
+static float sVrDrawEyeProj[2][16];
+static float sVrDrawProj[16];
+
+static void vr_update_eye_projections() {
+    // C_MTXPerspective's terms: m22 = -n/(f-n), m23 = -fn/(f-n). The eyes use
+    // the same planes so fog, which rebuilds distance from them, stays right.
+    const float m22 = sProjMatrix[10];
+    const float m23 = sProjMatrix[14];
+    float nearZ = 10.0f, farZ = 10000.0f;
+    if (m22 != 0.0f && m22 != 1.0f) {
+        const float f = m23 / m22;
+        const float n = -m22 * f / (1.0f - m22);
+        if (f > n && n > 0.0f) {
+            nearZ = n;
+            farZ = f;
+        }
+    }
+    for (int eye = 0; eye < 2; ++eye) pc_vr_eye_projection(eye, nearZ, farZ, sVrEyeProj[eye]);
+}
+
+static void vr_capture_draw_projection() {
+    if (!sVrWorldActive) return;
+    sVrDrawPerspective = sVrProjPerspective;
+    memcpy(sVrDrawEyeProj, sVrEyeProj, sizeof(sVrDrawEyeProj));
+    memcpy(sVrDrawProj, sProjMatrix, sizeof(sVrDrawProj));
+}
+#endif
 
 // Per-stage TEV state. Defaults mirror the GX hardware reset state: pass
 // rasterized color through to PREV, so nothing renders black before the game
@@ -2911,6 +2971,13 @@ static void perf_gpu_scene_begin() {
 }
 
 void pc_gfx_begin_frame(void) {
+#if PIKI_PC_VR
+    // Waits for the headset's next frame when a session runs; the world span
+    // never carries over from one frame to the next.
+    pc_vr_frame_begin();
+    sVrWorldActive = false;
+    sVrWorldDrawn = false;
+#endif
     sUi43 = false;
     sHudWide = false;
     sMenuClip43 = false;
@@ -3099,8 +3166,26 @@ void pc_gfx_begin_frame(void) {
                 baseHeight = baseWidth / sCurrentAspectRatio;
             }
         }
-        const int wantedWidth = std::max(160, int(lroundf(baseWidth * sRenderScale)));
-        const int wantedHeight = std::max(120, int(lroundf(baseHeight * sRenderScale)));
+        float renderScale = sRenderScale;
+#if PIKI_PC_VR
+        if (pc_vr_session_running()) {
+            // In the headset the internal target is the floating panel, whatever
+            // shape and size the window on the monitor happens to be. It matches
+            // the panel swapchain (pc_vr_xr.cpp), so presenting it is a copy
+            // rather than a rescale -- on a standalone headset that matters.
+            sCurrentAspectRatio = 16.0f / 9.0f;
+#ifdef __ANDROID__
+            baseWidth = 1280.0f;
+            baseHeight = 720.0f;
+#else
+            baseWidth = 1920.0f;
+            baseHeight = 1080.0f;
+#endif
+            renderScale = 1.0f;
+        }
+#endif
+        const int wantedWidth = std::max(160, int(lroundf(baseWidth * renderScale)));
+        const int wantedHeight = std::max(120, int(lroundf(baseHeight * renderScale)));
         if (wantedWidth != sRenderWidth || wantedHeight != sRenderHeight) {
             sRenderWidth = wantedWidth;
             sRenderHeight = wantedHeight;
@@ -4028,6 +4113,9 @@ static void post_apply_before_interface()
     if (sPostRanThisFrame) return;
     if (!sNativeFramebufferReady || !glBindFramebuffer_ptr || !glBlitFramebuffer_ptr) return;
     if (!pc_post_any_enabled(sPostEffects)) return;
+#if PIKI_PC_VR
+    if (pc_vr_session_running()) return;
+#endif
 
     // The port batches draws. Anything still pending belongs to the world, and
     // running the pass first would leave it to be drawn over the top of a
@@ -4138,6 +4226,115 @@ static void post_apply_before_interface()
     invalidate_uniform_cache();
 }
 
+#if PIKI_PC_VR
+// Shows the frame on the monitor while the headset has it: the left eye when
+// a world was drawn, the flat screen otherwise.
+static void vr_mirror_to_window(bool world) {
+#ifdef __ANDROID__
+    // Standalone: the activity's surface is behind the headset's own compositor
+    // and nobody ever sees it. Blitting a full frame into it every frame is
+    // pure cost.
+    (void)world;
+    return;
+#else
+    if (sDrawableWidth <= 0 || sDrawableHeight <= 0) return;
+    GLuint source = sNativeFramebuffer;
+    GLint sourceX = 0, sourceY = 0;
+    int sourceWidth = sRenderWidth, sourceHeight = sRenderHeight;
+    PcVrEyeTarget eye;
+    if (world && pc_vr_eye_target(0, &eye)) {
+        source = eye.framebuffer;
+        sourceX = eye.x;
+        sourceY = eye.y;
+        sourceWidth = eye.width;
+        sourceHeight = eye.height;
+    }
+    const float scale = std::min(float(sDrawableWidth) / float(sourceWidth), float(sDrawableHeight) / float(sourceHeight));
+    const GLint outWidth = GLint(sourceWidth * scale), outHeight = GLint(sourceHeight * scale);
+    const GLint outX = (sDrawableWidth - outWidth) / 2, outY = (sDrawableHeight - outHeight) / 2;
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, source);
+    glBindFramebuffer_ptr(GL_DRAW_FRAMEBUFFER, 0);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glBlitFramebuffer_ptr(sourceX, sourceY, sourceX + sourceWidth, sourceY + sourceHeight, outX, outY, outX + outWidth,
+                          outY + outHeight, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+#endif
+}
+#endif
+
+void pc_gfx_vr_world_begin(void) {
+#if PIKI_PC_VR
+    if (sVrWorldActive || !sNativeFramebufferReady || !glBindFramebuffer_ptr || !pc_vr_frame_active()) return;
+    pc_gfx_flush_batch();
+
+    GLboolean colourMask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+    GLboolean depthMask = GL_TRUE;
+    glGetBooleanv(GL_COLOR_WRITEMASK, colourMask);
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
+    const GLboolean scissorWasEnabled = glIsEnabled(GL_SCISSOR_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(GL_TRUE);
+#if PIKI_USE_GLES
+    glClearDepthf(sCopyClearDepth);
+#else
+    glClearDepth(sCopyClearDepth);
+#endif
+    // The internal target becomes the interface layer: everything drawn after
+    // the world lands on transparency, and the headset composites it.
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+    // PIKMIN_VR_CLEAR_DEBUG=1 paints the cleared background magenta. Anything
+    // that then comes out tinted is blending over the background rather than
+    // over the geometry that should be behind it.
+    static const bool clearDebug = std::getenv("PIKMIN_VR_CLEAR_DEBUG") != nullptr;
+
+    // Then the eyes, from the game's clear colour as the screen would be, and
+    // the stereo target stays bound until the world is finished.
+    PcVrEyeTarget target;
+    if (!pc_vr_eye_target(0, &target)) {
+        glColorMask(colourMask[0], colourMask[1], colourMask[2], colourMask[3]);
+        glDepthMask(depthMask);
+        if (scissorWasEnabled) glEnable(GL_SCISSOR_TEST);
+        return;
+    }
+    glBindFramebuffer_ptr(GL_FRAMEBUFFER, target.framebuffer);
+    if (clearDebug) {
+        glClearColor(1.0f, 0.0f, 1.0f, 1.0f);
+    } else {
+        // The game's own clear, alpha included. Forcing alpha to 1 here looks
+        // harmless -- the compositor treats the eye image as opaque either way
+        // -- but GX materials may blend against destination alpha, and then the
+        // eyes would shade differently from the flat screen.
+        glClearColor(sCopyClearColor[0], sCopyClearColor[1], sCopyClearColor[2], sCopyClearColor[3]);
+    }
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+    glColorMask(colourMask[0], colourMask[1], colourMask[2], colourMask[3]);
+    glDepthMask(depthMask);
+    // The per-eye scissor is what keeps one eye out of the other's half, so it
+    // has to be on for the whole span whatever the game last asked for.
+    glEnable(GL_SCISSOR_TEST);
+
+    sVrWorldActive = true;
+    sVrWorldDrawn = true;
+    if (sVrProjPerspective) vr_update_eye_projections();
+#endif
+}
+
+void pc_gfx_vr_world_end(void) {
+#if PIKI_PC_VR
+    if (!sVrWorldActive) return;
+    pc_gfx_flush_batch();
+    sVrWorldActive = false;
+    // Back to the interface layer for the HUD and everything after it.
+    glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
+    invalidate_gl_pipeline_guards();
+#endif
+}
+
 void pc_gfx_present(void) {
     pc_gfx_flush_batch();
 #ifdef GL_TIME_ELAPSED
@@ -4148,6 +4345,21 @@ void pc_gfx_present(void) {
 #endif
     if (!sNativeFramebufferReady || !glBindFramebuffer_ptr || !glBlitFramebuffer_ptr) return;
     if (sDrawableWidth <= 0 || sDrawableHeight <= 0) return;
+#if PIKI_PC_VR
+    if (pc_vr_session_running()) {
+        // No post-processing: depth of field and ambient occlusion assume one
+        // symmetric view, and the eyes are neither.
+        sPostRanThisFrame = false;
+        sVrWorldActive = false;
+        pc_vr_submit(sVrWorldDrawn ? 1 : 0, sNativeColorTexture, sRenderWidth, sRenderHeight);
+        vr_mirror_to_window(sVrWorldDrawn);
+        glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
+        glEnable(GL_SCISSOR_TEST);
+        if (glActiveTexture_ptr) glActiveTexture_ptr(GL_TEXTURE0);
+        invalidate_gl_pipeline_guards();
+        return;
+    }
+#endif
 #ifdef GL_TIME_ELAPSED
     PerfGpuQuery* gpuQuery = nullptr;
     if (sGpuTimingEnabled && sPerfGpuQueriesReady) {
@@ -4325,6 +4537,10 @@ void pc_gfx_set_projection(const Mtx44 mtx, GXProjectionType type) {
         }
         ++sProjMtxGen;
     }
+#if PIKI_PC_VR
+    sVrProjPerspective = type == GX_PERSPECTIVE;
+    if (sVrWorldActive && sVrProjPerspective && mtx) vr_update_eye_projections();
+#endif
 }
 
 void pc_gfx_set_current_mtx(u32 id) {
@@ -4506,11 +4722,29 @@ void pc_gfx_set_blend_mode(GXBlendMode type, GXBlendFactor srcFactor, GXBlendFac
             case GX_BL_DSTALPHA: d = GL_DST_ALPHA; break;
             case GX_BL_INVDSTALPHA: d = GL_ONE_MINUS_DST_ALPHA; break;
         }
+#if PIKI_PC_VR
+        // Over the transparent interface layer, alpha must accumulate as
+        // coverage (the headset composites it premultiplied); the plain
+        // function would square it and leave translucent windows washed out.
+        // The world is opaque to the compositor, so it keeps the game's own
+        // blending -- water and every other translucent surface included.
+        if (pc_vr_session_running() && !sVrWorldActive && glBlendFuncSeparate_ptr) {
+            glBlendFuncSeparate_ptr(s, d, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        } else
+#endif
         glBlendFunc(s, d);
     } else if (type == GX_BM_SUBTRACT) {
         glEnable(GL_BLEND);
-        glBlendEquation_ptr(GL_FUNC_SUBTRACT);
-        glBlendFunc(GL_ONE, GL_ONE);
+#if PIKI_PC_VR
+        if (pc_vr_session_running() && !sVrWorldActive && glBlendEquationSeparate_ptr && glBlendFuncSeparate_ptr) {
+            glBlendEquationSeparate_ptr(GL_FUNC_SUBTRACT, GL_FUNC_ADD);
+            glBlendFuncSeparate_ptr(GL_ONE, GL_ONE, GL_ZERO, GL_ONE);
+        } else
+#endif
+        {
+            glBlendEquation_ptr(GL_FUNC_SUBTRACT);
+            glBlendFunc(GL_ONE, GL_ONE);
+        }
     } else if (type == GX_BM_LOGIC) {
         glDisable(GL_BLEND);
 #if PIKI_USE_GLES
@@ -4555,18 +4789,29 @@ void pc_gfx_set_cull_mode(GXCullMode mode) {
     }
 }
 
+// In VR the interface layer's alpha is what the headset composites with, so
+// anything that writes colour must write alpha too, whatever GX asked for.
+static GXBool alpha_write_enabled() {
+#if PIKI_PC_VR
+    // Only the interface layer needs it: that is the surface whose alpha the
+    // headset composites with. The world keeps GX's own rule.
+    if (pc_vr_session_running() && !sVrWorldActive) return sColorUpdate;
+#endif
+    return sAlphaUpdate;
+}
+
 void pc_gfx_set_color_update(GXBool updateEnable) {
     if (sColorUpdate == updateEnable) return;
     sColorUpdate = updateEnable;
     pc_gfx_note_gl_state_change();
-    glColorMask(sColorUpdate, sColorUpdate, sColorUpdate, sAlphaUpdate);
+    glColorMask(sColorUpdate, sColorUpdate, sColorUpdate, alpha_write_enabled());
 }
 
 void pc_gfx_set_alpha_update(GXBool updateEnable) {
     if (sAlphaUpdate == updateEnable) return;
     sAlphaUpdate = updateEnable;
     pc_gfx_note_gl_state_change();
-    glColorMask(sColorUpdate, sColorUpdate, sColorUpdate, sAlphaUpdate);
+    glColorMask(sColorUpdate, sColorUpdate, sColorUpdate, alpha_write_enabled());
 }
 
 void pc_gfx_set_alpha_compare(GXCompare comp0, u8 ref0, GXAlphaOp op, GXCompare comp1, u8 ref1) {
@@ -6634,6 +6879,40 @@ static uint64_t compute_batch_state_key_full() {
 // outside our reach) counts differently from one caused by material state.
 static inline double submit_clock_ms();
 
+#if PIKI_PC_VR
+static void draw_arrays(GLenum mode, GLint first, GLsizei count) {
+    if (!sVrWorldActive) {
+        glDrawArrays(mode, first, count);
+        return;
+    }
+    // The stereo target is bound for the whole world span (see
+    // pc_gfx_vr_world_begin): only the viewport, the scissor and the projection
+    // move between the eyes. Rebinding a framebuffer here instead would make a
+    // tile-based GPU resolve its tiles twice per draw.
+    GLint viewport[4] = { 0, 0, 0, 0 };
+    GLint scissor[4] = { 0, 0, 0, 0 };
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    glGetIntegerv(GL_SCISSOR_BOX, scissor);
+    for (int eye = 0; eye < 2; ++eye) {
+        PcVrEyeTarget target;
+        if (!pc_vr_eye_target(eye, &target)) continue;
+        glViewport(target.x, target.y, target.width, target.height);
+        // The scissor keeps an eye's geometry out of the other's half.
+        glScissor(target.x, target.y, target.width, target.height);
+        // An orthographic draw inside the world (a fade over it) covers each
+        // eye the way it covered the screen.
+        glUniformMatrix4fv_ptr(sLoc.projMtx, 1, GL_FALSE, sVrDrawPerspective ? sVrDrawEyeProj[eye] : sVrDrawProj);
+        glDrawArrays(mode, first, count);
+    }
+    // Leave GL as the port's redundancy guards believe it to be.
+    glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+    glScissor(scissor[0], scissor[1], scissor[2], scissor[3]);
+    glUniformMatrix4fv_ptr(sLoc.projMtx, 1, GL_FALSE, sVrDrawProj);
+}
+#else
+static inline void draw_arrays(GLenum mode, GLint first, GLsizei count) { glDrawArrays(mode, first, count); }
+#endif
+
 // ── Primitive batching (PERF-NATIVE-002) ────────────────────────────────────
 //
 // The port used to emit one glDrawArrays per GX primitive: ~8.000 draws of ten
@@ -6879,7 +7158,7 @@ void pc_gfx_flush_batch(void) {
 
     gl_error_checkpoint("batch upload");
     const GLint firstVertex = static_cast<GLint>(sVboWriteOffset / sizeof(Vertex));
-    glDrawArrays(sBatchMode, firstVertex, (GLsizei)sBatchVerts.size());
+    draw_arrays(sBatchMode, firstVertex, (GLsizei)sBatchVerts.size());
     gl_error_checkpoint("batch draw");
 
     if (profiling) {
@@ -7035,6 +7314,9 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
     filesel_debug_log_draw();
 
     glUniformMatrix4fv_ptr(sLoc.projMtx, 1, GL_FALSE, sProjMatrix);
+#if PIKI_PC_VR
+    vr_capture_draw_projection();
+#endif
     static const float identity[16] = {
         1, 0, 0, 0,
         0, 1, 0, 0,
@@ -8139,7 +8421,7 @@ static void draw_resident_mesh(ResidentMesh& mesh) {
     const double t2 = profiling ? submit_clock_ms() : 0.0;
     if (profiling) sSubmitUniformMs += t2 - t1;
     glBindVertexArray_ptr(sMeshVAO);
-    glDrawArrays(GL_TRIANGLES, mesh.firstVertex, mesh.vertexCount);
+    draw_arrays(GL_TRIANGLES, mesh.firstVertex, mesh.vertexCount);
     glBindVertexArray_ptr(GLuint(sStreamVAO));
     if (profiling) {
         sSubmitDrawMs += submit_clock_ms() - t2;

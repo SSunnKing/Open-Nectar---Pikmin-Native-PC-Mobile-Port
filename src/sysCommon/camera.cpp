@@ -6,6 +6,9 @@
 #include "sysNew.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
+#if defined(PIKI_PC_VR)
+#include "vr/pc_vr.h"
+#endif
 #endif
 
 /**
@@ -236,7 +239,17 @@ void CullFrustum::createViewPlanes()
 	planes[0].mIsEnabled = true;
 
 	vectorToWorldPlane(Vector3f(0.0f, 0.0f, -1.0f), planes[1]);
-	planes[1].mPlane.mOffset -= 2600.0f;
+	// 2600 units is what the flat game culls at, measured for a camera a few
+	// hundred units behind the captain. A tabletop VR view is much further away
+	// in world units and would cut the far half of the level off.
+	f32 farCull = 2600.0f;
+#if defined(PIKI_PC_VR)
+	const f32 vrCull = pc_vr_cull_distance();
+	if (vrCull > 0.0f) {
+		farCull = vrCull;
+	}
+#endif
+	planes[1].mPlane.mOffset -= farCull;
 	planes[1].CheckMinMaxDir();
 	planes[1].mIsEnabled = true;
 
@@ -319,7 +332,14 @@ void CullFrustum::update(f32 aspectRatio, f32 fov, f32 zNear, f32 zFar)
 	// GX virtual). Without this, isPointVisible / isBoundVisible cull at
 	// 4:3 while the projection already shows 16:9 — objects pop at the
 	// old side edges. Menu path A (sUi43) keeps the caller aspect.
-	if (!pc_gfx_get_ui_43()) {
+	// In VR the caller's aspect describes the headset's own frustum, which has
+	// nothing to do with the window the game happens to have on the monitor.
+	const bool useWindowAspect = !pc_gfx_get_ui_43()
+#if defined(PIKI_PC_VR)
+	    && !pc_vr_frame_active()
+#endif
+	    ;
+	if (useWindowAspect) {
 		f32 windowAspect = pc_gfx_get_current_aspect_ratio();
 		if (windowAspect > 0.0f) {
 			aspectRatio = windowAspect;

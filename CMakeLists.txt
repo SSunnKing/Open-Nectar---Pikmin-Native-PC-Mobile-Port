@@ -174,6 +174,8 @@ add_compile_definitions(
     PIKI_PC_SETTINGS_MENU=1
 )
 
+include(cmake/windows-native.cmake)
+
 # ─── Include paths ───
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -276,6 +278,44 @@ if (ANDROID)
 endif()
 if (PIKMIN_TOUCH)
     list(APPEND PC_PORT_SOURCES pc_port/touch/pc_touch.cpp)
+endif()
+
+# ─── VR (OpenXR) ───
+# The headset mode: stereo world, floating interface panel, Touch controllers.
+#
+# Two platforms. On Windows the session binds to the WGL context and the loader
+# comes from the system (MSYS2: mingw-w64-x86_64-openxr-sdk). On Android it
+# binds to SDL's EGL context and the loader comes from the Khronos AAR that
+# android/app/build.gradle pulls in, which is what a Quest expects; Gradle
+# exposes it to CMake through prefab. Either way the mode turns itself off at
+# run time when no runtime or headset answers. See pc_port/vr/README.md.
+if (WIN32 OR ANDROID)
+    set(PIKMIN_VR_DEFAULT ON)
+else()
+    set(PIKMIN_VR_DEFAULT OFF)
+endif()
+option(PIKMIN_VR "Build the OpenXR VR mode" ${PIKMIN_VR_DEFAULT})
+if (PIKMIN_VR)
+    find_package(OpenXR CONFIG QUIET)
+    if (NOT OpenXR_FOUND)
+        # What the Khronos AAR calls itself when prefab publishes it.
+        find_package(openxr_loader CONFIG QUIET)
+    endif()
+    if (TARGET OpenXR::openxr_loader)
+        set(PIKMIN_VR_LOADER OpenXR::openxr_loader)
+    elseif (TARGET openxr_loader::openxr_loader)
+        set(PIKMIN_VR_LOADER openxr_loader::openxr_loader)
+    endif()
+    if (PIKMIN_VR_LOADER)
+        add_compile_definitions(PIKI_PC_VR=1)
+        list(APPEND PC_PORT_SOURCES
+            pc_port/vr/pc_vr_xr.cpp
+            pc_port/vr/pc_vr_rig.cpp)
+        message(STATUS "VR: OpenXR mode enabled (${PIKMIN_VR_LOADER})")
+    else()
+        message(WARNING "VR: OpenXR loader not found; building without the VR mode")
+        set(PIKMIN_VR OFF)
+    endif()
 endif()
 
 include_directories(
@@ -511,12 +551,18 @@ if (WIN32)
     # proyecto declara SDL_MAIN_HANDLED y define su propio main. Enlazarlo deja
     # SDL_main sin definir en todos los ejecutables.
     target_link_libraries(${NECTAR_GAME} PRIVATE ${SDL2_LIBRARIES} opengl32)
+    if (PIKMIN_VR)
+        target_link_libraries(${NECTAR_GAME} PRIVATE ${PIKMIN_VR_LOADER})
+    endif()
 elseif (ANDROID)
     # En Android no hay X11 ni OpenGL de escritorio. GLESv3 y EGL vienen del
     # NDK; log y android los necesita la capa de plataforma (logcat, ciclo de
     # vida de la actividad) cuando el ejecutable se convierta en biblioteca
     # compartida en la fase 4.
     target_link_libraries(${NECTAR_GAME} PRIVATE m ${SDL2_LIBRARIES} GLESv3 EGL log android)
+    if (PIKMIN_VR)
+        target_link_libraries(${NECTAR_GAME} PRIVATE ${PIKMIN_VR_LOADER})
+    endif()
     # Android 15 exige bibliotecas alineadas a páginas de 16 KB en arm64.
     target_link_options(${NECTAR_GAME} PRIVATE "-Wl,-z,max-page-size=16384")
 else()
@@ -548,7 +594,7 @@ set_target_properties(${NECTAR_GAME} PROPERTIES
     OUTPUT_NAME "${NECTAR_OUTPUT_NAME}"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
-if (NOT ANDROID)
+if (NOT ANDROID AND NOT CMAKE_HOST_WIN32)
     add_custom_command(TARGET ${NECTAR_GAME} POST_BUILD
         COMMAND /bin/chmod 775 "$<TARGET_FILE:${NECTAR_GAME}>"
         COMMENT "Ensuring the native Pikmin executable is runnable")
@@ -688,6 +734,12 @@ if(PIKMIN_BUILD_TESTS)
     target_link_libraries(pc_photo_mode_test PRIVATE ${SDL2_LIBRARIES})
     target_compile_options(pc_photo_mode_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_photo_mode_test COMMAND pc_photo_mode_test)
+
+    # VR rig and eye matrices (no headset needed)
+    add_executable(pc_vr_rig_test pc_port/vr/pc_vr_rig_test.cpp pc_port/vr/pc_vr_rig.cpp)
+    target_include_directories(pc_vr_rig_test PRIVATE pc_port/vr)
+    target_compile_options(pc_vr_rig_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_vr_rig_test COMMAND pc_vr_rig_test)
 
     # Which GPU to ask for on a switchable-graphics laptop (no GPU needed)
     add_executable(pc_gpu_preference_test pc_port/pc_gpu_preference_test.cpp pc_port/pc_gpu_preference.cpp)

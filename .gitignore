@@ -62,6 +62,8 @@ tools/vc6
 /assets/*
 !/assets/README.md
 /assets.partial*
+# Local install used while developing (tools/build_windows_native.sh output + extracted data)
+/game/
 /Pikmin (USA) (Rev 1)/
 /Pikmin*.zip
 *.[iI][sS][oO]
@@ -111,3 +113,6 @@ third_party/SDL2-mingw64/
 
 # Gradle wrapper para Windows (la regla *.bat es para los .bat del decomp)
 !android/gradlew.bat
+
+# Gradle state from building SDL2's bundled Android project
+third_party/SDL2-android/android-project/.gradle/

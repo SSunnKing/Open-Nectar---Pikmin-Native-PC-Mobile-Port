@@ -5,6 +5,9 @@
 #if defined(PIKI_PC_PORT)
 #include "timing/pc_render_phase.h"
 #include "pc_gfx.h"
+#if defined(PIKI_PC_VR)
+#include "vr/pc_vr.h"
+#endif
 #endif
 
 /**
@@ -1178,7 +1181,15 @@ void zen::particleGenerator::drawPtclOriented(Graphics& gfx)
 				Vector3f toCam  = gfx.mCamera->mPosition - worldPos;
 				f32 toCamLen2   = toCam.x * toCam.x + toCam.y * toCam.y + toCam.z * toCam.z;
 				bool faceCamera = false;
-				if (toCamLen2 > 1.0e-8f) {
+				// In VR the camera is the player's head: it sits low, close to the water, and never stops moving, so a
+				// ripple lying on the surface crosses the edge-on band constantly and flickers between flat and
+				// standing upright. A plane whose normal points up is a ripple on the ground, never one of the intro
+				// portal's rays, so in VR it is left lying where it was put.
+				bool keepOriented = false;
+#if defined(PIKI_PC_VR)
+				keepOriented = pc_vr_frame_active() && (vec3.y > 0.7f || vec3.y < -0.7f);
+#endif
+				if (!keepOriented && toCamLen2 > 1.0e-8f) {
 					Vector3f viewDir = toCam;
 					viewDir.normalize();
 					const f32 facing = vec3.x * viewDir.x + vec3.y * viewDir.y + vec3.z * viewDir.z;

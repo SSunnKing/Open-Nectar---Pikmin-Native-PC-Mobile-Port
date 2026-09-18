@@ -8,6 +8,9 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_window.h"
 #include "pc_gfx.h"
+#if defined(PIKI_PC_VR)
+#include "vr/pc_vr.h"
+#endif
 #endif
 
 /**
@@ -1504,6 +1507,11 @@ void DGXGraphics::setFog(bool enable)
  */
 void DGXGraphics::setFog(bool enable, immut Colour& color, f32 density, f32 start, f32 end)
 {
+#if defined(PIKI_PC_VR)
+	// Tabletop VR views the level from far away in world units; fog measured from the eye would swallow the miniature.
+	start += pc_vr_fog_offset();
+	end += pc_vr_fog_offset();
+#endif
 	mFogColour  = color;
 	mFogStart   = start;
 	mFogEnd     = end;
