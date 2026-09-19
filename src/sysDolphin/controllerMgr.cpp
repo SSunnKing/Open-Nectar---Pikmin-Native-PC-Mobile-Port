@@ -2,6 +2,7 @@
 
 #include "DebugLog.h"
 #include "Dolphin/pad.h"
+#include "pc_input_script.h"
 
 /**
  * @todo: Documentation
@@ -58,6 +59,22 @@ void ControllerMgr::init()
  */
 void ControllerMgr::updateController(Controller* controller)
 {
+	// Private fixtures may script the virtual pad to drive menus/sections.
+	unsigned scripted;
+	signed char scriptedX, scriptedY;
+	if (pc_input_script_override(controller->mPlayerNum, &scripted, &scriptedX, &scriptedY)) {
+		controller->mMainStickX = scriptedX;
+		controller->mMainStickY = scriptedY;
+		controller->mSubStickX  = 0;
+		controller->mSubStickY  = 0;
+		controller->mAnalogA    = 0;
+		controller->mAnalogB    = 0;
+		controller->mTriggerL   = 0;
+		controller->mTriggerR   = 0;
+		controller->updateCont(scripted);
+		return;
+	}
+
 	// import stick values from controller
 	controller->mMainStickX = sControllerPad[controller->mPlayerNum - 1].stickX;
 	controller->mMainStickY = sControllerPad[controller->mPlayerNum - 1].stickY;
