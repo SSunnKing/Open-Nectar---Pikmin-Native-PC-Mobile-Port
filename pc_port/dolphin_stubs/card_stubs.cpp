@@ -66,6 +66,41 @@ fs::path installDir()
 	return {};
 }
 
+// Per-user data folder, for installs whose own folder cannot be written to
+// (Program Files, /usr, /opt, an AppImage's read-only mount, Proton prefixes
+// with a read-only game dir). Issue #34: on Linux the card was written beside
+// the executable, silently failed there and the progress was gone on restart.
+fs::path userDataSaveDir()
+{
+#if defined(_WIN32)
+	if (const char* local = std::getenv("LOCALAPPDATA"); local != nullptr && *local != '\0')
+		return fs::path(local) / "Nectar" / "save";
+#else
+	if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg != nullptr && *xdg != '\0')
+		return fs::path(xdg) / "pikmin-native" / "save";
+	if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0')
+		return fs::path(home) / ".local" / "share" / "pikmin-native" / "save";
+#endif
+	return {};
+}
+
+// True when files can actually be created under `dir` (creating it if needed).
+bool writableDir(const fs::path& dir)
+{
+	std::error_code error;
+	fs::create_directories(dir, error);
+	if (error) return false;
+	const fs::path probe = dir / ".write_test";
+	{
+		std::ofstream out(probe, std::ios::binary | std::ios::trunc);
+		if (!out) return false;
+		out << '1';
+		if (!out) return false;
+	}
+	fs::remove(probe, error);
+	return true;
+}
+
 fs::path saveRoot()
 {
 	static const fs::path resolved = [] {
@@ -110,6 +145,15 @@ fs::path saveRoot()
 			}
 			// Could not write beside the game -- read-only install, most likely.
 			return candidate;
+		}
+		if (writableDir(preferred)) return preferred;
+		// The game folder is read-only: keep the card in the user's data
+		// folder instead of pretending to save (issue #34).
+		const fs::path fallback = userDataSaveDir();
+		if (!fallback.empty() && writableDir(fallback)) {
+			std::printf("[PC Port] Game folder is not writable; memory card lives in %s\n",
+			            fallback.string().c_str());
+			return fallback;
 		}
 		return preferred;
 	}();

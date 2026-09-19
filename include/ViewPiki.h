@@ -10,6 +10,10 @@ class MapMgr;
 /**
  * @brief TODO
  */
+#if defined(PIKI_PC_PORT)
+#include "mods/pc_hd_models.h"
+#endif
+
 class ViewPiki : public Piki {
 public:
 	ViewPiki(CreatureProp*);
@@ -25,6 +29,11 @@ public:
 	virtual void setLeaves(int);                        // _134
 
 	void init(Shape*, MapMgr*, Navi*);
+
+#if defined(PIKI_PC_PORT)
+	PcHdModelId hdPikiModel() const;
+	PcHdModelId hdHappaModel() const;
+#endif
 
 	// unused/inlined:
 	void refresh2d(Graphics&, int);

@@ -4438,7 +4438,19 @@ void pc_gfx_set_tex_coord_gen(GXTexCoordID coord, GXTexGenType type, GXTexGenSrc
     sTexCoordGen[coord].mtxIdx = matrixIdx;
 }
 
+// Last values handed to the z/blend/cull setters, for pc_gfx_get_pipeline_state.
+static PcGfxPipelineState sPipelineState = { GX_TRUE, GX_LEQUAL, GX_TRUE, GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, GX_LO_COPY, GX_CULL_BACK };
+
+PcGfxPipelineState pc_gfx_get_pipeline_state(void) { return sPipelineState; }
+
+void pc_gfx_set_pipeline_state(const PcGfxPipelineState& st) {
+    pc_gfx_set_z_mode(st.zCompare, st.zFunc, st.zUpdate);
+    pc_gfx_set_blend_mode(st.blendType, st.blendSrc, st.blendDst, st.blendOp);
+    pc_gfx_set_cull_mode(st.cull);
+}
+
 void pc_gfx_set_z_mode(GXBool compareEnable, GXCompare func, GXBool updateEnable) {
+    sPipelineState.zCompare = compareEnable; sPipelineState.zFunc = func; sPipelineState.zUpdate = updateEnable;
     static bool valid = false;
     static uint32_t seenSerial = 0;
     static GXBool lastCompare = GX_FALSE, lastUpdate = GX_FALSE;
@@ -4469,6 +4481,7 @@ void pc_gfx_set_z_mode(GXBool compareEnable, GXCompare func, GXBool updateEnable
 }
 
 void pc_gfx_set_blend_mode(GXBlendMode type, GXBlendFactor srcFactor, GXBlendFactor dstFactor, GXLogicOp op) {
+    sPipelineState.blendType = type; sPipelineState.blendSrc = srcFactor; sPipelineState.blendDst = dstFactor; sPipelineState.blendOp = op;
     static bool valid = false;
     static uint32_t seenSerial = 0;
     static GXBlendMode lastType = GX_BM_NONE;
@@ -4540,6 +4553,7 @@ void pc_gfx_set_blend_mode(GXBlendMode type, GXBlendFactor srcFactor, GXBlendFac
 }
 
 void pc_gfx_set_cull_mode(GXCullMode mode) {
+    sPipelineState.cull = mode;
     static bool valid = false;
     static uint32_t seenSerial = 0;
     static GXCullMode lastMode = GX_CULL_NONE;
@@ -5065,7 +5079,7 @@ static void apply_texture_filtering(bool gameRequestedMipmaps)
     }
 }
 
-void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height) {
+void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height, GXTexWrapMode wrapS, GXTexWrapMode wrapT) {
     if (!obj || !rgba || width == 0 || height == 0) return;
 
     const uintptr_t key = (uintptr_t)obj;
@@ -5086,8 +5100,8 @@ void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height) 
     glActiveTexture_ptr(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texId);
     sBoundTextures[0] = texId;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapS == GX_REPEAT ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapT == GX_REPEAT ? GL_REPEAT : GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
@@ -5629,6 +5643,15 @@ void pc_gfx_color(u8 r, u8 g, u8 b, u8 a) {
 void pc_gfx_texcoord(f32 u, f32 v) {
     sCurVertex.tex[0][0] = u;
     sCurVertex.tex[0][1] = v;
+}
+
+// Immediate-mode normal for the current vertex (call after pc_gfx_position).
+// Expressed in the space the loaded normal matrix expects; callers that
+// pre-transform to view space load an identity GX_PNMTX0 normal matrix.
+void pc_gfx_normal(f32 x, f32 y, f32 z) {
+    sCurVertex.nx = x;
+    sCurVertex.ny = y;
+    sCurVertex.nz = z;
 }
 
 void pc_gfx_push_f32(f32 val) {

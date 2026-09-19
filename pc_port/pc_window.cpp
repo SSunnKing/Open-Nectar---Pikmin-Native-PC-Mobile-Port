@@ -64,6 +64,9 @@ static char sLastVideoError[256] = { 0 };
 
 // Keyboard remapping state (PC only).
 static SDL_Scancode sKeyBindings[PC_KEY_ACT_COUNT];
+static bool sSwarmHeld = false; // PC_KEY_ACT_SWARM sampled by the last poll
+
+bool pc_window_swarm_held(void) { return sSwarmHeld; }
 static bool sKeyBindingsInitialized = false;
 
 // Gamepad remapping state.
@@ -76,6 +79,13 @@ static int sCStickInvert = 0;
 // Mouse input state for cursor (C-stick) control
 static bool sMouseRelativeMode = false;
 static int sMouseCenterX = 0;
+// Centre of the window as it is now (fullscreen included), not the stored
+// windowed size.
+static void warpMouseToCentre() {
+    int w = 0, h = 0;
+    SDL_GetWindowSize(sWindow, &w, &h);
+    SDL_WarpMouseInWindow(sWindow, w / 2, h / 2);
+}
 static int sMouseCenterY = 0;
 static bool sMouseWarped = false;
 
@@ -114,6 +124,7 @@ const SDL_Scancode kDefaultKeyBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_CSTICK_DOWN */ SDL_SCANCODE_G,
     /* PC_KEY_ACT_CSTICK_LEFT */ SDL_SCANCODE_F,
     /* PC_KEY_ACT_CSTICK_RIGHT*/ SDL_SCANCODE_H,
+    /* PC_KEY_ACT_SWARM       */ SDL_SCANCODE_C,
 };
 
 // Default gamepad bindings (SDL_GameControllerButton).
@@ -138,6 +149,7 @@ const int kDefaultGamepadBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_CSTICK_DOWN */ -1,
     /* PC_KEY_ACT_CSTICK_LEFT */ -1,
     /* PC_KEY_ACT_CSTICK_RIGHT*/ -1,
+    /* PC_KEY_ACT_SWARM       */ -1, // Optional; D-pad Down is taken by the pad's own D-pad
 };
 
 // Action names for UI display.
@@ -146,6 +158,7 @@ static const char* kKeyActionNames[PC_KEY_ACT_COUNT] = {
     "D-Pad Up", "D-Pad Down", "D-Pad Left", "D-Pad Right",
     "Stick Up", "Stick Down", "Stick Left", "Stick Right",
     "C-Stick Up", "C-Stick Down", "C-Stick Left", "C-Stick Right",
+    "Swarm to cursor",
 };
 
 static void initKeyBindings() {
@@ -290,7 +303,7 @@ void pc_window_message_control_label(char tag, char* buf, unsigned bufSize)
 		char compact[4] = { 0 };
 		bool allSingle = true;
 		for (int i = 0; i < 4; i++) {
-			const char* name = SDL_GetScancodeName(keys[i]);
+			const char* name = pc_bind_is_mouse(keys[i]) ? nullptr : SDL_GetScancodeName(keys[i]);
 			if (!name || name[1] != '\0') {
 				allSingle = false;
 				break;
@@ -304,8 +317,7 @@ void pc_window_message_control_label(char tag, char* buf, unsigned bufSize)
 		return;
 	}
 
-	const char* name = SDL_GetScancodeName(pc_window_get_key_binding(action));
-	snprintf(buf, bufSize, "%s", (name && name[0]) ? name : "?");
+	snprintf(buf, bufSize, "%s", pc_window_binding_name(pc_window_get_key_binding(action)));
 
 	// Mouse buttons are fixed conveniences (not F1 remaps): L=A, R=B, M=Z.
 	if (sControlMode != PC_CONTROL_CLASSIC) {
@@ -402,6 +414,29 @@ void pc_window_reset_key_bindings(void) {
     }
 }
 
+const char* pc_window_binding_name(int binding) {
+    if (pc_bind_is_mouse(binding)) {
+        static char name[24];
+        switch (binding - PC_BIND_MOUSE_BASE) {
+            case SDL_BUTTON_LEFT:   return "Mouse Left";
+            case SDL_BUTTON_MIDDLE: return "Mouse Middle";
+            case SDL_BUTTON_RIGHT:  return "Mouse Right";
+            case SDL_BUTTON_X1:     return "Mouse 4";
+            case SDL_BUTTON_X2:     return "Mouse 5";
+            default:
+                snprintf(name, sizeof(name), "Mouse %d", binding - PC_BIND_MOUSE_BASE);
+                return name;
+        }
+    }
+    const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(binding));
+    return (name && name[0]) ? name : "?";
+}
+
+bool pc_window_binding_held(int binding, const Uint8* keys, Uint32 mouseButtons) {
+    if (pc_bind_is_mouse(binding)) return (mouseButtons & SDL_BUTTON(binding - PC_BIND_MOUSE_BASE)) != 0;
+    return binding >= 0 && binding < SDL_NUM_SCANCODES && keys && keys[binding] != 0;
+}
+
 bool pc_window_load_key_bindings(const char* path) {
     initKeyBindings();
     std::ifstream file(path);
@@ -409,7 +444,7 @@ bool pc_window_load_key_bindings(const char* path) {
     int action;
     int scancode;
     while (file >> action >> scancode) {
-        if (action >= 0 && action < PC_KEY_ACT_COUNT && scancode >= 0 && scancode < SDL_NUM_SCANCODES) {
+        if (action >= 0 && action < PC_KEY_ACT_COUNT && pc_bind_is_valid(scancode)) {
             sKeyBindings[action] = static_cast<SDL_Scancode>(scancode);
         }
     }
@@ -698,7 +733,7 @@ void pc_window_poll_events(PADStatus* pad) {
                     sMouseCursorDeltaY = 0.0f;
                     if (!sMouseRelativeMode) {
                         // Re-center mouse when exiting relative mode
-                        SDL_WarpMouseInWindow(sWindow, sWindowWidth / 2, sWindowHeight / 2);
+                        warpMouseToCentre();
                         sMouseWarped = true;
                     } else {
                         // Consume any pending relative mouse motion on mode entry
@@ -714,7 +749,7 @@ void pc_window_poll_events(PADStatus* pad) {
                     // Clear mouse deltas on escape
                     sMouseCursorDeltaX = 0.0f;
                     sMouseCursorDeltaY = 0.0f;
-                    SDL_WarpMouseInWindow(sWindow, sWindowWidth / 2, sWindowHeight / 2);
+                    warpMouseToCentre();
                     sMouseWarped = true;
                     printf("[PC Port] Mouse relative mode: OFF (Escape)\n");
                 }
@@ -740,6 +775,9 @@ void pc_window_poll_events(PADStatus* pad) {
     }
 
     const Uint8* state = SDL_GetKeyboardState(NULL);
+    // Bindings may name a mouse button (issue #42); sample the mouse once here.
+    const Uint32 boundMouse = SDL_GetMouseState(NULL, NULL);
+    auto held = [&](int action) { return pc_window_binding_held(sKeyBindings[action], state, boundMouse); };
 
     u16 button = 0;
     s8  stickX = 0;
@@ -752,25 +790,25 @@ void pc_window_poll_events(PADStatus* pad) {
     initKeyBindings();
 
     // ── Keyboard Mapping (configurable) ──
-    if (state[sKeyBindings[PC_KEY_ACT_A]])        button |= PAD_BUTTON_A;
-    if (state[sKeyBindings[PC_KEY_ACT_B]])        button |= PAD_BUTTON_B;
-    if (state[sKeyBindings[PC_KEY_ACT_X]])        button |= PAD_BUTTON_X;
-    if (state[sKeyBindings[PC_KEY_ACT_Y]])        button |= PAD_BUTTON_Y;
-    if (state[sKeyBindings[PC_KEY_ACT_Z]])        button |= PAD_TRIGGER_Z;
-    if (state[sKeyBindings[PC_KEY_ACT_START]])    button |= PAD_BUTTON_START;
+    if (held(PC_KEY_ACT_A))        button |= PAD_BUTTON_A;
+    if (held(PC_KEY_ACT_B))        button |= PAD_BUTTON_B;
+    if (held(PC_KEY_ACT_X))        button |= PAD_BUTTON_X;
+    if (held(PC_KEY_ACT_Y))        button |= PAD_BUTTON_Y;
+    if (held(PC_KEY_ACT_Z))        button |= PAD_TRIGGER_Z;
+    if (held(PC_KEY_ACT_START))    button |= PAD_BUTTON_START;
 
     // D-Pad
-    if (state[sKeyBindings[PC_KEY_ACT_DPAD_UP]])    button |= PAD_BUTTON_UP;
-    if (state[sKeyBindings[PC_KEY_ACT_DPAD_DOWN]])  button |= PAD_BUTTON_DOWN;
-    if (state[sKeyBindings[PC_KEY_ACT_DPAD_LEFT]])  button |= PAD_BUTTON_LEFT;
-    if (state[sKeyBindings[PC_KEY_ACT_DPAD_RIGHT]]) button |= PAD_BUTTON_RIGHT;
+    if (held(PC_KEY_ACT_DPAD_UP))    button |= PAD_BUTTON_UP;
+    if (held(PC_KEY_ACT_DPAD_DOWN))  button |= PAD_BUTTON_DOWN;
+    if (held(PC_KEY_ACT_DPAD_LEFT))  button |= PAD_BUTTON_LEFT;
+    if (held(PC_KEY_ACT_DPAD_RIGHT)) button |= PAD_BUTTON_RIGHT;
 
     // Analog Triggers (Keyboard)
-    if (state[sKeyBindings[PC_KEY_ACT_L]]) {
+    if (held(PC_KEY_ACT_L)) {
         button |= PAD_TRIGGER_L;
         triggerL = 255;
     }
-    if (state[sKeyBindings[PC_KEY_ACT_R]]) {
+    if (held(PC_KEY_ACT_R)) {
         button |= PAD_TRIGGER_R;
         triggerR = 255;
     }
@@ -778,10 +816,10 @@ void pc_window_poll_events(PADStatus* pad) {
     // Main Stick (WASD) - ALWAYS controls Olimar movement
     // In all modes: WASD = movement, mouse = cursor (in mouse modes)
     int dirX = 0, dirY = 0;
-    if (state[sKeyBindings[PC_KEY_ACT_STICK_LEFT]])  dirX -= 1;
-    if (state[sKeyBindings[PC_KEY_ACT_STICK_RIGHT]]) dirX += 1;
-    if (state[sKeyBindings[PC_KEY_ACT_STICK_UP]])    dirY += 1;
-    if (state[sKeyBindings[PC_KEY_ACT_STICK_DOWN]])  dirY -= 1;
+    if (held(PC_KEY_ACT_STICK_LEFT))  dirX -= 1;
+    if (held(PC_KEY_ACT_STICK_RIGHT)) dirX += 1;
+    if (held(PC_KEY_ACT_STICK_UP))    dirY += 1;
+    if (held(PC_KEY_ACT_STICK_DOWN))  dirY -= 1;
 
     // WASD always controls movement stick (Olimar movement)
     stickX = (s8)(dirX * 127);
@@ -789,16 +827,17 @@ void pc_window_poll_events(PADStatus* pad) {
 
     // C-Stick (TFGH) - for Pikmin formation control
     int cdirX = 0, cdirY = 0;
-    if (state[sKeyBindings[PC_KEY_ACT_CSTICK_LEFT]])  cdirX -= 1;
-    if (state[sKeyBindings[PC_KEY_ACT_CSTICK_RIGHT]]) cdirX += 1;
-    if (state[sKeyBindings[PC_KEY_ACT_CSTICK_UP]])    cdirY += 1;
-    if (state[sKeyBindings[PC_KEY_ACT_CSTICK_DOWN]])  cdirY -= 1;
+    if (held(PC_KEY_ACT_CSTICK_LEFT))  cdirX -= 1;
+    if (held(PC_KEY_ACT_CSTICK_RIGHT)) cdirX += 1;
+    if (held(PC_KEY_ACT_CSTICK_UP))    cdirY += 1;
+    if (held(PC_KEY_ACT_CSTICK_DOWN))  cdirY -= 1;
 
     substickX = (s8)(cdirX * 127);
     substickY = (s8)(cdirY * 127);
 
     const bool usedKeyboard = button != 0 || dirX != 0 || dirY != 0 || cdirX != 0 || cdirY != 0;
     bool usedGamepad = false;
+    sSwarmHeld = held(PC_KEY_ACT_SWARM);
 
     // ── Gamepad Mapping (overrides / merges if controller connected) ──
     if (sController) {
@@ -864,6 +903,7 @@ void pc_window_poll_events(PADStatus* pad) {
         if (boundButtonPressed(PC_KEY_ACT_CSTICK_RIGHT)) substickX = 127;
         if (boundButtonPressed(PC_KEY_ACT_CSTICK_UP)) substickY = 127;
         if (boundButtonPressed(PC_KEY_ACT_CSTICK_DOWN)) substickY = -127;
+        if (boundButtonPressed(PC_KEY_ACT_SWARM)) sSwarmHeld = true;
 
         const int noticeZone = axisDeadZone < 16384 ? 16384 : axisDeadZone;
         usedGamepad = boundButtonPressed(PC_KEY_ACT_A) || boundButtonPressed(PC_KEY_ACT_B)
@@ -924,9 +964,15 @@ void pc_window_poll_events(PADStatus* pad) {
         } else {
             mouseState = SDL_GetMouseState(&mouseX, &mouseY);
             
-            // Convert absolute position to relative-like movement
-            float centerX = sWindowWidth * 0.5f;
-            float centerY = sWindowHeight * 0.5f;
+            // Convert absolute position to relative-like movement. Ask SDL
+            // for the real window size: in borderless fullscreen
+            // sWindowWidth/Height hold the *windowed* size to restore later,
+            // not the desktop size the cursor is measured against, which
+            // pinned the virtual cursor off-centre (issue #40).
+            int winW = sWindowWidth, winH = sWindowHeight;
+            SDL_GetWindowSize(sWindow, &winW, &winH);
+            float centerX = winW * 0.5f;
+            float centerY = winH * 0.5f;
             float maxRadius = std::min(centerX, centerY) * 0.8f;
             
             float dx = mouseX - centerX;

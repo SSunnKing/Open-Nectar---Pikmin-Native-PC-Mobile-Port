@@ -52,10 +52,28 @@ enum {
     PC_KEY_ACT_CSTICK_DOWN  = 17,
     PC_KEY_ACT_CSTICK_LEFT  = 18,
     PC_KEY_ACT_CSTICK_RIGHT = 19,
+    // Swarm (issue #29): while held the squad is pushed toward the cursor,
+    // like Down on the Wii D-pad. Appended so saved key_N indices stay valid.
+    PC_KEY_ACT_SWARM        = 20,
     PC_KEY_ACT_COUNT
 };
 void pc_window_set_key_binding(int action, SDL_Scancode scancode);
 SDL_Scancode pc_window_get_key_binding(int action);
+
+// Mouse buttons are bindable like keys (issue #42): they ride in the keyboard
+// binding table as pseudo-scancodes past SDL_NUM_SCANCODES, so
+// PC_BIND_MOUSE_BASE + SDL_BUTTON_X1 is "Mouse 4". Anything that indexes
+// SDL_GetKeyboardState() with a binding must go through pc_window_binding_held.
+#define PC_BIND_MOUSE_BASE  SDL_NUM_SCANCODES
+#define PC_BIND_MOUSE_LAST  (PC_BIND_MOUSE_BASE + 8)
+static inline bool pc_bind_is_mouse(int binding) { return binding >= PC_BIND_MOUSE_BASE && binding <= PC_BIND_MOUSE_LAST; }
+static inline bool pc_bind_is_valid(int binding) { return binding >= 0 && binding <= PC_BIND_MOUSE_LAST; }
+// Whether the swarm binding (keyboard, mouse or gamepad) is held right now.
+bool pc_window_swarm_held(void);
+// Name for either kind of binding ("Mouse 4", "Space", ...).
+const char* pc_window_binding_name(int binding);
+// Whether a binding is currently held, given the keyboard and mouse state.
+bool pc_window_binding_held(int binding, const Uint8* keys, Uint32 mouseButtons);
 const char* pc_window_get_key_action_name(int action);
 void pc_window_reset_key_bindings(void);
 bool pc_window_load_key_bindings(const char* path);

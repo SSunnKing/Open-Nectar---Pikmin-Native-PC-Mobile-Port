@@ -842,6 +842,12 @@ struct NaviThrowState : public NaviState {
 	// _00-_10 = NaviState
 	bool mHasThrownPiki; // _10
 	bool _11;  // _11
+#if defined(PIKI_PC_PORT)
+	// Throw press seen during the wind-up, before KEY_Action0 released the
+	// Pikmin. Kept so a rapid mash starts the next grab as soon as the throw
+	// lands instead of being dropped (issues #37 / #40).
+	bool mQueuedThrowPress;
+#endif
 	Piki* mTargetPiki; // _14
 };
 

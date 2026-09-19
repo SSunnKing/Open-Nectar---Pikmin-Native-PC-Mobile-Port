@@ -111,3 +111,7 @@ third_party/SDL2-mingw64/
 
 # Gradle wrapper para Windows (la regla *.bat es para los .bat del decomp)
 !android/gradlew.bat
+
+# Local HD model packs and prototype bundles (converted Nintendo assets; never commit)
+/dist/
+/mods/

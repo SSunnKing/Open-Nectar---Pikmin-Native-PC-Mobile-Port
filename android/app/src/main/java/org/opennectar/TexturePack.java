@@ -31,6 +31,7 @@ public final class TexturePack {
     /** Código de startActivityForResult del selector. Debe coincidir entre
      *  la actividad y este helper. */
     public static final int REQ_TEXTURE_PACK = 2048;
+    public static final int REQ_MODEL_PACK = 2049;
 
     public static native void nativeRegisterActivity(Activity activity);
     public static native void nativeUnregisterActivity();
@@ -54,6 +55,20 @@ public final class TexturePack {
     /** Abre el selector del sistema en el hilo de UI (lo llama JNI desde el
      *  hilo del juego, que no puede tocar startActivityForResult). */
     public static void openTexturePackPicker(final Activity activity) {
+        openPackPicker(activity, REQ_TEXTURE_PACK);
+    }
+
+    /** Modelo elegido en el submenú HD Models (HdModelConverter.KIND_*) para el picker en curso. */
+    private static int sPendingModelKind = HdModelConverter.KIND_OLIMAR;
+
+    public static int pendingModelKind() { return sPendingModelKind; }
+
+    public static void openModelPackPicker(final Activity activity, int kind) {
+        sPendingModelKind = kind;
+        openPackPicker(activity, REQ_MODEL_PACK);
+    }
+
+    private static void openPackPicker(final Activity activity, int requestCode) {
         android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
         intent.setType("*/*");
@@ -64,7 +79,7 @@ public final class TexturePack {
             "application/vnd.rar",
             "application/x-rar-compressed",
         });
-        activity.startActivityForResult(intent, REQ_TEXTURE_PACK);
+        activity.startActivityForResult(intent, requestCode);
     }
 
     /** Pide reiniciar la app entera para que el pack activo se indexe al
@@ -96,16 +111,31 @@ public final class TexturePack {
      *  Bloquea; llamar en un hilo. Al terminar informa a nativeInstallFinished
      *  (el menú F1 lo pinta durante unos segundos). */
     public static void install(Activity activity, Uri uri) {
+        installPack(activity, uri, "Textures", false);
+    }
+
+    public static void installModel(Activity activity, Uri uri, int kind) {
+        installPack(activity, uri, "Models", true, kind);
+    }
+
+    private static void installPack(Activity activity, Uri uri, String category, boolean modelPack) {
+        installPack(activity, uri, category, modelPack, -1);
+    }
+
+    private static void installPack(Activity activity, Uri uri, String category, boolean modelPack, int modelKind) {
         final String name = displayName(activity, uri);
         final String lower = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        final String label = name == null ? "pack" : name;
         final String gameDir = nativeGameDir();
         if (gameDir == null || gameDir.isEmpty()) {
             nativeInstallFinished(false, "Game directory is not ready.");
             return;
         }
-        File targetRoot = new File(gameDir, "Load/Textures");
+        File targetRoot = new File(gameDir, "Load");
         mkdirs(targetRoot);
-        File marker = new File(targetRoot, INCOMPLETE_MARKER);
+        File categoryRoot = new File(targetRoot, category);
+        mkdirs(categoryRoot);
+        File marker = new File(categoryRoot, INCOMPLETE_MARKER);
         try { new FileOutputStream(marker).close(); } catch (Exception ignored) {}
         sProgressFiles = 0;
         nativeInstallProgress(0);
@@ -114,26 +144,43 @@ public final class TexturePack {
         try {
             if (lower.endsWith(".rar")) {
                 cacheCopy = copyToCache(activity, uri);
-                installRar(cacheCopy, targetRoot);
+                installRar(cacheCopy, targetRoot, category, modelPack);
                 deleteQuietly(cacheCopy);
+            } else if (modelPack) {
+                // Los rips públicos de Pikmin 3 (Collada + PNG) se convierten
+                // aquí mismo a NHM; cualquier otro zip se trata como pack .nhm.
+                cacheCopy = copyToCache(activity, uri);
+                HdModelConverter.Result converted;
+                try {
+                    converted = HdModelConverter.convert(cacheCopy, categoryRoot, modelKind);
+                } finally {
+                    deleteQuietly(cacheCopy);
+                }
+                if (converted != null) {
+                    deleteQuietly(marker);
+                    nativeInstallFinished(true, "Converted " + label + " into " + converted.pack
+                        + " (" + converted.files + " model files). Restart to use the HD model.");
+                    return;
+                }
+                installZip(activity.getContentResolver(), uri, targetRoot, category, modelPack);
             } else {
-                installZip(activity.getContentResolver(), uri, targetRoot);
+                installZip(activity.getContentResolver(), uri, targetRoot, category, modelPack);
             }
         } catch (Exception e) {
             nativeInstallFinished(false, e.getMessage() == null ? "Could not install the pack." : e.getMessage());
             return;
         }
 
-        int textures = countTexFiles(targetRoot);
-        final String label = name == null ? "pack" : name;
-        if (textures <= 0) {
+        int assets = countPackFiles(categoryRoot, modelPack);
+        if (assets <= 0) {
             nativeInstallFinished(false,
-                '"' + label + "\" has no Load/Textures folder (expected tex1_*.dds/.png).");
+                '"' + label + "\" has no supported Load/" + category + " files.");
             return;
         }
         deleteQuietly(marker);
         nativeInstallFinished(true,
-            "Installed " + label + " (" + textures + " textures). Activate it and restart.");
+            "Installed " + label + " (" + assets + (modelPack ? " model files). Restart to use the HD model."
+                : " textures). Activate the pack and restart."));
     }
 
     private static String displayName(Activity activity, Uri uri) {
@@ -156,14 +203,15 @@ public final class TexturePack {
 
     // ── ZIP ────────────────────────────────────────────────────────────────
 
-    private static void installZip(ContentResolver resolver, Uri uri, File targetRoot)
+    private static void installZip(ContentResolver resolver, Uri uri, File targetRoot,
+                                   String category, boolean modelPack)
             throws Exception {
         int extracted = 0;
         try (InputStream in = resolver.openInputStream(uri);
              ZipInputStream zip = new ZipInputStream(in)) {
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
-                String rel = loadTexturesRelativePath(entry.getName());
+                String rel = loadPackRelativePath(entry.getName(), category);
                 if (rel == null) continue;
                 File out = safeFile(targetRoot, rel);
                 if (entry.isDirectory()) {
@@ -175,8 +223,7 @@ public final class TexturePack {
                         int n;
                         while ((n = zip.read(buffer)) > 0) os.write(buffer, 0, n);
                     }
-                    if (out.getName().toLowerCase(Locale.ROOT).endsWith(".dds")
-                        || out.getName().toLowerCase(Locale.ROOT).endsWith(".png")) {
+                    if (isSupported(out, modelPack)) {
                         extracted++;
                     }
                     progress();
@@ -184,12 +231,13 @@ public final class TexturePack {
                 zip.closeEntry();
             }
         }
-        if (extracted <= 0) throw new Exception("The archive contains no textures.");
+        if (extracted <= 0) throw new Exception("The archive contains no supported Load/" + category + " files.");
     }
 
     // ── RAR ────────────────────────────────────────────────────────────────
 
-    private static void installRar(File rarFile, File targetRoot) throws Exception {
+    private static void installRar(File rarFile, File targetRoot, String category,
+                                   boolean modelPack) throws Exception {
         // junrar (com.github.junrar) es una implementación Java de UnRAR:
         // soporta RAR4 y RAR5 en lectura. El recurso SAF no es un fichero
         // reabrible por ruta, así que primero se copia a la caché.
@@ -198,7 +246,7 @@ public final class TexturePack {
             com.github.junrar.rarfile.FileHeader header;
             while ((header = archive.nextFileHeader()) != null) {
                 if (header.isDirectory()) continue;
-                String rel = loadTexturesRelativePath(header.getFileName());
+                String rel = loadPackRelativePath(header.getFileName(), category);
                 if (rel == null) continue;
                 File out = safeFile(targetRoot, rel);
                 if (out == null) continue;
@@ -206,14 +254,13 @@ public final class TexturePack {
                 try (OutputStream os = new FileOutputStream(out)) {
                     archive.extractFile(header, os);
                 }
-                if (out.getName().toLowerCase(Locale.ROOT).endsWith(".dds")
-                    || out.getName().toLowerCase(Locale.ROOT).endsWith(".png")) {
+                if (isSupported(out, modelPack)) {
                     extracted++;
                 }
                 progress();
             }
         }
-        if (extracted <= 0) throw new Exception("The RAR contains no textures.");
+        if (extracted <= 0) throw new Exception("The RAR contains no supported Load/" + category + " files.");
     }
 
     private static File copyToCache(Activity activity, Uri uri) throws Exception {
@@ -233,17 +280,19 @@ public final class TexturePack {
      *  Dolphin: "NombrePack/Load/Textures/GPI/..."). Devuelve el resto de la
      *  ruta a partir de la carpeta de GameID, o null si la entrada no toca
      *  texturas. */
-    private static String loadTexturesRelativePath(String name) {
+    private static String loadPackRelativePath(String name, String category) {
         if (name == null) return null;
         String normalized = name.replace('\\', '/');
         String lower = normalized.toLowerCase(Locale.ROOT);
-        int idx = lower.indexOf("/load/textures");
+        String segment = "/load/" + category.toLowerCase(Locale.ROOT);
+        int idx = lower.indexOf(segment);
+        int segmentLength = segment.length();
         if (idx < 0) return null;
-        int sub = idx + "/load/textures".length();
+        int sub = idx + segmentLength;
         if (sub < normalized.length() && (normalized.charAt(sub) == '/' || normalized.charAt(sub) == '\\')) sub++;
         String rel = normalized.substring(sub);
         if (rel.isEmpty()) return null;
-        return rel;
+        return category + "/" + rel;
     }
 
     /** Resuelve una ruta relativa bajo root sin dejar escapar de él: los
@@ -266,17 +315,22 @@ public final class TexturePack {
         if (dir != null) dir.mkdirs();
     }
 
-    private static int countTexFiles(File root) {
+    private static boolean isSupported(File file, boolean modelPack) {
+        String lower = file.getName().toLowerCase(Locale.ROOT);
+        return modelPack ? lower.endsWith(".nhm")
+            : lower.endsWith(".dds") || lower.endsWith(".png");
+    }
+
+    private static int countPackFiles(File root, boolean modelPack) {
         if (root == null || !root.isDirectory()) return 0;
         int count = 0;
         File[] files = root.listFiles();
         if (files == null) return 0;
         for (File file : files) {
             if (file.isDirectory()) {
-                count += countTexFiles(file);
+                count += countPackFiles(file, modelPack);
             } else {
-                String lower = file.getName().toLowerCase(Locale.ROOT);
-                if (lower.endsWith(".dds") || lower.endsWith(".png")) count++;
+                if (isSupported(file, modelPack)) count++;
             }
         }
         return count;

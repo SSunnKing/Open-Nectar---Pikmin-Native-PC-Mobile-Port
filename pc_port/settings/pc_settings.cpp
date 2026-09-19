@@ -12,6 +12,9 @@
  */
 
 #include "settings/pc_settings.h"
+#include "mods/pc_hd_models.h"
+#include "mods/pc_hd_model_convert.h"
+#include "pc_file_dialog.h"
 #include "settings/pc_settings_p2d.h"
 #include "pc_menu_repeat.h"
 #ifdef __ANDROID__
@@ -280,6 +283,7 @@ bool sWaitingForKey = false; // true while capturing a new key
 // Enter / Space / pad A started capture while still held. Ignore them until
 // they are released, otherwise the same press is stored as the new binding.
 bool sCaptureWaitRelease = false;
+Uint32 sCapturePrevMouse = 0; // mouse buttons seen on the previous capture tick
 
 // Gamepad controls submenu state.
 bool sInGamepadSubmenu = false;
@@ -300,12 +304,17 @@ constexpr int kAdvancedRowCount = 4;
 // reference machine is a GTX 1050 -- so nothing here may be mandatory.
 bool sInGraphicsSubmenu = false;
 int sGraphicsSelection = 0;
-constexpr int kGraphicsRowCount = 11;
+constexpr int kGraphicsRowCount = 12;
 
 // Texture packs submenu state (PLAN_TEXTURAS_HD fase 2). La instalación la
 // hace el selector de archivos de Android y termina en un hilo Java; el
 // resultado llega por pc_texpack_install_finished() y se pinta aquí.
 bool sInTexturePacksSubmenu = false;
+bool sInHdModelsSubmenu = false;
+// Fila del submenú HD Models: 0 Olimar, 1 Pikmin, 2 Bulborb, 3 Dwarf Bulborb.
+int sHdModelsSelection = 0;
+std::atomic<bool> sHdModelInstallActive{false};
+bool sHdModelRestartPrompt = false;
 int sTexturePacksSelection = 0;      // 0 = instalar, 1.. = packs instalados
 std::atomic<bool> sTexturePackPickerActive{false}; // picker abierto o extracción en curso (hilo Java)
 std::atomic<int> sTexturePackInstallFiles{0};  // ficheros extraídos (hilo Java)
@@ -614,7 +623,9 @@ void closeMenu() {
     // la pagina principal.
     sInResolutionSubmenu = false;
     sInTexturePacksSubmenu = false;
+    sInHdModelsSubmenu = false;
     sTexturePackRestartPrompt = false;
+    sHdModelRestartPrompt = false;
     sInSaveDataSubmenu = false;
     sMenuOpen = false;
     pc_window_set_settings_menu_open(false);
@@ -914,7 +925,7 @@ void loadConfig() {
             int idx = atoi(key.substr(4).c_str());
             if (idx >= 0 && idx < PC_KEY_ACT_COUNT) {
                 const int scancode = atoi(val.c_str());
-                if (scancode >= 0 && scancode < SDL_NUM_SCANCODES) {
+                if (pc_bind_is_valid(scancode)) {
                     sConfig.keyboardBindings[idx] = scancode;
                 }
             }
@@ -1155,6 +1166,20 @@ void pollMenuInput() {
                 sWaitingForKey = false;
                 break;
             }
+            // Mouse buttons are bindable too (issue #42). Left and right stay
+            // out: they are the fixed cursor conveniences and the click that
+            // opened the capture would bind itself.
+            if (sWaitingForKey) {
+                const Uint32 mouseNow = SDL_GetMouseState(NULL, NULL);
+                const Uint32 mouseWent = mouseNow & ~sCapturePrevMouse;
+                sCapturePrevMouse = mouseNow;
+                for (int b = SDL_BUTTON_MIDDLE; b <= PC_BIND_MOUSE_LAST - PC_BIND_MOUSE_BASE; b++) {
+                    if (b == SDL_BUTTON_RIGHT || !(mouseWent & SDL_BUTTON(b))) continue;
+                    sPending.keyboardBindings[sControlSelection] = PC_BIND_MOUSE_BASE + b;
+                    sWaitingForKey = false;
+                    break;
+                }
+            }
             return;
         }
 
@@ -1188,6 +1213,7 @@ void pollMenuInput() {
         }
         if (ok) {
             sWaitingForKey = true;
+            sCapturePrevMouse = SDL_GetMouseState(NULL, NULL);
             sCaptureWaitRelease = true;
             return;
         }
@@ -1395,6 +1421,69 @@ void pollMenuInput() {
         return;
     }
 
+    // HD model restart prompt.
+    if (sHdModelRestartPrompt) {
+        bool accept = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
+        bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
+                      keyWentDown(SDL_SCANCODE_B);
+        if (ctl || sTouchFrameButtons) {
+            if (padNavA(ctl)) accept = true;
+            if (padNavB(ctl)) cancel = true;
+        }
+        if (accept && !cancel) {
+            sHdModelRestartPrompt = false;
+#ifdef __ANDROID__
+            pc_texpack_android_restart();
+#else
+            texturePackNotice(false, "HD model installed. Restart the game to apply it.");
+#endif
+        } else if (cancel) {
+            sHdModelRestartPrompt = false;
+        }
+        return;
+    }
+
+    if (sInHdModelsSubmenu) {
+        bool up = keyWentDown(SDL_SCANCODE_UP) || keyWentDown(SDL_SCANCODE_W);
+        bool down = keyWentDown(SDL_SCANCODE_DOWN) || keyWentDown(SDL_SCANCODE_S);
+        bool ok = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
+        bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
+                      keyWentDown(SDL_SCANCODE_B);
+        if (ctl || sTouchFrameButtons) {
+            if (padNavUp(ctl)) up = true;
+            if (padNavDown(ctl)) down = true;
+            if (padNavA(ctl)) ok = true;
+            if (padNavB(ctl)) cancel = true;
+        }
+        const int rowCount = 4;
+        if (up) { sHdModelsSelection = (sHdModelsSelection + rowCount - 1) % rowCount; return; }
+        if (down) { sHdModelsSelection = (sHdModelsSelection + 1) % rowCount; return; }
+        if (cancel) { sInHdModelsSubmenu = false; return; }
+        if (ok && !sTexturePackPickerActive) {
+#ifdef __ANDROID__
+            sTexturePackPickerActive = true;
+            sHdModelInstallActive = true;
+            pc_modelpack_android_open_picker(sHdModelsSelection);
+#else
+            // Desktop: native picker, then convert the chosen rip in place.
+            static const char* kTitles[4] = {
+                "Choose the Pikmin 3 Olimar zip", "Choose the Pikmin 3 Pikmin zip",
+                "Choose the Pikmin 3 Bulborb zip", "Choose the Pikmin 3 Dwarf Bulborb zip",
+            };
+            char chosen[4096];
+            if (pc_file_dialog_open(kTitles[sHdModelsSelection], "Model zip", "*.zip *.ZIP", chosen, sizeof(chosen))) {
+                char msg[192];
+                const int written = pc_hd_models_convert_file(chosen, sHdModelsSelection, msg, sizeof(msg));
+                texturePackNotice(written <= 0, msg);
+                if (written > 0) sHdModelRestartPrompt = true;
+            } else if (chosen[0] != '\0') {
+                texturePackNotice(true, chosen); // no dialog available: says why
+            }
+#endif
+        }
+        return;
+    }
+
     // Texture packs submenu. The restart prompt owns input while it is up:
     // activating a pack asks for a restart, and the choice must not leak into
     // the pack list underneath as a stray press.
@@ -1553,6 +1642,16 @@ void pollMenuInput() {
 #endif
                 sInTexturePacksSubmenu = true;
                 sTexturePacksSelection = 0;
+            }
+            return;
+        }
+        if (sGraphicsSelection == 11) {
+            if (ok) {
+                sInHdModelsSubmenu = true;
+                sHdModelsSelection = 0;
+                // Zips dropped straight into Load/Models are converted here
+                // too, so the rows below reflect them without a restart.
+                pc_hd_models_convert_sources();
             }
             return;
         }
@@ -2278,6 +2377,7 @@ void pc_texpack_install_progress(int files) {
 void pc_texpack_install_finished(bool ok, const char* message) {
     sTexturePackPickerActive = false;
     sTexturePackInstallFiles.store(0);
+    if (sHdModelInstallActive.exchange(false) && ok) sHdModelRestartPrompt = true;
     texturePackNotice(!ok, message ? message : (ok ? "Pack instalado." : "No se pudo instalar el pack."));
 }
 
@@ -2723,12 +2823,11 @@ void pc_settings_draw(void) {
             bool waiting = sWaitingForKey && selected;
 
             const char* actionName = pc_window_get_key_action_name(i);
-            SDL_Scancode boundSc = static_cast<SDL_Scancode>(sPending.keyboardBindings[i]);
-            const char* scName = SDL_GetScancodeName(boundSc);
+            const char* scName = pc_window_binding_name(sPending.keyboardBindings[i]);
 
             char value[96];
             if (waiting) {
-                snprintf(value, sizeof(value), "[Press a key...]");
+                snprintf(value, sizeof(value), "[Press a key or mouse button...]");
             } else {
                 snprintf(value, sizeof(value), "%s", scName ? scName : "None");
             }
@@ -2889,6 +2988,63 @@ void pc_settings_draw(void) {
         return; // Don't draw footer when submenu is open.
     }
 
+    // Dedicated HD model submenu. Models use their own package path and are
+    // intentionally not mixed with texture packs.
+    if (sInHdModelsSubmenu) {
+        const int subX = px1 + 18, subY = py1 + 44;
+        const int subW = panelW - 36, subH = panelH - 58;
+        drawSubmenuSurface(gfx, subX, subY, subW, subH, "HD Models",
+                           "Up/Down: model   A: install",
+                           "Esc/B: back   Restart required");
+
+        std::error_code modelEc;
+        const bool olimarInstalled = std::filesystem::is_regular_file(pc_hd_model_path(PC_HD_MODEL_OLIMAR), modelEc);
+        const bool pikminInstalled = std::filesystem::is_regular_file(pc_hd_model_path(PC_HD_MODEL_PIKI_RED), modelEc)
+            && std::filesystem::is_regular_file(pc_hd_model_path(PC_HD_MODEL_PIKI_YELLOW), modelEc)
+            && std::filesystem::is_regular_file(pc_hd_model_path(PC_HD_MODEL_PIKI_BLUE), modelEc);
+        const bool bulborbInstalled = std::filesystem::is_regular_file(pc_hd_model_path(PC_HD_MODEL_BULBORB), modelEc);
+        const bool dwarfInstalled = std::filesystem::is_regular_file(pc_hd_model_path(PC_HD_MODEL_BULBORB_DWARF), modelEc);
+        // Una fila por modelo: cada una abre el selector para su propio zip
+        // (los rips originales de Pikmin 3 o un pack .nhm ya convertido).
+        const char* labels[4] = { "Olimar HD", "Pikmin HD (red/yellow/blue)", "Bulborb HD", "Dwarf Bulborb HD" };
+        const bool installed[4] = { olimarInstalled, pikminInstalled, bulborbInstalled, dwarfInstalled };
+        for (int row = 0; row < 4; row++) {
+            char value[96];
+            const bool busy = sTexturePackPickerActive && row == sHdModelsSelection;
+            if (busy && sTexturePackInstallFiles.load() > 0)
+                snprintf(value, sizeof(value), "Installing... %d files", sTexturePackInstallFiles.load());
+            else if (busy)
+                snprintf(value, sizeof(value), "Selecting file...");
+            else
+                snprintf(value, sizeof(value), "%s", installed[row] ? "Installed" : "Not installed");
+            drawSubmenuRow(gfx, subX + 20, subY + 70 + row * 28, subW - 40,
+                           labels[row], value, row == sHdModelsSelection);
+        }
+        // The installer converts the public Pikmin 3 rips (Collada + PNG zips
+        // from The Models Resource) on the device, so no external tool is needed.
+        const char* hint = "Pick the original Pikmin 3 model zip from The Models Resource.";
+        drawTextOutline(subX + subW / 2 - menuTextWidth(hint) / 2, subY + 70 + 4 * 28 + 8, "%s",
+                        Colour(150, 160, 190, 255), Colour(10, 16, 36, 255), hint);
+        drawTimedNotice(subX + subW / 2, subY + subH - 8);
+
+        if (sHdModelRestartPrompt) {
+            const int boxW = 560, boxH = 150;
+            const int boxX = screenW / 2 - boxW / 2;
+            const int boxY = screenH / 2 - boxH / 2;
+            drawPikminPanel(gfx, boxX, boxY, boxW, boxH, 18);
+            const char* line1 = "HD model installed.";
+            const char* line2 = "Restart now so the HD models are loaded.";
+            drawTextOutline(boxX + boxW / 2 - menuTextWidth(line1) / 2, boxY + 42, "%s",
+                            Colour(255, 240, 180, 255), Colour(18, 26, 56, 255), line1);
+            drawTextOutline(boxX + boxW / 2 - menuTextWidth(line2) / 2, boxY + 68, "%s",
+                            Colour(255, 240, 180, 255), Colour(18, 26, 56, 255), line2);
+            const char* prompt = "A: Restart now   B: Not yet";
+            drawTextOutline(boxX + boxW / 2 - menuTextWidth(prompt) / 2, boxY + 106, "%s",
+                            Colour(255, 255, 255, 255), Colour(18, 26, 56, 255), prompt);
+        }
+        return;
+    }
+
     // Texture packs submenu overlay.
     if (sInTexturePacksSubmenu) {
         const int subX = px1 + 18, subY = py1 + 44;
@@ -3029,6 +3185,7 @@ void pc_settings_draw(void) {
             "Brightness",
             "Saturation",
             "Texture Packs",
+            "HD Models",
         };
 
         const int listStartY = subY + 62;
@@ -3063,7 +3220,7 @@ void pc_settings_draw(void) {
                 else snprintf(value, sizeof(value), "Anisotropic %dx", sPending.anisotropy);
             } else if (i == 6) {
                 snprintf(value, sizeof(value), "%s", gradingOn ? "On" : "Off");
-            } else if (i == 10) {
+            } else if (i == 10 || i == 11) {
                 // Rowing into a submenu rather than cycling a value. Mirror the
                 // main-list convention so the row reads like the others.
                 snprintf(value, sizeof(value), "Manage >");

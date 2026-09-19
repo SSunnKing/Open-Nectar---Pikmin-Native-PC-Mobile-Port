@@ -18,6 +18,10 @@
 /// elegir un .zip o .rar de pack de texturas, con el juego en marcha.
 void pc_texpack_android_open_picker(void);
 
+/// Abre el selector dedicado a paquetes de modelos HD (Load/Models).
+/// `kind`: 0 Olimar, 1 Pikmin, 2 Bulborb, 3 Dwarf Bulborb (HdModelConverter.KIND_*).
+void pc_modelpack_android_open_picker(int kind);
+
 /// Relanza la aplicación para que el pack activado se indexe al arrancar.
 void pc_texpack_android_restart(void);
 

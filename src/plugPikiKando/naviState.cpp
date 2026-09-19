@@ -2146,10 +2146,24 @@ void NaviThrowWaitState::exec(Navi* navi)
 		}
 	}
 
+#if defined(PIKI_PC_PORT)
+	// keyUp is level-triggered. A release while a nearby Pikmin is still
+	// waiting for the grab keyframe used to sit here until the ThrowWait
+	// animation reached KEY_Action0, which put a whole grab animation between
+	// every throw and capped the cadence (issues #37 / #40). Complete the grab
+	// on the spot instead: the Pikmin is in range and would have been attached
+	// a few frames later anyway.
+	if (navi->mKontroller->keyUp(KeyConfig::_instance->mThrowKey.mBind) && !mIsHoldingThrowPiki && mHeldThrowPiki
+	    && mHeldThrowPiki->getState() == PIKISTATE_Normal) {
+		mIsHoldingThrowPiki = true;
+		mHeldThrowPiki->mFSM->transit(mHeldThrowPiki, PIKISTATE_Hanged);
+		lockHangPiki(navi);
+	}
+#endif
 	if (navi->mKontroller->keyUp(KeyConfig::_instance->mThrowKey.mBind)
 #if defined(PIKI_PC_PORT)
-	    // keyUp is level-triggered: a quick release remains pending while the
-	    // Pikmin approaches and the grab animation finishes.
+	    // A pending (far) Pikmin still walking over remains pending until it
+	    // is actually grabbed.
 	    && mIsHoldingThrowPiki
 #endif
 	) {
@@ -2233,6 +2247,9 @@ void NaviThrowState::init(Navi* navi)
 	mHasThrownPiki = false;
 	seSystem->playPlayerSe(SE_THROW);
 	_11 = false;
+#if defined(PIKI_PC_PORT)
+	mQueuedThrowPress = false;
+#endif
 }
 
 /**
@@ -2287,7 +2304,20 @@ void NaviThrowState::exec(Navi* navi)
 
 	navi->findNextThrowPiki();
 
+#if defined(PIKI_PC_PORT)
+	// keyClick is a one-tick edge. While mashing, the next press usually
+	// lands during the wind-up and was ignored, so every other throw was
+	// lost and the cadence felt capped (issues #37 / #40). Remember it and
+	// act on it the tick the Pikmin leaves the hand.
+	const bool throwClick = navi->mKontroller->keyClick(KeyConfig::_instance->mThrowKey.mBind);
+	if (!mHasThrownPiki && throwClick) {
+		mQueuedThrowPress = true;
+	}
+	if (mHasThrownPiki && (throwClick || mQueuedThrowPress)) {
+		mQueuedThrowPress = false;
+#else
 	if (mHasThrownPiki && navi->mKontroller->keyClick(KeyConfig::_instance->mThrowKey.mBind)) {
+#endif
 		if (navi->procActionButton()) {
 			return;
 		}

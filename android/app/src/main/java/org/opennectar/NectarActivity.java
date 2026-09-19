@@ -72,6 +72,11 @@ public class NectarActivity extends SDLActivity {
         runOnUiThread(() -> TexturePack.openTexturePackPicker(this));
     }
 
+    /** Selector separado: los modelos HD no son packs de texturas. */
+    public void openModelPackPicker(final int kind) {
+        runOnUiThread(() -> TexturePack.openModelPackPicker(this, kind));
+    }
+
     /** Lo llama pc_texpack_android_restart() tras activar un pack. */
     public void restartTexturePacks() {
         TexturePack.restartTexturePacks(this);
@@ -100,6 +105,16 @@ public class NectarActivity extends SDLActivity {
                 // La extracción de cientos de MB no puede bloquear el hilo de UI; el
                 // juego puede seguir corriendo mientras tanto.
                 new Thread(() -> TexturePack.install(this, uri), "nectar-texture-pack").start();
+            }
+            return;
+        }
+        if (requestCode == TexturePack.REQ_MODEL_PACK) {
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+                TexturePack.nativeInstallFinished(false, "No file selected.");
+            } else {
+                final android.net.Uri uri = data.getData();
+                new Thread(() -> TexturePack.installModel(this, uri, TexturePack.pendingModelKind()),
+                           "nectar-model-pack").start();
             }
             return;
         }

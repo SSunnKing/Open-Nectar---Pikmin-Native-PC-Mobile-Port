@@ -9,6 +9,9 @@
 #include "MoviePlayer.h"
 #include "PikiAI.h"
 #include "PikiMgr.h"
+#if defined(PIKI_PC_PORT)
+#include "mods/pc_hd_models.h"
+#endif
 #include "PikiState.h"
 #include "Shape.h"
 #include "UfoItem.h"
@@ -422,6 +425,33 @@ void Piki::updateLook()
 	}
 }
 
+#if defined(PIKI_PC_PORT)
+/**
+ * HD replacement mesh for this piki's colour, if a pack is installed. The
+ * mushroom (kinoko) piki keeps the original model.
+ */
+PcHdModelId ViewPiki::hdPikiModel() const
+{
+	switch (mColor) {
+	case Blue: return PC_HD_MODEL_PIKI_BLUE;
+	case Red: return PC_HD_MODEL_PIKI_RED;
+	case Yellow: return PC_HD_MODEL_PIKI_YELLOW;
+	default: return PC_HD_MODEL_COUNT;
+	}
+}
+
+PcHdModelId ViewPiki::hdHappaModel() const
+{
+	switch (mHappa) {
+	case Leaf: return PC_HD_MODEL_HAPPA_LEAF;
+	case Bud: return PC_HD_MODEL_HAPPA_BUD;
+	case Flower: return PC_HD_MODEL_HAPPA_FLOWER;
+	default: return PC_HD_MODEL_COUNT;
+	}
+}
+
+#endif
+
 /**
  * @todo: Documentation
  */
@@ -448,14 +478,30 @@ void ViewPiki::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 	mPikiShape->mShape->calcJointWorldPos(gfx, 6, pos);
 	mEffectPos = pos;
 
-	if (isDamaged() && gsys->getRand(1.0f) > 0.5f) {
-		mPikiShape->mShape->mMaterialList->setColour(COLOUR_WHITE);
-	} else {
-		mPikiShape->mShape->mMaterialList->setColour(mCurrentColour);
+	const Colour drawColour = (isDamaged() && gsys->getRand(1.0f) > 0.5f) ? COLOUR_WHITE : mCurrentColour;
+	mPikiShape->mShape->mMaterialList->setColour(drawColour);
+#if defined(PIKI_PC_PORT)
+	// The original piki texture is grey and mCurrentColour paints it; the HD
+	// textures are already coloured. States the engine expresses by painting
+	// lighter (idle pastel, the white damage flash) become a blend toward
+	// white measured as how far the draw colour moved from the default.
+	const GXColor hdTint = { 255, 255, 255, 255 };
+	int hdWhiten         = 0;
+	const u8 drawRgb[3] = { drawColour.r, drawColour.g, drawColour.b };
+	const u8 baseRgb[3] = { mDefaultColour.r, mDefaultColour.g, mDefaultColour.b };
+	for (int ch = 0; ch < 3; ++ch) {
+		if (baseRgb[ch] >= 255 || drawRgb[ch] <= baseRgb[ch]) continue;
+		const int amount = (drawRgb[ch] - baseRgb[ch]) * 255 / (255 - baseRgb[ch]);
+		if (amount > hdWhiten) hdWhiten = amount;
 	}
+	const GXColor hdHappaTint = { 255, 255, 255, 255 };
+#endif
 
 	if (aiCullable()) {
-		mPikiShape->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
+#if defined(PIKI_PC_PORT)
+		if (!pc_hd_model_draw_skinned(gfx, mPikiShape->mShape, hdPikiModel(), hdTint, static_cast<u8>(hdWhiten)))
+#endif
+			mPikiShape->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
 	}
 
 	if (mIsPanicked) {
@@ -464,7 +510,10 @@ void ViewPiki::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 
 	if (aiCullable() && AIPerf::optLevel < 3 && mHappaModel) {
 		gfx.useMatrix(mPikiShape->mShape->getAnimMatrix(6), 0);
-		mHappaModel->drawshape(gfx, *gfx.mCamera, nullptr);
+#if defined(PIKI_PC_PORT)
+		if (!pc_hd_model_draw_rigid(gfx, mPikiShape->mShape->getAnimMatrix(6), hdHappaModel(), hdHappaTint))
+#endif
+			mHappaModel->drawshape(gfx, *gfx.mCamera, nullptr);
 	}
 
 	if (mMode == PikiMode::FormationMode && AIPerf::kandoOnly) {

@@ -110,6 +110,13 @@ void pc_texpack_android_open_picker(void)
 	if (env && open && gActivity) env->CallVoidMethod(gActivity, open);
 }
 
+void pc_modelpack_android_open_picker(int kind)
+{
+	JNIEnv* env = jni_env();
+	jmethodID open = activity_method(env, "openModelPackPicker", "(I)V");
+	if (env && open && gActivity) env->CallVoidMethod(gActivity, open, (jint)kind);
+}
+
 JavaVM* pc_android_jni_vm(void)
 {
 	return gVm;

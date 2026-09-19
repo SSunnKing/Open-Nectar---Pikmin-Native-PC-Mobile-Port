@@ -124,8 +124,31 @@ void BTeki::viewDraw(Graphics& gfx, immut Matrix4f& mat)
 	gfx.useMatrix(Matrix4f::ident, 0);
 	mTekiAnimator->updateContext();
 	mTekiShape->mShape->updateAnim(gfx, mat, nullptr, this);
-	mTekiShape->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
+#if defined(PIKI_PC_PORT)
+	if (!pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
+#endif
+		mTekiShape->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
 }
+
+#if defined(PIKI_PC_PORT)
+/**
+ * HD replacement mesh for this enemy type, if a pack is installed.
+ */
+PcHdModelId BTeki::hdModel() const
+{
+	switch (mTekiType) {
+	case TEKI_Chappy: return PC_HD_MODEL_BULBORB_DWARF;
+	case TEKI_Swallow: return PC_HD_MODEL_BULBORB;
+	default: return PC_HD_MODEL_COUNT;
+	}
+}
+
+GXColor BTeki::hdTint() const
+{
+	const GXColor white = { 255, 255, 255, 255 };
+	return white;
+}
+#endif
 
 /**
  * @todo: Documentation
@@ -1960,7 +1983,10 @@ void BTeki::drawTekiShape(Graphics& gfx)
 			mAnimatedMaterials.animate(nullptr);
 		}
 
-		mTekiShape->mShape->drawshape(gfx, *gfx.mCamera, &mAnimatedMaterials);
+#if defined(PIKI_PC_PORT)
+		if (!pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
+#endif
+			mTekiShape->mShape->drawshape(gfx, *gfx.mCamera, &mAnimatedMaterials);
 		if (lightType == 1) {
 			gfx.calcLighting(1.0f);
 		}

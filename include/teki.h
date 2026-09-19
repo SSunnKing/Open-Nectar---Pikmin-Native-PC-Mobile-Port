@@ -17,6 +17,9 @@
 #include "system.h"
 #include "types.h"
 #include "zen/CallBack.h"
+#if defined(PIKI_PC_PORT)
+#include "mods/pc_hd_models.h"
+#endif
 
 #if defined(PIKI_PC_PORT)
 f32 pc_hardmode_teki_life(f32 base);
@@ -214,6 +217,10 @@ public:
 	virtual void viewDoAnimation();                            // _150
 	virtual void viewFinishMotion();                           // _154
 	virtual void viewDraw(Graphics&, immut Matrix4f&);         // _158
+#if defined(PIKI_PC_PORT)
+	PcHdModelId hdModel() const;
+	GXColor hdTint() const;
+#endif
 	virtual void viewKill();                                   // _15C
 	virtual Vector3f viewGetScale();                           // _160
 	virtual f32 viewGetBottomRadius();                         // _164

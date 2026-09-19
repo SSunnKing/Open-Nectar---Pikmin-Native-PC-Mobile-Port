@@ -5,6 +5,7 @@
 #include "pc_permadeath.h"
 #include "pc_window.h"
 #include "settings/pc_settings.h"
+#include "mods/pc_hd_models.h"
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
 #endif
@@ -2102,6 +2103,22 @@ void Navi::makeCStick(bool isSunset)
 		cStickInput.set(0.0f, 0.0f, 0.0f);
 	}
 
+#if defined(PIKI_PC_PORT)
+	// Swarm button (issue #29): with the C-stick idle, steer the squad at the
+	// cursor. The input is expressed in camera space here and rotated into
+	// the world below, so the world-space direction is rotated back first.
+	if (!isSunset && pc_window_swarm_held() && cStickInput.length() < 0.05f) {
+		NVector3f toCursor(mCursorWorldPos.x - mSRT.t.x, 0.0f, mCursorWorldPos.z - mSRT.t.z);
+		if (toCursor.length() > 1.0f) {
+			toCursor.normalise();
+			NTransform3D NRef back = NTransform3D();
+			back.inputAxisAngle(NAxisAngle4f(NVector3f(0.0f, 1.0f, 0.0f), -cameraYaw));
+			back.transform(toCursor);
+			cStickInput.set(toCursor.x, 0.0f, toCursor.z);
+		}
+	}
+#endif
+
 	reviseController(cStickInput);
 
 	if (mPlateMgr) {
@@ -2337,7 +2354,11 @@ void Navi::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 {
 	mShadowCaster.mSourcePosition.set(mSRT.t.x + 75.0f, mSRT.t.y + 100.0f, mSRT.t.z + 25.0f);
 	mShadowCaster.mTargetPosition.set(mSRT.t.x, mSRT.t.y + 10.0f, mSRT.t.z);
-	mNaviShapeObject->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
+#if defined(PIKI_PC_PORT)
+	const GXColor hdTint = { 255, 255, 255, 255 };
+	if (!pc_hd_model_draw_skinned(gfx, mNaviShapeObject->mShape, PC_HD_MODEL_OLIMAR, hdTint))
+#endif
+		mNaviShapeObject->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
 	mCollInfo->updateInfo(gfx, false);
 	CollPart* antenna = mCollInfo->getSphere('ante');
 	if (antenna) {

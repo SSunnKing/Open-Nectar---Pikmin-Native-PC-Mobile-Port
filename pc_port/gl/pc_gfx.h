@@ -78,6 +78,18 @@ void pc_gfx_set_tex_coord_gen(GXTexCoordID coord, GXTexGenType type, GXTexGenSrc
 void pc_gfx_set_z_mode(GXBool compareEnable, GXCompare func, GXBool updateEnable);
 void pc_gfx_set_blend_mode(GXBlendMode type, GXBlendFactor srcFactor, GXBlendFactor dstFactor, GXLogicOp op);
 void pc_gfx_set_cull_mode(GXCullMode mode);
+
+// Snapshot of the fixed-function state a one-off draw (the HD model mod)
+// changes, so it can be put back exactly: the engine's material display
+// lists do not restate everything, so a leaked cull/blend/z mode showed up
+// on the next mesh drawn (a transparent Onion, a vanished helmet).
+struct PcGfxPipelineState {
+    GXBool zCompare; GXCompare zFunc; GXBool zUpdate;
+    GXBlendMode blendType; GXBlendFactor blendSrc, blendDst; GXLogicOp blendOp;
+    GXCullMode cull;
+};
+PcGfxPipelineState pc_gfx_get_pipeline_state(void);
+void pc_gfx_set_pipeline_state(const PcGfxPipelineState& state);
 void pc_gfx_set_color_update(GXBool updateEnable);
 void pc_gfx_set_alpha_update(GXBool updateEnable);
 void pc_gfx_set_alpha_compare(GXCompare comp0, u8 ref0, GXAlphaOp op, GXCompare comp1, u8 ref1);
@@ -118,7 +130,8 @@ void pc_gfx_set_dump_texture_names(int enabled);
 /// tiling. Nothing on the console could do this; it exists so the H4M player
 /// can hand over a finished picture instead of encoding one into a hardware
 /// format and unpicking it again with four TEV stages.
-void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height);
+void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height,
+                              GXTexWrapMode wrapS = GX_CLAMP, GXTexWrapMode wrapT = GX_CLAMP);
 void pc_gfx_init_tex_obj_ci(GXTexObj* obj, void* imagePtr, u16 width, u16 height, GXCITexFmt format,
                             GXTexWrapMode wrapS, GXTexWrapMode wrapT, GXBool mipmap, u32 tlutName);
 void pc_gfx_init_tlut_obj(GXTlutObj* obj, void* lut, GXTlutFmt format, u16 numEntries);
@@ -143,6 +156,7 @@ void pc_gfx_push_f32(f32 val);
 void pc_gfx_position(f32 x, f32 y, f32 z);
 void pc_gfx_color(u8 r, u8 g, u8 b, u8 a);
 void pc_gfx_texcoord(f32 u, f32 v);
+void pc_gfx_normal(f32 x, f32 y, f32 z);
 void pc_gfx_end(void);
 void pc_gfx_call_display_list(const void* list, u32 nbytes);
 
