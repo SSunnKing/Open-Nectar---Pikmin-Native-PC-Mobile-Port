@@ -9,6 +9,7 @@ PcFrameScheduler::PcFrameScheduler(int maxCatchUpTicks, double suspendThreshold)
     , mMaxCatchUpTicks(std::max(1, maxCatchUpTicks))
     , mSuspendThreshold(std::max(0.0, suspendThreshold))
     , mFixedDelta(1.0 / 60.0)
+    , mSpeed(1.0)
     , mLastTime(0.0)
     , mAccumulator(0.0)
     , mNextDeadline(0.0)
@@ -26,20 +27,22 @@ double PcFrameScheduler::deltaForClamp(int frameClamp)
 	return frameClamp / 60.0;
 }
 
-void PcFrameScheduler::reset(double now, int frameClamp)
+void PcFrameScheduler::reset(double now, int frameClamp, double speed)
 {
 	mInitialised   = true;
 	mFrameClamp    = frameClamp;
 	mFixedDelta    = deltaForClamp(mFrameClamp);
+	mSpeed         = std::isfinite(speed) ? std::max(1.0, std::min(2.0, speed)) : 1.0;
 	mLastTime      = now;
 	mAccumulator   = 0.0;
-	mNextDeadline  = now + mFixedDelta;
+	mNextDeadline  = now + mFixedDelta / mSpeed;
 }
 
-PcFrameSchedule PcFrameScheduler::advance(double now, int frameClamp)
+PcFrameSchedule PcFrameScheduler::advance(double now, int frameClamp, double speed)
 {
-	if (!mInitialised || frameClamp != mFrameClamp || now < mLastTime) {
-		reset(now, frameClamp);
+	speed = std::isfinite(speed) ? std::max(1.0, std::min(2.0, speed)) : 1.0;
+	if (!mInitialised || frameClamp != mFrameClamp || speed != mSpeed || now < mLastTime) {
+		reset(now, frameClamp, speed);
 		return { 0, mFixedDelta, 0.0, mNextDeadline, mDiscardedTicks };
 	}
 
@@ -48,11 +51,11 @@ PcFrameSchedule PcFrameScheduler::advance(double now, int frameClamp)
 	if (realDelta >= mSuspendThreshold) {
 		// Focus loss, debugging and loading pauses do not become simulation debt.
 		mAccumulator  = 0.0;
-		mNextDeadline = now + mFixedDelta;
+		mNextDeadline = now + mFixedDelta / mSpeed;
 		return { 0, mFixedDelta, 0.0, mNextDeadline, mDiscardedTicks };
 	}
 
-	mAccumulator += realDelta;
+	mAccumulator += realDelta * mSpeed;
 	const int available = static_cast<int>(std::floor((mAccumulator + 1e-12) / mFixedDelta));
 	const int ticks     = std::min(available, mMaxCatchUpTicks);
 	if (available > ticks) {
@@ -64,7 +67,7 @@ PcFrameSchedule PcFrameScheduler::advance(double now, int frameClamp)
 	if (mAccumulator < 0.0) mAccumulator = 0.0;
 
 	mTotalTicks += static_cast<std::uint64_t>(ticks);
-	mNextDeadline = now + (mFixedDelta - mAccumulator);
+	mNextDeadline = now + (mFixedDelta - mAccumulator) / mSpeed;
 	const double alpha = std::min(1.0, mAccumulator / mFixedDelta);
 	return { ticks, mFixedDelta, alpha, mNextDeadline, mDiscardedTicks };
 }

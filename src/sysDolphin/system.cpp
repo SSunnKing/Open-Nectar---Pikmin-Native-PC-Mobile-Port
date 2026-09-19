@@ -304,7 +304,7 @@ void System::run(BaseApp* app)
 
     // Initialize frame scheduler for fixed-step timing
     PcFrameScheduler frameScheduler;
-    frameScheduler.reset(std::chrono::steady_clock::now().time_since_epoch().count() / 1e9, mFrameRate);
+    frameScheduler.reset(std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(), mFrameRate);
 
     // Render packet capture only pays for itself in the experimental 60 FPS
     // mode. Left on unconditionally it copied every display list on the default
@@ -326,10 +326,12 @@ void System::run(BaseApp* app)
 #endif
 
 		// Get schedule from fixed-step scheduler
-		double now = std::chrono::steady_clock::now().time_since_epoch().count() / 1e9;
-		PcFrameSchedule schedule = frameScheduler.advance(now, mFrameRate);
+		double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+		const int frameClampAtSchedule = mFrameRate;
+        const double speedAtSchedule = pc_window_simulation_speed(mFrameRate);
+        PcFrameSchedule schedule = frameScheduler.advance(now, mFrameRate, speedAtSchedule);
 
-		if (schedule.logicalTicks > 0) {
+		for (int tickIndex = 0; tickIndex < schedule.logicalTicks; ++tickIndex) {
 #if PIKI_PC_PORT
 			// Sample input once per logical tick, not once per loop iteration.
 			// Only a tick consumes it, and the pad reader is edge shaped: a
@@ -339,11 +341,22 @@ void System::run(BaseApp* app)
 			// timer granularity is coarse enough to overshoot it -- which lost
 			// walking and throw inputs at high refresh rates.
 			mControllerMgr.update();
+            if (pc_window_should_close()) break; // Input may handle quit.
 			pc_gfx_enable_capture(pc_replay_test_enabled());
 #endif
 			updateSysClock();
+            // Fixed simulation steps; OS/audio/network clocks remain wall time.
+            mDeltaTime = static_cast<f32>(schedule.fixedDelta);
 			OSCheckActiveThreads();
 			app->idle();
+            // Deliver the sampled input before changing schedules, then drop old
+            // debt if this tick opened settings or changed speed/frame mode.
+            if (mFrameRate != frameClampAtSchedule || pc_window_simulation_speed(mFrameRate) != speedAtSchedule) {
+                const double resetTime = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                frameScheduler.reset(resetTime, mFrameRate, pc_window_simulation_speed(mFrameRate));
+                break;
+            }
 
 			// Identity-replay experiment: re-execute the tick's captured display
 			// lists into a cleared framebuffer and present that. It is NOT the
@@ -374,7 +387,7 @@ void System::run(BaseApp* app)
 		if (schedule.logicalTicks == 0) {
 			const double margin  = 0.001;
 			const double wakeAt  = schedule.nextDeadline - margin;
-			const double timeNow = std::chrono::steady_clock::now().time_since_epoch().count() / 1e9;
+			const double timeNow = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 			double waitFor       = wakeAt - timeNow;
 			if (waitFor > 0.0) {
 				// Never sleep past one whole frame: a clock jump or a clamp

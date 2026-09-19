@@ -59,6 +59,7 @@ static std::chrono::steady_clock::time_point sNextPresentDeadline;
 
 // Settings-menu video state (PC only).
 static int sDisplayMode = PC_WINDOW_FULLSCREEN_WINDOWED;
+static bool sFastForwardHeld = false;
 static bool sVsyncEnabled = true;   // presentation pacing on/off
 static char sLastVideoError[256] = { 0 };
 
@@ -668,6 +669,7 @@ void pc_window_poll_events(PADStatus* pad) {
                     event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
                     sMouseCursorDeltaX = 0.0f;
                     sMouseCursorDeltaY = 0.0f;
+                    sFastForwardHeld = false;
                 }
                 break;
             case SDL_CONTROLLERDEVICEADDED:
@@ -687,7 +689,13 @@ void pc_window_poll_events(PADStatus* pad) {
                     printf("[PC Port] Game Controller disconnected\n");
                 }
                 break;
+            case SDL_KEYUP:
+                if (event.key.keysym.scancode == SDL_SCANCODE_F10) sFastForwardHeld = false;
+                break;
             case SDL_KEYDOWN:
+                if (event.key.keysym.scancode == SDL_SCANCODE_F10 && !event.key.repeat && !sSettingsMenuOpen) {
+                    sFastForwardHeld = true;
+                }
                 // Toggle relative mouse mode with Tab key
                 if (event.key.keysym.scancode == SDL_SCANCODE_TAB
                     && sControlMode == PC_CONTROL_MOUSE_CURSOR && !sSettingsMenuOpen) {
@@ -992,7 +1000,7 @@ void pc_window_swap_buffers(void) {
             // at 120 and then presents at 60.
             const auto targetDuration = std::chrono::duration<double>(
                 sLogicalRetraceInterval == 0 ? (1.0 / 120.0)
-                                             : (sLogicalRetraceInterval / 60.0));
+                                             : (sLogicalRetraceInterval / 60.0)) / pc_window_simulation_speed(sLogicalRetraceInterval);
             const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(targetDuration);
             auto now = std::chrono::steady_clock::now();
             if (sNextPresentDeadline.time_since_epoch().count() == 0) {
@@ -1192,7 +1200,13 @@ float pc_window_get_mouse_sensitivity(void) {
     return sMouseSensitivity;
 }
 
+double pc_window_simulation_speed(int frameClamp) {
+    return sFastForwardHeld && !sSettingsMenuOpen && frameClamp == 2
+        && sWindow && (SDL_GetWindowFlags(sWindow) & SDL_WINDOW_INPUT_FOCUS) ? 2.0 : 1.0;
+}
+
 void pc_window_set_settings_menu_open(bool open) {
+    if (open) sFastForwardHeld = false;
     sSettingsMenuOpen = open;
     
     // Clear mouse deltas on menu state transition
