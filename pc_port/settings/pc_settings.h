@@ -58,6 +58,9 @@ int pc_settings_get_chain_actions(void);
 // the first pluck keeps going; release or whistle cancels. Off by default.
 int pc_settings_get_hold_to_pluck(void);
 
+// Suppress informational hints; progression and game-over screens remain active.
+int pc_settings_get_disable_tutorials(void);
+
 /// What the mouse wheel controls: 0 = Pikmin colour to throw, 1 = camera zoom.
 int pc_settings_get_mouse_wheel_action(void);
 

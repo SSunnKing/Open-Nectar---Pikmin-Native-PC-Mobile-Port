@@ -27,6 +27,7 @@
 #include <chrono>
 
 #include "settings/pc_settings.h"
+#include "settings/pc_tutorial_policy.h"
 #include "jaudio/piki_scene.h"
 #include "jaudio/pikidemo.h"
 #include "sysNew.h"
@@ -2660,6 +2661,13 @@ void GameMovieInterface::parse(GameMovieInterface::SimpleMessage& msg)
 	switch (cmd) {
 	case MOVIECMD_TextDemo:
 	{
+		if (pc_should_skip_tutorial(pc_settings_get_disable_tutorials(), data)) {
+			// Match normal text dismissal: release an associated movie wait too.
+			if (gameflow.mMoviePlayer->mIsActive) {
+				gameflow.mMoviePlayer->skipScene(SCENESKIP_Skip);
+			}
+			break;
+		}
 		// open a text window - data here should use the zen::ogScrTutorialMgr::EnumTutorial enum (text ID)
 		PRINT("***** START TUTORIAL WINDOW\n");
 		int ufoPartID = -1;
