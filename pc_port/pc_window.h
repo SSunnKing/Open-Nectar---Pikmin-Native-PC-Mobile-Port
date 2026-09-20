@@ -14,6 +14,8 @@ void pc_window_swap_buffers(void);
 void pc_window_set_swap_interval(int interval);
 void pc_window_shutdown(void);
 bool pc_window_should_close(void);
+// Experimental hold-F10 acceleration; only active in the stable 30 Hz mode.
+double pc_window_simulation_speed(int frameClamp);
 int  pc_window_get_width(void);
 int  pc_window_get_height(void);
 

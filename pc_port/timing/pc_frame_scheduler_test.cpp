@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 
 static int failures = 0;
 
@@ -55,6 +56,32 @@ int main()
 	result = change.advance(1.0 / 20.0, 2);
 	check(result.logicalTicks == 1, "new clamp deadline must produce one tick");
 
+
+    for (int clamp : {0, 1, 2}) {
+        PcFrameScheduler fast;
+        fast.reset(0.0, clamp, 2.0);
+        double simulated = 0.0;
+        for (int i = 1; i <= 2400; ++i) {
+            auto tick = fast.advance(i / 240.0, clamp, 2.0);
+            for (int n = 0; n < tick.logicalTicks; ++n) simulated += tick.fixedDelta;
+        }
+        check(std::abs(simulated - 20.0) < 1e-8, "2x consumes twenty simulated seconds in ten wall seconds");
+    }
+    PcFrameScheduler toggle;
+    toggle.reset(0, 2);
+    toggle.advance(.01, 2);
+    auto doubled = toggle.advance(.01, 2, 2);
+    check(doubled.logicalTicks == 0 && std::abs(doubled.nextDeadline - (.01 + 1.0/60)) < 1e-12,
+          "speed change clears fractional debt and uses wall-speed deadline");
+    auto suspended = toggle.advance(2.0, 2, 2);
+    check(suspended.logicalTicks == 0, "2x suspension does not create catch-up debt");
+    auto normal = toggle.advance(2.01, 2, 1);
+    check(normal.logicalTicks == 0, "release resets debt");
+    PcFrameScheduler overloaded;
+    overloaded.reset(0, 2, 2);
+    auto bounded = overloaded.advance(.25, 2, 2);
+    check(bounded.logicalTicks == 4 && bounded.discardedTicks == 11,
+          "2x catch-up remains bounded");
 	std::printf("PcFrameScheduler: %s\n", failures ? "FAILED" : "all tests passed");
 	return failures ? 1 : 0;
 }

@@ -16,8 +16,8 @@ class PcFrameScheduler {
 public:
 	explicit PcFrameScheduler(int maxCatchUpTicks = 4, double suspendThreshold = 0.5);
 
-	void reset(double now, int frameClamp);
-	PcFrameSchedule advance(double now, int frameClamp);
+	void reset(double now, int frameClamp, double speed = 1.0);
+	PcFrameSchedule advance(double now, int frameClamp, double speed = 1.0);
 
 	std::uint64_t totalTicks() const { return mTotalTicks; }
 	std::uint64_t discardedTicks() const { return mDiscardedTicks; }
@@ -32,6 +32,7 @@ private:
 	int mMaxCatchUpTicks;
 	double mSuspendThreshold;
 	double mFixedDelta;
+	double mSpeed;
 	double mLastTime;
 	double mAccumulator;
 	double mNextDeadline;
