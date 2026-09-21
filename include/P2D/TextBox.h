@@ -17,6 +17,16 @@ class P2DFont;
 class P2DTextBox : public P2DPane {
 public:
 	P2DTextBox(P2DPane*, RandomAccessStream*, u16);
+#if defined(PIKI_PC_PORT)
+	/// Clon huérfano (sin padre) con otro tag; comparte fuente, copia el texto.
+	P2DTextBox(immut P2DTextBox& src, u32 tag);
+	void pcSetFontSize(s16 w, s16 h)
+	{
+		mFontWidth  = w;
+		mFontHeight = h;
+	}
+	s16 pcGetFontHeight() { return mFontHeight; }
+#endif
 
 	virtual void loadResource(); // _08
 	virtual void makeResident(); // _0C

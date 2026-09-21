@@ -213,7 +213,13 @@ void DemoEventMgr::act(int sender, int event)
 		switch (event) {
 		case DemoEventNavi::Fue:
 		{
+#if defined(PIKI_PC_PORT)
+			for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+				naviMgr->getNavi(ni)->enterAllPikis();
+			}
+#else
 			naviMgr->getNavi()->enterAllPikis();
+#endif
 			break;
 		}
 		}
@@ -244,11 +250,20 @@ void DemoEventMgr::act(int sender, int event)
 				ufo->finishConeEffect();
 				ufo->setSpotActive(false);
 				playerState->setNavi(true);
+#if defined(PIKI_PC_PORT)
+				for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+					Navi* navi = naviMgr->getNavi(ni);
+					if (navi) {
+						navi->rideUfo();
+					}
+				}
+#else
 				Navi* navi = naviMgr->getNavi();
 				if (navi) {
 					PRINT("**** RIDE UFO \n");
 					navi->rideUfo();
 				}
+#endif
 				break;
 			}
 			case DemoEventUFO::Takeoff:
@@ -328,7 +343,7 @@ void DemoEventMgr::act(int sender, int event)
 				goal->startBoot();
 				playerState->setBootContainer(goalID);
 				if (playerState->isTutorial() && playerState->mShipEffectPartFlag & 8) {
-					Navi* navi = naviMgr->getNavi();
+					Navi* navi = naviMgr->getMovieNavi();
 					playerState->mShipEffectPartFlag &= ~8;
 					cameraMgr->mCamera->finishMotion();
 					cameraMgr->mCamera->mControlsEnabled = true;

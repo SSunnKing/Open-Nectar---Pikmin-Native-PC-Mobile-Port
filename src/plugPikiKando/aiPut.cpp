@@ -34,7 +34,7 @@ void ActPutBomb::procCollideMsg(Piki* piki, MsgCollide* msg)
 	if (mState == STATE_Wait) {
 		Creature* collider = msg->mEvent.mCollider;
 		if (collider->mObjType == OBJTYPE_Navi && !piki->isKinoko() && !collider->mStickListHead) {
-			rumbleMgr->start(RUMBLE_Unk2, 0, nullptr);
+			rumbleMgr->start(RUMBLE_Unk2, static_cast<Navi*>(collider)->mNaviID, nullptr);
 			mTouchedPlayer = true;
 			piki->mNavi    = static_cast<Navi*>(collider);
 		}

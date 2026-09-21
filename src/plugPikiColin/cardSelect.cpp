@@ -18,6 +18,8 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
 #include "pc_permadeath.h"
+#include "pc_coop.h"
+#include "pc_window.h"
 #include "settings/pc_settings.h"
 #endif
 
@@ -78,8 +80,34 @@ struct CardSelectSetupSection : public Node {
 
 		// reset the window pointer
 		memcardWindow = nullptr;
-		memcardWindow = new zen::ogScrFileChkSelMgr();
-		memcardWindow->start(gameflow.mIsChallengeMode); // challenge mode skips file select
+#if defined(PIKI_PC_PORT)
+		// El selector 1P/2P va antes del slot (PLAN_COOP fase 0b). Challenge
+		// mode se lo salta: siempre 1 jugador.
+		if (!gameflow.mIsChallengeMode && pc_coop_take_chosen_at_title()) {
+			// Elegido en el menú del título (Start / Co-op): sin selector 1P/2P.
+			if (pc_coop_pending()) {
+				mAwaitingDevAssign = true;
+				pc_devassign_prompt_open();
+			} else {
+				// 1 jugador: elige capitán (Olimar/Louie) antes del slot.
+				pc_window_input_reset_assignment();
+				mAwaitingCaptain = true;
+				pc_captain_prompt_open();
+			}
+		} else if (gameflow.mIsChallengeMode) {
+			pc_coop_set_captain(0, PC_CAPTAIN_OLIMAR);
+			memcardWindow = new zen::ogScrFileChkSelMgr();
+			memcardWindow->start(gameflow.mIsChallengeMode);
+		} else if (!gameflow.mIsChallengeMode) {
+			pc_coop_set_pending(false);
+			mAwaitingPlayerCount = true;
+			pc_playercount_prompt_open();
+		} else
+#endif
+		{
+			memcardWindow = new zen::ogScrFileChkSelMgr();
+			memcardWindow->start(gameflow.mIsChallengeMode); // challenge mode skips file select
+		}
 
 		gsys->setFade(1.0f);
 		mNextSectionsFlag = 0; // indicates we haven't set a destination yet (we're past setup)
@@ -103,12 +131,69 @@ struct CardSelectSetupSection : public Node {
 	{
 		mController->update();
 #if defined(PIKI_PC_PORT)
+		if (mAwaitingCaptain) {
+			const int choice = pc_captain_prompt_result();
+			if (choice == PC_DEVASSIGN_PENDING) {
+				return;
+			}
+			mAwaitingCaptain = false;
+			if (choice == PC_DEVASSIGN_CANCELLED) {
+				mNextSectionsFlag = PACK_NEXT_ONEPLAYER(ONEPLAYER_GameExit);
+				mState            = Exit;
+				gsys->setFade(0.0f);
+				return;
+			}
+			memcardWindow = new zen::ogScrFileChkSelMgr();
+			memcardWindow->start(gameflow.mIsChallengeMode);
+			return;
+		}
+		if (mAwaitingPlayerCount) {
+			const int choice = pc_playercount_prompt_result();
+			if (choice == PC_PLAYERCOUNT_PENDING) {
+				return;
+			}
+			mAwaitingPlayerCount = false;
+			if (choice == PC_PLAYERCOUNT_CANCELLED) {
+				mNextSectionsFlag = PACK_NEXT_ONEPLAYER(ONEPLAYER_GameExit);
+				mState            = Exit;
+				gsys->setFade(0.0f);
+				return;
+			}
+			pc_coop_set_pending(choice == PC_PLAYERCOUNT_TWO);
+			if (choice == PC_PLAYERCOUNT_TWO) {
+				// Con 2 jugadores, cada uno elige su mando antes del slot.
+				mAwaitingDevAssign = true;
+				pc_devassign_prompt_open();
+				return;
+			}
+			pc_window_input_reset_assignment();
+			memcardWindow = new zen::ogScrFileChkSelMgr();
+			memcardWindow->start(gameflow.mIsChallengeMode);
+			return;
+		}
+		if (mAwaitingDevAssign) {
+			const int choice = pc_devassign_prompt_result();
+			if (choice == PC_DEVASSIGN_PENDING) {
+				return;
+			}
+			mAwaitingDevAssign = false;
+			if (choice == PC_DEVASSIGN_CANCELLED) {
+				pc_window_input_reset_assignment();
+				mAwaitingPlayerCount = true;
+				pc_playercount_prompt_open();
+				return;
+			}
+			memcardWindow = new zen::ogScrFileChkSelMgr();
+			memcardWindow->start(gameflow.mIsChallengeMode);
+			return;
+		}
 		if (mAwaitingNewGameChoice) {
 			const int choice = pc_newgame_prompt_result();
 			if (choice == PC_NEWGAME_PENDING) {
 				return; // still deciding; nothing else may advance
 			}
 			mAwaitingNewGameChoice = false;
+			mPromptBackdrop        = nullptr;
 			if (choice == PC_NEWGAME_CANCELLED) {
 				// Back to the file screen. It was closed to put the prompt up,
 				// so it is opened again rather than resumed -- nothing had been
@@ -249,7 +334,24 @@ struct CardSelectSetupSection : public Node {
 #if defined(PIKI_PC_PORT)
 		// Before the early return: the file screen is closed while the prompt
 		// is up, so the prompt is all there is to draw.
+		if (mAwaitingPlayerCount) {
+			pc_playercount_prompt_draw();
+			return;
+		}
+		if (mAwaitingDevAssign) {
+			pc_devassign_prompt_draw();
+			return;
+		}
+		if (mAwaitingCaptain) {
+			pc_captain_prompt_draw();
+			return;
+		}
 		if (mAwaitingNewGameChoice) {
+			// La pantalla de slots sigue de fondo (estrellas y degradado)
+			// mientras el prompt está encima; solo se dibuja, sin update.
+			if (mPromptBackdrop) {
+				mPromptBackdrop->drawBackdrop(gfx);
+			}
 			pc_newgame_prompt_draw();
 			return;
 		}
@@ -269,6 +371,9 @@ struct CardSelectSetupSection : public Node {
 			PRINT("got return code .... %d\n", returnCode);
 
 			// close the memory card window and decide what to do next
+#if defined(PIKI_PC_PORT)
+			mPromptBackdropNext = memcardWindow;
+#endif
 			memcardWindow = nullptr;
 			if (returnCode == zen::ogScrFileChkSelMgr::ErrorOrCompleted) {
 				// back out to title screen
@@ -302,6 +407,7 @@ struct CardSelectSetupSection : public Node {
 					mPendingCard           = card;
 					mPendingSlot           = returnCode - zen::ogScrFileChkSelMgr::FILECHKSEL_SlotOffset;
 					mAwaitingNewGameChoice = true;
+					mPromptBackdrop        = mPromptBackdropNext;
 					pc_newgame_prompt_open();
 					return;
 				}
@@ -337,7 +443,12 @@ struct CardSelectSetupSection : public Node {
 #if defined(PIKI_PC_PORT)
 	// Port-only, and last: the offsets documented above are the original
 	// layout, and appending keeps them true.
+	bool mAwaitingPlayerCount   = false; ///< The 1P/2P prompt is up (before the slot screen).
+	bool mAwaitingCaptain       = false; ///< 1P: selector Olimar/Louie antes del slot.
+	bool mAwaitingDevAssign     = false; ///< The controller assignment prompt is up.
 	bool mAwaitingNewGameChoice = false; ///< The new-game prompt is up.
+	zen::ogScrFileChkSelMgr* mPromptBackdrop     = nullptr; ///< Pantalla de slots dibujada bajo el prompt.
+	zen::ogScrFileChkSelMgr* mPromptBackdropNext = nullptr;
 	CardQuickInfo mPendingCard;          ///< The slot it is deciding for.
 	int mPendingSlot = 0;                ///< That slot's file index (A/B/C).
 #endif

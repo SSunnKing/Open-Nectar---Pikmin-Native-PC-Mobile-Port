@@ -27,7 +27,9 @@ public:
 		MENU_Sound    = 2,
 		MENU_Rumble   = 3,
 		MENU_Language = 4,
-
+#if defined(PIKI_PC_PORT)
+		MENU_Advanced = 5, ///< Advanced Options (ajustes del port) con el panel de option.blo
+#endif
 	};
 
 	enum TitleStatus {
@@ -46,6 +48,11 @@ public:
 
 	TitleStatus update(Controller*);
 	void start(bool);
+#if defined(PIKI_PC_PORT)
+	void pcInsertCoopItem(DrawMenu* menu);
+	DrawMenu* mAdvancedMenu = nullptr; ///< option.blo reetiquetado: Display / Save / Back
+	void pcSetupAdvancedMenu();
+#endif
 	void draw(Graphics&);
 
 private:

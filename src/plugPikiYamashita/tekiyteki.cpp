@@ -59,7 +59,7 @@ void YTeki::exitCourse()
 bool YTeki::isNaviWatch()
 {
 	bool res   = false;
-	Navi* navi = naviMgr->getNavi();
+	Navi* navi = naviMgr->getNearestNavi(getPosition());
 	if (qdist2(getPosition().x, getPosition().z, navi->getPosition().x, navi->getPosition().z) < getParameterF(TPF_VisibleRange)
 	    && aiCullable()) {
 		res = true;

@@ -123,7 +123,7 @@ int ActDecoy::exec()
 	}
 	case 0:
 	{
-		Navi* navi       = naviMgr->getNavi();
+		Navi* navi       = naviMgr->getNearestNavi(mPiki->mSRT.t);
 		Vector3f naviDir = mPiki->mSRT.t - navi->mSRT.t;
 		naviDir.normalise();
 		Vector3f tekiDir = mPiki->mSRT.t - teki->mSRT.t;

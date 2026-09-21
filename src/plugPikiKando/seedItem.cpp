@@ -115,7 +115,11 @@ void SeedItem::doKill()
 void SeedItem::update()
 {
 	if (mStateId == 0) {
+#if defined(PIKI_PC_PORT)
+		Navi* player = naviMgr->getNearestNavi(mSRT.t);
+#else
 		Navi* player = naviMgr->getNavi();
+#endif
 
 		Vector3f toPlayer    = player->mSRT.t - mSRT.t;
 		toPlayer.y           = 0.0f;

@@ -2,6 +2,8 @@
 """Build Open Nectar's external HD model packs (NHM1) from Pikmin 3 rips.
 
     build-hd-model-pack.py olimar  <Olimar.zip> <out.nhm>
+    build-hd-model-pack.py louie   <Louie.zip>  <out.nhm>     (Pikmin 2 rip)
+    build-hd-model-pack.py louie_hd <Louie.zip> <out.nhm>     (Pikmin 3 rip, playerD)
     build-hd-model-pack.py pikmin  <Pikmin.zip> <out dir>
     build-hd-model-pack.py bulborb <Dwarf Bulborb.zip> <Bulborb.zip> <out dir>
 
@@ -80,6 +82,7 @@ def wrap_repeat(t: float) -> float:
 
 PART_FLAG_REPEAT = 1   # texture wraps instead of clamping
 PART_FLAG_NOCULL = 2   # draw both faces (thin eye discs)
+PART_FLAG_NOTINT = 4   # ignores the in-game tint (a captain's head/visor)
 CORNEA_ALPHA = 64
 
 
@@ -211,9 +214,11 @@ def write_pack(output: Path, bones: list[tuple[str, list]], parts: list[tuple]) 
     print(f"wrote {output}: {sum(len(part[0]) for part in parts)} vertices, {len(parts)} parts (v{version})")
 
 
-def build_olimar(source_zip: Path, output: Path) -> None:
+def build_olimar(source_zip: Path, output: Path, prefix: str = "playerE") -> None:
+    """Pikmin 3 captain rip: playerE (Olimar) or playerD (Louie), same layout.
+    Head and visor are flagged NOTINT so the co-op tint colours the suit only."""
     with zipfile.ZipFile(source_zip) as archive:
-        root = ET.fromstring(archive.read("playerE.dae"))
+        root = ET.fromstring(archive.read(f"{prefix}.dae"))
         controllers, bind_by_joint = read_skins(root)
         # Only head_m samples playerE_head; the suit, metal, light and both
         # helmet layers (naka = inner, soto = outer glass) sample playerE_body.
@@ -224,12 +229,14 @@ def build_olimar(source_zip: Path, output: Path) -> None:
             material = geometry.find("c:mesh/c:triangles", NS).get("material")
             key = {"head_m": "head", "naka_m": "glass", "soto_m": "glass"}.get(material, "body")
             by_part[key] += expand(root, geometry, controllers, JOINTS, wrap_clamp)
-        body = rgba(archive, "playerE_body.png")
+        body = rgba(archive, f"{prefix}_body.png")
         glass_pixels = bytearray(body[2])
         glass_pixels[3::4] = bytes([GLASS_ALPHA]) * (len(glass_pixels) // 4)
-        textures = [body, rgba(archive, "playerE_head.png"), (body[0], body[1], bytes(glass_pixels))]
+        head = rgba(archive, f"{prefix}_head.png")
+        glass = (body[0], body[1], bytes(glass_pixels))
     bones = [(joint, bind_by_joint.get(joint, IDENTITY)) for joint in JOINTS]
-    write_pack(output, bones, list(zip((by_part["body"], by_part["head"], by_part["glass"]), textures)))
+    write_pack(output, bones, [(by_part["body"], body), (by_part["head"], head, PART_FLAG_NOTINT),
+                               (by_part["glass"], glass, PART_FLAG_NOTINT)])
 
 
 # Pikmin 3's rigid leaf/bud/flower meshes are Y-up-ish with the stem along -Z.
@@ -366,13 +373,185 @@ def build_bulborb(dwarf_zip: Path, big_zip: Path, out_dir: Path) -> None:
         write_pack(out_dir / "bulborb.nhm", bones, parts)
 
 
+# ── Louie (Pikmin 2 rip, "Captain Louie/orima3.dae") ──────────────────────
+# The Pikmin 2 captain rig is Pikmin 1's (same joint names, near-identical
+# rest pose), so the mesh skins straight onto the engine's animation with the
+# pack's own inverse binds. The rip has no normals (computed here, smooth per
+# position) and its joints are only named on the scene nodes.
+# Same glassiness as Olimar HD (GLASS_ALPHA): a faint blue inner shell plus
+# the reflection texture, both nearly transparent so the face shows through.
+LOUIE_NAKA_RGBA = (60, 120, 255, 28)  # naka_mat: untextured inner visor tint
+LOUIE_SOTO_ALPHA = 56                 # helkan_8ia is drawn blended over the face
+
+
+def louie_joint_names(root: ET.Element) -> dict[str, str]:
+    """Skin joints are 'jointnodeN'; the scene node carries the real name."""
+    names = {}
+    for node in root.iter():
+        if node.tag.endswith("node") and node.get("type") == "JOINT":
+            names[node.get("id")] = node.get("name") or node.get("id")
+            if node.get("sid"):
+                names[node.get("sid")] = node.get("name") or node.get("id")
+    return names
+
+
+def expand_polylist(root: ET.Element, geometry: ET.Element, influences: list, joint_names: list[str],
+                    uv_transform=None) -> list[tuple]:
+    """Like expand(), for a <polylist> of triangles without normals."""
+    mesh = geometry.find("c:mesh", NS)
+    data = source_data(mesh)
+    prim = mesh.find("c:polylist", NS)
+    if prim is None:
+        prim = mesh.find("c:triangles", NS)
+    vertices_node = mesh.find("c:vertices", NS)
+    via_vertex = {x.get("semantic"): x.get("source")[1:] for x in vertices_node.findall("c:input", NS)}
+    inputs = prim.findall("c:input", NS)
+    stride = 1 + max(int(x.get("offset")) for x in inputs)
+    offsets, sources = {}, {}
+    for x in inputs:
+        if x.get("semantic") == "VERTEX":
+            for sub, source in via_vertex.items():
+                offsets[sub], sources[sub] = int(x.get("offset")), source
+        else:
+            offsets[x.get("semantic")], sources[x.get("semantic")] = int(x.get("offset")), x.get("source")[1:]
+    vcount = prim.find("c:vcount", NS)
+    if vcount is not None and any(int(v) != 3 for v in vcount.text.split()):
+        raise SystemExit("polylist with non-triangles is not supported")
+    indices = [int(x) for x in prim.find("c:p", NS).text.split()]
+    positions, pos_stride = data[sources["POSITION"]]
+    uvs, uv_stride = data[sources["TEXCOORD"]]
+
+    def pos(i: int) -> list[float]:
+        return positions[i * pos_stride:i * pos_stride + 3]
+
+    # Smooth normals: accumulate face normals per position index.
+    acc: dict[int, list[float]] = {}
+    for base in range(0, len(indices), stride * 3):
+        ids = [indices[base + k * stride + offsets["POSITION"]] for k in range(3)]
+        a, b, c = pos(ids[0]), pos(ids[1]), pos(ids[2])
+        u = [b[i] - a[i] for i in range(3)]
+        v = [c[i] - a[i] for i in range(3)]
+        n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]
+        for i in ids:
+            acc.setdefault(i, [0.0, 0.0, 0.0])
+            acc[i] = [acc[i][k] + n[k] for k in range(3)]
+
+    out = []
+    for base in range(0, len(indices), stride):
+        pi = indices[base + offsets["POSITION"]]
+        ti = indices[base + offsets["TEXCOORD"]]
+        n = acc.get(pi, [0.0, 1.0, 0.0])
+        length = (n[0] ** 2 + n[1] ** 2 + n[2] ** 2) ** 0.5 or 1.0
+        normal = [x / length for x in n]
+        uv = uvs[ti * uv_stride:ti * uv_stride + 2]
+        u, v = uv[0], 1.0 - uv[1]
+        if uv_transform:
+            u, v = uv_transform(u, v)
+        skin = influences[pi]
+        bone_ids = [joint_names.index(name) for name, _ in skin] + [0] * (4 - len(skin))
+        bone_weights = [w for _, w in skin] + [0.0] * (4 - len(skin))
+        out.append((*pos(pi), *normal, wrap_clamp(u), wrap_clamp(v), *bone_ids, *bone_weights))
+    return out
+
+
+def solid_texture(rgba_color: tuple, size: int = 4) -> tuple[int, int, bytes]:
+    return size, size, bytes(rgba_color) * (size * size)
+
+
+def build_louie(source_zip: Path, output: Path) -> None:
+    with zipfile.ZipFile(source_zip) as archive:
+        prefix = next(n for n in archive.namelist() if n.endswith("orima3.dae"))[:-len("orima3.dae")]
+        root = ET.fromstring(archive.read(prefix + "orima3.dae"))
+        node_names = louie_joint_names(root)
+        controllers, bind_by_node = read_skins(root)
+        bind_by_joint = {node_names.get(k, k): v for k, v in bind_by_node.items()}
+        # Rename the skin influences to the real joint names.
+        controllers = {g: [[(node_names.get(n, n), w) for n, w in row] for row in rows] for g, rows in controllers.items()}
+        # Which geometry uses which material: node -> controller -> geometry.
+        material_of = {}
+        for node in root.findall("c:library_visual_scenes/c:visual_scene/c:node", NS):
+            inst = node.find(".//c:instance_controller", NS)
+            if inst is None:
+                continue
+            controller_id = inst.get("url")[1:]
+            controller = root.find(f"c:library_controllers/c:controller[@id='{controller_id}']", NS)
+            geometry_id = controller.find("c:skin", NS).get("source")[1:]
+            mat = inst.find(".//c:instance_material", NS)
+            material_of[geometry_id] = mat.get("target")[1:] if mat is not None else None
+        textured = {}
+        for material in root.findall("c:library_materials/c:material", NS):
+            effect_id = material.find("c:instance_effect", NS).get("url")[1:]
+            effect = root.find(f"c:library_effects/c:effect[@id='{effect_id}']", NS)
+            images = [x.text for x in effect.iter() if x.tag.endswith("init_from")]
+            textured[material.get("id")] = images[0] if images else None
+        image_files = {img.get("id"): img.find("c:init_from", NS).text
+                       for img in root.findall("c:library_images/c:image", NS)}
+        body, naka, soto = [], [], []
+        HEAD_JOINTS = {"headjnt", "happajnt1", "happajnt2", "happajnt3"}
+        for geometry in root.findall("c:library_geometries/c:geometry", NS):
+            gid = geometry.get("id")
+            image = textured.get(material_of.get(gid))
+            file = image_files.get(image, image) if image else None
+            influences = controllers[gid]
+            if file and "luzy" in file:
+                body += expand_polylist(root, geometry, influences, JOINTS)
+            elif file and "helkan" in file:
+                # soto_mat: texture matrix scale 0.5 + offset 0.5.
+                soto += expand_polylist(root, geometry, influences, JOINTS,
+                                        uv_transform=lambda u, v: (u * 0.5 + 0.5, v * 0.5 + 0.5))
+            else:
+                naka += expand_polylist(root, geometry, influences, JOINTS)
+        # luzy_565 is an 8x8 palette (2x2 cells): upscale nearest so bilinear
+        # sampling at the cell centres never bleeds into a neighbour.
+        with Image.open(io.BytesIO(archive.read(prefix + "luzy_565.png"))) as image:
+            image = image.convert("RGBA").resize((64, 64), Image.NEAREST)
+            body_tex = (image.width, image.height, image.tobytes())
+        soto_tex = translucent(rgba(archive, prefix + "helkan_8ia.png"), LOUIE_SOTO_ALPHA)
+    # naka is wound inwards in the rip (it is the inside of the visor); the
+    # game culls back faces, so flip it into an outward tinted shell.
+    naka = flip_winding(naka)
+    # The co-op distinction tint must only colour the suit: split the head
+    # (triangles bound to the head/antenna joints) into its own untinted part,
+    # and leave the visor untinted too.
+    head_ids = {JOINTS.index(j) for j in HEAD_JOINTS}
+    suit, head = split_by_joints(body, head_ids)
+    bones = [(joint, bind_by_joint.get(joint, IDENTITY)) for joint in JOINTS]
+    parts = [(suit, body_tex), (head, body_tex, PART_FLAG_NOTINT),
+             (naka, solid_texture(LOUIE_NAKA_RGBA), PART_FLAG_NOTINT), (soto, soto_tex, PART_FLAG_NOTINT)]
+    write_pack(output, bones, parts)
+
+
+def split_by_joints(vertices: list[tuple], joint_ids: set) -> tuple[list, list]:
+    """Per triangle: goes to the second list when most of its weight sits on
+    `joint_ids` (vertex layout: 8 floats, 4 bone ids, 4 weights)."""
+    a, b = [], []
+    for i in range(0, len(vertices), 3):
+        tri = vertices[i:i + 3]
+        weight = sum(w for v in tri for bone, w in zip(v[8:12], v[12:16]) if bone in joint_ids)
+        (b if weight > 1.5 else a).extend(tri)
+    return a, b
+
+
+def flip_winding(vertices: list[tuple]) -> list[tuple]:
+    out = []
+    for i in range(0, len(vertices), 3):
+        a, b, c = vertices[i:i + 3]
+        for v in (a, c, b):
+            out.append((*v[:3], -v[3], -v[4], -v[5], *v[6:]))
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("kind", choices=["olimar", "pikmin", "bulborb"])
+    parser.add_argument("kind", choices=["olimar", "louie", "louie_hd", "pikmin", "bulborb"])
     parser.add_argument("paths", nargs="+", type=Path, help="source zip(s) then the output NHM file or directory")
     args = parser.parse_args()
     if args.kind == "olimar":
         build_olimar(args.paths[0], args.paths[1])
+    elif args.kind == "louie":
+        build_louie(args.paths[0], args.paths[1])
+    elif args.kind == "louie_hd":
+        build_olimar(args.paths[0], args.paths[1], prefix="playerD")
     elif args.kind == "pikmin":
         build_pikmin(args.paths[0], args.paths[1])
     else:

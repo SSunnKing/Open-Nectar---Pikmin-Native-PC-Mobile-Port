@@ -1160,6 +1160,22 @@ bool BTeki::inSectorPosition(immut Vector3f& targetPos, f32 maxDistance, f32 sec
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+Creature* BTeki::pcRetargetDeadNavi(Creature* target)
+{
+	Navi* other = naviMgr ? naviMgr->getNearestNavi(getPosition()) : nullptr;
+	if (!other || other == target || !other->isAlive()) {
+		return nullptr;
+	}
+	NVector3f pos(getPosition());
+	NVector3f otherPos(other->getPosition());
+	if (pos.distanceXZ(otherPos) > getParameterF(TPF_VisibleRange)) {
+		return nullptr;
+	}
+	return other;
+}
+#endif
+
 bool BTeki::visibleCreature(Creature& target)
 {
 	TekiRecognitionCondition recog(static_cast<Teki*>(this));
@@ -1381,9 +1397,19 @@ bool BTeki::insideDirection(Vector3f& direction)
  */
 Creature* BTeki::getClosestNaviPiki(immut Condition& cond, f32* outDist)
 {
-	Creature* navi = naviMgr->getNavi();
-	if (!cond.satisfy(navi)) {
-		navi = nullptr;
+	// Cooperativo: el navi más cercano que cumpla la condición.
+	Creature* navi = nullptr;
+	f32 naviBest   = 0.0f;
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+		Navi* cand = naviMgr->getNavi(ni);
+		if (!cand || !cond.satisfy(cand)) {
+			continue;
+		}
+		f32 d = calcSphereDistance(*cand);
+		if (!navi || d < naviBest) {
+			navi     = cand;
+			naviBest = d;
+		}
 	}
 
 	Creature* piki   = pikiMgr->findClosest(getPosition(), &cond);
@@ -1493,11 +1519,13 @@ bool BTeki::interactNaviPiki(immut Interaction& interaction, immut Condition& co
  */
 bool BTeki::interactNavi(immut Interaction& interaction, immut Condition& cond)
 {
-	bool res   = false;
-	Navi* navi = naviMgr->getNavi();
-	if (cond.satisfy(navi)) {
-		navi->stimulate(interaction);
-		res = true;
+	bool res = false;
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+		Navi* navi = naviMgr->getNavi(ni);
+		if (navi && cond.satisfy(navi)) {
+			navi->stimulate(interaction);
+			res = true;
+		}
 	}
 
 	return res;
@@ -1610,9 +1638,11 @@ void BTeki::flickLower(InteractFlick& flick)
  */
 bool BTeki::checkNaviPiki(immut Condition& cond)
 {
-	Navi* navi = naviMgr->getNavi();
-	if (cond.satisfy(navi)) {
-		return true;
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+		Navi* navi = naviMgr->getNavi(ni);
+		if (navi && cond.satisfy(navi)) {
+			return true;
+		}
 	}
 
 	Iterator iter(pikiMgr);

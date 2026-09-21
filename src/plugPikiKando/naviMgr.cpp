@@ -41,6 +41,12 @@ NaviMgr::NaviMgr()
 
 	memStat->start("navi shapeobject");
 	mNaviShapeObject[0] = new PikiShapeObject(mNaviShape);
+	// P2 comparte el ShapeObject: el modelo solo tiene un par de AnimContext
+	// (overrideAnim) y cada Navi vuelca el suyo con updateContext() justo
+	// antes de dibujarse, igual que hacen los pikmin del mismo color. Un
+	// segundo PikiShapeObject re-enlazaría los overrides y P1 dibujaría con
+	// contextos vacíos ("no joint anim").
+	mNaviShapeObject[1] = mNaviShapeObject[0];
 	memStat->end("navi shapeobject");
 
 	memStat->start("navi animmgr");
@@ -100,6 +106,43 @@ Navi* NaviMgr::getNavi(int idx)
 	}
 	return static_cast<Navi*>(mObjectList[idx]);
 }
+
+#if defined(PIKI_PC_PORT)
+Navi* NaviMgr::getNearestNavi(const Vector3f& pos)
+{
+	Navi* best    = nullptr;
+	f32 bestDist  = 0.0f;
+	for (int i = 0; i < mNumObjects; i++) {
+		Navi* navi = static_cast<Navi*>(mObjectList[i]);
+		if (!navi || !navi->isAlive()) {
+			continue;
+		}
+		Vector3f sep = navi->mSRT.t - pos;
+		f32 dist     = sep.x * sep.x + sep.z * sep.z;
+		if (!best || dist < bestDist) {
+			best     = navi;
+			bestDist = dist;
+		}
+	}
+	return best ? best : getNavi();
+}
+
+Navi* NaviMgr::getMovieNavi()
+{
+	if (mMovieNavi && mMovieNavi->isAlive()) {
+		return mMovieNavi;
+	}
+	// Sin disparador (fin del día, etc.): el primero que siga vivo, así el
+	// vídeo no lo protagoniza un Olimar caído.
+	for (int i = 0; i < mNumObjects; i++) {
+		Navi* navi = static_cast<Navi*>(mObjectList[i]);
+		if (navi && navi->isAlive()) {
+			return navi;
+		}
+	}
+	return getNavi();
+}
+#endif
 
 /**
  * @todo: Documentation

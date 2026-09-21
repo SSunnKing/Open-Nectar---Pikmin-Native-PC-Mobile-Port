@@ -259,9 +259,17 @@ void zen::ogRaderMgr::setRaderScroll(int x, int y)
  * @todo: Documentation
  * @note UNUSED Size: 00025C
  */
+#if defined(PIKI_PC_PORT)
+int zen::gRaderNaviIndex = 0;
+#endif
+
 void zen::ogRaderMgr::getOrimaPos()
 {
+#if defined(PIKI_PC_PORT)
+	Navi* navi = naviMgr->getNaviCount() > gRaderNaviIndex ? naviMgr->getNavi(gRaderNaviIndex) : naviMgr->getNavi();
+#else
 	Navi* navi      = naviMgr->getNavi();
+#endif
 	mOlimarWorldPos = navi->getPosition();
 
 	mOlimarMapPos  = ogCalcDispXZ(mOlimarWorldPos);
@@ -271,6 +279,15 @@ void zen::ogRaderMgr::getOrimaPos()
 	mOlimarIcon->setScale(10.0f / mCurrentScale);
 	mOlimarIconAngle = PI - navi->mSRT.r.y;
 	mOlimarIcon->rotate(P2DROTATE_Unk2, mOlimarIconAngle);
+#if defined(PIKI_PC_PORT)
+	if (mOlimarIcon2 && naviMgr->getNaviCount() > 1) {
+		Navi* navi2    = naviMgr->getNavi(navi->mNaviID == 0 ? 1 : 0);
+		Vector3f disp2 = ogCalcDispXZ(navi2->getPosition());
+		mOlimarIcon2->move(disp2.x, disp2.z);
+		mOlimarIcon2->setScale(10.0f / mCurrentScale);
+		mOlimarIcon2->rotate(P2DROTATE_Unk2, PI - navi2->mSRT.r.y);
+	}
+#endif
 	f32 x = (mCurrentScale * -(mOlimarMapPos.x + mScrollOffsetX)) / 10.0f;
 	f32 y = (mCurrentScale * -(mOlimarMapPos.z + mScrollOffsetY)) / 10.0f;
 	setRaderScroll(x, y);
@@ -400,6 +417,16 @@ void zen::ogRaderMgr::startSub()
 
 	mOlimarIcon->alone();
 	mIconPane->appendChild(mOlimarIcon);
+#if defined(PIKI_PC_PORT)
+	// Segundo marcador para P2, clonado del de Olimar y teñido como su modelo.
+	if (naviMgr && naviMgr->getNaviCount() > 1) {
+		mOlimarIcon2 = new P2DPicture(mOlimarIcon->getTexture(0));
+		mIconPane->appendChild(mOlimarIcon2);
+		mOlimarIcon2->setWhite(Colour(90, 150, 255, 255));
+		mOlimarIcon2->setBlack(Colour(0, 0, 0, 0));
+		setOffsetSub(mOlimarIcon2);
+	}
+#endif
 
 	mContainerIcons[0] = mBlueContainerIcon;
 	mContainerIcons[1] = mRedContainerIcon;

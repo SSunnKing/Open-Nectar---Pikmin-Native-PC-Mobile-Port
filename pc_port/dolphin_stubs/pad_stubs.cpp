@@ -40,7 +40,16 @@ void PADSetSamplingRate(u32 msec)             { (void)msec; }
 void PADClamp(PADStatus* status)              { (void)status; }
 void PADClampCircle(PADStatus* status)        { (void)status; }
 void PADControlAllMotors(const u32* cmdArray) { (void)cmdArray; }
-void PADControlMotor(s32 chan, u32 command)    { (void)chan; (void)command; }
+void PADControlMotor(s32 chan, u32 command) {
+    // Vibración por jugador: canal 0 = mando de P1, canal 1 = mando de P2.
+    SDL_GameController* ctl = chan == 0 ? pc_window_get_controller() : chan == 1 ? pc_window_get_controller_p2() : nullptr;
+    if (!ctl) return;
+    if (command == PAD_MOTOR_RUMBLE) {
+        SDL_GameControllerRumble(ctl, 0x9000, 0x9000, 120);
+    } else {
+        SDL_GameControllerRumble(ctl, 0, 0, 0);
+    }
+}
 BOOL PADRecalibrate(u32 mask)                 { (void)mask; return TRUE; }
 BOOL PADSync(void)                            { return TRUE; }
 void PADSetAnalogMode(u32 mode)               { (void)mode; }

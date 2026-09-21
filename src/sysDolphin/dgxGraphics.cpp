@@ -792,6 +792,11 @@ void DGXGraphics::setPerspective(Mtx44 mtx, f32 fovY, f32 aspect, f32 zNear, f32
 	if (actualAspect <= 0.0f) actualAspect = aspect;
 
 	MTXPerspective(mtx, fovY, actualAspect, zNear, zFar);
+	// x_ndc = -m00*x/z - m02: restar el offset a m02 corre la imagen +offset.
+	f32 projOffX, projOffY;
+	pc_gfx_get_proj_offset(&projOffX, &projOffY);
+	mtx[0][2] -= projOffX;
+	mtx[1][2] -= projOffY;
 #else
 	MTXPerspective(mtx, fovY, aspect, zNear, zFar);
 #endif

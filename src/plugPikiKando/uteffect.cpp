@@ -99,12 +99,21 @@ UtEffectMgr::UtEffectMgr()
 	// Pikmin 1 only creates one Navi. This second effect slot is leftover
 	// multiplayer code, so keep it usable without indexing beyond NaviMgr's
 	// one-element object array.
+#if defined(PIKI_PC_PORT)
+	// Cooperativo: si hay segundo Olimar, su silbato sale de su propio cursor.
+	Navi* secondNavi = naviMgr->getSize() > 1 ? naviMgr->getNavi(1) : nullptr;
+	registerEffect(KandoEffect::NaviWhistle1, new NaviWhistle(secondNavi ? secondNavi : primaryNavi));
+#else
 	registerEffect(KandoEffect::NaviWhistle1, new NaviWhistle(primaryNavi));
+#endif
 	registerEffect(KandoEffect::SmokeSoil, new SmokeSoilEffect);
 	registerEffect(KandoEffect::SmokeGrass, new SmokeGrassEffect);
 	registerEffect(KandoEffect::SmokeRock, new SmokeRockEffect);
 	registerEffect(KandoEffect::SmokeTree, new SmokeTreeEffect);
 	registerEffect(KandoEffect::NaviFue0, new NaviFue(primaryNavi));
+#if defined(PIKI_PC_PORT)
+	registerEffect(KandoEffect::NaviFue1, new NaviFue(secondNavi ? secondNavi : primaryNavi));
+#endif
 	registerEffect(KandoEffect::PikiGrowup1, new SimpleEffect(EffectMgr::EFF_Piki_GrowUp1));
 	registerEffect(KandoEffect::PikiGrowup2, new SimpleEffect(EffectMgr::EFF_Piki_GrowUp2));
 	registerEffect(KandoEffect::WallHit1, new SimpleEffect(EffectMgr::EFF_Wl_Hit1));

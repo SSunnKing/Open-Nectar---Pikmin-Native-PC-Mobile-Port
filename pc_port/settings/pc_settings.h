@@ -28,6 +28,9 @@ void pc_settings_request_toggle(void);
 /// frame; el toque usa coordenadas normalizadas de la ventana (0..1).
 void pc_settings_touch_buttons(unsigned short pressed);
 void pc_settings_touch_tap(float x, float y);
+/// Arrastre vertical normalizado (fracción de la altura de la ventana) sobre
+/// los menús del port: las listas con scroll lo convierten en filas.
+void pc_settings_touch_drag(float dy);
 
 // Draws the overlay through the game's GX/GL stack. Called from VIWaitForRetrace
 // just before the framebuffer is blitted to the window, so it appears on top.
@@ -41,6 +44,9 @@ bool pc_settings_has_pending_video(void);
 
 // Returns the current FPS mode (0=30 FPS, 1=60 FPS, 2=120 FPS experimental).
 int pc_settings_get_fps_mode(void);
+/// Sombras proyectadas (Graphics > Shadows): 0 off, 1-3 fuerza. Con >0 el
+/// juego no pinta sus manchas de sombra originales.
+int pc_settings_get_shadows(void);
 
 // Returns 1 while the "chain Pikmin actions" mod is enabled, 0 otherwise.
 //
@@ -86,8 +92,44 @@ int  pc_newgame_prompt_result(void);
 /// True after accept on the second prompt if Hard was chosen.
 bool pc_newgame_prompt_chose_hard(void);
 
+/* Selector 1 jugador / 2 jugadores (PLAN_COOP fase 0b). Lo abre la sección de
+   selección de slot justo al entrar desde "Empezar". Si se eligen 2 jugadores
+   sin segundo mando conectado, el prompt se queda esperando a que aparezca. */
+#define PC_PLAYERCOUNT_PENDING   (-1)
+#define PC_PLAYERCOUNT_CANCELLED (0)
+#define PC_PLAYERCOUNT_ONE       (1)
+#define PC_PLAYERCOUNT_TWO       (2)
+
+void pc_playercount_prompt_open(void);
+bool pc_playercount_prompt_active(void);
+void pc_playercount_prompt_draw(void);
+int  pc_playercount_prompt_result(void);
+
+/* Asignación de mando/teclado a cada jugador, tras elegir 2 jugadores. */
+#define PC_DEVASSIGN_PENDING   (-1)
+#define PC_DEVASSIGN_CANCELLED (0)
+#define PC_DEVASSIGN_OK        (1)
+
+void pc_devassign_prompt_open(void);
+bool pc_devassign_prompt_active(void);
+void pc_devassign_prompt_draw(void);
+
+/* Selector de capitán para 1 jugador (Start): Olimar o Louie con teclado,
+   mando de P1 o táctil. Resultado como PC_DEVASSIGN_*; al aceptar fija
+   pc_coop_set_captain(0, ...). */
+void pc_captain_prompt_open(void);
+bool pc_captain_prompt_active(void);
+int  pc_captain_prompt_result(void);
+void pc_captain_prompt_draw(void);
+int  pc_devassign_prompt_result(void);
+
 /// Debug shortcuts F5 and F6, off by default.
 int pc_settings_get_debug_keys(void);
+
+/// Pantalla partida cooperativa: 0 = vertical (izq/der), 1 = horizontal.
+int pc_settings_get_coop_split(void);
+// Cámara coop dinámica (una cámara con los Olimar cerca); 0 = partida fija.
+int pc_settings_get_coop_merge_camera(void);
 
 /**
  * @brief The language the PAL disc should be played in, as an OS_LANG_* value.

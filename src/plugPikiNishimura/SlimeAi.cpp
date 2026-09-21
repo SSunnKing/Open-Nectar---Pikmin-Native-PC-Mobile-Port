@@ -558,7 +558,7 @@ void SlimeAi::setExpansionGoal()
  */
 void SlimeAi::setAppearGoal()
 {
-	Navi* navi     = naviMgr->getNavi();
+	Navi* navi     = naviMgr->getNearestNavi(mSlime->mSRT.t);
 	f32 angle      = atan2f(navi->mSRT.t.x - mSlime->mSRT.t.x, navi->mSRT.t.z - mSlime->mSRT.t.z);
 	f32 initialSep = C_SLIME_PARM(mSlime, mDistanceBetweenNuclei) + 100.0f;
 	Vector3f naviDir(sinf(angle), 0.0f, cosf(angle));

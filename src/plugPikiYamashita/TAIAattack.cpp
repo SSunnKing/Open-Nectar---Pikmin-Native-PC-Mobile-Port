@@ -195,7 +195,7 @@ bool TAIAflickingAfterMotionLoop::act(Teki& teki)
  */
 bool TAIAtargetNavi::act(Teki& teki)
 {
-	Navi* navi = naviMgr->getNavi();
+	Navi* navi = naviMgr->getNearestNavi(teki.getPosition());
 	if (teki.attackableCreature(*navi)) {
 		teki.setCreaturePointer(0, navi);
 		return true;

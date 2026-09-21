@@ -376,7 +376,7 @@ protected:
 
 	void runAway(Teki& teki)
 	{
-		Navi* const navi = naviMgr->getNavi(); // Jesus christ, it's an actual const meme in the wild.
+		Navi* const navi = naviMgr->getNearestNavi(teki.getPosition()); // Jesus christ, it's an actual const meme in the wild.
 		Vector3f sep;
 		int safetyParam = TPF_SafetyTerritoryRange;
 		sep.set(teki.getPosition() - navi->getPosition());

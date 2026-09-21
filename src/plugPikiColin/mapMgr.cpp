@@ -1,4 +1,7 @@
 #include "MapMgr.h"
+#if defined(PIKI_PC_PORT)
+#include "gl/pc_gfx.h"
+#endif
 
 #include "AIPerf.h"
 #include "Creature.h"

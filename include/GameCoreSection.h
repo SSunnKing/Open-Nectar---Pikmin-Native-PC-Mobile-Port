@@ -1,11 +1,14 @@
 #ifndef _GAMECORESECTION_H
 #define _GAMECORESECTION_H
 
+#include "Camera.h"
+#include "Geometry.h"
 #include "Light.h"
 #include "Node.h"
 #include "types.h"
 
 class Camera;
+class PcamCameraManager;
 class Controller;
 class Creature;
 class Font;
@@ -17,6 +20,7 @@ struct SearchSystem;
 
 namespace zen {
 struct DrawGameInfo;
+class GameInfo;
 }
 
 /**
@@ -77,7 +81,11 @@ struct GameCoreSection : public Node {
 	bool hidePelletExceptSucked();
 
 	static void finishPause() { pauseFlag = 0; }
+#if defined(PIKI_PC_PORT)
+	static void startPause(u16 pause);
+#else
 	static void startPause(u16 pause) { pauseFlag = pause; }
+#endif
 	static bool inPause() { return pauseFlag & COREPAUSE_Unk16; } // probably?
 
 	static u16 pauseFlag;
@@ -108,6 +116,53 @@ struct GameCoreSection : public Node {
 	Font* mBigFont;                   // _6C
 	Light _70;                        // _70
 	zen::DrawGameInfo* mDrawGameInfo; // _344
+#if defined(PIKI_PC_PORT)
+	// Port-only, al final para no mover los offsets originales.
+	Navi* mNavi2 = nullptr; ///< Segundo Olimar (cooperativo); nullptr en 1P.
+	// Pantalla partida (fase 3): cámara y manager propios de P2. `cameraMgr`
+	// (global) apunta a P1; durante la pasada de P2 se conmuta con
+	// setActiveView(1) para que el código que lee el singleton vea la suya.
+	Camera* mGameCamera2 = nullptr;
+	PcamCameraManager* mCameraMgr2 = nullptr;
+	int mRenderPass = 0; ///< 0 = primera vista de la frame (o única).
+	bool isSplitScreen() { return mNavi2 != nullptr && mGameCamera2 != nullptr; }
+	void setActiveView(int view);
+	Camera* getViewCamera(int view);
+	void updateCoopCameras();
+	/// Vista en curso: cámara, aspecto, viewport/scissor y limpieza de las
+	/// listas por frame (luces, shapes cacheadas) cuando view > 0.
+	void beginView(Graphics& gfx, int view, f32 farClip);
+	/// Vuelve a pantalla completa y a la cámara de P1.
+	void endViews(Graphics& gfx, Camera* mainCamera);
+	/// Viewport (espacio GX) de la vista en curso, o pantalla completa.
+	RectArea currentViewRect(Graphics& gfx);
+	RectArea splitViewRect(Graphics& gfx, int view);
+	bool mViewRectActive = false;
+	int mActiveViewIndex = 0;
+	// Pantalla partida dinámica: con los Olimar cerca las dos mitades
+	// muestran una sola cámara (blend 0); al alejarse cada mitad hace lerp
+	// hacia su cámara propia (blend 1). El lado de cada jugador se fija por
+	// su posición en pantalla al empezar a dividirse.
+	f32 mSplitBlend = 1.0f;
+	int mP1Side     = 0; ///< 0 = izquierda/arriba, 1 = derecha/abajo.
+	Camera mUnifiedCam;
+	Camera mViewCam[2];
+	void updateDynamicSplit(f32 dt);
+	int viewSide(int view) { return view == 0 ? mP1Side : 1 - mP1Side; }
+	/// Sub-rectángulo GX (HUD, menús) de la mitad de `view` según su lado.
+	void setViewSubrect(int view);
+	// HUD de P2 (fase 4): retrato/vida y pelotón propios; día/sol se dibuja
+	// una vez desde mDrawGameInfo.
+	zen::DrawGameInfo* mDrawGameInfo2 = nullptr;
+	/// Cuenta los pikmin en el pelotón de `navi`; GameStat::formationPikis
+	/// es global y no distingue de quién es cada uno.
+	int countFormationPikis(Navi* navi);
+	void fillHudInfo(zen::GameInfo* info, Navi* navi);
+	/// Dibuja el HUD del juego: partido por jugador en cooperativo.
+	void drawGameInfoHud(Graphics& gfx);
+	void drawDownedLabel(Graphics& gfx, Navi* navi, f32 viewAspect);
+	void drawContainerWindows(Graphics& gfx);
+#endif
 };
 
 #endif

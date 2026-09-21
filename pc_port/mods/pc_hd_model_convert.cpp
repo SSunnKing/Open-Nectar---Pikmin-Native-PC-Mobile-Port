@@ -68,6 +68,7 @@ uint32_t rd32(const char* p) { return (uint32_t)rd16(p) | ((uint32_t)rd16(p + 2)
 
 struct ZipSource : Source {
 	struct Entry {
+		std::string name;
 		std::string lowerName;
 		uint16_t method;
 		uint32_t csize, usize, local;
@@ -104,6 +105,7 @@ struct ZipSource : Source {
 			if (pos + 46 + n > data.size()) return false;
 			std::string name(&data[pos + 46], n);
 			std::replace(name.begin(), name.end(), '\\', '/');
+			e.name      = name;
 			e.lowerName = lower(name);
 			entries.push_back(e);
 			pos += 46 + n + x + c;
@@ -125,6 +127,13 @@ struct ZipSource : Source {
 	{
 		const Entry* e = find(suffix);
 		if (!e) fail("The archive is missing " + suffix + ".");
+		return readEntry(*e);
+	}
+
+	std::vector<char> readEntry(const Entry& entry) const
+	{
+		const Entry* e = &entry;
+		const std::string suffix = e->name;
 		size_t pos = e->local;
 		if (pos + 30 > data.size() || rd32(&data[pos]) != 0x04034b50) fail("Corrupt zip entry " + suffix + ".");
 		uint16_t n = rd16(&data[pos + 26]), x = rd16(&data[pos + 28]);
@@ -601,6 +610,7 @@ Texture loadTexture(const Source& src, const std::string& suffix)
 
 constexpr int kFlagRepeat = 1;
 constexpr int kFlagNoCull = 2;
+constexpr int kFlagNoTint = 4; // ignores the in-game tint (a captain's head/visor)
 constexpr int kGlassAlpha  = 72;
 constexpr int kCorneaAlpha = 64;
 
@@ -712,9 +722,12 @@ XmlNode dae(const Source& src, const std::string& suffix)
 
 // ───────────────────────────── builders ─────────────────────────────
 
-void buildOlimar(const Source& src, const fs::path& outDir)
+// Capitán de Pikmin 3: playerE (Olimar) o playerD (Louie), misma
+// estructura. Cabeza y visor van sin tinte (el tinte coop colorea el traje).
+void buildCaptainP3(const Source& src, const fs::path& outDir, const char* prefix, const char* file)
 {
-	XmlNode root = dae(src, "playerE.dae");
+	const std::string p = prefix;
+	XmlNode root = dae(src, p + ".dae");
 	Skins skins  = readSkins(root);
 	// Only head_m samples playerE_head; suit, metal, light and both helmet
 	// layers (naka inner, soto glass) sample playerE_body. The glass is the
@@ -726,12 +739,246 @@ void buildOlimar(const Source& src, const fs::path& outDir)
 		auto v = expand(g, skins, kJoints, wrapClamp, nullptr);
 		target.insert(target.end(), v.begin(), v.end());
 	}
-	Texture bodyTex = loadTexture(src, "playerE_body.png");
+	Texture bodyTex = loadTexture(src, p + "_body.png");
 	std::vector<Part> parts;
 	parts.push_back({ body, bodyTex, 0 });
-	parts.push_back({ head, loadTexture(src, "playerE_head.png"), 0 });
-	parts.push_back({ glass, bodyTex.translucent(kGlassAlpha), 0 });
-	writePack(outDir / "olimar_hd.nhm", bonesFor(kJoints, skins), parts);
+	parts.push_back({ head, loadTexture(src, p + "_head.png"), kFlagNoTint });
+	parts.push_back({ glass, bodyTex.translucent(kGlassAlpha), kFlagNoTint });
+	writePack(outDir / file, bonesFor(kJoints, skins), parts);
+}
+
+void buildOlimar(const Source& src, const fs::path& outDir) { buildCaptainP3(src, outDir, "playerE", "olimar_hd.nhm"); }
+void buildLouieHd(const Source& src, const fs::path& outDir) { buildCaptainP3(src, outDir, "playerD", "louie_hd.nhm"); }
+
+// ── Louie (Pikmin 2 rip, "Captain Louie/orima3.dae") ──
+// Same rig as Pikmin 1 (joint names on the scene nodes, skin refers to
+// jointnodeN), no normals in the rip, <polylist> of triangles.
+
+// Cristal casi transparente, como el de Olimar HD (kGlassAlpha).
+constexpr int kLouieSotoAlpha = 56;
+const unsigned char kLouieNakaRgba[4] = { 60, 120, 255, 28 };
+
+void collectJointNames(const XmlNode& n, std::map<std::string, std::string>& out)
+{
+	if (n.name == "node" && n.attr("type") == "JOINT") {
+		std::string name = n.attr("name").empty() ? n.attr("id") : n.attr("name");
+		out[n.attr("id")] = name;
+		if (!n.attr("sid").empty()) out[n.attr("sid")] = name;
+	}
+	for (const XmlNode& c : n.children) collectJointNames(c, out);
+}
+
+// Expands a <polylist> (all triangles) that has POSITION + TEXCOORD only,
+// computing smooth normals per position index.
+std::vector<Vertex> expandPolylist(const XmlNode* geometry, const Skins& skins, const std::vector<std::string>& jointNames,
+                                   float uvScale, float uvOffset)
+{
+	const XmlNode* mesh = geometry->child("mesh");
+	auto data = sourceData(mesh);
+	const XmlNode* prim = mesh ? mesh->child("polylist") : nullptr;
+	if (!prim) prim = mesh ? mesh->child("triangles") : nullptr;
+	if (!prim) fail("Geometry without <polylist>.");
+	const XmlNode* verticesNode = mesh->child("vertices");
+	std::map<std::string, int> offsets;
+	std::map<std::string, std::string> sources;
+	int stride = 0;
+	for (const XmlNode* in : prim->all("input")) {
+		int offset = std::atoi(in->attr("offset").c_str());
+		stride = std::max(stride, offset);
+		std::string semantic = in->attr("semantic");
+		if (semantic == "VERTEX" && verticesNode) {
+			for (const XmlNode* sub : verticesNode->all("input")) {
+				offsets[sub->attr("semantic")] = offset;
+				sources[sub->attr("semantic")] = ref(sub, "source");
+			}
+		} else {
+			offsets[semantic] = offset;
+			sources[semantic] = ref(in, "source");
+		}
+	}
+	stride += 1;
+	if (const XmlNode* vcount = prim->child("vcount"))
+		for (int c : ints(vcount)) if (c != 3) fail("polylist with non-triangles.");
+	std::vector<int> indices = ints(prim->child("p"));
+	auto ctl = skins.controllers.find(geometry->attr("id"));
+	if (ctl == skins.controllers.end()) fail("No skin for geometry " + geometry->attr("id") + ".");
+	const std::vector<Influence>& influences = ctl->second;
+	std::map<std::string, int> jointIndex;
+	for (size_t i = 0; i < jointNames.size(); i++) jointIndex[jointNames[i]] = (int)i;
+	if (!sources.count("POSITION") || !sources.count("TEXCOORD")) fail("Mesh lacks POSITION/TEXCOORD.");
+	const DaeSource& P = data[sources["POSITION"]];
+	const DaeSource& T = data[sources["TEXCOORD"]];
+	const int po = offsets["POSITION"], to = offsets["TEXCOORD"];
+	auto pos = [&](int i, float* out) {
+		if ((size_t)i * P.stride + 3 > P.floats.size()) fail("Vertex index out of range.");
+		for (int k = 0; k < 3; k++) out[k] = P.floats[(size_t)i * P.stride + k];
+	};
+	std::map<int, std::array<float, 3>> acc;
+	for (size_t base = 0; base + (size_t)stride * 3 <= indices.size(); base += (size_t)stride * 3) {
+		int ids[3];
+		float a[3], b[3], c[3];
+		for (int k = 0; k < 3; k++) ids[k] = indices[base + (size_t)k * stride + po];
+		pos(ids[0], a); pos(ids[1], b); pos(ids[2], c);
+		float u[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] };
+		float w[3] = { c[0] - a[0], c[1] - a[1], c[2] - a[2] };
+		float n[3] = { u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0] };
+		for (int id : ids) {
+			auto& e = acc[id];
+			e[0] += n[0]; e[1] += n[1]; e[2] += n[2];
+		}
+	}
+	std::vector<Vertex> out;
+	out.reserve(indices.size() / stride);
+	for (size_t base = 0; base + stride <= indices.size(); base += stride) {
+		int pi = indices[base + po], ti = indices[base + to];
+		float p[3];
+		pos(pi, p);
+		if ((size_t)ti * T.stride + 2 > T.floats.size()) fail("UV index out of range.");
+		float uv[2] = { T.floats[(size_t)ti * T.stride], T.floats[(size_t)ti * T.stride + 1] };
+		std::array<float, 3> n = acc.count(pi) ? acc[pi] : std::array<float, 3> { 0, 1, 0 };
+		float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+		if (len <= 0) len = 1;
+		if ((size_t)pi >= influences.size()) fail("Skin index out of range.");
+		const Influence& skin = influences[pi];
+		Vertex v {};
+		v[0] = p[0]; v[1] = p[1]; v[2] = p[2];
+		v[3] = n[0] / len; v[4] = n[1] / len; v[5] = n[2] / len;
+		v[6] = wrapClamp(uv[0] * uvScale + uvOffset);
+		v[7] = wrapClamp((1.0f - uv[1]) * uvScale + uvOffset);
+		for (size_t k = 0; k < skin.joints.size() && k < 4; k++) {
+			auto ji = jointIndex.find(skin.joints[k]);
+			if (ji == jointIndex.end()) fail("Unknown joint " + skin.joints[k] + ".");
+			v[8 + k]  = (float)ji->second;
+			v[12 + k] = skin.weights[k];
+		}
+		out.push_back(v);
+	}
+	return out;
+}
+
+// Per triangle: to `head` when most of its weight sits on the head/antenna
+// joints (indices in kJoints), otherwise to `suit`.
+void splitHead(const std::vector<Vertex>& in, std::vector<Vertex>& suit, std::vector<Vertex>& head)
+{
+	static const int kHeadJoints[] = { 5, 6, 7, 8 }; // headjnt, happajnt1-3
+	for (size_t i = 0; i + 3 <= in.size(); i += 3) {
+		float weight = 0;
+		for (int k = 0; k < 3; k++)
+			for (int b = 0; b < 4; b++)
+				for (int hj : kHeadJoints)
+					if ((int)in[i + k][8 + b] == hj) weight += in[i + k][12 + b];
+		std::vector<Vertex>& dst = weight > 1.5f ? head : suit;
+		dst.insert(dst.end(), in.begin() + i, in.begin() + i + 3);
+	}
+}
+
+std::vector<Vertex> flipWinding(const std::vector<Vertex>& in)
+{
+	std::vector<Vertex> out;
+	out.reserve(in.size());
+	for (size_t i = 0; i + 3 <= in.size(); i += 3) {
+		const Vertex* tri[3] = { &in[i], &in[i + 2], &in[i + 1] };
+		for (const Vertex* t : tri) {
+			Vertex v = *t;
+			v[3] = -v[3]; v[4] = -v[4]; v[5] = -v[5];
+			out.push_back(v);
+		}
+	}
+	return out;
+}
+
+void buildLouie(const Source& src, const fs::path& outDir)
+{
+	XmlNode root = dae(src, "orima3.dae");
+	std::map<std::string, std::string> nodeName;
+	collectJointNames(root, nodeName);
+	Skins raw = readSkins(root);
+	// Rename jointnodeN -> real joint names everywhere.
+	Skins skins;
+	for (const auto& kv : raw.bindByJoint) {
+		auto it = nodeName.find(kv.first);
+		skins.bindByJoint[it == nodeName.end() ? kv.first : it->second] = kv.second;
+	}
+	for (const auto& kv : raw.controllers) {
+		std::vector<Influence> rows = kv.second;
+		for (Influence& inf : rows)
+			for (std::string& j : inf.joints) {
+				auto it = nodeName.find(j);
+				if (it != nodeName.end()) j = it->second;
+			}
+		skins.controllers[kv.first] = std::move(rows);
+	}
+	// Geometry -> texture file, via scene node -> controller -> material -> effect -> image.
+	std::map<std::string, std::string> imageFile;
+	if (const XmlNode* lib = root.child("library_images"))
+		for (const XmlNode* img : lib->all("image"))
+			if (const XmlNode* init = img->child("init_from")) imageFile[img->attr("id")] = init->text;
+	std::map<std::string, std::string> materialImage;
+	if (const XmlNode* lib = root.child("library_materials"))
+		for (const XmlNode* m : lib->all("material")) {
+			std::string effectId = ref(m->child("instance_effect"), "url");
+			const XmlNode* effect = nullptr;
+			if (const XmlNode* el = root.child("library_effects"))
+				for (const XmlNode* e : el->all("effect"))
+					if (e->attr("id") == effectId) effect = e;
+			std::vector<const XmlNode*> inits;
+			if (effect) effect->descendants("init_from", inits);
+			materialImage[m->attr("id")] = inits.empty() ? std::string() : inits[0]->text;
+		}
+	std::map<std::string, std::string> geometryMaterial;
+	std::map<std::string, std::string> controllerGeometry;
+	if (const XmlNode* lib = root.child("library_controllers"))
+		for (const XmlNode* c : lib->all("controller"))
+			if (const XmlNode* skin = c->child("skin")) controllerGeometry[c->attr("id")] = ref(skin, "source");
+	std::vector<const XmlNode*> instances;
+	root.descendants("instance_controller", instances);
+	for (const XmlNode* inst : instances) {
+		std::vector<const XmlNode*> mats;
+		inst->descendants("instance_material", mats);
+		auto g = controllerGeometry.find(ref(inst, "url"));
+		if (g != controllerGeometry.end() && !mats.empty()) geometryMaterial[g->second] = ref(mats[0], "target");
+	}
+	std::vector<Vertex> body, naka, soto;
+	for (const XmlNode* g : geometries(root)) {
+		std::string image = materialImage[geometryMaterial[g->attr("id")]];
+		std::string file  = imageFile.count(image) ? imageFile[image] : image;
+		std::string lf    = lower(file);
+		if (lf.find("luzy") != std::string::npos) {
+			auto v = expandPolylist(g, skins, kJoints, 1.0f, 0.0f);
+			body.insert(body.end(), v.begin(), v.end());
+		} else if (lf.find("helkan") != std::string::npos) {
+			auto v = expandPolylist(g, skins, kJoints, 0.5f, 0.5f); // soto_mat texture matrix
+			soto.insert(soto.end(), v.begin(), v.end());
+		} else {
+			auto v = expandPolylist(g, skins, kJoints, 1.0f, 0.0f);
+			naka.insert(naka.end(), v.begin(), v.end());
+		}
+	}
+	// naka is wound inwards (inside of the visor); flip into an outward shell.
+	naka = flipWinding(naka);
+	// luzy_565 is an 8x8 palette (2x2 cells): nearest-upscale to 64x64 so
+	// bilinear sampling never bleeds across cells.
+	Texture palette = loadTexture(src, "luzy_565.png");
+	Texture bodyTex;
+	bodyTex.width = bodyTex.height = 64;
+	bodyTex.rgba.resize(64 * 64 * 4);
+	for (int y = 0; y < 64; y++)
+		for (int x = 0; x < 64; x++) {
+			int sx = x * palette.width / 64, sy = y * palette.height / 64;
+			std::memcpy(&bodyTex.rgba[((size_t)y * 64 + x) * 4], &palette.rgba[((size_t)sy * palette.width + sx) * 4], 4);
+		}
+	Texture nakaTex;
+	nakaTex.width = nakaTex.height = 4;
+	for (int i = 0; i < 16; i++) nakaTex.rgba.insert(nakaTex.rgba.end(), kLouieNakaRgba, kLouieNakaRgba + 4);
+	// The co-op tint must only colour the suit: head and visor go untinted.
+	std::vector<Vertex> suit, head;
+	splitHead(body, suit, head);
+	std::vector<Part> parts;
+	parts.push_back({ suit, bodyTex, 0 });
+	parts.push_back({ head, bodyTex, kFlagNoTint });
+	parts.push_back({ naka, nakaTex, kFlagNoTint });
+	parts.push_back({ soto, loadTexture(src, "helkan_8ia.png").translucent(kLouieSotoAlpha), kFlagNoTint });
+	writePack(outDir / "louie.nhm", bonesFor(kJoints, skins), parts);
 }
 
 // Pikmin 3's leaf/bud/flower have the stem along -Z; Pikmin 1 draws
@@ -915,6 +1162,9 @@ struct Kind {
 
 const Kind kKinds[] = {
 	{ "playerE.dae", "OlimarHD", { "olimar_hd.nhm" }, buildOlimar },
+	// Louie: Pikmin 2 rip; luzy_565.png is unique to it (Olimar's rip shares orima3.dae).
+	{ "luzy_565.png", "Louie", { "louie.nhm" }, buildLouie },
+	{ "playerD.dae", "LouieHD", { "louie_hd.nhm" }, buildLouieHd },
 	{ "piki_p3_red.dae", "PikminHD",
 	  { "piki_red.nhm", "piki_yellow.nhm", "piki_blue.nhm", "happa_leaf.nhm", "happa_bud.nhm", "happa_flower.nhm" }, buildPikmin },
 	{ "red bulborb/model.dae", "BulborbHD", { "bulborb.nhm" }, buildBulborb },
@@ -952,6 +1202,47 @@ int convert(const Source& src, const fs::path& modelsRoot, bool force = false)
 }
 
 } // namespace
+
+// Instala un pack de texturas desde un zip (escritorio): las entradas bajo
+// ".../Load/Textures/<pack>/..." van a Load/Textures/<pack>/...; si el zip
+// no lleva esa carpeta, todo cuelga de Load/Textures/<nombre del zip>/.
+// Misma regla que el instalador Android (TexturePack.java).
+int pc_texpack_install_zip(const char* zipPath, char* message, unsigned long messageSize)
+{
+	auto say = [&](const std::string& text) {
+		if (message && messageSize) std::snprintf(message, messageSize, "%s", text.c_str());
+	};
+	ZipSource zip;
+	if (!zipPath || !zip.open(zipPath)) { say("Not a readable .zip file."); return 0; }
+	const fs::path root = fs::path("Load") / "Textures";
+	const std::string stem = fs::path(zipPath).stem().string();
+	std::error_code ec;
+	fs::create_directories(root, ec);
+	int written = 0;
+	for (const ZipSource::Entry& e : zip.entries) {
+		if (e.name.empty() || e.name.back() == '/') continue;
+		std::string rel;
+		const size_t idx = e.lowerName.find("load/textures/");
+		if (idx != std::string::npos) rel = e.name.substr(idx + std::strlen("load/textures/"));
+		else rel = stem + "/" + e.name;
+		if (rel.empty() || rel.find("..") != std::string::npos) continue;
+		const fs::path out = root / rel;
+		try {
+			std::vector<char> bytes = zip.readEntry(e);
+			fs::create_directories(out.parent_path(), ec);
+			std::ofstream f(out, std::ios::binary);
+			if (!f) continue;
+			f.write(bytes.data(), (std::streamsize)bytes.size());
+			written++;
+		} catch (const Error& err) {
+			say(err.message);
+			return written;
+		}
+	}
+	if (written == 0) say("The zip has no files to install.");
+	else say("Texture pack installed (" + std::to_string(written) + " files). Activate it in the list.");
+	return written;
+}
 
 int pc_hd_models_convert_sources(void)
 {
@@ -997,10 +1288,10 @@ int pc_hd_models_convert_file(const char* pathStr, int expected, char* message, 
 	for (int k = 0; k < (int)(sizeof(kKinds) / sizeof(kKinds[0])); k++)
 		if (src->has(kKinds[k].marker)) { found = k; break; }
 	if (found < 0) {
-		say("Not a Pikmin 3 model zip (Olimar, Pikmin, Bulborb or Dwarf Bulborb).");
+		say("Not a known model zip (Olimar, Louie, Louie HD, Pikmin, Bulborb or Dwarf Bulborb).");
 		return 0;
 	}
-	static const char* kNames[] = { "Olimar", "Pikmin", "Bulborb", "Dwarf Bulborb" };
+	static const char* kNames[] = { "Olimar", "Louie", "Louie HD", "Pikmin", "Bulborb", "Dwarf Bulborb" };
 	if (expected >= 0 && expected != found) {
 		char buf[160];
 		std::snprintf(buf, sizeof(buf), "This zip is the %s model, not %s.", kNames[found], kNames[expected]);

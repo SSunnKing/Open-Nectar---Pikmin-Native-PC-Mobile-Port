@@ -3,6 +3,7 @@
 #include "NaviMgr.h"
 #include "nlib/Math.h"
 #include "zen/Graphics.h"
+#include "zen/DrawGameInfo.h"
 #include "zen/Math.h"
 
 const f32 zen::DrawLifeCircle::TRI_NUM = 128.0f;
@@ -103,7 +104,12 @@ void zen::DrawLifeCircle::drawLifeCircle(f32 healthRatio)
 void zen::DrawNaviLifeCircle::drawLifeCircle()
 {
 	if (naviMgr) {
+#if defined(PIKI_PC_PORT)
+		// HUD por jugador: el índice lo fija el DrawGameInfo que está dibujando.
+		Navi* navi = naviMgr->getNavi(zen::gHudNaviIndex);
+#else
 		Navi* navi = naviMgr->getNavi(mNaviIndex);
+#endif
 		DrawLifeCircle::drawLifeCircle(navi->mHealth / C_NAVI_PARM(navi, mHealth)); // ratio of current health to parameter health
 	} else {
 		DrawLifeCircle::drawLifeCircle(1.0f);

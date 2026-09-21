@@ -259,7 +259,7 @@ void PelCreature::startAI(int)
  */
 void PelCreature::doRender(Graphics& gfx, Matrix4f& mtx)
 {
-	Navi* navi = naviMgr->getNavi();
+	Navi* navi = naviMgr->getNavi(); // debug: solo P1
 	if (navi->mKontroller->keyClick(KBBTN_B)) {
 		mVelocity.y += 400.0f;
 		if (mIsRealDynamics) {

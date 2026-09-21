@@ -1,4 +1,7 @@
 #include "zen/ogTitle.h"
+#include "P2D/Picture.h"
+#include <cstdio>
+#include <cstring>
 
 #include "DebugLog.h"
 #include "P2D/TextBox.h"
@@ -10,6 +13,12 @@
 #include "zen/DrawMenu.h"
 #include "zen/ZenController.h"
 #include "zen/ogSub.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_coop.h"
+#include "settings/pc_settings.h"
+#include "settings/pc_glass_menu.h"
+#include "settings/pc_settings_rows.h"
+#endif
 
 /**
  * @note UNUSED Size: 00009C
@@ -53,8 +62,23 @@ void zen::ogScrTitleMgr::setGamePrefs()
  */
 zen::ogScrTitleMgr::ogScrTitleMgr()
 {
+#if defined(PIKI_PC_PORT)
+	// Co-op (bajo Start) y Advanced Options (bajo Options) como opciones del
+	// menú principal: dos huecos extra clonados del último. Con 4 ítems se
+	// compacta el paso a 36 px; con 5 (Challenge Mode) a 33 px, subiendo el
+	// panel para no pisar el logo ni el copyright.
+	// El cristal se ensancha 40 px para que "Advanced Options" respire.
+	const PcMenuExtend extNoChallenge   = { 2, 36, -32, 'yoko', 40 };
+	const PcMenuExtend extWithChallenge = { 2, 33, -44, 'yoko', 40 };
+	mMenuNoChallenge   = new DrawMenu("screen/blo/m_select.blo", false, false, &extNoChallenge);
+	mMenuWithChallenge = new DrawMenu("screen/blo/m_selec2.blo", false, false, &extWithChallenge);
+	pcInsertCoopItem(mMenuNoChallenge);
+	pcInsertCoopItem(mMenuWithChallenge);
+	pcSetupAdvancedMenu();
+#else
 	mMenuNoChallenge   = new DrawMenu("screen/blo/m_select.blo", false, false);
 	mMenuWithChallenge = new DrawMenu("screen/blo/m_selec2.blo", false, false);
+#endif
 	mMainMenu          = mMenuNoChallenge;
 
 	mOptionsMenu  = new DrawMenu("screen/blo/option.blo", false, false);
@@ -124,6 +148,98 @@ zen::ogScrTitleMgr::ogScrTitleMgr()
 	DispBarBGM(false);
 	DispBarSE(false);
 }
+
+#if defined(PIKI_PC_PORT)
+// Tras clonar dos huecos, los textos quedan: Start / Co-op / Options /
+// Advanced Options [/ Challenge Mode] (en ambos pares he/hm: normal y resaltado).
+void zen::ogScrTitleMgr::pcInsertCoopItem(DrawMenu* menu)
+{
+	static char sCoopLabel[]     = "Co-op";
+	static char sAdvancedLabel[] = "Advanced Options";
+	static immut char* kFamilies[] = { "he%02d", "hm%02d" };
+	char buf[8];
+	for (int f = 0; f < 2; f++) {
+		int n = 0;
+		sprintf(buf, kFamilies[f], 0);
+		while (menu->getScreenPtr()->search(P2DPaneLibrary::makeTag(buf), false)) {
+			sprintf(buf, kFamilies[f], ++n);
+		}
+		if (n < 4) {
+			continue;
+		}
+		P2DTextBox* box[6];
+		for (int i = 0; i < n && i < 6; i++) {
+			sprintf(buf, kFamilies[f], i);
+			box[i] = static_cast<P2DTextBox*>(menu->getScreenPtr()->search(P2DPaneLibrary::makeTag(buf), true));
+		}
+		// Originales: 0 Start, 1 Options[, 2 Challenge]. Las cajas quedan
+		// (todas centradas en la misma X); solo viaja el texto.
+		char* optionsText   = box[1]->getString();
+		char* challengeText = n >= 5 ? box[2]->getString() : nullptr;
+		box[1]->setString(sCoopLabel);
+		box[2]->setString(optionsText);
+		box[3]->setString(sAdvancedLabel);
+		// Caja más ancha (misma X central) para que el texto no se parta en
+		// dos líneas; la caja de texto envuelve por ancho.
+		{
+			const int cx = box[3]->getPosH() + box[3]->getWidth() / 2;
+			const int w  = 400;
+			box[3]->resize(w, box[3]->getHeight());
+			box[3]->move(cx - w / 2, box[3]->getPosV());
+		}
+		if (challengeText) box[4]->setString(challengeText);
+	}
+}
+#endif
+
+#if defined(PIKI_PC_PORT)
+// Advanced Options: mismo panel que Options (option.blo) con sus huecos
+// reetiquetados. El texto del título ("Options") existe en más de un pane
+// (normal y resaltado), así que se sustituye por contenido en todo el árbol.
+// Hueco 1 ("Messages") ya viene oculto en el .blo.
+static void pcRelabelTextPanes(P2DPane* pane, immut char* from, char* to)
+{
+	if (pane->getTypeID() == PANETYPE_TextBox) {
+		P2DTextBox* box = static_cast<P2DTextBox*>(pane);
+		if (box->getString() && strcmp(box->getString(), from) == 0) box->setString(to);
+	}
+	for (PSUTree<P2DPane>* it = pane->getFirstChild(); it; it = it->getNextChild()) {
+		pcRelabelTextPanes(it->getObject(), from, to);
+	}
+}
+
+void zen::ogScrTitleMgr::pcSetupAdvancedMenu()
+{
+	static char sTitle[] = "Advanced";
+	static char* sLabels[7] = { (char*)"Display", (char*)"Controls", (char*)"Graphics", (char*)"Mods",
+		                         (char*)"Save Data", (char*)"Save", (char*)"Back" };
+	// option.blo trae 4 huecos (el 1 oculto): se muestran los 4 y se clonan 3
+	// más, con el paso compactado y el cristal estirado (PcMenuExtend).
+	const PcMenuExtend ext = { 3, 30, -44, 'yoko', 0 };
+	mAdvancedMenu  = new DrawMenu("screen/blo/option.blo", false, false, &ext);
+	P2DScreen* scr = mAdvancedMenu->getScreenPtr();
+	// Fondo negro del .blo fuera, como hace el título con los demás menús.
+	if (P2DPane* back = scr->search('back', false)) static_cast<P2DPicture*>(back)->setAlpha(0);
+	static const char* kFamilies[] = { "he%02d", "hm%02d", "i%02dl", "i%02dr" };
+	char buf[8];
+	for (int i = 0; i < 7; i++) {
+		for (int f = 0; f < 4; f++) {
+			sprintf(buf, kFamilies[f], i);
+			P2DPane* p = scr->search(P2DPaneLibrary::makeTag(buf), false);
+			if (!p || f >= 2) continue; // los iconos los gestiona DrawMenu (cursor propio)
+			p->show();                  // el hueco 1 ("Messages") viene oculto
+			static_cast<P2DTextBox*>(p)->setString(sLabels[i]);
+		}
+	}
+	P2DTextBox* titl = static_cast<P2DTextBox*>(scr->search('titl', false));
+	if (titl && titl->getString()) {
+		char original[64];
+		snprintf(original, sizeof(original), "%s", titl->getString());
+		pcRelabelTextPanes(scr, original, sTitle);
+	}
+	mAdvancedMenu->setMenuItemActiveSw(1, true);
+}
+#endif
 
 /**
  * @todo: Documentation
@@ -198,6 +314,34 @@ zen::ogScrTitleMgr::TitleStatus zen::ogScrTitleMgr::update(Controller* input)
 		if (flag0 != 0) {
 			break;
 		}
+#if defined(PIKI_PC_PORT)
+		// Orden PC: Start / Co-op / Options / Advanced Options / Challenge Mode.
+		if (mCurrentSelection == 0 || mCurrentSelection == 1) {
+			pc_coop_set_pending(mCurrentSelection == 1);
+			pc_coop_set_chosen_at_title(true);
+			mPendingExitStatus = STATUS_ExitToStoryMode;
+			mStatus            = STATUS_Exiting;
+			return mStatus;
+		}
+		if (mCurrentSelection == 2) {
+			mCurrentMenuID = MENU_Options;
+			mOptionsMenu->start(0);
+			break;
+		}
+		if (mCurrentSelection == 3) {
+			// Advanced Options: panel propio (option.blo) con los grupos de
+			// ajustes del port; las listas las pinta pc_glass_menu.
+			pc_settings_rows_begin();
+			mCurrentMenuID = MENU_Advanced;
+			mAdvancedMenu->start(0);
+			break;
+		}
+		if (mCurrentSelection == 4) {
+			mPendingExitStatus = STATUS_ExitToChallengeMode;
+			mStatus            = STATUS_Exiting;
+			return mStatus;
+		}
+#else
 		if (mCurrentSelection == 0) {
 			// Start
 			mPendingExitStatus = STATUS_ExitToStoryMode;
@@ -216,6 +360,7 @@ zen::ogScrTitleMgr::TitleStatus zen::ogScrTitleMgr::update(Controller* input)
 			mStatus            = STATUS_Exiting;
 			return mStatus;
 		}
+#endif
 		if (mMainMenu->checkSelectMenuCancel()) {
 			mPendingExitStatus = STATUS_ExitToStart;
 			mStatus            = STATUS_Exiting;
@@ -223,6 +368,35 @@ zen::ogScrTitleMgr::TitleStatus zen::ogScrTitleMgr::update(Controller* input)
 		}
 		break;
 	}
+#if defined(PIKI_PC_PORT)
+	case MENU_Advanced:
+	{
+		// Mientras una lista está abierta la entrada la consume pc_settings.
+		if (pc_glass_menu_active()) {
+			break;
+		}
+		mAdvancedMenu->update(input);
+		int flagA         = mAdvancedMenu->getStatusFlag();
+		mCurrentSelection = mAdvancedMenu->getSelectMenu();
+		if (flagA != 0) {
+			break;
+		}
+		// 0 Display, 1 Controls, 2 Graphics, 3 Mods, 4 Save Data, 5 Save, 6 Back.
+		const bool cancelled = mAdvancedMenu->checkSelectMenuCancel();
+		if (!cancelled && mCurrentSelection >= 0 && mCurrentSelection < PC_SET_GROUP_COUNT) {
+			pc_glass_menu_open_list(mCurrentSelection);
+			mAdvancedMenu->start(mCurrentSelection);
+			break;
+		}
+		if (cancelled || mCurrentSelection == 5 || mCurrentSelection == 6) {
+			pc_settings_rows_end(!cancelled && mCurrentSelection == 5);
+			mAdvancedMenu->setCancelSelectMenuNo(-1);
+			mMainMenu->start(-1);
+			mCurrentMenuID = MENU_MainMenu;
+		}
+		break;
+	}
+#endif
 	case MENU_Options:
 	{
 		mOptionsMenu->update(input);
@@ -525,6 +699,15 @@ void zen::ogScrTitleMgr::draw(Graphics& gfx)
 			mLanguageMenu->draw(gfx);
 			break;
 		}
+#if defined(PIKI_PC_PORT)
+		case MENU_Advanced:
+		{
+			// Con una lista abierta el panel de grupos se esconde (la lista
+			// ocupa su sitio, la pinta pc_glass_menu tras el frame).
+			if (!pc_glass_menu_active()) mAdvancedMenu->draw(gfx);
+			break;
+		}
+#endif
 		}
 	}
 }

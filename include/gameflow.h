@@ -32,6 +32,11 @@ class Texture;
 
 /// Checks course open flags for a given stage.
 #define IS_STAGE_OPEN(flags, stageID) ((flags) & (1 << (stageID)))
+#if defined(PIKI_PC_PORT)
+/// Depuración: con PIKMIN_UNLOCK_ALL=1 todos los mapas (historia y desafío)
+/// cuentan como abiertos, sin tocar la partida guardada.
+bool pc_unlock_all_stages();
+#endif
 
 /// PAL-exclusive packing of language preference flag (to save to card).
 #define PACK_LANG_FLAG(flag, lang) ((flag) & 0xFFFFFFC3 | ((lang) & 0xF) << 2)
@@ -227,6 +232,9 @@ public:
 	 */
 	bool isStageOpen(int storyStageID)
 	{
+#if defined(PIKI_PC_PORT)
+		if (pc_unlock_all_stages() && storyStageID >= STAGE_START && storyStageID <= STAGE_TESTMAP) return true;
+#endif
 		if (storyStageID >= STAGE_START && storyStageID <= STAGE_TESTMAP) {
 			return IS_STAGE_OPEN(mCourseOpenFlags, storyStageID) != false;
 		}
@@ -531,6 +539,9 @@ struct GamePrefs : public CoreNode {
 	/// Checks if a challenge mode stage/map is unlocked.
 	bool isStageOpen(int chalStageID)
 	{
+#if defined(PIKI_PC_PORT)
+		if (pc_unlock_all_stages() && chalStageID >= CHALSTAGE_START && chalStageID <= CHALSTAGE_COUNT) return true;
+#endif
 		// Lesser than *or equal to* `CHALSTAGE_COUNT` is probably a bug; inherited from Story Mode's handling of stage IDs for test maps.
 		if (chalStageID >= CHALSTAGE_START && chalStageID <= CHALSTAGE_COUNT) {
 			return IS_STAGE_OPEN(mChalCourseOpenFlags, chalStageID) != false;

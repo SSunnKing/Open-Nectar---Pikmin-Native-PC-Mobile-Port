@@ -223,6 +223,13 @@ u16 sQueuedGameButtons = 0;
 int sLayoutW = 0, sLayoutH = 0;
 int sGameMenuClaimFrames = 0;
 int sPortMenuClaimFrames = 0;
+// Arrastre vertical sobre los menús del port (listas con scroll): se manda
+// como desplazamiento normalizado y, si se movió, el toque no cuenta.
+struct MenuDrag {
+	long long finger = -1;
+	float lastY = 0.0f, startY = 0.0f;
+	bool moved = false;
+} sMenuDrag;
 
 // Con un menú reclamando la capa: B/atrás, A/confirmar del menú F1 y los
 // botones cuyo icono está en pantalla.
@@ -591,6 +598,11 @@ void pc_touch_on_finger(long long fingerId, PcTouchPhase phase, float x, float y
 			s.y0 = y;
 			break;
 		}
+		if (sPortMenuClaimFrames > 0 && sMenuDrag.finger < 0 && button_at(x, y) < 0) {
+			sMenuDrag.finger = fingerId;
+			sMenuDrag.lastY = sMenuDrag.startY = y;
+			sMenuDrag.moved = false;
+		}
 		const int btn = button_at(x, y);
 		if (btn < 0 && sGameMenuClaimFrames <= 0 && sColorTapFinger < 0 && in_color_icon(x, y)) {
 			// Va antes que el stick: el icono cae dentro de su zona.
@@ -633,6 +645,11 @@ void pc_touch_on_finger(long long fingerId, PcTouchPhase phase, float x, float y
 		break;
 	}
 	case PC_TOUCH_MOVE:
+		if (fingerId == sMenuDrag.finger && sPortMenuClaimFrames > 0 && sLayoutH > 0) {
+			if (std::fabs(y - sMenuDrag.startY) > 0.01f * float(sLayoutH)) sMenuDrag.moved = true;
+			if (sMenuDrag.moved) pc_settings_touch_drag((y - sMenuDrag.lastY) / float(sLayoutH));
+			sMenuDrag.lastY = y;
+		}
 		if (fingerId == sStick.finger) update_stick(x, y);
 		for (GestureFinger& g : sRightGesture) {
 			if (g.finger != fingerId) continue;
@@ -705,6 +722,11 @@ void pc_touch_on_finger(long long fingerId, PcTouchPhase phase, float x, float y
 			g.finger = -1;
 			g.moved = false;
 			sPinchDistance = -1.0f;
+		}
+		if (fingerId == sMenuDrag.finger) {
+			if (sMenuDrag.moved) gestureMoved = true; // un arrastre no es un toque
+			sMenuDrag.finger = -1;
+			sMenuDrag.moved = false;
 		}
 		if (!gestureMoved)
 		{

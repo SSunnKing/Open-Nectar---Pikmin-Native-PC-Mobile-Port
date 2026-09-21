@@ -652,8 +652,8 @@ void ActorInstance::initInstance()
 		}
 	}
 
-	if (mFlags & CAF_MoveDayEndNavi && naviMgr && naviMgr->getNavi()) {
-		naviMgr->getNavi()->startDayEnd();
+	if (mFlags & CAF_MoveDayEndNavi && naviMgr && naviMgr->getMovieNavi()) {
+		naviMgr->getMovieNavi()->startDayEnd();
 	}
 
 	if (!mIsLeaf) {
@@ -1242,12 +1242,12 @@ void ActorInstance::refresh(immut Matrix4f& mtx, Graphics& gfx, f32* p3)
 #endif
 
 	if (mFlags & (CAF_MoveDayEndNavi | CAF_MoveAiNavi)) {
-		if (naviMgr && naviMgr->getNavi()) {
+		if (naviMgr && naviMgr->getMovieNavi()) {
 			Vector3f pos(0.0f, 0.0f, 0.0f);
 			pos.multMatrix(mActiveActor->mModel->getAnimMatrix(0));
 			pos.multMatrix(gfx.mCamera->mInverseLookAtMtx);
-			naviMgr->getNavi()->updateDayEnd(pos);
-			naviMgr->getNavi()->demoDraw(gfx, nullptr);
+			naviMgr->getMovieNavi()->updateDayEnd(pos);
+			naviMgr->getMovieNavi()->demoDraw(gfx, nullptr);
 		}
 	} else {
 		u32 flags = mActiveActor->mModel->mShapeFlags;

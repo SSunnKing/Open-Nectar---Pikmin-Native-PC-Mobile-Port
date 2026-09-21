@@ -1,4 +1,5 @@
 #include "zen/DamageEffect.h"
+#include "zen/DrawGameInfo.h"
 #include "Graphics.h"
 #include "NaviMgr.h"
 #include "gameflow.h"
@@ -22,7 +23,7 @@ bool zen::DamageEffect::update()
 	if (!gameflow.mIsUIOverlayActive) {
 		Navi* navi;
 		if (naviMgr) {
-			navi = naviMgr->getNavi(0);
+			navi = naviMgr->getNavi(zen::gHudNaviIndex);
 		}
 
 		// hmm.

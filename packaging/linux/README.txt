@@ -52,6 +52,10 @@ restore permissions with:
   chmod +x nectar nectar-launcher nectar.real nectar-launcher.real \
            lib/ld-linux-x86-64.so.2
 
+Optional desktop shortcut with the Open Nectar icon: edit
+open-nectar.desktop (replace /ruta/a/nectar-linux with this folder's
+path) and copy it to ~/.local/share/applications/.
+
 
 -------------------------------------------------------------------
 2. INSTALL MISSING DEPENDENCIES

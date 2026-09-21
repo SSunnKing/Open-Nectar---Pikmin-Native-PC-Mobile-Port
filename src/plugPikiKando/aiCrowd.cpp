@@ -130,6 +130,9 @@ void ActCrowd::setFormed()
 {
 	mState = STATE_Formed;
 	if (mPiki->hasBomb() && !playerState->mDemoFlags.isFlag(DEMOFLAG_GrabFirstBomb)) {
+		#if defined(PIKI_PC_PORT)
+		if (mPiki->mNavi) naviMgr->setMovieNavi(mPiki->mNavi);
+#endif
 		playerState->mDemoFlags.setFlag(DEMOFLAG_GrabFirstBomb, mPiki);
 	}
 }
@@ -295,6 +298,9 @@ int ActCrowd::exec()
 	f32 travelDist  = effDir.length();
 
 	if (mPiki->hasBomb() && !playerState->mDemoFlags.isFlag(DEMOFLAG_GrabFirstBomb) && travelDist < 100.0f) {
+		#if defined(PIKI_PC_PORT)
+		if (mPiki->mNavi) naviMgr->setMovieNavi(mPiki->mNavi);
+#endif
 		playerState->mDemoFlags.setFlag(DEMOFLAG_GrabFirstBomb, mPiki);
 	}
 

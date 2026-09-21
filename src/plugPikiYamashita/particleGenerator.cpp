@@ -128,6 +128,21 @@ void zen::particleGenerator::applyTint(Colour& col)
 	col.b = u8((int(mTint.b) * bright) / 255);
 }
 
+// PC: con tinte, la textura pasa a intensidad (canal rojo replicado) para que
+// una textura de color fijo (p.ej. el brillo rojo de la antena) tome el
+// color del tinte en vez de multiplicarse con él.
+void zen::particleGenerator::beginTintTexSwap()
+{
+	if (!mHasTint) return;
+	GXSetTevSwapModeTable(GX_TEV_SWAP0, GX_CH_RED, GX_CH_RED, GX_CH_RED, GX_CH_ALPHA);
+}
+
+void zen::particleGenerator::endTintTexSwap()
+{
+	if (!mHasTint) return;
+	GXSetTevSwapModeTable(GX_TEV_SWAP0, GX_CH_RED, GX_CH_GREEN, GX_CH_BLUE, GX_CH_ALPHA);
+}
+
 void zen::particleGenerator::init(u8* data, Texture* tex1, Texture* tex2, immut Vector3f& pos, zen::particleMdlManager* mdlMgr,
                                   zen::CallBack1<zen::particleGenerator*>* cb1,
                                   zen::CallBack2<zen::particleGenerator*, zen::particleMdl*>* cb2)
@@ -1020,6 +1035,7 @@ void zen::particleGenerator::drawPtclBillboard(Graphics& gfx)
 #endif
 
 	if (gfx.initParticle(false)) {
+		beginTintTexSwap();
 		zenList* origin = mPtclMdlListManager.getOrigin();
 		zenList* list   = mPtclMdlListManager.getTopList();
 		while (list != origin) {
@@ -1029,12 +1045,15 @@ void zen::particleGenerator::drawPtclBillboard(Graphics& gfx)
 			Colour col(ptcl->mPrimaryColor.r, ptcl->mPrimaryColor.g, ptcl->mPrimaryColor.b,
 			           RoundOff(ptcl->mPrimaryColor.a * ptcl->mAlphaFactor));
 			applyTint(col);
-			gfx.setPrimEnv(&col, &ptcl->mEnvColor);
+			Colour env(ptcl->mEnvColor);
+			applyTint(env);
+			gfx.setPrimEnv(&col, &env);
 			gfx.drawRotParticle(*gfx.mCamera, ptcl->mLocalPosition + ptcl->mGlobalPosition, -ptcl->mRotAngle,
 			                    ptcl->mSize * ptcl->mScaleFactor * 25.0f);
 
 			list = next;
 		}
+		endTintTexSwap();
 	}
 }
 
@@ -1053,6 +1072,7 @@ void zen::particleGenerator::drawPtclOriented(Graphics& gfx)
 		return;
 	}
 	gfx.useMatrix(gfx.mCamera->mLookAtMtx, 0);
+	beginTintTexSwap();
 #else
 	GXClearVtxDesc();
 	GXSetVtxDesc(GX_VA_PNMTXIDX, GX_DIRECT);
@@ -1094,7 +1114,9 @@ void zen::particleGenerator::drawPtclOriented(Graphics& gfx)
 
 		col.set(ptcl->mPrimaryColor.r, ptcl->mPrimaryColor.g, ptcl->mPrimaryColor.b, RoundOff(ptcl->mPrimaryColor.a * ptcl->mAlphaFactor));
 		applyTint(col);
-		gfx.setPrimEnv(&col, &ptcl->mEnvColor);
+		Colour env(ptcl->mEnvColor);
+		applyTint(env);
+		gfx.setPrimEnv(&col, &env);
 
 		MTXIdentity(mtx2);
 
@@ -1351,6 +1373,9 @@ void zen::particleGenerator::drawPtclOriented(Graphics& gfx)
 		}
 #endif
 	}
+#if defined(PIKI_PC_PORT)
+	endTintTexSwap();
+#endif
 #else
 	drawPtclBillboard(gfx);
 #endif
@@ -1517,7 +1542,9 @@ void zen::particleGenerator::drawPtclChildren(Graphics& gfx)
 		particleChildMdl* child = (particleChildMdl*)list;
 		next                    = list->mNext;
 
-		gfx.setPrimEnv(&child->mPrimaryColor, &child->mPrimaryColor);
+		Colour childCol(child->mPrimaryColor);
+		applyTint(childCol);
+		gfx.setPrimEnv(&childCol, &childCol);
 		gfx.drawParticle(*gfx.mCamera, child->mLocalPosition + child->mGlobalPosition, 25.0f * child->mSize);
 
 		list = next;

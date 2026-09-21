@@ -18,6 +18,9 @@
 #include "NaviMgr.h"
 #include "Pcam/Camera.h"
 #include "Pcam/CameraManager.h"
+#if defined(PIKI_PC_PORT)
+static bool pcOnyonBusyByOther(Navi* navi, GoalItem* onyon);
+#endif
 #include "Pellet.h"
 #include "PikiAI.h"
 #include "PikiHeadItem.h"
@@ -605,8 +608,13 @@ void NaviWalkState::exec(Navi* navi)
 		if (diff.length() <= navi->getSize() + coll->mRadius) {
 			onyon->setSpotActive(true);
 			if (navi->mKontroller->keyClick(KBBTN_A)) {
+#if defined(PIKI_PC_PORT)
+				if (pcOnyonBusyByOther(navi, onyon)) {
+					continue; // el otro Olimar ya tiene abierta esta cebolla
+				}
+#endif
 				navi->mGoalItem = onyon;
-				rumbleMgr->start(RUMBLE_Unk2, 0, nullptr);
+				rumbleMgr->start(RUMBLE_Unk2, navi->mNaviID, nullptr);
 				transit(navi, NAVISTATE_Container);
 				return;
 			}
@@ -737,7 +745,7 @@ void NaviWalkState::exec(Navi* navi)
 #if defined(PIKI_PC_PORT)
 		// Third place that chooses a Pikmin to throw. Same two-pass colour
 		// preference as the others: the chosen colour first, then everyone.
-		const int preferredColor = pc_preferred_throw_color();
+		const int preferredColor = pc_preferred_throw_color_for(navi);
 		for (int pass = 0; pass < 2; pass++) {
 			const bool restrict = (pass == 0) && (preferredColor >= 0);
 			if (pass == 1 && (nearestPiki != nullptr || preferredColor < 0)) {
@@ -1000,6 +1008,25 @@ void NaviUfoState::procAnimMsg(Navi* navi, MsgAnim* msg)
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+// Cooperativo: una cebolla solo atiende a un Olimar a la vez.
+static bool pcOnyonBusyByOther(Navi* navi, GoalItem* onyon)
+{
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+		Navi* other = naviMgr->getNavi(ni);
+		if (other && other != navi && other->getCurrState()->getID() == NAVISTATE_Container && other->mGoalItem == onyon) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static zen::DrawContainer* pcContainerWindowFor(Navi* navi)
+{
+	return (navi->mNaviID == 1 && containerWindow2) ? containerWindow2 : containerWindow;
+}
+#endif
+
 NaviContainerState::NaviContainerState()
     : NaviState(NAVISTATE_Container)
 {
@@ -1034,12 +1061,24 @@ void NaviContainerState::init(Navi* navi)
 
 	GameStat::update();
 	PRINT("START CONAINER WINDOW ***\n");
+#if defined(PIKI_PC_PORT)
+	// Cooperativo: cada Olimar tiene su ventana y su mando; el mundo no se
+	// pausa (el otro sigue jugando) y el HUD no se oculta.
+	zen::DrawContainer* win = pcContainerWindowFor(navi);
+	const bool coop         = containerWindow2 != nullptr;
+	if (!coop) gameflow.mGameInterface->message(MOVIECMD_HideHUD, 0);
+	win->start((zen::DrawContainer::containerType)navi->mGoalItem->mOnionColour, storedPikisAvailable, 10000,
+	           numOnionColoredPikis, AICONST.mMaxPikisOnField(), totalExitPendingPikis + GameStat::mapPikis,
+	           AICONST.mMaxPikisOnField());
+	if (!coop) gameflow.mPauseAll = TRUE;
+#else
 	gameflow.mGameInterface->message(MOVIECMD_HideHUD, 0);
 	containerWindow->start((zen::DrawContainer::containerType)navi->mGoalItem->mOnionColour, storedPikisAvailable, 10000,
 	                       numOnionColoredPikis, AICONST.mMaxPikisOnField(), totalExitPendingPikis + GameStat::mapPikis,
 	                       AICONST.mMaxPikisOnField());
 	PRINT("FINISH START CONAINER WINDOW ***\n");
 	gameflow.mPauseAll = TRUE;
+#endif
 	mContainerWinEvent = 0;
 	mContainerWinCount = 0;
 }
@@ -1083,8 +1122,13 @@ void NaviContainerState::onCloseWindow()
 void NaviContainerState::exec(Navi* navi)
 {
 	int signedPikiCount;
+#if defined(PIKI_PC_PORT)
+	if (pcContainerWindowFor(navi)->update(signedPikiCount)) {
+		if (!containerWindow2) gameflow.mGameInterface->message(MOVIECMD_ShowHUD, 0);
+#else
 	if (containerWindow->update(signedPikiCount)) {
 		gameflow.mGameInterface->message(MOVIECMD_ShowHUD, 0);
+#endif
 		PRINT("result is %d\n", signedPikiCount);
 		if (signedPikiCount > 0) {
 			enterPikis(navi, signedPikiCount);
@@ -1155,7 +1199,11 @@ void NaviContainerState::exitPikis(Navi* navi, int countToExit)
 void NaviContainerState::cleanup(Navi* navi)
 {
 	PRINT("cleanup\n");
+#if defined(PIKI_PC_PORT)
+	if (!containerWindow2) gameflow.mPauseAll = FALSE;
+#else
 	gameflow.mPauseAll = FALSE;
+#endif
 	navi->mGoalItem->setSpotActive(true);
 }
 
@@ -1621,7 +1669,7 @@ void NaviGeyzerState::procBounceMsg(Navi* navi, MsgBounce* msg)
 	if (mGeyserState != 0) {
 		mGeyserState = 3;
 		mGetupDelayTimer = 0.3f + (0.2f * gsys->getRand(1.0f));
-		rumbleMgr->start(RUMBLE_Unk10, 0, nullptr);
+		rumbleMgr->start(RUMBLE_Unk10, navi->mNaviID, nullptr);
 	}
 }
 
@@ -1676,9 +1724,13 @@ void NaviGatherState::init(Navi* navi)
 	int kEffID = (navi->mNaviID == 0) ? KandoEffect::NaviWhistle0 : KandoEffect::NaviWhistle1;
 	EffectParm parm(navi->mSRT.t);
 	UtEffectMgr::cast(kEffID, parm);
+#if defined(PIKI_PC_PORT)
+	UtEffectMgr::cast(navi->mNaviID == 0 ? KandoEffect::NaviFue0 : KandoEffect::NaviFue1, parm);
+#else
 	UtEffectMgr::cast(KandoEffect::NaviFue0, parm);
+#endif
 	mWhistleEffectsStopped = false;
-	rumbleMgr->start(RUMBLE_Unk3, 0, nullptr);
+	rumbleMgr->start(RUMBLE_Unk3, navi->mNaviID, nullptr);
 }
 
 /**
@@ -1705,6 +1757,11 @@ void NaviGatherState::exec(Navi* navi)
 			Vector3f diff = coll->mCentre - navi->getCentre();
 			f32 test      = diff.length();
 			if (test <= navi->getSize() + coll->mRadius && navi->mKontroller->keyClick(KeyConfig::_instance->mSetCursorKey.mBind)) {
+#if defined(PIKI_PC_PORT)
+				if (pcOnyonBusyByOther(navi, onyon)) {
+					continue;
+				}
+#endif
 				navi->mGoalItem = onyon;
 				transit(navi, NAVISTATE_Container);
 				return;
@@ -1793,7 +1850,11 @@ void NaviGatherState::exec(Navi* navi)
 		seSystem->stopPlayerSe(SE_GATHER);
 		mWhistleEffectsStopped = true;
 		utEffectMgr->kill(navi->mNaviID == 0 ? KandoEffect::NaviWhistle0 : KandoEffect::NaviWhistle1);
+#if defined(PIKI_PC_PORT)
+		utEffectMgr->kill(navi->mNaviID == 0 ? KandoEffect::NaviFue0 : KandoEffect::NaviFue1);
+#else
 		utEffectMgr->kill(KandoEffect::NaviFue0);
+#endif
 	}
 
 	if (check || navi->mWhistleTimer > C_NAVI_PARM(navi, mWhistleHoldTime)) {
@@ -1836,11 +1897,17 @@ void NaviGatherState::procAnimMsg(Navi* navi, MsgAnim* msg)
  */
 void NaviGatherState::cleanup(Navi* navi)
 {
-	rumbleMgr->stop(3, 0);
+	rumbleMgr->stop(3, navi->mNaviID);
 	int id = (navi->mNaviID == 0) ? 1 : 2;
 	seSystem->stopPlayerSe(SE_GATHER);
 	utEffectMgr->kill(id);
+#if defined(PIKI_PC_PORT)
+	// 7 = NaviFue0 (P1), 8 = NaviFue1 (P2): si no, el efecto del silbato de
+	// P2 se queda encendido para siempre.
+	utEffectMgr->kill(navi->mNaviID == 0 ? KandoEffect::NaviFue0 : KandoEffect::NaviFue1);
+#else
 	utEffectMgr->kill(7);
+#endif
 }
 
 /**
@@ -1954,7 +2021,7 @@ void NaviThrowWaitState::init(Navi* navi)
 	// nobody in range, the original unrestricted search. Without the second
 	// pass, pointing the wheel at a colour standing further away would leave
 	// the captain grabbing nothing.
-	const int preferredColor = pc_preferred_throw_color();
+	const int preferredColor = pc_preferred_throw_color_for(navi);
 	for (int pass = 0; pass < 2; pass++) {
 		const bool restrict = (pass == 0) && (preferredColor >= 0);
 		if (pass == 1 && (throwPiki != nullptr || preferredColor < 0)) {
@@ -2123,6 +2190,24 @@ void NaviThrowWaitState::exec(Navi* navi)
 			return;
 		}
 	}
+#if defined(PIKI_PC_PORT)
+	// A sujeto + cruceta izquierda/derecha (issue #43): el Pikmin en la mano
+	// vuelve al grupo y la selección se repite con el nuevo color.
+	if (pc_navi_step_throw_color(navi) && mHeldThrowPiki && mIsHoldingThrowPiki
+	    && mHeldThrowPiki->mColor != pc_preferred_throw_color_for(navi)) {
+		mHeldThrowPiki->mFSM->transit(mHeldThrowPiki, PIKISTATE_Normal);
+		init(navi);
+		if (!mHeldThrowPiki && !mPendingThrowPiki) {
+			transit(navi, NAVISTATE_Walk);
+			return;
+		}
+		if (mHeldThrowPiki) {
+			mIsHoldingThrowPiki = true;
+			mHeldThrowPiki->mFSM->transit(mHeldThrowPiki, PIKISTATE_Hanged);
+			lockHangPiki(navi);
+		}
+	}
+#endif
 	navi->mNextThrowPiki = mHeldThrowPiki;
 
 	navi->mThrowDistance = C_NAVI_PARM(navi, mThrowMinDistance)
@@ -2269,7 +2354,7 @@ void NaviThrowState::procAnimMsg(Navi* navi, MsgAnim* msg)
 	case KEY_Action0:
 	{
 		mTargetPiki->mFSM->transit(mTargetPiki, 14);
-		rumbleMgr->start(RUMBLE_Unk2, 0, nullptr);
+		rumbleMgr->start(RUMBLE_Unk2, navi->mNaviID, nullptr);
 
 		// none of this is used for anything
 		f32 test = C_NAVI_PARM(navi, mThrowMinDistance)
@@ -2538,10 +2623,15 @@ void NaviNukuState::init(Navi* navi)
 	navi->mPressedTimer = 0.0f;
 	mPullCountRemaining = C_NAVI_PARM(navi, mPluckLoopCount);
 	if (navi->mIsCursorVisible && !playerState->isChallengeMode() && !navi->mIsPlucking && playerState->mTotalPluckedPikiCount < 100) {
-		cameraMgr->mCamera->startMotion(cameraMgr->mCamera->mAttentionInfo);
+#if defined(PIKI_PC_PORT)
+		PcamCameraManager* naviCam = pcCameraMgrForNavi(navi->mNaviID);
+#else
+		PcamCameraManager* naviCam = cameraMgr;
+#endif
+		naviCam->mCamera->startMotion(naviCam->mCamera->mAttentionInfo);
 		BUGPRINT("> camera START MOTION | NUKU");
-		navi->mIsPlucking                    = true;
-		cameraMgr->mCamera->mControlsEnabled = false;
+		navi->mIsPlucking                  = true;
+		naviCam->mCamera->mControlsEnabled = false;
 	}
 
 	if (!AICONST._54()) {
@@ -2990,7 +3080,7 @@ void NaviAttackState::exec(Navi* navi)
 						dir = navi->mSRT.t + dir * 11.0f;
 						effectMgr->create(EffectMgr::EFF_Navi_PunchA, dir, nullptr, nullptr);
 						effectMgr->create(EffectMgr::EFF_Navi_PunchB, dir, nullptr, nullptr);
-						rumbleMgr->start(RUMBLE_Unk2, 0, nullptr);
+						rumbleMgr->start(RUMBLE_Unk2, navi->mNaviID, nullptr);
 						navi->playEventSound(teki, SE_PIKI_ATTACK_HIT);
 						mAttackPhase = 2;
 					} else {
@@ -3156,6 +3246,36 @@ void NaviDeadState::restart(Navi* navi)
  */
 void NaviDeadState::init(Navi* navi)
 {
+#if defined(PIKI_PC_PORT)
+	// Cooperativo: si el otro Olimar sigue vivo, este solo queda caído. La
+	// partida (y el permadeath) solo termina cuando caen los dos.
+	mDowned = false;
+	// Un Olimar muere con mHealth <= 1, no a 0: se deja a 0 para que isAlive()
+	// (enemigos, getNearestNavi, getMovieNavi) lo ignore, y el "otro vivo" se
+	// juzga por salud > 1, por si caen los dos en la misma frame.
+	navi->mHealth = 0.0f;
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+		Navi* other = naviMgr->getNavi(ni);
+		if (other && other != navi && other->mHealth > 1.0f && other->getCurrState()->getID() != NAVISTATE_Dead) {
+			mDowned = true;
+		}
+	}
+	if (mDowned) {
+		playerState->mResultFlags.setOn(zen::RESFLAG_OlimarDown);
+		navi->mMotionSpeed = 30.0f;
+		navi->startMotion(PaniMotionInfo(PIKIANIM_ODead, navi), PaniMotionInfo(PIKIANIM_ODead));
+		// SE_PLAYER_DOWN es un evento de escena (corta la música): con el
+		// otro vivo la música sigue; se avisa con el sonido de daño.
+		seSystem->playPlayerSe(SE_DAMAGED);
+		navi->mVelocity.set(0.0f, 0.0f, 0.0f);
+		navi->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+		PcamCameraManager* naviCam = pcCameraMgrForNavi(navi->mNaviID);
+		naviCam->mCamera->startMotion(naviCam->mCamera->mAttentionInfo);
+		naviCam->mCamera->mIsActive = false;
+		navi->releasePikis();
+		return;
+	}
+#endif
 	GameStat::orimaDead = true;
 	playerState->mResultFlags.setOn(zen::RESFLAG_OlimarDown);
 	gameflow.mGameInterface->message(MOVIECMD_SetPauseAllowed, FALSE);
@@ -3167,8 +3287,13 @@ void NaviDeadState::init(Navi* navi)
 	navi->mVelocity.set(0.0f, 0.0f, 0.0f);
 	navi->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
 
-	cameraMgr->mCamera->startMotion(cameraMgr->mCamera->mAttentionInfo);
-	cameraMgr->mCamera->mIsActive = false;
+#if defined(PIKI_PC_PORT)
+	PcamCameraManager* naviCam = pcCameraMgrForNavi(navi->mNaviID);
+#else
+	PcamCameraManager* naviCam = cameraMgr;
+#endif
+	naviCam->mCamera->startMotion(naviCam->mCamera->mAttentionInfo);
+	naviCam->mCamera->mIsActive = false;
 	seMgr->setPikiNum(0);
 	navi->releasePikis();
 	GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
@@ -3197,6 +3322,11 @@ void NaviDeadState::procAnimMsg(Navi* navi, MsgAnim* msg)
 	switch (msg->mKeyEvent->mEventType) {
 	case KEY_Finished:
 	{
+#if defined(PIKI_PC_PORT)
+		if (mDowned) {
+			break; // el cuerpo se queda; el otro sigue jugando
+		}
+#endif
 		gameflow.mGameInterface->message(MOVIECMD_GameEndCondition, ENDCAUSE_NaviDown);
 		break;
 	}
@@ -3445,6 +3575,9 @@ void NaviPartsAccessState::procAnimMsg(Navi* navi, MsgAnim* msg)
 			gameflow.mShipTextType   = SHIPTEXT_PartsAccess;
 			gameflow.mShipTextPartID = id;
 			playerState->mDemoFlags.resetFlag(id + DEMOFLAG_UfoPartDiscoveryOffset);
+#if defined(PIKI_PC_PORT)
+			naviMgr->setMovieNavi(navi);
+#endif
 			playerState->mDemoFlags.setFlag(id + DEMOFLAG_UfoPartDiscoveryOffset, pelt);
 		}
 		break;

@@ -2853,13 +2853,23 @@ void PikiNukareState::cleanup(Piki* piki)
 
 	if (piki->mColor == Red && !playerState->mDemoFlags.isFlag(DEMOFLAG_PluckRedPikmin)) {
 		PRINT("** NUKARE STATE CLEANUP !!!\n");
+#if defined(PIKI_PC_PORT)
+		// El que arranca el pikmin protagoniza el vídeo.
+		Navi* pluckNavi = piki->mNavi ? piki->mNavi : naviMgr->getNavi();
+		naviMgr->setMovieNavi(pluckNavi);
+#else
+		Navi* pluckNavi = naviMgr->getNavi();
+#endif
 		playerState->mDemoFlags.setFlag(DEMOFLAG_PluckRedPikmin, piki);
 		playerState->mDemoFlags.setFlagOnly(DEMOFLAG_NoPikminTimeout);
 		playerState->mDemoFlags.setFlagOnly(DEMOFLAG_ApproachSeed);
-		playerState->mDemoFlags.setTimer(demoParms->mParms._30(), DEMOFLAG_Unk9, naviMgr->getNavi());
+		playerState->mDemoFlags.setTimer(demoParms->mParms._30(), DEMOFLAG_Unk9, pluckNavi);
 		playerState->setDisplayPikiCount(Red);
 
 	} else if (piki->mColor == Yellow && !playerState->mDemoFlags.isFlag(DEMOFLAG_PluckYellowPikmin)) {
+#if defined(PIKI_PC_PORT)
+		if (piki->mNavi) naviMgr->setMovieNavi(piki->mNavi);
+#endif
 		playerState->mDemoFlags.setFlag(DEMOFLAG_PluckYellowPikmin, piki);
 		playerState->mResultFlags.setOn(zen::RESFLAG_MeetYellowPikminNoBomb);
 		playerState->mResultFlags.setOn(zen::RESFLAG_Onyons);
@@ -2867,6 +2877,9 @@ void PikiNukareState::cleanup(Piki* piki)
 		playerState->setDisplayPikiCount(Yellow);
 
 	} else if (piki->mColor == Blue && !playerState->mDemoFlags.isFlag(DEMOFLAG_PluckBluePikmin)) {
+#if defined(PIKI_PC_PORT)
+		if (piki->mNavi) naviMgr->setMovieNavi(piki->mNavi);
+#endif
 		playerState->mDemoFlags.setFlag(DEMOFLAG_PluckBluePikmin, piki);
 		playerState->mResultFlags.setOn(zen::RESFLAG_MeetBluePikmin);
 		playerState->setContainer(Blue);
@@ -2891,7 +2904,7 @@ void PikiNukareState::procAnimMsg(Piki* piki, MsgAnim* msg)
 	switch (msg->mKeyEvent->mEventType) {
 	case KEY_Action0:
 	{
-		rumbleMgr->start(RUMBLE_Unk0, 0, nullptr);
+		rumbleMgr->start(RUMBLE_Unk0, piki->mNavi ? piki->mNavi->mNaviID : 0, nullptr);
 		if (piki->mGroundTriangle && MapCode::getAttribute(piki->mGroundTriangle) == ATTR_Water) {
 			effectMgr->create(EffectMgr::EFF_P_Bubbles, piki->mSRT.t, nullptr, nullptr);
 		} else {

@@ -240,9 +240,104 @@ bool zen::DrawMenuTitle::update(f32 dt)
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+namespace {
+P2DPane* pcClonePane(P2DPane* src, u32 tag)
+{
+	P2DPane* clone = nullptr;
+	if (src->getTypeID() == PANETYPE_TextBox) {
+		clone = new P2DTextBox(*static_cast<P2DTextBox*>(src), tag);
+	} else if (src->getTypeID() == PANETYPE_Picture) {
+		clone = new P2DPicture(*static_cast<P2DPicture*>(src), tag);
+	}
+	if (clone && src->pcGetParentPane()) {
+		src->pcGetParentPane()->appendChild(clone);
+	}
+	return clone;
+}
+} // namespace
+
+void zen::DrawMenu::pcExtendMenu(immut PcMenuExtend& ext)
+{
+	static immut char* kFamilies[] = { "he%02d", "hm%02d", "i%02dl", "i%02dr" };
+	char buf[8];
+	int n = 0;
+	sprintf(buf, "he%02d", 0);
+	while (mScreen.search(P2DPaneLibrary::makeTag(buf), false)) {
+		sprintf(buf, "he%02d", ++n);
+	}
+	if (n < 2 || ext.extraItems <= 0) {
+		return;
+	}
+	const int total = n + ext.extraItems;
+	// Los huecos de un .blo pueden colgar de padres distintos (en option.blo
+	// he00-02 de ROOT y he03 de yoko): se llevan todos a ROOT en coordenadas
+	// globales antes de medir y clonar. El constructor los reparenta luego
+	// a 'pall' de todas formas.
+	for (int f = 0; f < 4; f++)
+		for (int i = 0; i < n; i++) {
+			sprintf(buf, kFamilies[f], i);
+			if (P2DPane* pane = mScreen.search(P2DPaneLibrary::makeTag(buf), false)) P2DPaneLibrary::changeParent(pane, &mScreen);
+		}
+	int listGrow = 0;
+	for (int f = 0; f < 4; f++) {
+		sprintf(buf, kFamilies[f], 0);
+		P2DPane* first = mScreen.search(P2DPaneLibrary::makeTag(buf), false);
+		sprintf(buf, kFamilies[f], n - 1);
+		P2DPane* last = mScreen.search(P2DPaneLibrary::makeTag(buf), false);
+		if (!first || !last) {
+			continue;
+		}
+		const int dy      = (last->getPosV() - first->getPosV()) / (n - 1);
+		const int spacing = ext.spacing > 0 ? ext.spacing : dy;
+		for (int k = 1; k <= ext.extraItems; k++) {
+			sprintf(buf, kFamilies[f], n - 1 + k);
+			pcClonePane(last, P2DPaneLibrary::makeTag(buf));
+		}
+		// Recolocar toda la familia con el paso nuevo, en absoluto desde el
+		// primer hueco; los iconos también se alinean en X con el primero
+		// (en option.blo el hueco oculto los tiene descolocados).
+		const int x0 = first->getPosH(), y0 = first->getPosV();
+		for (int i = 0; i < total; i++) {
+			sprintf(buf, kFamilies[f], i);
+			P2DPane* pane = mScreen.search(P2DPaneLibrary::makeTag(buf), false);
+			if (pane) {
+				const int dx = f >= 2 ? x0 - pane->getPosH() : 0;
+				pane->add(dx, (y0 + spacing * i + ext.shiftY) - pane->getPosV());
+			}
+		}
+		if (f == 0) {
+			listGrow = spacing * (total - 1) - dy * (n - 1);
+		}
+	}
+	// Cristal del panel: imágenes sin tag bajo panelParentTag; el resto de
+	// hijos (placa/texto del título) solo acompañan al desplazamiento.
+	P2DPane* panelParent = mScreen.search(ext.panelParentTag, false);
+	if (panelParent) {
+		for (PSUTree<P2DPane>* it = panelParent->getFirstChild(); it; it = it->getNextChild()) {
+			P2DPane* pane = it->getObject();
+			pane->add(0, ext.shiftY);
+			if (pane->pcGetTag() == 0 && pane->getTypeID() == PANETYPE_Picture && pane->getHeight() >= 100) {
+				pane->add(-ext.widen / 2, 0);
+				pane->resize(pane->getWidth() + ext.widen, pane->getHeight() + listGrow);
+			}
+		}
+	}
+}
+#endif
+
+#if defined(PIKI_PC_PORT)
+zen::DrawMenu::DrawMenu(immut char* bloFileName, bool useAlphaMgr, bool useTexAnimMgr, immut PcMenuExtend* ext)
+#else
 zen::DrawMenu::DrawMenu(immut char* bloFileName, bool useAlphaMgr, bool useTexAnimMgr)
+#endif
     : DrawScreen(bloFileName, nullptr, useAlphaMgr, useTexAnimMgr)
 {
+#if defined(PIKI_PC_PORT)
+	if (ext) {
+		pcExtendMenu(*ext);
+	}
+#endif
 	mState         = STATUS_Inactive;
 	_104           = 0.0f;
 	_108           = 0.5f;

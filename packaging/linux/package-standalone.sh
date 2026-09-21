@@ -111,6 +111,10 @@ cp "${pal_build_dir}/bin/nectar" "${output_dir}/nectar-pal.real"
 strip "${output_dir}/nectar-pal.real" 2>/dev/null || true
 cp "${stage_dir}/usr/bin/nectar-launcher" "${output_dir}/nectar-launcher.real"
 cp "${script_dir}/${readme_source}" "${output_dir}/${readme_source}"
+# Icono y entrada de escritorio (el binario no lleva icono en Linux; la
+# ventana sí, embebido). Exec se rellena con la ruta al copiar el paquete.
+cp "${repo_root}/packaging/icon/open_nectar.png" "${output_dir}/open_nectar.png"
+cp "${repo_root}/packaging/linux/open-nectar.desktop" "${output_dir}/open-nectar.desktop"
 
 printf '%s\n' '[4/5] Copiando librerías del sistema al paquete...'
 # Librerías acopladas al driver de GPU o al kernel: las aporta el sistema.

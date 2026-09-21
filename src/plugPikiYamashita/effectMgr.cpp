@@ -1,4 +1,7 @@
 #include "EffectMgr.h"
+#if defined(PIKI_PC_PORT)
+#include "gl/pc_gfx.h"
+#endif
 #include "Colour.h"
 #include "DebugLog.h"
 #include "Graphics.h"
@@ -465,6 +468,10 @@ void SmokeEmitter::update(f32 timeStep)
  */
 void SmokeEmitter::draw(Graphics& gfx)
 {
+#if defined(PIKI_PC_PORT)
+	pc_gfx_shadow_exclude(1);
+	struct Restore { ~Restore() { pc_gfx_shadow_exclude(0); } } restore;
+#endif
 	if (!mModel) {
 		bool light = gfx.setLighting(false, nullptr);
 		int blend  = gfx.setCBlending(mBlendMode);
@@ -769,11 +776,18 @@ void EffectMgr::update()
  */
 void EffectMgr::draw(Graphics& gfx)
 {
+#if defined(PIKI_PC_PORT)
+	// Partículas (humo de la nave, chispas...): nunca proyectan sombra.
+	pc_gfx_shadow_exclude(1);
+#endif
 	if (mDoCulling) {
 		mPtclMgr.cullingDraw(gfx);
 	} else {
 		mPtclMgr.draw(gfx);
 	}
+#if defined(PIKI_PC_PORT)
+	pc_gfx_shadow_exclude(0);
+#endif
 }
 
 /**

@@ -42,6 +42,11 @@ struct ogScrFileChkSelMgr {
 	void startSave();
 	returnStatusFlag update(Controller*, CardQuickInfo&);
 	void draw(Graphics&);
+#if defined(PIKI_PC_PORT)
+	/// Solo el fondo (data_b + destellos), sin slots ni burbuja ampliada:
+	/// para dejarlo bajo el prompt de partida nueva tras elegir slot.
+	void drawBackdrop(Graphics&);
+#endif
 
 	// unused/inlined:
 	void init();

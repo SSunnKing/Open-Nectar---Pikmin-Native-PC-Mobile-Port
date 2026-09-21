@@ -64,7 +64,7 @@ void AttentionCamera::start(u32 tag, Creature* target, f32 p3, f32 p4)
  */
 void AttentionCamera::finish()
 {
-	mTarget    = naviMgr->getNavi();
+	mTarget    = naviMgr->getMovieNavi();
 	mFadeState = 1;
 	mActiveFader->initFadeOut();
 }
@@ -86,7 +86,11 @@ void AttentionCamera::update()
 		if (mTarget->mObjType != OBJTYPE_Navi) {
 			cameraMgr->mCamera->startCamera(mTarget);
 		} else {
+#if defined(PIKI_PC_PORT)
+			pcCameraMgrForNavi(static_cast<Navi*>(mTarget)->mNaviID)->mCamera->startCamera(mTarget);
+#else
 			cameraMgr->mCamera->startCamera(mTarget);
+#endif
 		}
 
 		mFadeState = 2;

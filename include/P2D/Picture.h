@@ -78,6 +78,10 @@ public:
 	}
 
 	P2DPicture(P2DPane*, RandomAccessStream*, u16);
+#if defined(PIKI_PC_PORT)
+	/// Clon huérfano (sin padre) con otro tag; comparte la textura.
+	P2DPicture(immut P2DPicture& src, u32 tag);
+#endif
 	P2DPicture(Texture*);
 	P2DPicture(); // unused/inlined
 

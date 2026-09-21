@@ -190,6 +190,11 @@ struct NaviDeadState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
+#if defined(PIKI_PC_PORT)
+	// Cooperativo: "caído" = ha muerto pero el otro Olimar sigue vivo. El
+	// cuerpo se queda, el mundo no se pausa y el día no termina.
+	bool mDowned = false;
+#endif
 };
 
 /**

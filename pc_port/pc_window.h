@@ -70,10 +70,13 @@ static inline bool pc_bind_is_mouse(int binding) { return binding >= PC_BIND_MOU
 static inline bool pc_bind_is_valid(int binding) { return binding >= 0 && binding <= PC_BIND_MOUSE_LAST; }
 // Whether the swarm binding (keyboard, mouse or gamepad) is held right now.
 bool pc_window_swarm_held(void);
+bool pc_window_swarm_held_p2(void);
 // Name for either kind of binding ("Mouse 4", "Space", ...).
 const char* pc_window_binding_name(int binding);
 // Whether a binding is currently held, given the keyboard and mouse state.
 bool pc_window_binding_held(int binding, const Uint8* keys, Uint32 mouseButtons);
+// Mouse buttons pressed since the previous call (SDL_BUTTON mask); for capture.
+Uint32 pc_window_take_mouse_pressed(void);
 const char* pc_window_get_key_action_name(int action);
 void pc_window_reset_key_bindings(void);
 bool pc_window_load_key_bindings(const char* path);
@@ -103,6 +106,24 @@ int pc_window_get_cstick_invert(void);
 
 // Access to controller for menu navigation.
 SDL_GameController* pc_window_get_controller(void);
+// Segundo mando físico (P2 en cooperativo); nullptr si no hay.
+SDL_GameController* pc_window_get_controller_p2(void);
+
+// Asignación de dispositivos por jugador (PLAN_COOP). Sin asignación explícita
+// P1 = teclado + primer mando y P2 = segundo mando.
+#define PC_INPUT_DEV_NONE     0
+#define PC_INPUT_DEV_KEYBOARD 1
+#define PC_INPUT_DEV_GAMEPAD  2
+int  pc_window_num_gamepads(void);
+void pc_window_input_reset_assignment(void);
+void pc_window_input_assign(int player, int kind, int gamepadId);
+int  pc_window_input_get_assignment(int player, int* gamepadId);
+// Jugador (0/1) que tiene el teclado; el ratón va con él.
+int  pc_window_get_keyboard_owner(void);
+const char* pc_window_gamepad_name(int gamepadId);
+// Última pulsación de tecla (no Esc) o botón de mando desde la última consulta.
+bool pc_window_take_button_press(int* kind, int* gamepadId);
+void pc_window_discard_button_presses(void);
 
 // Last device that produced game input. Tutorial text uses this so the
 // prompts match the F1 bindings the player is actually using.
@@ -112,6 +133,10 @@ bool pc_window_last_input_is_gamepad(void);
 // Keyboard vs gamepad follows pc_window_last_input_is_gamepad(). In mouse
 // cursor mode, A/B/Z also list the matching mouse button.
 void pc_window_message_control_label(char tag, char* buf, unsigned bufSize);
+// Cooperativo: jugador (0/1) al que van dirigidos los textos de tutorial;
+// con asignación explícita de dispositivos la etiqueta usa el suyo en vez
+// del último dispositivo usado. -1 = sin preferencia.
+void pc_window_set_prompt_player(int player);
 
 void pc_window_set_display_mode(int mode);        // PC_WINDOW_FULLSCREEN_*
 int  pc_window_get_display_mode(void);

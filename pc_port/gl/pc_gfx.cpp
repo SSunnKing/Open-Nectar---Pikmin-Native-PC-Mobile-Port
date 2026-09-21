@@ -29,6 +29,7 @@
 
 #include "../timing/pc_render_packet.h"
 #include "pc_tev_shader.h"
+#include "pc_gx_lighting_glsl.h"
 #include "pc_postprocess.h"
 #include "pc_texpack.h"
 #include "../timing/pc_render_phase.h"
@@ -98,6 +99,7 @@ static bool sFilteringReported = false;
 static PFNGLBINDVERTEXARRAYPROC glBindVertexArray_ptr = nullptr;
 static PFNGLBLENDEQUATIONPROC glBlendEquation_ptr = nullptr;
 static PFNGLGENBUFFERSPROC glGenBuffers_ptr = nullptr;
+static PFNGLDRAWBUFFERSPROC glDrawBuffers_ptr = nullptr;
 static PFNGLBINDBUFFERPROC glBindBuffer_ptr = nullptr;
 static PFNGLBUFFERDATAPROC glBufferData_ptr = nullptr;
 static PFNGLBUFFERSUBDATAPROC glBufferSubData_ptr = nullptr;
@@ -173,6 +175,7 @@ static void load_gl_functions() {
     glBindVertexArray_ptr = (PFNGLBINDVERTEXARRAYPROC)SDL_GL_GetProcAddress("glBindVertexArray");
     glBlendEquation_ptr = (PFNGLBLENDEQUATIONPROC)SDL_GL_GetProcAddress("glBlendEquation");
     glGenBuffers_ptr = (PFNGLGENBUFFERSPROC)SDL_GL_GetProcAddress("glGenBuffers");
+    glDrawBuffers_ptr = (PFNGLDRAWBUFFERSPROC)SDL_GL_GetProcAddress("glDrawBuffers");
     glBindBuffer_ptr = (PFNGLBINDBUFFERPROC)SDL_GL_GetProcAddress("glBindBuffer");
     glBufferData_ptr = (PFNGLBUFFERDATAPROC)SDL_GL_GetProcAddress("glBufferData");
     glBufferSubData_ptr = (PFNGLBUFFERSUBDATAPROC)SDL_GL_GetProcAddress("glBufferSubData");
@@ -692,6 +695,8 @@ struct ProgramLocations {
 	GLint alphaOp = -1;
 	GLint alphaRef0 = -1;
 	GLint alphaRef1 = -1;
+	GLint outTint = -1;
+	GLint perPixel = -1;
 	GLint numStages = -1;
 	GLint fastPath = -1;
 	GLint tevPrev = -1;
@@ -1273,17 +1278,58 @@ static int sDrawableHeight = 480;
 static bool sUi43 = false;
 static bool sHudWide = false;
 
+// Pantalla partida: sub-rectángulo (normalizado, origen abajo-izquierda como
+// GL) del destino sobre el que se mapea el espacio GX 640x480. Con él, el
+// HUD de un jugador se dibuja "a pantalla completa" dentro de su mitad.
+static bool  sViewSubrectOn = false;
+static float sViewSubX0 = 0.0f, sViewSubY0 = 0.0f, sViewSubX1 = 1.0f, sViewSubY1 = 1.0f;
+float pc_gfx_get_current_aspect_ratio(void);
+
+// Tamaño virtual del HUD forzado (pantalla partida): 0 = automático
+// (480*aspecto x 480). Con él, una vista más estrecha que 640 usa 640 x
+// (640/aspecto) y el HUD se dibuja reducido y anclado abajo.
+static int sHudVirtWOverride = 0, sHudVirtHOverride = 0;
+
+static int hud_virtual_height() {
+    return sHudVirtHOverride > 0 ? sHudVirtHOverride : 480;
+}
+
 static int hud_virtual_width() {
-    const int v = int(lroundf(480.0f * sCurrentAspectRatio));
+    if (sHudVirtWOverride > 0) return sHudVirtWOverride;
+    const int v = int(lroundf(480.0f * pc_gfx_get_current_aspect_ratio()));
     return v < 640 ? 640 : v;
+}
+
+int pc_gfx_get_hud_virtual_height(void) { return hud_virtual_height(); }
+
+void pc_gfx_set_hud_virtual_size(int w, int h) {
+    sHudVirtWOverride = w > 0 ? w : 0;
+    sHudVirtHOverride = h > 0 ? h : 0;
+    invalidate_gl_pipeline_guards();
 }
 
 // GX 640x480 → GL. World/HUD stretch X to the window aspect. Menu UI 4:3 uses
 // a uniform scale and centres the 640x480 rect (pillarbox). Viewport and
 // scissor both call this so they cannot drift.
+static void gx_rect_params_inner(float targetWidth, float targetHeight,
+                                 float& scaleX, float& scaleY, float& offsetX, float& offsetY);
+
 static void gx_rect_params(float& scaleX, float& scaleY, float& offsetX, float& offsetY) {
-    const float targetWidth = sNativeFramebufferReady ? float(sRenderWidth) : float(sDrawableWidth);
-    const float targetHeight = sNativeFramebufferReady ? float(sRenderHeight) : float(sDrawableHeight);
+    const float fullWidth = sNativeFramebufferReady ? float(sRenderWidth) : float(sDrawableWidth);
+    const float fullHeight = sNativeFramebufferReady ? float(sRenderHeight) : float(sDrawableHeight);
+    if (!sViewSubrectOn) {
+        gx_rect_params_inner(fullWidth, fullHeight, scaleX, scaleY, offsetX, offsetY);
+        return;
+    }
+    const float subW = fullWidth * (sViewSubX1 - sViewSubX0);
+    const float subH = fullHeight * (sViewSubY1 - sViewSubY0);
+    gx_rect_params_inner(subW, subH, scaleX, scaleY, offsetX, offsetY);
+    offsetX += fullWidth * sViewSubX0;
+    offsetY += fullHeight * sViewSubY0;
+}
+
+static void gx_rect_params_inner(float targetWidth, float targetHeight,
+                                 float& scaleX, float& scaleY, float& offsetX, float& offsetY) {
     if (sUi43) {
         const float scale = fminf(targetWidth / 640.0f, targetHeight / 480.0f);
         scaleX = scale;
@@ -1294,11 +1340,12 @@ static void gx_rect_params(float& scaleX, float& scaleY, float& offsetX, float& 
     }
     if (sHudWide) {
         const float virtW = float(hud_virtual_width());
-        const float scale = fminf(targetWidth / virtW, targetHeight / 480.0f);
+        const float virtH = float(hud_virtual_height());
+        const float scale = fminf(targetWidth / virtW, targetHeight / virtH);
         scaleX = scale;
         scaleY = scale;
         offsetX = (targetWidth - virtW * scale) * 0.5f;
-        offsetY = (targetHeight - 480.0f * scale) * 0.5f;
+        offsetY = (targetHeight - virtH * scale) * 0.5f;
         return;
     }
     const int baseWidth = int(lroundf(480.0f * sCurrentAspectRatio));
@@ -1353,7 +1400,8 @@ static void map_gx_rect(float x, float y, float width, float height,
     float scaleX, scaleY, offsetX, offsetY;
     gx_rect_params(scaleX, scaleY, offsetX, offsetY);
     glX = (GLint)lroundf(offsetX + x * scaleX);
-    glY = (GLint)lroundf(offsetY + (480.0f - y - height) * scaleY);
+    const float virtH = sHudWide ? float(hud_virtual_height()) : 480.0f;
+    glY = (GLint)lroundf(offsetY + (virtH - y - height) * scaleY);
     glWidth = (GLsizei)std::max(0L, lroundf(width * scaleX));
     glHeight = (GLsizei)std::max(0L, lroundf(height * scaleY));
 }
@@ -1659,6 +1707,72 @@ void pc_gfx_dim_full_target(unsigned char alpha)
     sDimWindowAlpha = alpha;
 }
 
+// Desenfoque de una región del render target (coordenadas GX con el mapeo
+// vigente: 4:3 centrado, ancho virtual...). Se hace con blits filtrados
+// hacia abajo (1/4 y 1/8) y de vuelta: barato y suficiente para que el texto
+// de un panel de cristal se lea sobre el fondo del título.
+static GLuint sBlurFbo[2] = { 0, 0 }, sBlurTex[2] = { 0, 0 };
+static int sBlurTexW[2] = { 0, 0 }, sBlurTexH[2] = { 0, 0 };
+
+static bool blur_target(int i, int w, int h)
+{
+    if (!glGenFramebuffers_ptr || !glFramebufferTexture2D_ptr) return false;
+    if (!sBlurFbo[i]) glGenFramebuffers_ptr(1, &sBlurFbo[i]);
+    if (!sBlurTex[i]) glGenTextures(1, &sBlurTex[i]);
+    if (sBlurTexW[i] != w || sBlurTexH[i] != h) {
+        glBindTexture(GL_TEXTURE_2D, sBlurTex[i]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glBindFramebuffer_ptr(GL_FRAMEBUFFER, sBlurFbo[i]);
+        glFramebufferTexture2D_ptr(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sBlurTex[i], 0);
+        sBlurTexW[i] = w;
+        sBlurTexH[i] = h;
+    }
+    return true;
+}
+
+void pc_gfx_blur_gx_rect(int gxX, int gxY, int gxW, int gxH, int passes)
+{
+    if (!sNativeFramebufferReady || !glBlitFramebuffer_ptr || !glBindFramebuffer_ptr) return;
+    float sx, sy, ox, oy;
+    gx_rect_params(sx, sy, ox, oy);
+    // GX tiene el origen arriba; el framebuffer GL abajo.
+    const int x0 = int(ox + gxX * sx), x1 = int(ox + (gxX + gxW) * sx);
+    const int yTop = int(oy + gxY * sy), yBottom = int(oy + (gxY + gxH) * sy);
+    const int y0 = sRenderHeight - yBottom, y1 = sRenderHeight - yTop;
+    const int w = x1 - x0, h = y1 - y0;
+    if (w <= 8 || h <= 8) return;
+    const int wA = w / 4 < 4 ? 4 : w / 4, hA = h / 4 < 4 ? 4 : h / 4;
+    const int wB = wA / 2 < 2 ? 2 : wA / 2, hB = hA / 2 < 2 ? 2 : hA / 2;
+    if (!blur_target(0, wA, hA) || !blur_target(1, wB, hB)) return;
+
+    pc_gfx_note_gl_state_change();
+    invalidate_gl_pipeline_guards();
+    glDisable(GL_SCISSOR_TEST);
+    // nativo -> A (1/4)
+    glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, sNativeFramebuffer);
+    glBindFramebuffer_ptr(GL_DRAW_FRAMEBUFFER, sBlurFbo[0]);
+    glBlitFramebuffer_ptr(x0, y0, x1, y1, 0, 0, wA, hA, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    for (int p = 0; p < (passes < 1 ? 1 : passes); p++) {
+        // A -> B (1/8) -> A: cada ida y vuelta filtrada ensancha el desenfoque.
+        glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, sBlurFbo[0]);
+        glBindFramebuffer_ptr(GL_DRAW_FRAMEBUFFER, sBlurFbo[1]);
+        glBlitFramebuffer_ptr(0, 0, wA, hA, 0, 0, wB, hB, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, sBlurFbo[1]);
+        glBindFramebuffer_ptr(GL_DRAW_FRAMEBUFFER, sBlurFbo[0]);
+        glBlitFramebuffer_ptr(0, 0, wB, hB, 0, 0, wA, hA, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    }
+    // A -> nativo (misma región)
+    glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, sBlurFbo[0]);
+    glBindFramebuffer_ptr(GL_DRAW_FRAMEBUFFER, sNativeFramebuffer);
+    glBlitFramebuffer_ptr(0, 0, wA, hA, x0, y0, x1, y1, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
+    glEnable(GL_SCISSOR_TEST);
+}
+
 static void dim_window_letterbox(GLint outX, GLint outY, GLint outW, GLint outH)
 {
     if (!sDimWindowAfterBlit) return;
@@ -1769,7 +1883,7 @@ void pc_gfx_apply_menu_clip_43(void) {
 }
 
 // ── GLSL Shaders ──
-static const char* vShaderSrc =
+static const char* vShaderHead =
 #if PIKI_USE_GLES
     "#version 300 es\n"
     "precision highp float;\n"
@@ -1795,45 +1909,19 @@ static const char* vShaderSrc =
     // matrices are added.
     "uniform vec4 uPosPalette[63];\n"
     "uniform vec4 uNrmPalette[63];\n"
-    "uniform int uNumLights;\n"
-    "uniform vec4 uLightPos[4];\n"
-    "uniform vec4 uLightColor[4];\n"
-    "uniform vec4 uLightK[4];\n"     // distance attenuation k0,k1,k2,enabled
-    "uniform vec4 uAmbColor;\n"
-    "uniform int uChan0En;\n"
-    "uniform int uChan1En;\n"
-    "uniform int uChan0AttnFn;\n"  // GXAttnFn: 0=SPEC, 1=SPOT, 2=NONE
-    "uniform int uChan1AttnFn;\n"
-    "uniform int uNumLights1;\n"
-    "uniform vec4 uLightPos1[4];\n"
-    "uniform vec4 uLightColor1[4];\n"
-    "uniform vec4 uLightK1[4];\n"
-    "uniform vec4 uAmbColor1;\n"
-    "uniform vec4 uSpecHalf1;\n"   // specular half-vector for channel 1
-    "uniform vec4 uSpecAttn1;\n"   // specular a0,a1,a2 quadratic coefficients
     "uniform int uTcMode[8];\n"      // 0=direct uv, 1=position, 2=normal
     "uniform mat4 uTcMtx[8];\n"
     "out vec3 vLit0;\n"
     "out vec3 vLit1;\n"
+    "out vec3 vWorldPos;\n"
+    "out vec3 vNormal;\n"
     "out vec4 vColor;\n"
     "out vec2 vTexCoord0;\n"
     "out vec2 vTexCoord1;\n"
     "out vec2 vTexCoord2;\n"
-    "out vec2 vTexCoord3;\n"
-    "vec3 doLights(vec3 N, vec4 wp, int n, vec4 lp[4], vec4 lc[4], vec4 lk[4]) {\n"
-    "    vec3 sum = vec3(0.0);\n"
-    "    for (int i = 0; i < n; i++) {\n"
-    "        vec3 Ld = lp[i].xyz - wp.xyz;\n"
-    "        float dist = length(Ld);\n"
-    "        vec3 L = Ld / max(dist, 0.001);\n"
-    "        float diff = max(dot(N, L), 0.0);\n"
-    "        if (lk[i].w > 0.5) {\n"
-    "            diff *= clamp(lk[i].x + lk[i].y * dist + lk[i].z * dist * dist, 0.0, 1.0);\n"
-    "        }\n"
-    "        sum += diff * lc[i].rgb;\n"
-    "    }\n"
-    "    return sum;\n"
-    "}\n"
+    "out vec2 vTexCoord3;\n";
+// (kGxLightingGlsl va entre las dos mitades; ver build_vertex_source.)
+static const char* vShaderTail =
     "vec2 rawTc(int index) {\n"
     "    if (index == 0) return aTexCoord0;\n"
     "    if (index == 1) return aTexCoord1;\n"
@@ -1866,32 +1954,10 @@ static const char* vShaderSrc =
     "    vec3 N = normalize((uUsePalette != 0)\n"
     "        ? vec3(dot(uNrmPalette[matrixRow].xyz, aNormal), dot(uNrmPalette[matrixRow + 1].xyz, aNormal), dot(uNrmPalette[matrixRow + 2].xyz, aNormal))\n"
     "        : uNrmMtx * aNormal);\n"
-    "    vec3 lit0 = uAmbColor.rgb + doLights(N, worldPos, uNumLights, uLightPos, uLightColor, uLightK);\n"
-    "    vec3 spec1 = vec3(0.0);\n"
-    // GX_AF_SPEC is 0; 2 is GX_AF_NONE. Testing for 2 meant the specular
-    // branch never ran on a specular channel, and the diffuse branch ran
-    // instead on a light whose dir field holds a half-vector, not a position.
-    // The misleading comment on uChan0AttnFn above is where that came from.
-    "    if (uChan1AttnFn == 0 && uNumLights1 > 0) {\n"
-    "        // GX evaluates specular as a ratio of two quadratics in N.H: the\n"
-    "        // angle coefficients over the distance ones. The numerator alone\n"
-    "        // gives a far broader, flatter highlight than the hardware.\n"
-    "        float cosT = max(dot(N, normalize(uSpecHalf1.xyz)), 0.0);\n"
-    "        vec3 quad = vec3(1.0, cosT, cosT * cosT);\n"
-    "        float num = max(0.0, dot(uSpecAttn1.xyz, quad));\n"
-    "        float den = dot(uLightK1[0].xyz, quad);\n"
-    "        float att = (den > 1e-5) ? clamp(num / den, 0.0, 1.0) : 0.0;\n"
-    "        spec1 = att * uLightColor1[0].rgb;\n"
-    "    }\n"
-    "    // GX_AF_SPEC uses the channel's attenuation function to produce the\n"
-    "    // specular term.  Feeding the same light through the diffuse path as\n"
-    "    // well double-counts COLOR1 and saturates specular materials white.\n"
-    "    vec3 diffuse1 = (uChan1AttnFn == 0)\n"
-    "        ? vec3(0.0)\n"
-    "        : doLights(N, worldPos, uNumLights1, uLightPos1, uLightColor1, uLightK1);\n"
-    "    vec3 lit1 = uAmbColor1.rgb + diffuse1 + spec1;\n"
-    "    vLit0 = uChan0En != 0 ? clamp(lit0, 0.0, 1.0) : vec3(-1.0);\n"
-    "    vLit1 = uChan1En != 0 ? clamp(lit1, 0.0, 1.0) : vec3(-1.0);\n"
+    "    vLit0 = gxLit0(N, worldPos);\n"
+    "    vLit1 = gxLit1(N, worldPos);\n"
+    "    vWorldPos = worldPos.xyz;\n"
+    "    vNormal = N;\n"
     "    vColor = aColor;\n"
     // GX permits later texgens to use the output of an earlier texgen as
     // their source (GX_TG_TEXCOORD0..6). Evaluate in hardware order instead
@@ -1906,7 +1972,14 @@ static const char* vShaderSrc =
     "    vTexCoord3 = tc3;\n"
     "}\n";
 
-static const char* fShaderSrc =
+// Fuente completa del shader de vértices: cabecera + iluminación GX compartida + cuerpo.
+static const std::string& vertex_shader_source() {
+    static const std::string src = std::string(vShaderHead) + kGxLightingGlsl + vShaderTail;
+    return src;
+}
+static const char* vShaderSrc = nullptr; // se rellena en pc_gfx_init (vertex_shader_source)
+
+static const char* fShaderHead =
 #if PIKI_USE_GLES
     "#version 300 es\n"
     "precision highp float;\n"
@@ -1917,7 +1990,9 @@ static const char* fShaderSrc =
     "in vec3 vLit0;\n"
     "in vec3 vLit1;\n"
     "in vec4 vColor;\n"
-    "in vec2 vTexCoord0;\n"
+    "in vec2 vTexCoord0;\n";
+// (kGxLightingGlsl + kGxLightingFragGlsl van aquí; ver fragment_shader_source.)
+static const char* fShaderTail =
     "in vec2 vTexCoord1;\n"
     "in vec2 vTexCoord2;\n"
     "in vec2 vTexCoord3;\n"
@@ -1952,6 +2027,7 @@ static const char* fShaderSrc =
     "uniform int uAlphaOp;\n"
     "uniform float uAlphaRef0;\n"
     "uniform float uAlphaRef1;\n"
+    "uniform vec3 uOutTint;\n" // multiplicador final (HUD de J2 en coop)
     "uniform ivec4 uTevCSel[16];\n"
     "uniform ivec4 uTevASel[16];\n"
     "uniform ivec4 uTevCOps[16];\n"
@@ -2050,17 +2126,19 @@ static const char* fShaderSrc =
     "    vec4 rast0;\n"
     "    vec4 base0 = vec4(uUseMaterialRgb ? uMaterialColor.rgb : vColor.rgb,\n"
     "                      uUseMaterialAlpha ? uMaterialColor.a : vColor.a);\n"
-    "    if (vLit0.x < -0.5) {\n"
+    "    vec3 lit0 = gxPixelLit0(vLit0);\n"
+    "    if (lit0.x < -0.5) {\n"
     "        // Disabling channel lighting does not force vertex color: GX\n"
     "        // still selects the raster value with matSrc.\n"
     "        rast0 = base0;\n"
     "    } else {\n"
-    "        rast0 = vec4(clamp(base0.rgb * vLit0, 0.0, 1.0), base0.a);\n"
+    "        rast0 = vec4(clamp(base0.rgb * lit0, 0.0, 1.0), base0.a);\n"
     "    }\n"
     "    vec4 base1 = vec4(uUseMaterialRgb1 ? uMaterialColor1.rgb : vColor.rgb, base0.a);\n"
-    "    vec4 rast1 = vLit1.x < -0.5\n"
+    "    vec3 lit1 = gxPixelLit1(vLit1);\n"
+    "    vec4 rast1 = lit1.x < -0.5\n"
     "        ? base1\n"
-    "        : vec4(clamp(base1.rgb * vLit1, 0.0, 1.0), base1.a);\n"
+    "        : vec4(clamp(base1.rgb * lit1, 0.0, 1.0), base1.a);\n"
     "    if (uFastPath != 0) {\n"
     "        vec4 fastRast = (uTevChan[0].x == 1) ? rast1 : rast0;\n"
     "        vec4 fastCol;\n"
@@ -2073,7 +2151,7 @@ static const char* fShaderSrc =
     "                        (uAlphaOp == 1) ? (fastTest0 || fastTest1) :\n"
     "                        (uAlphaOp == 2) ? (fastTest0 != fastTest1) : (fastTest0 == fastTest1);\n"
     "        if (!fastPass) discard;\n"
-    "        fragColor = fastCol;\n"
+    "        fragColor = vec4(fastCol.rgb * uOutTint, fastCol.a);\n"
     "        return;\n"
     "    }\n"
     // TEVPREV is a real programmable TEV register (BP E0/E1), not an
@@ -2144,8 +2222,14 @@ static const char* fShaderSrc =
     "                (uAlphaOp == 1) ? (test0 || test1) :\n"
     "                (uAlphaOp == 2) ? (test0 != test1) : (test0 == test1);\n"
     "    if (!pass) discard;\n"
-    "    fragColor = col;\n"
+    "    fragColor = vec4(col.rgb * uOutTint, col.a);\n"
     "}\n";
+
+static const std::string& fragment_shader_source() {
+    static const std::string src = std::string(fShaderHead) + kGxLightingGlsl + kGxLightingFragGlsl + fShaderTail;
+    return src;
+}
+static const char* fShaderSrc = nullptr; // se rellena en pc_gfx_init (fragment_shader_source)
 
 static int sRenderResolutionW = 0, sRenderResolutionH = 0;
 
@@ -2185,7 +2269,75 @@ int pc_gfx_get_aspect_ratio_mode(void) {
     return sAspectRatioMode;
 }
 
+// Pantalla partida (PLAN_COOP fase 3): mientras se dibuja una vista, la
+// proyección y el culling deben usar el aspecto de esa vista, no el de la
+// ventana. 0 = sin override.
+static float sViewAspectOverride = 0.0f;
+
+void pc_gfx_set_view_aspect_override(float aspect) {
+    const float v = aspect > 0.0f ? aspect : 0.0f;
+    if (v != sViewAspectOverride) {
+        sViewAspectOverride = v;
+        invalidate_gl_pipeline_guards();
+    }
+}
+
+static float sProjOffX = 0.0f, sProjOffY = 0.0f;
+
+// Multiplicador de color de salida del shader principal (HUD de J2).
+static float sOutTint[3] = { 1.0f, 1.0f, 1.0f };
+
+// Iluminación por píxel (Graphics > Lighting).
+static bool sPerPixelLighting = false;
+void pc_gfx_set_per_pixel_lighting(int enabled) {
+    const bool want = enabled != 0;
+    if (want != sPerPixelLighting) {
+        sPerPixelLighting = want;
+        state_touched();
+        invalidate_gl_pipeline_guards();
+    }
+}
+
+void pc_gfx_set_out_tint(float r, float g, float b) {
+    if (r != sOutTint[0] || g != sOutTint[1] || b != sOutTint[2]) {
+        sOutTint[0] = r; sOutTint[1] = g; sOutTint[2] = b;
+        state_touched();
+        invalidate_gl_pipeline_guards();
+    }
+}
+
+void pc_gfx_clear_out_tint(void) { pc_gfx_set_out_tint(1.0f, 1.0f, 1.0f); }
+
+void pc_gfx_set_proj_offset(float ndcX, float ndcY) {
+    if (ndcX != sProjOffX || ndcY != sProjOffY) {
+        sProjOffX = ndcX;
+        sProjOffY = ndcY;
+        invalidate_gl_pipeline_guards();
+    }
+}
+
+void pc_gfx_get_proj_offset(float* ndcX, float* ndcY) {
+    if (ndcX) *ndcX = sProjOffX;
+    if (ndcY) *ndcY = sProjOffY;
+}
+
+void pc_gfx_set_view_subrect(float x0, float y0, float x1, float y1) {
+    sViewSubrectOn = true;
+    sViewSubX0 = x0; sViewSubY0 = y0; sViewSubX1 = x1; sViewSubY1 = y1;
+    invalidate_gl_pipeline_guards();
+}
+
+void pc_gfx_clear_view_subrect(void) {
+    if (!sViewSubrectOn) return;
+    sViewSubrectOn = false;
+    invalidate_gl_pipeline_guards();
+}
+
 float pc_gfx_get_current_aspect_ratio(void) {
+    return sViewAspectOverride > 0.0f ? sViewAspectOverride : sCurrentAspectRatio;
+}
+
+float pc_gfx_get_window_aspect_ratio(void) {
     return sCurrentAspectRatio;
 }
 
@@ -2266,6 +2418,8 @@ static void query_program_locations(GLuint program, ProgramLocations& out) {
     out.alphaOp = glGetUniformLocation_ptr(program, "uAlphaOp");
     out.alphaRef0 = glGetUniformLocation_ptr(program, "uAlphaRef0");
     out.alphaRef1 = glGetUniformLocation_ptr(program, "uAlphaRef1");
+    out.outTint = glGetUniformLocation_ptr(program, "uOutTint");
+    out.perPixel = glGetUniformLocation_ptr(program, "uPerPixel");
     out.numStages = glGetUniformLocation_ptr(program, "uNumStages");
     out.fastPath = glGetUniformLocation_ptr(program, "uFastPath");
     out.tevPrev = glGetUniformLocation_ptr(program, "uTevPrev");
@@ -2656,6 +2810,8 @@ void pc_gfx_init(void) {
 
     // Compile Shaders
     GLuint vs = glCreateShader_ptr(GL_VERTEX_SHADER);
+    vShaderSrc = vertex_shader_source().c_str();
+    fShaderSrc = fragment_shader_source().c_str();
     glShaderSource_ptr(vs, 1, &vShaderSrc, NULL);
     glCompileShader_ptr(vs);
 
@@ -3823,6 +3979,13 @@ static void gl_program_cache_invalidate();
 // to focus on. Late present (file select, title, cutscenes with no interface)
 // applies the pass to the whole picture, including 2D chrome -- leftover
 // gameplay focus then blurred the menus after exiting a stage.
+static bool sPostRanThisFrame = false;
+// Declarados aquí (antes del módulo de sombras) en vez de junto a su uso.
+static PcGfxPipelineState sPipelineState = { GX_TRUE, GX_LEQUAL, GX_TRUE, GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, GX_LO_COPY, GX_CULL_BACK };
+static constexpr int kPaletteSlots = 21;
+static int sPaletteSlotsNeeded = kPaletteSlots;
+#include "pc_gfx_shadows.inc"
+
 static GLuint post_apply(bool allowDof)
 {
     if (!pc_post_any_enabled(sPostEffects)) return sNativeFramebuffer;
@@ -3861,6 +4024,13 @@ static GLuint post_apply(bool allowDof)
     // Bloom runs its own chain first, at half resolution, leaving its result in
     // sBloomTex[0] for the main pass to add in. A failure here is not fatal:
     // the composite simply reads a texture that contributes nothing.
+    // Sombras primero: su máscara la multiplica el compuesto igual que la
+    // oclusión, y ambas leen la profundidad del mundo tal cual quedó.
+    const bool shadowReady = shadow_build();
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
     bool aoReady = false;
     if (pc_post_ssao_active(sPostEffects)) {
         aoReady = ao_build();
@@ -3936,6 +4106,13 @@ static GLuint post_apply(bool allowDof)
         if (glUniform1i_ptr) glUniform1i_ptr(glGetUniformLocation_ptr(sPostProgram, "uAO"), 3);
         glActiveTexture_ptr(GL_TEXTURE0);
     }
+    if (pc_post_shadows_active(sPostEffects) && glActiveTexture_ptr) {
+        // Igual que la oclusión: blanco (x1) si la máscara no se construyó.
+        glActiveTexture_ptr(GL_TEXTURE5);
+        glBindTexture(GL_TEXTURE_2D, shadowReady ? sShadowMaskTex : post_white_texture());
+        if (glUniform1i_ptr) glUniform1i_ptr(glGetUniformLocation_ptr(sPostProgram, "uShadow"), 5);
+        glActiveTexture_ptr(GL_TEXTURE0);
+    }
     if (bloomReady && glActiveTexture_ptr) {
         glActiveTexture_ptr(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D, sBloomTex[0]);
@@ -4003,7 +4180,6 @@ static GLuint post_apply(bool allowDof)
 // port's setters all carry redundancy guards -- viewport, scissor, blend,
 // depth, cull -- and a guard that has been lied to silently skips the call
 // that would have corrected it.
-static bool sPostRanThisFrame = false;
 
 // Defined after the TEV program cache it clears. Zeroing sCurrentProgram alone
 // is not enough: use_program_for_current_state() has a fast path that returns
@@ -4170,6 +4346,7 @@ void pc_gfx_present(void) {
         filesel_debug_on_present(latePost, sourceFramebuffer);
     }
     sPostRanThisFrame = false;
+    shadow_frame_reset();
     // PIKMIN_FRAME_DUMP=<dir>: the finished frame as PPM every 15 frames, for
     // looking at a scene where no screenshot tool reaches (Wayland, adb-less).
     if (const char* dumpDir = std::getenv("PIKMIN_FRAME_DUMP")) {
@@ -4267,6 +4444,7 @@ void pc_gfx_set_projection(const Mtx44 mtx, GXProjectionType type) {
         sProjSeenThisFrame++;
         sDrawsAtProjection = sPerfDraws;
     }
+    sShadowProjPerspective = type == GX_PERSPECTIVE;
     if (mtx && type == GX_PERSPECTIVE) {
         const float p00 = mtx[0][0];
         const float p11 = mtx[1][1];
@@ -4439,7 +4617,6 @@ void pc_gfx_set_tex_coord_gen(GXTexCoordID coord, GXTexGenType type, GXTexGenSrc
 }
 
 // Last values handed to the z/blend/cull setters, for pc_gfx_get_pipeline_state.
-static PcGfxPipelineState sPipelineState = { GX_TRUE, GX_LEQUAL, GX_TRUE, GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, GX_LO_COPY, GX_CULL_BACK };
 
 PcGfxPipelineState pc_gfx_get_pipeline_state(void) { return sPipelineState; }
 
@@ -4629,12 +4806,29 @@ void pc_gfx_set_chan_amb_color(GXChannelID chan, GXColor color) {
     ch->ambColor[3] = color.a / 255.0f;
 }
 
+static GXColor sMatColorTint = { 255, 255, 255, 255 };
+static bool    sMatColorTintOn = false;
+
+void pc_gfx_set_mat_color_tint(GXColor tint) {
+    sMatColorTint   = tint;
+    sMatColorTintOn = true;
+}
+
+void pc_gfx_clear_mat_color_tint(void) {
+    sMatColorTintOn = false;
+}
+
 void pc_gfx_set_chan_mat_color(GXChannelID chan, GXColor color) {
     state_touched();
     GfxChannel* ch = nullptr;
     if (chan == GX_COLOR0 || chan == GX_ALPHA0 || chan == GX_COLOR0A0) ch = &sChannels[0];
     else if (chan == GX_COLOR1 || chan == GX_ALPHA1 || chan == GX_COLOR1A1) ch = &sChannels[1];
     if (!ch) return;
+    if (sMatColorTintOn) {
+        color.r = (u8)((color.r * sMatColorTint.r) / 255);
+        color.g = (u8)((color.g * sMatColorTint.g) / 255);
+        color.b = (u8)((color.b * sMatColorTint.b) / 255);
+    }
     ch->matColor[0] = color.r / 255.0f;
     ch->matColor[1] = color.g / 255.0f;
     ch->matColor[2] = color.b / 255.0f;
@@ -6902,6 +7096,7 @@ void pc_gfx_flush_batch(void) {
 
     gl_error_checkpoint("batch upload");
     const GLint firstVertex = static_cast<GLint>(sVboWriteOffset / sizeof(Vertex));
+    shadow_record_stream(sBatchVerts, sBatchMode);
     glDrawArrays(sBatchMode, firstVertex, (GLsizei)sBatchVerts.size());
     gl_error_checkpoint("batch draw");
 
@@ -7013,8 +7208,6 @@ void pc_gfx_flush_submit_stats(void) {
 // useMatrixQuick loads at id = index*3). Uploaded as rows; only the first
 // `slots` slots a mesh actually references, and only when one of those
 // matrices was reloaded since the last upload to this program.
-static constexpr int kPaletteSlots = 21;
-static int sPaletteSlotsNeeded = kPaletteSlots;
 static void upload_matrix_palette(int slots) {
     if (sLoc.posPalette < 0 && sLoc.nrmPalette < 0) return;
     if (slots < 1) slots = 1;
@@ -7077,6 +7270,8 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
     glUniform1i_ptr(sLoc.alphaOp, static_cast<int>(sAlphaOp));
     glUniform1f_ptr(sLoc.alphaRef0, sAlphaRef0);
     glUniform1f_ptr(sLoc.alphaRef1, sAlphaRef1);
+    if (sLoc.outTint >= 0) glUniform3f_ptr(sLoc.outTint, sOutTint[0], sOutTint[1], sOutTint[2]);
+    if (sLoc.perPixel >= 0) glUniform1i_ptr(sLoc.perPixel, sPerPixelLighting ? 1 : 0);
     glUniform4f_ptr(sLoc.tevPrev, sTevRegisters[GX_TEVPREV][0], sTevRegisters[GX_TEVPREV][1],
                    sTevRegisters[GX_TEVPREV][2], sTevRegisters[GX_TEVPREV][3]);
     glUniform4f_ptr(sLoc.tevReg0, sTevRegisters[GX_TEVREG0][0], sTevRegisters[GX_TEVREG0][1],
@@ -7371,6 +7566,7 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
     }
     int numLights = 0;
     float ambR = 1.0f, ambG = 1.0f, ambB = 1.0f, ambA = 1.0f;
+    if (sShadowProjPerspective && !sPostRanThisFrame) sun_capture_from_channel0();
     if (sChannels[0].enabled) {
         // Only lit channels contribute lighting; a disabled channel must pass
         // rasterized colors through untouched (matches GX hardware behavior).
@@ -8162,6 +8358,7 @@ static void draw_resident_mesh(ResidentMesh& mesh) {
     const double t2 = profiling ? submit_clock_ms() : 0.0;
     if (profiling) sSubmitUniformMs += t2 - t1;
     glBindVertexArray_ptr(sMeshVAO);
+    shadow_record_resident(mesh.firstVertex, mesh.vertexCount);
     glDrawArrays(GL_TRIANGLES, mesh.firstVertex, mesh.vertexCount);
     glBindVertexArray_ptr(GLuint(sStreamVAO));
     if (profiling) {

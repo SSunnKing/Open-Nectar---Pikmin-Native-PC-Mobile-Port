@@ -9,6 +9,8 @@
 #include "settings/pc_settings.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_photo_mode.h"
+#include "pc_coop.h"
+#include "pc_window.h"
 #include "gl/pc_gfx.h"
 #endif
 #endif
@@ -75,6 +77,25 @@ static bool lastDamage;
 static bool currDamage;
 static u32 damageParm;
 u16 GameCoreSection::pauseFlag;
+
+#if defined(PIKI_PC_PORT)
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <execinfo.h>
+#endif
+void GameCoreSection::startPause(u16 pause)
+{
+	pauseFlag = pause;
+	// Traza de depuración del coop (solo glibc: backtrace no existe en MinGW/bionic).
+#if defined(__linux__) && !defined(__ANDROID__)
+	if (getenv("PIKMIN_COOP_TRACE")) {
+		fprintf(stderr, "[COOP] startPause(%04x)\n", pause);
+		void* frames[8];
+		int n = backtrace(frames, 8);
+		backtrace_symbols_fd(frames, n, 2);
+	}
+#endif
+}
+#endif
 #if defined(PIKI_PC_PORT)
 // What the pause gates held before photo mode took them, so leaving restores
 // whatever the game was doing rather than assuming it was unpaused.
@@ -87,6 +108,9 @@ u16 GameCoreSection::textDemoTimer;
 int GameCoreSection::textDemoIndex;
 PcamCameraManager* cameraMgr;
 zen::DrawContainer* containerWindow;
+#if defined(PIKI_PC_PORT)
+zen::DrawContainer* containerWindow2 = nullptr;
+#endif
 zen::DrawHurryUp* hurryupWindow;
 zen::DrawAccount* accountWindow;
 
@@ -232,10 +256,18 @@ void GameCoreSection::startMovie(u32 flags, bool useMovieBackCamera)
 		}
 	}
 
+#if defined(PIKI_PC_PORT)
+	// Cooperativo: los dos Olimar se congelan (DemoWait) durante el vídeo; el
+	// que lo disparó (getMovieNavi) es el que la cinemática anima y mueve.
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+	Navi* orima = naviMgr->getNavi(ni);
+#else
 	Navi* orima = naviMgr->getNavi();
+#endif
 	if (orima) {
 		orima->mNaviLightEfx->changeEffect(EffectMgr::EFF_Navi_Light);
 		orima->mNaviLightGlowEfx->changeEffect(EffectMgr::EFF_Navi_LightGlow);
+		orima->applyPlayerLightTint();
 		orima->mCursorTrailEfx->changeEffect(EffectMgr::EFF_Navi_LightGlow);
 		orima->mCursorTrailEfx->scaleSize(kCursorTrailScale);
 		orima->mCursorTrailEfx->setEmitting(false);
@@ -263,6 +295,9 @@ void GameCoreSection::startMovie(u32 flags, bool useMovieBackCamera)
 			orima->mStateMachine->transit(orima, NAVISTATE_DemoWait);
 		}
 	}
+#if defined(PIKI_PC_PORT)
+	}
+#endif
 
 	{
 		Iterator it(pikiMgr);
@@ -318,6 +353,12 @@ void GameCoreSection::endMovie(int movieIdx)
 
 	mNavi->mNaviLightEfx->restart();
 	mNavi->mNaviLightGlowEfx->restart();
+#if defined(PIKI_PC_PORT)
+	if (mNavi2) {
+		mNavi2->mNaviLightEfx->restart();
+		mNavi2->mNaviLightGlowEfx->restart();
+	}
+#endif
 	mHideFlags = 0;
 
 	if (mNavi) {
@@ -343,6 +384,9 @@ void GameCoreSection::endMovie(int movieIdx)
 		cameraMgr->mCamera->makeCurrentPosition(angle);
 		cameraMgr->update();
 	}
+#if defined(PIKI_PC_PORT)
+	naviMgr->setMovieNavi(nullptr);
+#endif
 
 	STACK_PAD_VAR(6);
 }
@@ -569,11 +613,19 @@ void GameCoreSection::cleanupDayEnd()
 	}
 	playerState->setDayEnd(true);
 
+#if defined(PIKI_PC_PORT)
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+		if (Navi* navi = naviMgr->getNavi(ni)) {
+			navi->mRippleEffect->kill();
+		}
+	}
+#else
 	if (naviMgr->getNavi()) {
 		PRINT("********** KILL RIPPLE EFFECT****\n");
 		Navi* navi = naviMgr->getNavi();
 		navi->mRippleEffect->kill();
 	}
+#endif
 	seSystem->resetSystem();
 
 	if (!playerState->isChallengeMode() && !playerState->isGameCourse()) {
@@ -759,7 +811,18 @@ void GameCoreSection::cleanupDayEnd()
 	if (!playerState->isChallengeMode()) {
 		playerState->update();
 	}
+#if defined(PIKI_PC_PORT)
+	// Fin del día: los dos Olimar pasan al estado de vídeo.
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+		Navi* navi = naviMgr->getNavi(ni);
+		if (navi->getCurrState()->getID() == NAVISTATE_Dead) {
+			continue; // caído: el cuerpo se queda durante el fin del día
+		}
+		navi->startMovieInf();
+	}
+#else
 	naviMgr->getNavi()->startMovieInf();
+#endif
 	if (!playerState->isChallengeMode()) {
 		playerState->mResultFlags.dump();
 	}
@@ -1042,6 +1105,18 @@ void GameCoreSection::initStage()
 		mNavi->mSRT.r.set(0.0f, 0.0f, 0.0f);
 	}
 	mNavi->reset();
+#if defined(PIKI_PC_PORT)
+	if (mNavi2) {
+		// P2 aparece al lado de P1, mirando hacia el mismo sitio.
+		Vector3f side(cosf(mNavi->mFaceDirection), 0.0f, -sinf(mNavi->mFaceDirection));
+		mNavi2->mSRT.t         = mNavi->mSRT.t + side * 30.0f;
+		mNavi2->mLastPosition  = mNavi2->mSRT.t;
+		mNavi2->mDayEndPosition = mNavi2->mSRT.t;
+		mNavi2->mFaceDirection = mNavi->mFaceDirection;
+		mNavi2->mSRT.r         = mNavi->mSRT.r;
+		mNavi2->reset();
+	}
+#endif
 
 	sprintf(path2, "%s%d.gen", path, (gameflow.mWorldClock.mCurrentDay - 1) % MAX_DAYS);
 	data = gsys->openFile(path2);
@@ -1185,7 +1260,18 @@ void GameCoreSection::initStage()
 	attentionCamera = new AttentionCamera;
 	cameraMgr->startCamera(naviMgr->getNavi());
 	cameraMgr->update();
+#if defined(PIKI_PC_PORT)
+	if (mCameraMgr2) {
+		mCameraMgr2->startCamera(mNavi2);
+		mCameraMgr2->update();
+	}
+#endif
 	mNavi->mIsCursorVisible = TRUE;
+#if defined(PIKI_PC_PORT)
+	if (mNavi2) {
+		mNavi2->mIsCursorVisible = TRUE; // sin esto P2 no tiene cursor ni silbato
+	}
+#endif
 
 #if defined(VERSION_PIKIDEMO)
 #else
@@ -1301,6 +1387,18 @@ void GameCoreSection::finalSetup()
 			itemMgr->getUfo();
 			cameraMgr->mCamera->startCamera(navi, 1, 0);
 		}
+#if defined(PIKI_PC_PORT)
+		if (mNavi2) {
+			// P2 también sale de la nave, un poco a un lado para no solaparse.
+			mNavi2->mStateMachine->transit(mNavi2, 23);
+			if (UfoItem* ufo = itemMgr->getUfo()) {
+				Vector3f side(cosf(ufo->mFaceDirection), 0.0f, -sinf(ufo->mFaceDirection));
+				mNavi2->mSRT.t = mNavi2->mSRT.t + side * 30.0f;
+				mNavi2->mSRT.t.y = mMapMgr->getMinY(mNavi2->mSRT.t.x, mNavi2->mSRT.t.z, true);
+				mNavi2->mLastPosition = mNavi2->mSRT.t;
+			}
+		}
+#endif
 	} else {
 		if (playerState->isTutorial()) {
 			cameraMgr->mCamera->startCamera(mNavi, 0, 0);
@@ -1312,6 +1410,11 @@ void GameCoreSection::finalSetup()
 			cameraMgr->mCamera->startCamera(mNavi, 1, 0);
 		}
 	}
+#if defined(PIKI_PC_PORT)
+	if (mCameraMgr2) {
+		mCameraMgr2->mCamera->startCamera(mNavi2, 1, 0);
+	}
+#endif
 
 	UfoItem* ufo = itemMgr->getUfo();
 	if (ufo) {
@@ -1366,6 +1469,9 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 
 	memStat->start("gui");
 	containerWindow = new zen::DrawContainer();
+#if defined(PIKI_PC_PORT)
+	containerWindow2 = nullptr; // se crea más abajo, cuando ya existe mNavi2
+#endif
 	hurryupWindow   = new zen::DrawHurryUp();
 	accountWindow   = new zen::DrawAccount();
 	memStat->end("gui");
@@ -1462,8 +1568,16 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 	PRINT("================== NAVI ===================\n");
 	memStat->start("navi");
 	naviMgr = new NaviMgr();
+#if defined(PIKI_PC_PORT)
+	pc_coop_begin_run();
+	naviMgr->create(pc_coop_active() ? 2 : 1);
+	mNavi = static_cast<Navi*>(naviMgr->birth());
+	// mNaviID 1 -> Kontroller(2) -> pad 1 (segundo mando, fase 0).
+	mNavi2 = pc_coop_active() ? static_cast<Navi*>(naviMgr->birth()) : nullptr;
+#else
 	naviMgr->create(1);
 	mNavi = static_cast<Navi*>(naviMgr->birth());
+#endif
 	PRINT("********* navi ==== %x\n", mNavi);
 	gameflow.addGenNode("naviMgr", naviMgr);
 	memStat->end("navi");
@@ -1538,15 +1652,42 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 
 	mNavi->mNaviCamera = &camera;
 	mNavi->init();
+#if defined(PIKI_PC_PORT)
+	if (mNavi2) {
+		// Fase 1: cámara única que sigue a P1; P2 comparte la misma cámara.
+		mNavi2->mNaviCamera = &camera;
+		mNavi2->init();
+	}
+#endif
 	camera.mPosition.x = 500.0f * sinf(camera.mRotation.x);
 	camera.mPosition.y = 140.0f;
 	camera.mPosition.z = 500.0f * cosf(camera.mRotation.x);
 	gsys->setFade(1.0f);
 	cameraMgr = new PcamCameraManager(&camera, mNavi->mKontroller);
 	gameflow.addGenNode("cameraMgr", cameraMgr);
+#if defined(PIKI_PC_PORT)
+	cameraMgrP1 = cameraMgr;
+	if (mNavi2) {
+		mGameCamera2 = new Camera();
+		mGameCamera2->mRotation = camera.mRotation;
+		mGameCamera2->mPosition = camera.mPosition;
+		mGameCamera2->mFov      = camera.mFov;
+		mNavi2->mNaviCamera     = mGameCamera2;
+		mCameraMgr2 = new PcamCameraManager(mGameCamera2, mNavi2->mKontroller);
+		cameraMgrP2 = mCameraMgr2;
+	} else {
+		cameraMgrP2 = nullptr;
+	}
+#endif
 	memStat->end("gamecore");
 
 	mDrawGameInfo = new zen::DrawGameInfo(!gameflow.mIsChallengeMode ? zen::DrawGameInfo::MODE_Story : zen::DrawGameInfo::MODE_Challenge);
+#if defined(PIKI_PC_PORT)
+	if (mNavi2) {
+		containerWindow2 = new zen::DrawContainer(2);
+		mDrawGameInfo2 = new zen::DrawGameInfo(!gameflow.mIsChallengeMode ? zen::DrawGameInfo::MODE_Story : zen::DrawGameInfo::MODE_Challenge, 1);
+	}
+#endif
 }
 
 /**
@@ -1702,9 +1843,24 @@ void GameCoreSection::update()
 	}
 
 	if (GameStat::allPikis == 0 && GameStat::maxPikis > 0) {
+#if defined(PIKI_PC_PORT)
+		// Cooperativo: la secuencia de extinción la hace un Olimar vivo, no
+		// un cuerpo caído. Si el vivo ya está en ella, no se repite.
+		Navi* navi = naviMgr->getMovieNavi();
+		int id     = navi->getCurrState()->getID();
+		if (mNavi2) {
+			bool anyInPikiZero = false;
+			for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+				if (naviMgr->getNavi(ni)->getCurrState()->getID() == NAVISTATE_PikiZero) anyInPikiZero = true;
+			}
+			if (anyInPikiZero) id = NAVISTATE_PikiZero;
+		}
+#else
 		Navi* navi = mNavi;
 		int id     = navi->getCurrState()->getID();
-		if (id != NAVISTATE_PikiZero && id != NAVISTATE_DemoSunset && id != NAVISTATE_DemoWait && id != NAVISTATE_DemoInf) {
+#endif
+		if (id != NAVISTATE_PikiZero && id != NAVISTATE_DemoSunset && id != NAVISTATE_DemoWait && id != NAVISTATE_DemoInf
+		    && id != NAVISTATE_Dead) {
 			PRINT("**** PIKI ZERO GAME OVER *******\n");
 			PRINT("deadpikis %d pellets %d killtekis %d maxpikis %d" MISSING_NEWLINE, static_cast<int>(GameStat::deadPikis),
 			      static_cast<int>(GameStat::getPellets), static_cast<int>(GameStat::killTekis), GameStat::maxPikis);
@@ -1715,10 +1871,45 @@ void GameCoreSection::update()
 
 	if (!gameflow.mMoviePlayer->mIsActive) {
 		cameraMgr->update();
+#if defined(PIKI_PC_PORT)
+		updateCoopCameras();
+#endif
 	}
+#if defined(PIKI_PC_PORT)
+	// Los textos de tutorial muestran los controles del jugador que los
+	// disparó (setMovieNavi se fija en cada disparador, fase 2).
+	pc_window_set_prompt_player(mNavi2 ? naviMgr->getMovieNavi()->mNaviID : -1);
+#endif
 
 
+#if defined(PIKI_PC_PORT)
+	fillHudInfo(mDrawGameInfo->info(), mNavi);
+	if (mNavi2 && mDrawGameInfo2) {
+		fillHudInfo(mDrawGameInfo2->info(), mNavi2);
+	}
+	Node::update();
+}
+
+int GameCoreSection::countFormationPikis(Navi* navi)
+{
+	int count = 0;
+	Iterator iter(pikiMgr);
+	CI_LOOP(iter)
+	{
+		Piki* piki = static_cast<Piki*>(*iter);
+		if (piki->isAlive() && piki->mMode == PikiMode::FormationMode && piki->mNavi == navi) {
+			count++;
+		}
+	}
+	return count;
+}
+
+void GameCoreSection::fillHudInfo(zen::GameInfo* info, Navi* navi)
+{
+	Piki* nextThrowPiki = navi->mNextThrowPiki;
+#else
 	Piki* nextThrowPiki = naviMgr->getNavi()->mNextThrowPiki;
+#endif
 	int encodedNextThrowType;
 	if (nextThrowPiki) {
 		int color = nextThrowPiki->mColor;
@@ -1747,12 +1938,20 @@ void GameCoreSection::update()
 		// 0 = no next throw piki
 		encodedNextThrowType = 0;
 	}
+#if defined(PIKI_PC_PORT)
+	info->mEncodedNextThrowType = encodedNextThrowType;
+	info->mTotalPikiNum         = GameStat::allPikis;
+	info->mMapPikiNum           = GameStat::mapPikis;
+	info->mFormationPikiNum     = mNavi2 ? countFormationPikis(navi) : (short)GameStat::formationPikis;
+}
+#else
 	zen::pGameInfo->mEncodedNextThrowType = encodedNextThrowType;
 	zen::pGameInfo->mTotalPikiNum         = GameStat::allPikis;
 	zen::pGameInfo->mMapPikiNum           = GameStat::mapPikis;
 	zen::pGameInfo->mFormationPikiNum     = GameStat::formationPikis;
 	Node::update();
 }
+#endif
 
 /**
  * @todo: Documentation
@@ -2031,6 +2230,302 @@ void GameCoreSection::updateAI()
 #endif
 }
 
+#if defined(PIKI_PC_PORT)
+static PcamCameraManager* sCameraMgrP1 = nullptr;
+
+void GameCoreSection::updateCoopCameras()
+{
+	if (!mCameraMgr2) {
+		return;
+	}
+	// La cámara de P2 se actualiza con el singleton apuntando a ella, porque
+	// PcamCamera y sus eventos leen `cameraMgr` por dentro.
+	setActiveView(1);
+	mCameraMgr2->update();
+	setActiveView(0);
+	updateDynamicSplit(gsys->getFrameTime());
+}
+
+// Cámara unificada: foco en el punto medio de los dos focos, orientación de
+// la cámara de J1 y distancia media más un extra proporcional a la
+// separación, para que quepan los dos Olimar.
+void GameCoreSection::updateDynamicSplit(f32 dt)
+{
+	Camera* own[2] = { mNavi->mNaviCamera, mGameCamera2 };
+	if (!pc_settings_get_coop_merge_camera()) {
+		// Pantalla partida fija: J1 izquierda/arriba, cámaras propias.
+		mSplitBlend = 1.0f;
+		mP1Side     = 0;
+		mNavi->mControlCamera = nullptr;
+		if (mNavi2) mNavi2->mControlCamera = nullptr;
+		return;
+	}
+	if (!own[0] || !own[1] || !mNavi2 || !sCameraMgrP1 && !cameraMgr) {
+		return;
+	}
+	// NCamera::makeCamera solo escribe mPosition; el foco hay que sacarlo
+	// del watchpoint de cada PcamCamera.
+	PcamCameraManager* mgrs[2] = { sCameraMgrP1 ? sCameraMgrP1 : cameraMgr, mCameraMgr2 };
+	for (int i = 0; i < 2; i++) {
+		NVector3f& wp = mgrs[i]->mCamera->getWatchpoint();
+		own[i]->mFocus.set(wp.x, wp.y, wp.z);
+	}
+	Vector3f p0 = mNavi->mSRT.t, p1 = mNavi2->mSRT.t;
+	const f32 sep = p0.distance(p1);
+	Vector3f dir[2];
+	f32 dist[2];
+	for (int i = 0; i < 2; i++) {
+		dir[i]  = own[i]->mPosition - own[i]->mFocus;
+		dist[i] = dir[i].length();
+		if (dist[i] > 0.001f) dir[i].scale(1.0f / dist[i]);
+	}
+	const f32 dAvg = 0.5f * (dist[0] + dist[1]);
+	// Orientación: la de J1 (promediar las dos se anula cuando miran en
+	// sentidos opuestos y la cámara gira sola).
+	Vector3f dirU = dir[0];
+	mUnifiedCam = *own[0];
+	mUnifiedCam.mFocus.set(0.5f * (own[0]->mFocus.x + own[1]->mFocus.x), 0.5f * (own[0]->mFocus.y + own[1]->mFocus.y),
+	                       0.5f * (own[0]->mFocus.z + own[1]->mFocus.z));
+	mUnifiedCam.mPosition = mUnifiedCam.mFocus + dirU * (dAvg + 0.7f * sep);
+	mUnifiedCam.mFov      = 0.5f * (own[0]->mFov + own[1]->mFov);
+	mUnifiedCam.calcLookAt(mUnifiedCam.mPosition, mUnifiedCam.mFocus, nullptr);
+	mUnifiedCam.update(1.0f, mUnifiedCam.mFov, mUnifiedCam.mNear, mUnifiedCam.mFar);
+
+	// Umbral con histéresis relativo a la distancia de cámara propia.
+	const f32 target = sep > 0.6f * dAvg ? 1.0f : (sep < 0.4f * dAvg ? 0.0f : (mSplitBlend > 0.5f ? 1.0f : 0.0f));
+	const f32 step   = dt / 0.45f;
+	if (mSplitBlend < target) {
+		mSplitBlend = mSplitBlend + step > target ? target : mSplitBlend + step;
+	} else if (mSplitBlend > target) {
+		mSplitBlend = mSplitBlend - step < target ? target : mSplitBlend - step;
+	}
+
+	// Lado por posición en pantalla, solo mientras está unificada y con
+	// margen para que el HUD no salte cuando los dos se cruzan.
+	if (mSplitBlend <= 0.0f) {
+		const bool horizontal = pc_settings_get_coop_split() == 1;
+		immut Vector3f& axis  = horizontal ? mUnifiedCam.mViewYAxis : mUnifiedCam.mViewXAxis;
+		const f32 a0 = (p0 - mUnifiedCam.mPosition).dot(axis);
+		const f32 a1 = (p1 - mUnifiedCam.mPosition).dot(axis);
+		const f32 d  = horizontal ? a1 - a0 : a0 - a1; // < 0: P1 a la izquierda / arriba.
+		if (d < -12.0f) mP1Side = 0;
+		else if (d > 12.0f) mP1Side = 1;
+	}
+
+	// Cámaras de cada vista: lerp unificada -> propia.
+	const f32 b = mSplitBlend;
+	for (int i = 0; i < 2; i++) {
+		Camera& c = mViewCam[i];
+		c         = *own[i];
+		c.mPosition.set(mUnifiedCam.mPosition.x + (own[i]->mPosition.x - mUnifiedCam.mPosition.x) * b,
+		                mUnifiedCam.mPosition.y + (own[i]->mPosition.y - mUnifiedCam.mPosition.y) * b,
+		                mUnifiedCam.mPosition.z + (own[i]->mPosition.z - mUnifiedCam.mPosition.z) * b);
+		c.mFocus.set(mUnifiedCam.mFocus.x + (own[i]->mFocus.x - mUnifiedCam.mFocus.x) * b,
+		             mUnifiedCam.mFocus.y + (own[i]->mFocus.y - mUnifiedCam.mFocus.y) * b,
+		             mUnifiedCam.mFocus.z + (own[i]->mFocus.z - mUnifiedCam.mFocus.z) * b);
+		c.mFov = mUnifiedCam.mFov + (own[i]->mFov - mUnifiedCam.mFov) * b;
+		c.calcLookAt(c.mPosition, c.mFocus, nullptr);
+		// update() rehace mPlanePointers, que tras la copia apuntan a los
+		// planos de la cámara origen.
+		c.update(1.0f, c.mFov, c.mNear, c.mFar);
+	}
+	// Los controles siguen a la vista mostrada (con la cámara unificada, la
+	// orientación de J1), no a la cámara propia de cada uno.
+	mNavi->mControlCamera  = &mViewCam[0];
+	mNavi2->mControlCamera = &mViewCam[1];
+}
+
+// HUD en la misma mitad que la vista 3D del jugador (lado y orientación).
+void GameCoreSection::setViewSubrect(int view)
+{
+	const int side = viewSide(view);
+	if (pc_settings_get_coop_split() == 1) {
+		pc_gfx_set_view_subrect(0.0f, side == 0 ? 0.5f : 0.0f, 1.0f, side == 0 ? 1.0f : 0.5f);
+	} else {
+		pc_gfx_set_view_subrect(side == 0 ? 0.0f : 0.5f, 0.0f, side == 0 ? 0.5f : 1.0f, 1.0f);
+	}
+}
+
+void GameCoreSection::setActiveView(int view)
+{
+	if (!mCameraMgr2) {
+		return;
+	}
+	if (view == 1) {
+		if (!sCameraMgrP1) {
+			sCameraMgrP1 = cameraMgr;
+		}
+		cameraMgr = mCameraMgr2;
+	} else if (sCameraMgrP1) {
+		cameraMgr    = sCameraMgrP1;
+		sCameraMgrP1 = nullptr;
+	}
+}
+
+Camera* GameCoreSection::getViewCamera(int view)
+{
+	if (!pc_settings_get_coop_merge_camera()) {
+		return view == 1 ? mGameCamera2 : mNavi->mNaviCamera;
+	}
+	return &mViewCam[view == 1 ? 1 : 0];
+}
+
+void GameCoreSection::drawGameInfoHud(Graphics& gfx)
+{
+	if (!isSplitScreen() || !mDrawGameInfo2 || gameflow.mMoviePlayer->mIsActive) {
+		mDrawGameInfo->draw(gfx);
+		return;
+	}
+	// Parte de cada jugador dentro de su mitad: el espacio GX 640x480 se
+	// mapea al sub-rectángulo (pc_gfx_set_view_subrect) y el ancho virtual
+	// del HUD sale del aspecto de la mitad.
+	const f32 windowAspect = pc_gfx_get_window_aspect_ratio();
+	const f32 viewAspect   = pc_settings_get_coop_split() == 1 ? windowAspect * 2.0f : windowAspect * 0.5f;
+	zen::DrawGameInfo* huds[2] = { mDrawGameInfo, mDrawGameInfo2 };
+	for (int view = 0; view < 2; view++) {
+		// Sub-rectángulo normalizado con origen abajo-izquierda (GL).
+		setViewSubrect(view);
+		pc_gfx_set_view_aspect_override(viewAspect);
+		// El HUD de J2 con el tinte de distinción de su capitán (suavizado
+		// hacia blanco para no apagar la fuente); sin tinte si van distintos.
+		const bool hudTinted = view == 1 && pc_coop_p2_tinted();
+		if (hudTinted) {
+			unsigned char r, g, b;
+			pc_coop_p2_tint(&r, &g, &b);
+			pc_gfx_set_out_tint(1.0f - (1.0f - r / 255.0f) * 0.4f, 1.0f - (1.0f - g / 255.0f) * 0.4f,
+			                    1.0f - (1.0f - b / 255.0f) * 0.4f);
+		}
+		huds[view]->drawPlayer(gfx);
+		drawDownedLabel(gfx, view == 0 ? mNavi : mNavi2, viewAspect);
+		if (hudTinted) pc_gfx_clear_out_tint();
+	}
+	pc_gfx_set_view_aspect_override(0.0f);
+	pc_gfx_clear_view_subrect();
+	gfx.setViewport(AREA_FULL_SCREEN(gfx));
+	gfx.setScissor(AREA_FULL_SCREEN(gfx));
+	mDrawGameInfo->drawShared(gfx);
+}
+
+// Menú de cebolla/nave: en pantalla partida cada jugador ve el suyo dentro
+// de su mitad, con el mismo espacio virtual que su HUD.
+void GameCoreSection::drawContainerWindows(Graphics& gfx)
+{
+	if (!isSplitScreen() || !containerWindow2 || gameflow.mMoviePlayer->mIsActive) {
+		containerWindow->draw(gfx);
+		return;
+	}
+	const f32 windowAspect = pc_gfx_get_window_aspect_ratio();
+	const f32 viewAspect   = pc_settings_get_coop_split() == 1 ? windowAspect * 2.0f : windowAspect * 0.5f;
+	int virtW = int(lroundf(480.0f * viewAspect));
+	int virtH = 480;
+	if (virtW < 640) {
+		virtW = 640;
+		virtH = int(lroundf(640.0f / viewAspect));
+	}
+	zen::DrawContainer* wins[2] = { containerWindow, containerWindow2 };
+	for (int view = 0; view < 2; view++) {
+		setViewSubrect(view);
+		pc_gfx_set_view_aspect_override(viewAspect);
+		pc_gfx_set_hud_virtual_size(virtW, virtH);
+		wins[view]->draw(gfx);
+	}
+	pc_gfx_set_hud_virtual_size(0, 0);
+	pc_gfx_set_view_aspect_override(0.0f);
+	pc_gfx_clear_view_subrect();
+	gfx.setViewport(AREA_FULL_SCREEN(gfx));
+	gfx.setScissor(AREA_FULL_SCREEN(gfx));
+}
+
+// Rótulo en la vista de un Olimar caído (fase 5). Mismo espacio virtual que
+// el HUD de esa mitad, para que no salga estirado.
+void GameCoreSection::drawDownedLabel(Graphics& gfx, Navi* navi, f32 viewAspect)
+{
+	if (!navi || !gsys->mConsFont || navi->getCurrState()->getID() != NAVISTATE_Dead) {
+		return;
+	}
+	int virtW = int(lroundf(480.0f * viewAspect));
+	int virtH = 480;
+	if (virtW < 640) {
+		virtW = 640;
+		virtH = int(lroundf(640.0f / viewAspect));
+	}
+	pc_gfx_set_hud_virtual_size(virtW, virtH);
+	pc_gfx_set_hud_wide(1);
+	Matrix4f ortho;
+	gfx.setOrthogonal(ortho.mMtx, RectArea(0, 0, virtW, virtH));
+	gfx.setViewport(RectArea(0, 0, virtW, virtH));
+	gfx.setScissor(RectArea(0, 0, virtW, virtH));
+	gfx.setFog(false);
+	gfx.useTexture(nullptr, GX_TEXMAP0);
+	const char* text = pc_settings_get_language() == 3 ? "OLIMAR CAIDO" : "OLIMAR DOWN";
+	const int textW  = gsys->mConsFont->stringWidth(text);
+	const int x      = (virtW - textW) / 2;
+	const int y      = virtH / 2 - gsys->mConsFont->mCharHeight / 2;
+	gfx.setColour(Colour(0, 0, 0, 200), true);
+	gfx.setAuxColour(Colour(0, 0, 0, 200));
+	gfx.texturePrintf(gsys->mConsFont, x + 2, y + 2, "%s", text);
+	gfx.setColour(Colour(255, 90, 90, 255), true);
+	gfx.setAuxColour(Colour(255, 90, 90, 255));
+	gfx.texturePrintf(gsys->mConsFont, x, y, "%s", text);
+	pc_gfx_set_hud_wide(0);
+	pc_gfx_set_hud_virtual_size(0, 0);
+}
+
+RectArea GameCoreSection::splitViewRect(Graphics& gfx, int view)
+{
+	const int w = gfx.mScreenWidth, h = gfx.mScreenHeight;
+	const int side = viewSide(view);
+	if (pc_settings_get_coop_split() == 1) {
+		return side == 0 ? RectArea(0, 0, w, h / 2) : RectArea(0, h / 2, w, h);
+	}
+	return side == 0 ? RectArea(0, 0, w / 2, h) : RectArea(w / 2, 0, w, h);
+}
+
+RectArea GameCoreSection::currentViewRect(Graphics& gfx)
+{
+	return mViewRectActive ? splitViewRect(gfx, mActiveViewIndex) : AREA_FULL_SCREEN(gfx);
+}
+
+void GameCoreSection::beginView(Graphics& gfx, int view, f32 farClip)
+{
+	Camera* cam = getViewCamera(view);
+	setActiveView(view);
+	mActiveViewIndex = view;
+	mViewRectActive  = true;
+	// Frustum de pantalla completa corrido en NDC hacia el lado de la vista
+	// y recortado a su mitad: con blend 0 las dos mitades componen una sola
+	// imagen; con blend 1 cada Olimar queda centrado en la suya.
+	const bool horizontal = pc_settings_get_coop_split() == 1;
+	const f32 shift       = 0.5f * mSplitBlend * (viewSide(view) == 0 ? 1.0f : -1.0f);
+	pc_gfx_set_proj_offset(horizontal ? 0.0f : -shift, horizontal ? shift : 0.0f);
+	gfx.setCamera(cam);
+	cam->update(pc_gfx_get_window_aspect_ratio(), cam->mFov, 100.0f, farClip);
+	gfx.setViewport(AREA_FULL_SCREEN(gfx));
+	gfx.setScissor(currentViewRect(gfx));
+	// initRender() vacía luces y shapes cacheadas una vez por frame; cada
+	// pasada vuelve a añadir las mismas Light (DayMgr::refresh) y encola sus
+	// translúcidos. Sin esto la lista de luces se vuelve circular y la
+	// segunda vista repinta los cascos de la primera con matrices ajenas.
+	if (view > 0) {
+		gfx.mActiveLightMask = 0;
+		gfx.mLight.initCore("");
+		gfx.resetCacheBuffer();
+		gfx.resetMatrixBuffer();
+	}
+}
+
+void GameCoreSection::endViews(Graphics& gfx, Camera* mainCamera)
+{
+	pc_gfx_set_proj_offset(0.0f, 0.0f);
+	mViewRectActive  = false;
+	mActiveViewIndex = 0;
+	setActiveView(0);
+	gfx.setCamera(mainCamera);
+	gfx.setViewport(AREA_FULL_SCREEN(gfx));
+	gfx.setScissor(AREA_FULL_SCREEN(gfx));
+}
+#endif
+
 /**
  * @todo: Documentation
  */
@@ -2042,12 +2537,22 @@ void GameCoreSection::draw(Graphics& gfx)
 #if defined(PIKI_PC_PORT)
 	advanceState = pc_render_is_authoritative();
 #endif
+#if defined(PIKI_PC_PORT)
+	// Segunda vista de la frame: solo dibujar, no avanzar sonido.
+	if (mRenderPass != 0) advanceState = false;
+#endif
 	gsys->mTimer->start("se updt", true);
 	if (advanceState && gameflow.mMoviePlayer->mIsActive) {
 		Vector3f pos;
 		gameflow.mMoviePlayer->getLookAtPos(pos);
 		seSystem->update(gfx, pos);
 	} else if (advanceState) {
+#if defined(PIKI_PC_PORT)
+		// Pantalla partida: el escuchador va al punto medio entre los dos.
+		if (mNavi2 && mNavi2->isAlive()) {
+			seSystem->update(gfx, (mNavi->mSRT.t + mNavi2->mSRT.t) * 0.5f);
+		} else
+#endif
 		seSystem->update(gfx, mNavi->mSRT.t);
 	}
 	gsys->mTimer->stop("se updt");
@@ -2121,15 +2626,21 @@ void GameCoreSection::draw(Graphics& gfx)
 	gfx.setLighting(false, nullptr);
 	gfx.useTexture(mShadowTexture, GX_TEXMAP0);
 	gfx.setColour(Colour(255, 255, 255, 128), true);
-	if (AIPerf::optLevel <= 1) {
-		pikiMgr->drawShadow(gfx, mShadowTexture);
+#if defined(PIKI_PC_PORT)
+	// Con sombras proyectadas (shadow map) las manchas originales sobran.
+	if (pc_settings_get_shadows() == 0)
+#endif
+	{
+		if (AIPerf::optLevel <= 1) {
+			pikiMgr->drawShadow(gfx, mShadowTexture);
+		}
+		itemMgr->drawShadow(gfx, mShadowTexture);
+		pelletMgr->drawShadow(gfx, mShadowTexture);
+		if (tekiMgr && !hideTeki()) {
+			tekiMgr->drawShadow(gfx, mShadowTexture);
+		}
+		naviMgr->drawShadow(gfx);
 	}
-	itemMgr->drawShadow(gfx, mShadowTexture);
-	pelletMgr->drawShadow(gfx, mShadowTexture);
-	if (tekiMgr && !hideTeki()) {
-		tekiMgr->drawShadow(gfx, mShadowTexture);
-	}
-	naviMgr->drawShadow(gfx);
 
 	gfx.setCBlending(blend);
 	gfx.setDepth(true);
@@ -2265,10 +2776,18 @@ void GameCoreSection::draw2D(Graphics& gfx)
 		AState<Navi>* s = navi->getCurrState();
 		int state       = s->getID();
 		if (state != NAVISTATE_DemoSunset) {
+#if defined(PIKI_PC_PORT)
+			drawGameInfoHud(gfx);
+#else
 			mDrawGameInfo->draw(gfx);
+#endif
 		}
 		gfx.setOrthogonal(orthoMtx.mMtx, AREA_FULL_SCREEN(gfx));
+#if defined(PIKI_PC_PORT)
+		drawContainerWindows(gfx);
+#else
 		containerWindow->draw(gfx);
+#endif
 		if (!gameflow.mMoviePlayer->mIsActive && !gameflow.mIsUIOverlayActive) {
 			hurryupWindow->draw(gfx);
 		}

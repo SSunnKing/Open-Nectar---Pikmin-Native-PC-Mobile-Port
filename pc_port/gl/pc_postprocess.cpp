@@ -32,9 +32,14 @@ bool pc_post_dof_active(const PcPostEffects& fx)
 	return fx.dof && fx.dofStrength > 0.0f && fx.dofIterations > 0;
 }
 
+static std::string pc_post_view_depth_glsl();
+
+bool pc_post_shadows_active(const PcPostEffects& fx) { return fx.shadows && fx.shadowStrength > 0.0f; }
+
 bool pc_post_any_enabled(const PcPostEffects& fx)
 {
 	if (fx.fxaa) return true;
+	if (pc_post_shadows_active(fx)) return true;
 	if (pc_post_ssao_active(fx)) return true;
 	if (pc_post_dof_active(fx)) return true;
 	if (pc_post_bloom_active(fx)) return true;
@@ -49,7 +54,84 @@ bool pc_post_needs_depth(const PcPostEffects& fx)
 	// Ambient occlusion and depth of field. Both reconstruct view depth with
 	// the GameCube range, and both have to be dropped outright when the driver
 	// gave us a renderbuffer instead of a depth texture.
-	return pc_post_ssao_active(fx) || pc_post_dof_active(fx);
+	return pc_post_ssao_active(fx) || pc_post_dof_active(fx) || pc_post_shadows_active(fx);
+}
+
+std::string pc_post_build_shadow_depth_vertex()
+{
+	std::string src;
+	src += kGlslVersion; src += kGlslPrecision;
+	src += "in vec3 aPos;\n";
+	src += "in vec2 aTexCoord0;\n";
+	src += "in float aMatrixSlot;\n";
+	src += "uniform mat4 uLightVP;\n";
+	src += "uniform mat4 uPosMtx;\n";
+	src += "uniform int uUsePalette;\n";
+	src += "uniform vec4 uPosPalette[63];\n";
+	src += "out vec2 vUV;\n";
+	src += "void main() {\n";
+	src += "    int row = clamp(int(aMatrixSlot + 0.5), 0, 20) * 3;\n";
+	src += "    vec4 p = vec4(aPos, 1.0);\n";
+	src += "    vec4 vp = (uUsePalette != 0)\n";
+	src += "        ? vec4(dot(uPosPalette[row], p), dot(uPosPalette[row + 1], p), dot(uPosPalette[row + 2], p), 1.0)\n";
+	src += "        : uPosMtx * p;\n";
+	src += "    gl_Position = uLightVP * vp;\n";
+	src += "    vUV = aTexCoord0;\n";
+	src += "}\n";
+	return src;
+}
+
+std::string pc_post_build_shadow_depth_fragment()
+{
+	std::string src;
+	src += kGlslVersion; src += kGlslPrecision;
+	src += "in vec2 vUV;\n";
+	src += "uniform sampler2D uTex;\n";
+	src += "uniform int uAlphaTest;\n";
+	src += "uniform float uAlphaRef;\n";
+	src += "out vec4 oColour;\n";
+	src += "void main() {\n";
+	// Recortes (hojas, hierba): lo que el juego descarta por alpha tampoco
+	// proyecta sombra.
+	src += "    if (uAlphaTest != 0 && texture(uTex, vUV).a < uAlphaRef) discard;\n";
+	src += "    oColour = vec4(1.0);\n";
+	src += "}\n";
+	return src;
+}
+
+std::string pc_post_build_shadow_mask_shader()
+{
+	std::string src;
+	src += kGlslVersion; src += kGlslPrecision;
+	src += "in vec2 vUV;\n";
+	src += "out vec4 oColour;\n";
+	src += "uniform sampler2D uDepth;\n";
+	src += "uniform sampler2DShadow uShadowMap;\n"; // comparación bilineal en hardware
+	src += "uniform vec4 uProjInfo;\n";   // invP00, invP11, near, far
+	src += "uniform mat4 uLightVP;\n";    // vista -> clip de la luz
+	src += "uniform vec4 uShadowParams;\n"; // x strength, y texel, z bias, w alcance (vista)
+	src += pc_post_view_depth_glsl();
+	src += "void main() {\n";
+	src += "    float z = viewDepth(vUV);\n";
+	src += "    if (z >= uProjInfo.w * 0.999) { oColour = vec4(1.0); return; }\n";
+	src += "    vec2 ndc = vUV * 2.0 - 1.0;\n";
+	src += "    vec3 P = vec3(ndc * uProjInfo.xy * z, -z);\n";
+	src += "    vec4 lc = uLightVP * vec4(P, 1.0);\n";
+	src += "    vec3 l = lc.xyz / lc.w * 0.5 + 0.5;\n";
+	src += "    if (l.x < 0.0 || l.x > 1.0 || l.y < 0.0 || l.y > 1.0 || l.z > 1.0) { oColour = vec4(1.0); return; }\n";
+	// PCF 3x3: proporción de taps más cercanos a la luz que el píxel.
+	src += "    float lit = 0.0;\n";
+	src += "    float ref = l.z - uShadowParams.z;\n";
+	src += "    for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {\n";
+	src += "        lit += texture(uShadowMap, vec3(l.xy + vec2(float(x), float(y)) * uShadowParams.y * 1.5, ref));\n";
+	src += "    }\n";
+	src += "    lit /= 9.0;\n";
+	// Fundido al final del alcance para que el borde del mapa no corte.
+	src += "    float fade = clamp((uShadowParams.w - z) / (0.15 * uShadowParams.w), 0.0, 1.0);\n";
+	src += "    float dark = mix(1.0, 1.0 - uShadowParams.x, (1.0 - lit) * fade);\n";
+	src += "    oColour = vec4(vec3(dark), 1.0);\n";
+	src += "}\n";
+	return src;
 }
 
 // The GameCube depth range, in one place.
@@ -401,6 +483,9 @@ std::string pc_post_build_fragment_shader(const PcPostEffects& fx)
 	if (pc_post_ssao_active(fx)) {
 		src += "uniform sampler2D uAO;\n";
 	}
+	if (pc_post_shadows_active(fx)) {
+		src += "uniform sampler2D uShadow;\n";
+	}
 	if (pc_post_dof_active(fx)) {
 		src += "uniform sampler2D uDof;\n";
 		src += "uniform vec4 uProjInfo;\n";
@@ -509,6 +594,10 @@ std::string pc_post_build_fragment_shader(const PcPostEffects& fx)
 		// arrived, so it scales what the surface received. Bloom is light that
 		// did arrive and then scattered, which lands on top of the result.
 		src += "    c *= texture(uAO, vUV).r;\n";
+	}
+	if (pc_post_shadows_active(fx)) {
+		// Sombra directa del sol: luz que no llegó, también multiplica.
+		src += "    c *= texture(uShadow, vUV).r;\n";
 	}
 
 	if (pc_post_bloom_active(fx)) {

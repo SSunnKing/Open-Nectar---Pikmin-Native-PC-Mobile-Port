@@ -9,6 +9,9 @@
 #include "Piki.h"
 #include "ShadowCaster.h"
 #include "types.h"
+#if defined(PIKI_PC_PORT)
+#include "Dolphin/gx.h"
+#endif
 
 class CPlate;
 struct BurnEffect;
@@ -161,6 +164,21 @@ public:
 	bool mIsPellet;                       // _2E1, is lying down/carryable
 	Kontroller* mKontroller;              // _2E4
 	Camera* mNaviCamera;                  // _2E8, could be CullFrustum*, but probably Camera*
+#if defined(PIKI_PC_PORT)
+	/// Cámara con la que se interpretan stick/ratón. En coop con cámara
+	/// dinámica es la vista realmente mostrada (lerp unificada->propia), no
+	/// mNaviCamera; nullptr = mNaviCamera.
+	Camera* mControlCamera = nullptr;
+	Camera* controlCamera() { return mControlCamera ? mControlCamera : mNaviCamera; }
+	/// Coop: color de la luz de la antena según capitán/tinte. Llamar tras
+	/// cada changeEffect.
+	void applyPlayerLightTint();
+	/// Capitán de este Olimar (PcCaptain): Olimar o Louie.
+	int pcCaptain();
+	/// Tinte de distinción (solo J2 cuando ambos llevan el mismo capitán).
+	bool pcHasTint();
+	GXColor pcTint();
+#endif
 	immut Vector3f* mLookAtPosPtr;        // _2EC
 	u8 mLookTimer;                        // _2F0
 	f32 mHeadYawOffsetRel;                // _2F4
@@ -289,6 +307,13 @@ extern bool DelayPikiBirth;
 #if defined(PIKI_PC_PORT)
 /// Colour chosen with the mouse wheel, or -1 when no preference is active.
 int pc_preferred_throw_color();
+/// Color preferido de la rueda para un Olimar concreto: solo cuenta para el
+/// jugador que tiene teclado y ratón; el otro no tiene rueda (-1).
+int pc_preferred_throw_color_for(Navi* navi);
+/// Avanza el color preferido con rueda/táctil/cruceta; true si la cruceta lo
+/// cambió en este tick (para cambiar el Pikmin ya sujeto, issue #43).
+bool pc_navi_step_throw_color(Navi* navi);
+bool pcIsLastNaviStanding(Navi* navi);
 #endif
 
 #endif

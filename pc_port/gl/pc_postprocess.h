@@ -71,6 +71,13 @@ struct PcPostEffects {
 
 	// Colour grading. Cheap, needs only the scene colour, and it is the effect
 	// that proves the whole path works end to end.
+	// Sombras proyectadas (shadow map del sol, aplicadas en pantalla): la
+	// máscara multiplica el color, como la oclusión. strength 0 = sin sombra.
+	bool shadows        = false;
+	float shadowStrength = 0.0f;  // 0 .. 1, cuánto oscurece la sombra
+	int shadowMapSize   = 2048;
+	float shadowRange   = 1400.0f; // unidades de vista cubiertas por el mapa
+
 	bool colourGrading = false;
 	float gamma        = 1.0f;   // 0.5 .. 2.0, 1.0 is untouched
 	float brightness   = 0.0f;   // -0.5 .. 0.5, 0.0 is untouched
@@ -86,6 +93,8 @@ struct PcPostEffects {
 		    && dofSharpFraction == o.dofSharpFraction
 		    && dofFalloffFraction == o.dofFalloffFraction
 		    && dofIterations == o.dofIterations
+		    && shadows == o.shadows && shadowStrength == o.shadowStrength
+		    && shadowMapSize == o.shadowMapSize && shadowRange == o.shadowRange
 		    && colourGrading == o.colourGrading && gamma == o.gamma
 		    && brightness == o.brightness && saturation == o.saturation;
 	}
@@ -137,6 +146,16 @@ std::string pc_post_build_ssao_shader();
 /// Gaussian this will not average across a silhouette, which is what kept
 /// foliage shimmering.
 std::string pc_post_build_ao_blur_shader();
+
+/// Sombras: true cuando hay que renderizar el mapa y aplicar la máscara.
+bool pc_post_shadows_active(const PcPostEffects& fx);
+/// Pasada de profundidad desde la luz (misma disposición de vértices que el
+/// juego: posición, uv0 y slot de paleta; recorte por alpha de textura).
+std::string pc_post_build_shadow_depth_vertex();
+std::string pc_post_build_shadow_depth_fragment();
+/// Máscara en pantalla: reconstruye la posición de vista desde la profundidad
+/// y compara con el mapa (PCF 3x3). Escribe 1 = iluminado, 1-strength = sombra.
+std::string pc_post_build_shadow_mask_shader();
 
 /// True when depth of field will actually blur something.
 bool pc_post_dof_active(const PcPostEffects& fx);

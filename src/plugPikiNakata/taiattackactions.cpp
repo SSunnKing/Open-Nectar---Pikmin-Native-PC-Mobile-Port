@@ -48,7 +48,7 @@ bool TaiAttackableNaviPikiAction::act(Teki& teki)
  */
 bool TaiAttackableNaviAction::act(Teki& teki)
 {
-	Navi* navi = naviMgr->getNavi();
+	Navi* navi = naviMgr->getNearestNavi(teki.getPosition());
 	if (teki.attackableCreature(*navi)) {
 		teki.setCreaturePointer(0, navi);
 		return true;
@@ -115,11 +115,12 @@ bool TaiAnimationSwallowingAction::act(Teki& teki)
 
 		InteractKill NRef kill = InteractKill(&teki, 0);
 		bool check1            = false;
-		Navi* navi             = naviMgr->getNavi();
-
-		if (andCond3.satisfy(navi)) {
-			navi->stimulate(InteractSwallow(&teki, nullptr, 0));
-			check1 = true;
+		for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+			Navi* navi = naviMgr->getNavi(ni);
+			if (navi && andCond3.satisfy(navi)) {
+				navi->stimulate(InteractSwallow(&teki, nullptr, 0));
+				check1 = true;
+			}
 		}
 
 		bool check2 = false;

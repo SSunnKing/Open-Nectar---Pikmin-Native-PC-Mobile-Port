@@ -134,7 +134,7 @@ public:
 		bool res = false;
 		TAIAmotion::act(teki);
 		teki.addFrameCounter(gsys->getFrameTime());
-		Navi* navi        = naviMgr->getNavi();
+		Navi* navi        = naviMgr->getNearestNavi(teki.getPosition());
 		teki.mTargetAngle = teki.calcTargetDirection(navi->getPosition());
 
 		if (teki.mCurrentAnimEvent == KEY_Action0) {
@@ -302,7 +302,7 @@ public:
 	virtual bool act(Teki& teki) // _10
 	{
 		bool res   = false;
-		Navi* navi = naviMgr->getNavi();
+		Navi* navi = naviMgr->getNearestNavi(teki.getPosition());
 		if (teki.mDamageCount > 0.0f) {
 			PRINT("MIURIN DAMAGE! \n");
 			res = true;
@@ -339,7 +339,7 @@ public:
 protected:
 	void goNextState(Teki& teki)
 	{
-		Navi* navi = naviMgr->getNavi();
+		Navi* navi = naviMgr->getNearestNavi(teki.getPosition());
 		teki.setCreaturePointer(0, navi);
 		if (navi->isBuried()) {
 			mNextState = mNextStateIfNaviBury;
@@ -465,7 +465,7 @@ public:
 	virtual bool act(Teki& teki) // _10
 	{
 		bool res   = false;
-		Navi* navi = naviMgr->getNavi();
+		Navi* navi = naviMgr->getNearestNavi(teki.getPosition());
 		if (navi->isBuried()) {
 			PRINT("navi is buried.\n");
 			res = true;
@@ -497,7 +497,7 @@ public:
 
 	virtual void start(Teki& teki) // _08
 	{
-		Navi* navi    = naviMgr->getNavi();
+		Navi* navi    = naviMgr->getNearestNavi(teki.getPosition());
 		f32 a         = NMathF::atan2(navi->getPosition().x - teki.getPosition().x, navi->getPosition().z - teki.getPosition().z);
 		f32 angleDiff = a - teki.mFaceDirection;
 		if (zen::Abs(angleDiff) > PI) {
@@ -632,7 +632,7 @@ public:
 	{
 		bool res = TAIAattackableTarget::act(teki);
 		if (res) {
-			Navi* navi = naviMgr->getNavi();
+			Navi* navi = naviMgr->getNearestNavi(teki.getPosition());
 			if (navi->isBuried()) {
 				PRINT("navi is buried.\n"); // he sure is.
 				res = false;

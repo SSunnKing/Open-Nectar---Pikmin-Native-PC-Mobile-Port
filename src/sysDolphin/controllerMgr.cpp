@@ -142,6 +142,15 @@ void ControllerMgr::updateController(Controller* controller)
 	controller->mTriggerL = sControllerPad[controller->mPlayerNum - 1].triggerLeft;
 	controller->mTriggerR = sControllerPad[controller->mPlayerNum - 1].triggerRight;
 
+#if defined(PIKI_PC_PORT)
+	// Congelado (p. ej. su menú de mapa abierto en cooperativo): ni botones
+	// ni sticks llegan al juego. updateCont ya anula los botones.
+	if (controller->mIsControllerFrozen) {
+		controller->mMainStickX = controller->mMainStickY = 0;
+		controller->mSubStickX = controller->mSubStickY = 0;
+		controller->mTriggerL = controller->mTriggerR = 0;
+	}
+#endif
 	// process pressed buttons
 	controller->updateCont(keyStatus);
 }

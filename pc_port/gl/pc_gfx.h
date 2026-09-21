@@ -29,6 +29,28 @@ float pc_gfx_get_render_scale(void);
 void pc_gfx_set_aspect_ratio_mode(int mode);
 int pc_gfx_get_aspect_ratio_mode(void);
 float pc_gfx_get_current_aspect_ratio(void);
+// Aspecto de la ventana sin el override de vista (pantalla partida).
+float pc_gfx_get_window_aspect_ratio(void);
+// Override del aspecto mientras se dibuja una vista parcial; 0 lo quita.
+void pc_gfx_set_view_aspect_override(float aspect);
+// Desplazamiento de la proyección perspectiva en NDC (pantalla partida
+// dinámica): la vista de cada mitad usa el frustum completo corrido para que
+// con blend 0 ambas mitades formen una sola imagen. (0,0) lo quita.
+void pc_gfx_set_proj_offset(float ndcX, float ndcY);
+// Iluminación por píxel (la misma ecuación GX, evaluada en el fragmento con
+// la normal interpolada) en lugar de por vértice. 0 = original.
+void pc_gfx_set_per_pixel_lighting(int enabled);
+// Mientras está a 1, lo que se dibuje no entra en el mapa de sombras
+// (cursor, marcadores, anillos: geometría sobre el suelo que no es un objeto).
+void pc_gfx_shadow_exclude(int on);
+void pc_gfx_get_proj_offset(float* ndcX, float* ndcY);
+// Sub-rectángulo normalizado (origen abajo-izquierda) del destino sobre el
+// que se mapea el espacio GX 640x480 (HUD por jugador en pantalla partida).
+void pc_gfx_set_view_subrect(float x0, float y0, float x1, float y1);
+// Tamaño virtual del HUD (0,0 = automático). Solo para la pantalla partida.
+void pc_gfx_set_hud_virtual_size(int w, int h);
+int  pc_gfx_get_hud_virtual_height(void);
+void pc_gfx_clear_view_subrect(void);
 
 // Menu 2D: uniform 640x480 inside the RT (pillarbox). World keeps the
 // stretched map. Viewport and scissor share map_gx_rect, so this flag
@@ -41,6 +63,9 @@ int pc_gfx_get_ui_43(void);
 // Used by the F1 overlay so the dim covers 16:9 even when leftover menu
 // scissors still describe a left-aligned 4:3 rect.
 void pc_gfx_dim_full_target(unsigned char alpha);
+// Desenfoca una región del render target dada en coordenadas GX (640x480 con
+// el mapeo de UI vigente). `passes` ida-y-vuelta a 1/8 (2-3 para un cristal).
+void pc_gfx_blur_gx_rect(int gxX, int gxY, int gxW, int gxH, int passes);
 
 // Field HUD: GX space is V=480*aspect by 480, mapped uniformly onto the RT.
 // Panes are translated in that space (left / centre / right). Not a stretch.
@@ -95,6 +120,14 @@ void pc_gfx_set_alpha_update(GXBool updateEnable);
 void pc_gfx_set_alpha_compare(GXCompare comp0, u8 ref0, GXAlphaOp op, GXCompare comp1, u8 ref1);
 void pc_gfx_set_chan_ctrl(GXChannelID chan, GXBool enable, GXColorSrc ambSrc, GXColorSrc matSrc, u32 lightMask, GXDiffuseFn diffFn, GXAttnFn attnFn);
 void pc_gfx_set_chan_mat_color(GXChannelID chan, GXColor color);
+// Multiplicador global del colour de material (PLAN_COOP: tinte de P2).
+// Se aplica a cada GXSetChanMatColor mientras esté activo; 255 = sin cambio.
+void pc_gfx_set_mat_color_tint(GXColor tint);
+void pc_gfx_clear_mat_color_tint(void);
+// Multiplicador del color final de todo lo que dibuje el shader principal
+// (tinte del HUD de J2 en coop). (1,1,1) lo quita.
+void pc_gfx_set_out_tint(float r, float g, float b);
+void pc_gfx_clear_out_tint(void);
 void pc_gfx_set_chan_amb_color(GXChannelID chan, GXColor color);
 void pc_gfx_init_light_pos(void* ltObj, f32 x, f32 y, f32 z);
 void pc_gfx_init_light_dir(void* ltObj, f32 x, f32 y, f32 z);

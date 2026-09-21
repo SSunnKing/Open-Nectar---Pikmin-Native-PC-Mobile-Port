@@ -950,7 +950,6 @@ void SeSystem::update(Graphics& gfx, immut Vector3f& listenerPos)
 	}
 
 	if (bossMgr && naviMgr && naviMgr->getNavi()) {
-		Navi* navi = naviMgr->getNavi();
 		Iterator it(bossMgr);
 		Boss* nearestBoss = nullptr;
 		f32 maxDist       = seSystem->mSoundParams->mParms.mBossBGMEndDist();
@@ -958,6 +957,12 @@ void SeSystem::update(Graphics& gfx, immut Vector3f& listenerPos)
 		{
 			Boss* boss = (Boss*)*it;
 			if (boss->isBossBgm()) {
+#if defined(PIKI_PC_PORT)
+				// Música de jefe si cualquiera de los dos Olimar está cerca.
+				Navi* navi = naviMgr->getNearestNavi(boss->mSRT.t);
+#else
+				Navi* navi = naviMgr->getNavi();
+#endif
 				f32 dist = qdist2(boss, navi);
 				if (dist <= maxDist) {
 					nearestBoss = boss;

@@ -3,13 +3,16 @@
 #if defined(PIKI_PC_PORT)
 #include "GameStat.h"
 #include "pc_permadeath.h"
+#include "pc_coop.h"
 #include "pc_window.h"
 #include "settings/pc_settings.h"
 #include "mods/pc_hd_models.h"
+#include "gl/pc_gfx.h"
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
 #endif
 static f32 pcNaviHurt(f32 damage) { return pc_hardmode_navi_damage(damage); }
+
 #else
 static f32 pcNaviHurt(f32 damage) { return damage; }
 #endif
@@ -393,8 +396,14 @@ void Navi::startDamageEffect()
 	}
 
 	if (mHealth <= 1.0f) {
-		gameflow.mGameInterface->message(MOVIECMD_SetPauseAllowed, FALSE);
-		GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
+#if defined(PIKI_PC_PORT)
+		// Cooperativo: si el otro sigue vivo, el mundo no se pausa (solo caído).
+		if (pcIsLastNaviStanding(this))
+#endif
+		{
+			gameflow.mGameInterface->message(MOVIECMD_SetPauseAllowed, FALSE);
+			GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
+		}
 
 	} else if (!gameflow.mMoviePlayer->mIsActive && mHealth <= 0.25f * NAVI_PARM(mHealth)
 	           && !playerState->mDemoFlags.isFlag(DEMOFLAG_OlimarLowHealth)) {
@@ -420,7 +429,12 @@ void Navi::startDamageEffect()
 	int vibTypes[2] = { 0, 1 };
 	f32 randIdx     = gsys->getRand(1.0f);
 	// int vib         = vibTypes[int(2.0f * randIdx * 0.9999999f)];
+#if defined(PIKI_PC_PORT)
+	// Daño propio: solo tiembla la cámara del Olimar golpeado.
+	pcCameraMgrForNavi(mNaviID)->startVibrationEvent(vibTypes[int(2.0f * randIdx * 0.9999999f)], mSRT.t, false);
+#else
 	cameraMgr->startVibrationEvent(vibTypes[int(2.0f * randIdx * 0.9999999f)], mSRT.t);
+#endif
 
 	SeSystem::playPlayerSe(SE_DAMAGED);
 }
@@ -434,8 +448,14 @@ void Navi::finishDamage()
 	mStateMachine->restart(this);
 
 	if (mHealth <= 1.0f) {
+#if defined(PIKI_PC_PORT)
+		const bool lastStanding = pcIsLastNaviStanding(this);
+		mStateMachine->transit(this, NAVISTATE_Dead);
+		if (lastStanding) GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
+#else
 		mStateMachine->transit(this, NAVISTATE_Dead);
 		GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
+#endif
 	} else {
 		if (!gameflow.mMoviePlayer->mIsActive && mHealth <= 0.25f * NAVI_PARM(mHealth)
 		    && !playerState->mDemoFlags.isFlag(DEMOFLAG_OlimarLowHealth)) {
@@ -633,6 +653,9 @@ void Navi::reset()
 	mNextThrowPiki   = nullptr;
 	mNaviLightEfx->changeEffect(EffectMgr::EFF_Navi_Light);
 	mNaviLightGlowEfx->changeEffect(EffectMgr::EFF_Navi_LightGlow);
+#if defined(PIKI_PC_PORT)
+	applyPlayerLightTint();
+#endif
 	// Estela del cursor: el mismo resplandor que deja la antena, emitido
 	// solo mientras el cursor se mueve.
 	mCursorTrailEfx->changeEffect(EffectMgr::EFF_Navi_LightGlow);
@@ -674,11 +697,31 @@ f32 Navi::getiMass()
  * simply taking the nearest Pikmin. Driven by the mouse wheel.
  */
 static int sPreferredThrowColor = -1;
+// Cooperativo: el segundo Olimar no tiene rueda, pero sí cruceta (issue #43).
+static int sPreferredThrowColorP2 = -1;
 
 /// The colour the wheel currently points at, or -1 for the original behaviour.
 /// Read by the grab selection in naviState.cpp, which picks the Pikmin that is
 /// actually thrown.
 int pc_preferred_throw_color() { return sPreferredThrowColor; }
+// Cooperativo: true si ningún otro Olimar sigue en pie (salud > 1 y no muerto).
+bool pcIsLastNaviStanding(Navi* navi)
+{
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+		Navi* other = naviMgr->getNavi(ni);
+		if (other && other != navi && other->mHealth > 1.0f && other->getCurrState()->getID() != NAVISTATE_Dead) {
+			return false;
+		}
+	}
+	return true;
+}
+
+int pc_preferred_throw_color_for(Navi* navi)
+{
+	if (!navi) return -1;
+	if (navi->mNaviID == pc_window_get_keyboard_owner()) return sPreferredThrowColor;
+	return sPreferredThrowColorP2;
+}
 
 /// True when the squad holds at least one Pikmin of @p color.
 static bool pcSquadHasColor(int color)
@@ -698,16 +741,26 @@ static bool pcSquadHasColor(int color)
  * any of them. A preference whose colour ran out snaps to one that exists,
  * otherwise the wheel would appear stuck on an empty colour.
  */
-static void pcUpdatePreferredThrowColor()
+static bool pcUpdatePreferredThrowColor(Navi* navi)
 {
+	const bool keyboardOwner = navi->mNaviID == pc_window_get_keyboard_owner();
+	int& preferred = keyboardOwner ? sPreferredThrowColor : sPreferredThrowColorP2;
+
 	// Tocar el icono del HUD cuenta como una muesca, y funciona aunque la
 	// rueda esté asignada al zoom: en pantalla táctil no hay rueda.
 	int touchSteps = 0;
 #if PIKI_PC_TOUCH
-	touchSteps = pc_touch_take_color_taps();
+	if (keyboardOwner) touchSteps = pc_touch_take_color_taps();
 #endif
-	if (pc_settings_get_mouse_wheel_action() != 0 && touchSteps == 0 && sPreferredThrowColor < 0) {
-		return;
+	// Cruceta izquierda/derecha como en Pikmin 2 (issue #43): vale para
+	// mando y teclado, con o sin A pulsado. Abajo sigue siendo el original.
+	int padSteps = 0;
+	if (navi->mKontroller->keyClick(KBBTN_DPAD_RIGHT)) padSteps++;
+	if (navi->mKontroller->keyClick(KBBTN_DPAD_LEFT)) padSteps--;
+
+	const bool wheelOn = keyboardOwner && pc_settings_get_mouse_wheel_action() == 0;
+	if (!wheelOn && touchSteps == 0 && padSteps == 0 && preferred < 0) {
+		return false;
 	}
 
 	int present[PikiColorCount];
@@ -718,40 +771,46 @@ static void pcUpdatePreferredThrowColor()
 		}
 	}
 	if (presentCount == 0) {
-		sPreferredThrowColor = -1;
-		return;
+		preferred = -1;
+		return false;
 	}
 
 	// Where the current preference sits among the colours on hand.
 	int index = 0;
 	for (int i = 0; i < presentCount; i++) {
-		if (present[i] == sPreferredThrowColor) {
+		if (present[i] == preferred) {
 			index = i;
 			break;
 		}
 	}
 
-	int steps = touchSteps;
-	if (pc_settings_get_mouse_wheel_action() == 0) {
+	int steps = touchSteps + padSteps;
+	if (wheelOn) {
 		steps += pc_window_take_wheel_steps();
 	}
 	if (steps != 0) {
 		index = ((index + steps) % presentCount + presentCount) % presentCount;
 	}
-	const int previous = sPreferredThrowColor;
-	sPreferredThrowColor = present[index];
-	if (previous != sPreferredThrowColor && getenv("PIKMIN_WHEEL_TRACE") != nullptr) {
+	const int previous = preferred;
+	preferred          = present[index];
+	if (previous != preferred && getenv("PIKMIN_WHEEL_TRACE") != nullptr) {
 		fprintf(stderr, "[WHEEL] preferred colour -> %d (in squad=%d)\n",
-		        sPreferredThrowColor, presentCount);
+		        preferred, presentCount);
 		fflush(stderr);
 	}
+	return padSteps != 0 && previous != preferred;
+}
+
+bool pc_navi_step_throw_color(Navi* navi)
+{
+	return pcUpdatePreferredThrowColor(navi);
 }
 #endif
 
 void Navi::findNextThrowPiki()
 {
 #if defined(PIKI_PC_PORT)
-	pcUpdatePreferredThrowColor();
+	pcUpdatePreferredThrowColor(this);
 #endif
 	mNextThrowPiki = nullptr;
 	Iterator iter(mPlateMgr);
@@ -967,8 +1026,13 @@ void Navi::update()
 				mIsPlucking       = false;
 				mFastPluckKeyTaps = 0;
 				BUGPRINT("< camera FINISH MOTION");
-				cameraMgr->mCamera->finishMotion();
-				cameraMgr->mCamera->mControlsEnabled = true;
+#if defined(PIKI_PC_PORT)
+				PcamCameraManager* naviCam = pcCameraMgrForNavi(mNaviID);
+#else
+				PcamCameraManager* naviCam = cameraMgr;
+#endif
+				naviCam->mCamera->finishMotion();
+				naviCam->mCamera->mControlsEnabled = true;
 				mNoPluckTimer                        = 0;
 			}
 		}
@@ -1150,7 +1214,14 @@ void Navi::callPikis(f32 radius)
 			static_cast<PikiFlownState*>(piki->getCurrState())->mKnockdownTimer = 0.0f;
 		}
 
-		if ((piki->mNavi == this || piki->mNavi == nullptr) && !piki->isKinoko() && piki->isAlive() && !piki->isBuried()
+#if defined(PIKI_PC_PORT)
+		// Cooperativo: un pikmin solo pertenece a un Olimar mientras está en su
+		// pelotón. Fuera de él (trabajando, libre) cualquiera puede silbarlo.
+		const bool callable = piki->mNavi == this || piki->mNavi == nullptr || piki->mMode != PikiMode::FormationMode;
+#else
+		const bool callable = piki->mNavi == this || piki->mNavi == nullptr;
+#endif
+		if (callable && !piki->isKinoko() && piki->isAlive() && !piki->isBuried()
 		    && (piki->mMode != PikiMode::FormationMode || piki->getState() == PIKISTATE_Emotion) && piki->mIsCallable
 		    && state != PIKISTATE_Nukare && state != PIKISTATE_Swallowed && state != PIKISTATE_Drown && state != PIKISTATE_Absorb
 		    && state != PIKISTATE_LookAt && state != PIKISTATE_Pressed && dist < radius) {
@@ -1558,6 +1629,16 @@ bool Navi::procActionButton()
 			f32 sproutDist         = sqrtf(sproutNaviSep.x * sproutNaviSep.x + sproutNaviSep.z * sproutNaviSep.z);
 			f32 heightDiff         = absF(sproutNaviSep.y);
 			if (sprout->canPullout() && sproutDist < minDist && heightDiff < 25.0f) {
+#if defined(PIKI_PC_PORT)
+				// Cooperativo: si el otro Olimar ya va a por este brote, se salta
+				// (si no, los dos lo arrancan y sale un pikmin duplicado).
+				bool claimed = false;
+				for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+					Navi* other = naviMgr->getNavi(ni);
+					if (other && other != this && other->mSproutToPluck == sprout) claimed = true;
+				}
+				if (claimed) continue;
+#endif
 				minDist       = sproutDist;
 				closestSprout = sprout;
 			}
@@ -1883,7 +1964,8 @@ void Navi::makeVelocity(bool isSunset)
 	} else {
 		mMainStick.set(0.0f, 0.0f, 0.0f);
 	}
-	f32 angle                   = NMathF::atan2(mNaviCamera->mViewXAxis.z, mNaviCamera->mViewXAxis.x);
+	Camera* ctrlCam             = controlCamera();
+	f32 angle                   = NMathF::atan2(ctrlCam->mViewXAxis.z, ctrlCam->mViewXAxis.x);
 	NAxisAngle4f NRef axisAngle = NAxisAngle4f(NVector3f(0.0f, 1.0f, 0.0f), angle);
 	NTransform3D NRef transform = NTransform3D();
 	transform.inputAxisAngle(axisAngle);
@@ -1930,9 +2012,13 @@ void Navi::makeVelocity(bool isSunset)
 
 	// Use virtual cursor (mouse) in PC mouse modes, otherwise use movement stick
 	#ifdef PIKI_PC_PORT
-	if (pc_window_get_control_mode() == PC_CONTROL_MOUSE_CURSOR
-	    || pc_window_get_mouse_cursor_delta_x() != 0.0f
-	    || pc_window_get_mouse_cursor_delta_y() != 0.0f) {
+	// El ratón y el cursor virtual van con el jugador que tiene el teclado;
+	// el otro usa siempre el modo clásico.
+	const bool mouseIsMine = mNaviID == pc_window_get_keyboard_owner();
+	if (mouseIsMine
+	    && (pc_window_get_control_mode() == PC_CONTROL_MOUSE_CURSOR
+	        || pc_window_get_mouse_cursor_delta_x() != 0.0f
+	        || pc_window_get_mouse_cursor_delta_y() != 0.0f)) {
 		// Direct mouse delta mode: use raw deltas, no normalization or frame time scaling
 		// SDL already provides distance since last poll
 		static const float kMouseCursorWorldScale = 0.5f; // Convert SDL counts to world units
@@ -1944,10 +2030,10 @@ void Navi::makeVelocity(bool isSunset)
 		// mCursorPosition is a world-space offset from Olimar.  SDL deltas are
 		// screen-space, so fixed world X/Z axes make the cursor rotate or invert
 		// as the camera turns.  Project the camera basis onto the ground instead.
-		Vector3f screenRight(mNaviCamera->mViewXAxis.x, 0.0f, mNaviCamera->mViewXAxis.z);
+		Vector3f screenRight(ctrlCam->mViewXAxis.x, 0.0f, ctrlCam->mViewXAxis.z);
 		// SDL Y grows downwards, whereas the gameplay cursor's positive screen
 		// vertical direction is camera-forward on the ground plane.
-		Vector3f screenDown(-mNaviCamera->mViewZAxis.x, 0.0f, -mNaviCamera->mViewZAxis.z);
+		Vector3f screenDown(-ctrlCam->mViewZAxis.x, 0.0f, -ctrlCam->mViewZAxis.z);
 		if (screenRight.length() > 0.0001f) {
 			screenRight.normalise();
 		}
@@ -2008,7 +2094,7 @@ void Navi::makeVelocity(bool isSunset)
 		// this hides many developer sins i am sure.
 		STACK_PAD_VAR(5);
 		return;
-	} else if (pc_window_get_control_mode() != PC_CONTROL_CLASSIC) {
+	} else if (mouseIsMine && pc_window_get_control_mode() != PC_CONTROL_CLASSIC) {
 		// Fallback for other non-classic modes (if any): use virtual cursor
 		NVector3f cursorStickVec(
 			pc_window_get_virtual_cursor_x() / 127.0f,
@@ -2046,7 +2132,7 @@ void Navi::makeVelocity(bool isSunset)
 	// For cursor-facing logic, use virtual cursor in mouse modes
 	#ifdef PIKI_PC_PORT
 	f32 cursorStickMag = moveStickMag;
-	if (pc_window_get_control_mode() != PC_CONTROL_CLASSIC) {
+	if (mNaviID == pc_window_get_keyboard_owner() && pc_window_get_control_mode() != PC_CONTROL_CLASSIC) {
 		cursorStickMag = sqrtf(
 			(pc_window_get_virtual_cursor_x() / 127.0f) * (pc_window_get_virtual_cursor_x() / 127.0f) +
 			(pc_window_get_virtual_cursor_y() / 127.0f) * (pc_window_get_virtual_cursor_y() / 127.0f)
@@ -2091,7 +2177,8 @@ void Navi::makeVelocity(bool isSunset)
  */
 void Navi::makeCStick(bool isSunset)
 {
-	f32 cameraYaw               = NMathF::atan2(mNaviCamera->mViewXAxis.z, mNaviCamera->mViewXAxis.x);
+	Camera* ctrlCam             = controlCamera();
+	f32 cameraYaw               = NMathF::atan2(ctrlCam->mViewXAxis.z, ctrlCam->mViewXAxis.x);
 	NAxisAngle4f NRef axisAngle = NAxisAngle4f(NVector3f(0.0f, 1.0f, 0.0f), cameraYaw);
 
 	NTransform3D NRef transform = NTransform3D();
@@ -2107,7 +2194,8 @@ void Navi::makeCStick(bool isSunset)
 	// Swarm button (issue #29): with the C-stick idle, steer the squad at the
 	// cursor. The input is expressed in camera space here and rotated into
 	// the world below, so the world-space direction is rotated back first.
-	if (!isSunset && pc_window_swarm_held() && cStickInput.length() < 0.05f) {
+	const bool swarmHeld = mNaviID == 0 ? pc_window_swarm_held() : pc_window_swarm_held_p2();
+	if (!isSunset && swarmHeld && cStickInput.length() < 0.05f) {
 		NVector3f toCursor(mCursorWorldPos.x - mSRT.t.x, 0.0f, mCursorWorldPos.z - mSRT.t.z);
 		if (toCursor.length() > 1.0f) {
 			toCursor.normalise();
@@ -2317,7 +2405,14 @@ void Navi::refresh(Graphics& gfx)
 				mCursorTrailEfx->restart();
 			}
 			// Del color del anillo del cursor sobre el suelo (magenta).
-			const Colour trailColour(235, 70, 235, 255);
+			// Olimar magenta; Louie azul; con tinte de J2, el color del tinte.
+			Colour trailColour(235, 70, 235, 255);
+			if (pcHasTint()) {
+				GXColor t = pcTint();
+				trailColour.set(t.r, t.g, t.b, 255);
+			} else if (pcCaptain() == PC_CAPTAIN_LOUIE) {
+				trailColour.set(60, 130, 255, 255);
+			}
 			mCursorTrailEfx->setTint(trailColour);
 			mCursorTrailEfx->setEmitting(moving);
 			if (cursorShown) mCursorTrailLastPos = trailPos;
@@ -2330,7 +2425,24 @@ void Navi::refresh(Graphics& gfx)
 			gfx.useMatrix(viewMtx, 0);
 
 			mAnimatedMaterials.updateContext();
+#if defined(PIKI_PC_PORT)
+			// El cursor y su marcador no proyectan sombra (shadow map).
+			pc_gfx_shadow_exclude(1);
+			// Coop: el anillo de J2 en azul (el original es magenta, así que
+			// el tinte apaga rojo y verde).
+			// Sobre el magenta original: azul (Louie, u Olimar/Olimar J2) o
+			// rojo (Louie/Louie J2).
+			const bool cursorTinted = pcHasTint() || pcCaptain() == PC_CAPTAIN_LOUIE;
+			if (cursorTinted) {
+				GXColor cursorTint = pcTint();
+				const bool red     = pcHasTint() && cursorTint.r > cursorTint.b;
+				pc_gfx_set_mat_color_tint(red ? GXColor { 255, 60, 40, 255 } : GXColor { 40, 110, 255, 255 });
+			}
+#endif
 			GlobalShape::cursorShape->drawshape(gfx, *gfx.mCamera, nullptr);
+#if defined(PIKI_PC_PORT)
+			if (cursorTinted) pc_gfx_clear_mat_color_tint();
+#endif
 
 			Colour markerColour;
 			if (mNextThrowPiki) {
@@ -2343,6 +2455,9 @@ void Navi::refresh(Graphics& gfx)
 			GlobalShape::markerShape2->mMaterialList->colour()    = markerColour;
 			GlobalShape::markerShape2->drawshape(gfx, *gfx.mCamera, nullptr);
 			gfx.setLighting(isLighting, nullptr);
+#if defined(PIKI_PC_PORT)
+			pc_gfx_shadow_exclude(0);
+#endif
 		}
 	}
 }
@@ -2350,15 +2465,62 @@ void Navi::refresh(Graphics& gfx)
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+int Navi::pcCaptain() { return pc_coop_captain(mNaviID); }
+
+bool Navi::pcHasTint() { return mNaviID == 1 && pc_coop_p2_tinted(); }
+
+GXColor Navi::pcTint()
+{
+	GXColor c = { 255, 255, 255, 255 };
+	if (pcHasTint()) pc_coop_p2_tint(&c.r, &c.g, &c.b);
+	return c;
+}
+
+// Luz de la antena: Olimar roja (original), Louie azul. Con tinte de J2
+// (mismo capitán los dos) la luz toma el color del tinte.
+void Navi::applyPlayerLightTint()
+{
+	Colour light(255, 255, 255, 255);
+	bool tinted = false;
+	if (pcHasTint()) {
+		GXColor t = pcTint();
+		light.set(t.r, t.g, t.b, 255);
+		tinted = true;
+	} else if (pcCaptain() == PC_CAPTAIN_LOUIE) {
+		light.set(80, 140, 255, 255);
+		tinted = true;
+	}
+	if (!tinted) return;
+	if (mNaviLightEfx) mNaviLightEfx->setTint(light);
+	if (mNaviLightGlowEfx) mNaviLightGlowEfx->setTint(light);
+}
+#endif
+
 void Navi::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 {
 	mShadowCaster.mSourcePosition.set(mSRT.t.x + 75.0f, mSRT.t.y + 100.0f, mSRT.t.z + 25.0f);
 	mShadowCaster.mTargetPosition.set(mSRT.t.x, mSRT.t.y + 10.0f, mSRT.t.z);
 #if defined(PIKI_PC_PORT)
-	const GXColor hdTint = { 255, 255, 255, 255 };
-	if (!pc_hd_model_draw_skinned(gfx, mNaviShapeObject->mShape, PC_HD_MODEL_OLIMAR, hdTint))
+	// Cooperativo: capitán (Olimar HD/original o Louie) y tinte de
+	// distinción de J2 cuando ambos llevan el mismo.
+	const bool tinted    = pcHasTint();
+	const GXColor hdTint = pcTint();
+	if (tinted) pc_gfx_set_mat_color_tint(hdTint);
+	// Louie: primero el pack HD de Pikmin 3, si no el de Pikmin 2; Olimar HD o el original.
+	bool drawn = false;
+	if (pcCaptain() == PC_CAPTAIN_LOUIE) {
+		drawn = pc_hd_model_draw_skinned(gfx, mNaviShapeObject->mShape, PC_HD_MODEL_LOUIE_HD, hdTint)
+		     || pc_hd_model_draw_skinned(gfx, mNaviShapeObject->mShape, PC_HD_MODEL_LOUIE, hdTint);
+	} else {
+		drawn = pc_hd_model_draw_skinned(gfx, mNaviShapeObject->mShape, PC_HD_MODEL_OLIMAR, hdTint);
+	}
+	if (!drawn)
 #endif
 		mNaviShapeObject->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
+#if defined(PIKI_PC_PORT)
+	if (tinted) pc_gfx_clear_mat_color_tint();
+#endif
 	mCollInfo->updateInfo(gfx, false);
 	CollPart* antenna = mCollInfo->getSphere('ante');
 	if (antenna) {
@@ -2544,11 +2706,14 @@ bool InteractBury::actNavi(Navi* navi) immut
 	}
 
 	navi->mStateMachine->transit(navi, NAVISTATE_Bury);
-	rumbleMgr->start(RUMBLE_Unk1, 0, nullptr);
+	rumbleMgr->start(RUMBLE_Unk1, navi->mNaviID, nullptr);
 	navi->mHealth -= pcNaviHurt(mDamage);
 	navi->startDamageEffect();
 	navi->mLifeGauge.updValue(navi->mHealth, C_NAVI_PARM(navi, mHealth));
 	if (navi->mHealth <= 1.0f) {
+#if defined(PIKI_PC_PORT)
+		if (pcIsLastNaviStanding(navi))
+#endif
 		GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
 		navi->mStateMachine->transit(navi, NAVISTATE_Dead);
 	}
@@ -2597,11 +2762,14 @@ bool InteractSuck::actNavi(Navi* navi) immut
 	BUGPRINT("life = %.1f", navi->mHealth);
 
 	navi->mLifeGauge.updValue(navi->mHealth, C_NAVI_PARM(navi, mHealth));
-	rumbleMgr->start(RUMBLE_Unk15, 0, nullptr);
+	rumbleMgr->start(RUMBLE_Unk15, navi->mNaviID, nullptr);
 	BUGPRINT("lgauge");
 	navi->startDamageEffect();
 	BUGPRINT("dmg eff");
 	if (navi->mHealth <= 1.0f) {
+#if defined(PIKI_PC_PORT)
+		if (pcIsLastNaviStanding(navi))
+#endif
 		GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
 		navi->mStateMachine->transit(navi, NAVISTATE_Dead);
 		BUGPRINT("navi dead");
@@ -2624,11 +2792,14 @@ bool InteractAttack::actNavi(Navi* navi) immut
 		return false;
 	}
 
-	rumbleMgr->start(RUMBLE_Unk1, 0, nullptr);
+	rumbleMgr->start(RUMBLE_Unk1, navi->mNaviID, nullptr);
 	SeSystem::playPlayerSe(SE_DAMAGED);
 	navi->mHealth -= pcNaviHurt(mDamage);
 	navi->mLifeGauge.updValue(navi->mHealth, C_NAVI_PARM(navi, mHealth));
 	if (navi->mHealth <= 1.0f) {
+#if defined(PIKI_PC_PORT)
+		if (pcIsLastNaviStanding(navi))
+#endif
 		GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
 		PRINT("ATTACK DEAD ******\n");
 	} else {
@@ -2653,11 +2824,14 @@ bool InteractPress::actNavi(Navi* navi) immut
 		return false;
 	}
 
-	rumbleMgr->start(RUMBLE_Unk1, 0, nullptr);
+	rumbleMgr->start(RUMBLE_Unk1, navi->mNaviID, nullptr);
 	navi->mHealth -= pcNaviHurt(mDamage);
 	navi->mLifeGauge.updValue(navi->mHealth, C_NAVI_PARM(navi, mHealth));
 	navi->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
 	if (navi->mHealth <= 1.0f) {
+#if defined(PIKI_PC_PORT)
+		if (pcIsLastNaviStanding(navi))
+#endif
 		GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
 		PRINT("PRESS DEAD ******\n");
 	}
@@ -2681,11 +2855,14 @@ bool InteractSwallow::actNavi(Navi* navi) immut
 		return false;
 	}
 
-	rumbleMgr->start(RUMBLE_Unk1, 0, nullptr);
+	rumbleMgr->start(RUMBLE_Unk1, navi->mNaviID, nullptr);
 	navi->mHealth -= pcNaviHurt(10.0f);
 	SeSystem::playPlayerSe(SE_DAMAGED);
 	navi->startDamageEffect();
 	if (navi->mHealth <= 1.0f) {
+#if defined(PIKI_PC_PORT)
+		if (pcIsLastNaviStanding(navi))
+#endif
 		GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
 		PRINT("SWALLOW DEAD ******\n");
 	} else {
@@ -2710,13 +2887,16 @@ bool InteractBomb::actNavi(Navi* navi) immut
 		return false;
 	}
 
-	rumbleMgr->start(RUMBLE_Unk1, 0, nullptr);
+	rumbleMgr->start(RUMBLE_Unk1, navi->mNaviID, nullptr);
 	SeSystem::playPlayerSe(SE_DAMAGED);
 	navi->mHealth -= pcNaviHurt(mDamage);
 	navi->mLifeGauge.updValue(navi->mHealth, C_NAVI_PARM(navi, mHealth));
 	navi->startDamageEffect();
 	navi->mFlickIntensity = 100.0f;
 	if (navi->mHealth <= 1.0f) {
+#if defined(PIKI_PC_PORT)
+		if (pcIsLastNaviStanding(navi))
+#endif
 		GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
 		PRINT("BOMB DEAD ******\n");
 	}
@@ -2749,10 +2929,10 @@ bool InteractFlick::actNavi(Navi* navi) immut
 	}
 
 	if (mDamage > 0.0f) {
-		rumbleMgr->start(RUMBLE_Unk10, 0, nullptr);
+		rumbleMgr->start(RUMBLE_Unk10, navi->mNaviID, nullptr);
 		navi->startDamageEffect();
 	} else {
-		rumbleMgr->start(RUMBLE_Unk10, 0, nullptr);
+		rumbleMgr->start(RUMBLE_Unk10, navi->mNaviID, nullptr);
 	}
 
 	SeSystem::playPlayerSe(SE_DAMAGED);
@@ -2760,6 +2940,9 @@ bool InteractFlick::actNavi(Navi* navi) immut
 	navi->mLifeGauge.updValue(navi->mHealth, C_NAVI_PARM(navi, mHealth));
 	navi->mFlickIntensity = mIntensity;
 	if (navi->mHealth <= 1.0f) {
+#if defined(PIKI_PC_PORT)
+		if (pcIsLastNaviStanding(navi))
+#endif
 		GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
 		PRINT("FLICK DEAD ******\n");
 	}
@@ -2781,10 +2964,13 @@ bool InteractBubble::actNavi(Navi* navi) immut
 
 	navi->mHealth -= pcNaviHurt(mDamage);
 	navi->mLifeGauge.updValue(navi->mHealth, C_NAVI_PARM(navi, mHealth));
-	rumbleMgr->start(RUMBLE_Unk1, 0, nullptr);
+	rumbleMgr->start(RUMBLE_Unk1, navi->mNaviID, nullptr);
 	SeSystem::playPlayerSe(SE_FIRED);
 	navi->startDamageEffect();
 	if (navi->mHealth <= 1.0f) {
+#if defined(PIKI_PC_PORT)
+		if (pcIsLastNaviStanding(navi))
+#endif
 		GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
 	}
 	navi->mFlickIntensity = 2.0f;
@@ -2804,9 +2990,12 @@ bool InteractFire::actNavi(Navi* navi) immut
 	navi->mHealth -= pcNaviHurt(mDamage);
 	navi->mLifeGauge.updValue(navi->mHealth, C_NAVI_PARM(navi, mHealth));
 	navi->startDamageEffect();
-	rumbleMgr->start(RUMBLE_Unk1, 0, nullptr);
+	rumbleMgr->start(RUMBLE_Unk1, navi->mNaviID, nullptr);
 	SeSystem::playPlayerSe(SE_FIRED);
 	if (navi->mHealth <= 1.0f) {
+#if defined(PIKI_PC_PORT)
+		if (pcIsLastNaviStanding(navi))
+#endif
 		GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
 	}
 	navi->mFlickIntensity = 2.0f;
@@ -2843,7 +3032,7 @@ void Navi::throwPiki(Piki* piki, immut Vector3f& pos)
 {
 	f32 unused = mFaceDirection + PI;
 	piki->mActiveAction->abandon(nullptr);
-	rumbleMgr->start(RUMBLE_Unk2, 0, nullptr);
+	rumbleMgr->start(RUMBLE_Unk2, mNaviID, nullptr);
 	piki->mSRT.t         = mSRT.t + Vector3f(0.0f, 10.0f, 0.0f);
 	Vector3f throwDir    = pos - piki->mSRT.t;
 	f32 throwDist        = speedy_sqrtf(SQUARE(throwDir.x) + SQUARE(throwDir.z));

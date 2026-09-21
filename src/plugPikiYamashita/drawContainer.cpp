@@ -32,6 +32,15 @@ const f32 zen::WindowPaneMgr::weightPosGravity = 9.8f;
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+zen::DrawContainer::DrawContainer(int playerNum)
+    : DrawContainer()
+{
+	// El menú lee su propio Controller; P2 lee el pad 1.
+	mController->reset(playerNum);
+}
+#endif
+
 zen::DrawContainer::DrawContainer()
     : mZenController(nullptr)
 {
@@ -399,10 +408,13 @@ void zen::DrawContainer::draw(Graphics& gfx)
 	if (mIsActive) {
 #if defined(PIKI_PC_PORT)
 		pc_gfx_set_hud_wide(1);
+		// En pantalla partida el tamaño virtual puede ser 640 x (>480):
+		// el menú se centra también en vertical.
 		const int virtW = pc_gfx_get_hud_virtual_width();
-		P2DPerspGraph graph(0, 0, virtW, 480, 30.0f, 1.0f, 5000.0f);
+		const int virtH = pc_gfx_get_hud_virtual_height();
+		P2DPerspGraph graph(0, 0, virtW, virtH, 30.0f, 1.0f, 5000.0f);
 		graph.setPort();
-		mScreen.draw((virtW - 640) / 2, 0, &graph);
+		mScreen.draw((virtW - 640) / 2, (virtH - 480) / 2, &graph);
 		pc_gfx_set_hud_wide(0);
 #else
 		mPerspGraph->setPort();

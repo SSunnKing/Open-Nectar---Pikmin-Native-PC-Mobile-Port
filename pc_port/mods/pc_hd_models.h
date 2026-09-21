@@ -13,6 +13,8 @@ struct Matrix4f;
 // falls back to the original draw when its pack is missing or invalid.
 enum PcHdModelId {
 	PC_HD_MODEL_OLIMAR = 0,
+	PC_HD_MODEL_LOUIE,    // co-op captain (Pikmin 2 rip); pack-bound skinning
+	PC_HD_MODEL_LOUIE_HD, // Louie from the Pikmin 3 rip (playerD); preferred when installed
 	PC_HD_MODEL_PIKI_BLUE,
 	PC_HD_MODEL_PIKI_RED,
 	PC_HD_MODEL_PIKI_YELLOW,

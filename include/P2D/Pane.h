@@ -176,6 +176,33 @@ public:
 		*dispPos = pos;
 	}
 
+#if defined(PIKI_PC_PORT)
+	/// Copia todo menos el árbol (queda huérfano) y el callback (nullptr).
+	void pcCopyPaneFrom(immut P2DPane& o)
+	{
+		mCallBack      = nullptr;
+		mPaneType      = o.mPaneType;
+		_0A            = o._0A;
+		mFlag          = o.mFlag;
+		mTagName       = o.mTagName;
+		mPaneZ         = o.mPaneZ;
+		mBounds        = o.mBounds;
+		mGlobalBounds  = o.mGlobalBounds;
+		mClipBounds    = o.mClipBounds;
+		mScissorBounds = o.mScissorBounds;
+		mLocalMtx      = o.mLocalMtx;
+		mWorldMtx      = o.mWorldMtx;
+		mOffsetX       = o.mOffsetX;
+		mOffsetY       = o.mOffsetY;
+		mRotation      = o.mRotation;
+		mScale         = o.mScale;
+		mCullMode      = o.mCullMode;
+	}
+	void pcSetTag(u32 tag) { mTagName = tag; }
+	u32 pcGetTag() { return mTagName; }
+	P2DPane* pcGetParentPane() { return mPaneTree.getParent() ? mPaneTree.getParent()->getObject() : nullptr; }
+#endif
+
 protected:
 	virtual void drawSelf(int x, int y) // _2C
 	{

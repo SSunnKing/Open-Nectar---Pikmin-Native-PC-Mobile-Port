@@ -237,6 +237,13 @@ PlayerState::PlayerState()
 	mPerHourGraph.create(getStartHour(), getEndHour());
 	mPerDayGraph.create(0, getTotalDays());
 	mIsTutorialMode = true;
+#if defined(PIKI_PC_PORT)
+	if (pc_unlock_all_stages()) {
+		// Sin cinemáticas de introducción: todas las banderas de demo puestas.
+		for (int d = 0; d < DEMOFLAG_COUNT; d++) mDemoFlags.setFlagOnly(d);
+		mIsTutorialMode = false;
+	}
+#endif
 	for (i = 0; i < STAGE_COUNT; i++) {
 		mStagePartsCollected[i] = 0;
 	}
@@ -259,8 +266,23 @@ PlayerState::PlayerState()
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+bool pc_unlock_all_stages()
+{
+	static int cached = -1;
+	if (cached < 0) {
+		const char* v = getenv("PIKMIN_UNLOCK_ALL");
+		cached        = (v && *v && *v != '0') ? 1 : 0;
+	}
+	return cached == 1;
+}
+#endif
+
 bool PlayerState::courseOpen(int courseID)
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_unlock_all_stages() && courseID >= STAGE_START && courseID <= STAGE_TESTMAP) return true;
+#endif
 	if (courseID >= STAGE_START && courseID <= STAGE_TESTMAP) {
 		return IS_STAGE_OPEN(gameflow.mPlayState.mCourseOpenFlags, courseID) != 0;
 	}
@@ -547,6 +569,10 @@ void PlayerState::loadCard(RandomAccessStream& data)
  */
 bool PlayerState::isTutorial()
 {
+#if defined(PIKI_PC_PORT)
+	// Modo de prueba (PIKMIN_UNLOCK_ALL): sin tutorial, directo al mapa.
+	if (pc_unlock_all_stages()) return false;
+#endif
 	if (flowCont.mCurrentStage && flowCont.mCurrentStage->mStageID != STAGE_Practice) {
 		return false;
 	}

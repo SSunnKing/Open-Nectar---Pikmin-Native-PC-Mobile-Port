@@ -1,4 +1,5 @@
 #include "DebugLog.h"
+#include <cstring>
 #include "Dolphin/gx.h"
 #include "P2D/Font.h"
 #include "P2D/Print.h"
@@ -38,6 +39,35 @@ void P2DTextBox::loadResource()
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+P2DTextBox::P2DTextBox(immut P2DTextBox& src, u32 tag)
+    : P2DPane()
+{
+	pcCopyPaneFrom(src);
+	pcSetTag(tag);
+	mFontString = src.mFontString;
+	mFont       = src.mFont;
+	mCharColor  = src.mCharColor;
+	mGradColor  = src.mGradColor;
+	mAlignmentH = src.mAlignmentH;
+	mAlignmentV = src.mAlignmentV;
+	mSpacing    = src.mSpacing;
+	mLeading    = src.mLeading;
+	mFontWidth  = src.mFontWidth;
+	mFontHeight = src.mFontHeight;
+	mOffsetX    = src.mOffsetX;
+	mOffsetY    = src.mOffsetY;
+	mCursorX    = src.mCursorX;
+	mCursorY    = src.mCursorY;
+	mText       = nullptr;
+	if (src.mText) {
+		size_t n = strlen(src.mText);
+		mText    = new char[n + 1];
+		memcpy(mText, src.mText, n + 1);
+	}
+}
+#endif
+
 P2DTextBox::P2DTextBox(P2DPane* pane, RandomAccessStream* ramStream, u16 param3)
     : P2DPane(pane, ramStream, param3)
 {

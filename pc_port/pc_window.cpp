@@ -2,6 +2,7 @@
 #include "port/jaudio_host.h"
 #endif
 #include "pc_window.h"
+#include "pc_icon.h"
 #if PIKI_PC_TOUCH
 #include "gl/pc_gfx.h"
 #include "touch/pc_touch.h"
@@ -21,10 +22,37 @@
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <vector>
 
 static SDL_Window*   sWindow = nullptr;
 static SDL_GLContext sGLContext = nullptr;
-static SDL_GameController* sController = nullptr;
+// Mandos resueltos por jugador: sControllers[0] = P1, [1] = P2. Se recalculan
+// desde sOpenPads + sPlayerDevice cada vez que cambia algo (resolvePlayerPads).
+static SDL_GameController* sControllers[2] = { nullptr, nullptr };
+#define sController sControllers[0]
+static bool sSwarmHeldP2 = false;
+
+// Todos los mandos abiertos, y el dispositivo asignado a cada jugador. Sin
+// asignación explícita (1 jugador, o antes de pasar por el menú) P1 = teclado
+// + primer mando y P2 = segundo mando.
+struct PcOpenPad {
+	SDL_GameController* ctl;
+	SDL_JoystickID id;
+};
+static std::vector<PcOpenPad> sOpenPads;
+struct PcPlayerDevice {
+	int kind;          // PC_INPUT_DEV_*
+	SDL_JoystickID id; // solo si kind == GAMEPAD
+};
+static PcPlayerDevice sPlayerDevice[2] = { { PC_INPUT_DEV_NONE, -1 }, { PC_INPUT_DEV_NONE, -1 } };
+static bool sPlayerDeviceExplicit = false;
+static int  sKeyboardOwner = 0; // jugador que recibe teclado (0 salvo asignación)
+
+// Última pulsación vista en el bucle de eventos, para el menú "pulsa un botón".
+static int            sLastPressKind   = PC_INPUT_DEV_NONE;
+static SDL_JoystickID sLastPressId     = -1;
+static unsigned       sLastPressSerial = 0;
+static unsigned       sLastPressTaken  = 0;
 static bool sShouldClose = false;
 static bool sLastInputIsGamepad = false;
 
@@ -43,6 +71,75 @@ static bool pc_joystick_is_secondary(int index)
 	return n.find("motion") != std::string::npos || n.find("touchpad") != std::string::npos
 	    || n.find("accelerometer") != std::string::npos || n.find("gyro") != std::string::npos;
 }
+
+// Abre el joystick en la primera ranura libre (P1 y luego P2).
+static SDL_GameController* pc_find_open_pad(SDL_JoystickID id)
+{
+	for (const PcOpenPad& p : sOpenPads)
+		if (p.id == id)
+			return p.ctl;
+	return nullptr;
+}
+
+static void resolvePlayerPads()
+{
+	sControllers[0] = nullptr;
+	sControllers[1] = nullptr;
+	sKeyboardOwner  = 0;
+	if (!sPlayerDeviceExplicit) {
+		if (sOpenPads.size() > 0) sControllers[0] = sOpenPads[0].ctl;
+		if (sOpenPads.size() > 1) sControllers[1] = sOpenPads[1].ctl;
+		return;
+	}
+	for (int p = 0; p < 2; p++) {
+		if (sPlayerDevice[p].kind == PC_INPUT_DEV_GAMEPAD)
+			sControllers[p] = pc_find_open_pad(sPlayerDevice[p].id);
+		else if (sPlayerDevice[p].kind == PC_INPUT_DEV_KEYBOARD)
+			sKeyboardOwner = p;
+	}
+}
+
+static bool pc_controller_open_slot(int index)
+{
+	if (!SDL_IsGameController(index) || pc_joystick_is_secondary(index))
+		return false;
+	SDL_GameController* ctl = SDL_GameControllerOpen(index);
+	if (!ctl)
+		return false;
+	const SDL_JoystickID id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(ctl));
+	if (pc_find_open_pad(id)) {
+		SDL_GameControllerClose(ctl); // ya lo teníamos (SDL cuenta referencias)
+		return false;
+	}
+	sOpenPads.push_back({ ctl, id });
+	if (sOpenPads.size() == 1)
+		sLastInputIsGamepad = true;
+	printf("[PC Port] Opened Game Controller #%d (id %d): %s\n", (int)sOpenPads.size(), (int)id, SDL_GameControllerName(ctl));
+	fflush(stdout);
+	resolvePlayerPads();
+	return true;
+}
+
+static void pc_controller_close_instance(SDL_JoystickID which)
+{
+	for (size_t i = 0; i < sOpenPads.size(); i++) {
+		if (sOpenPads[i].id != which)
+			continue;
+		SDL_GameControllerClose(sOpenPads[i].ctl);
+		sOpenPads.erase(sOpenPads.begin() + i);
+		for (int p = 0; p < 2; p++) {
+			if (sPlayerDevice[p].kind == PC_INPUT_DEV_GAMEPAD && sPlayerDevice[p].id == which) {
+				sPlayerDevice[p].kind = PC_INPUT_DEV_NONE;
+				sPlayerDevice[p].id   = -1;
+			}
+		}
+		if (sOpenPads.empty())
+			sLastInputIsGamepad = false;
+		printf("[PC Port] Game Controller (id %d) disconnected\n", (int)which);
+		break;
+	}
+	resolvePlayerPads();
+}
 static int sWindowWidth = 1280;
 static int sWindowHeight = 720;
 static int sLogicalRetraceInterval = 1;
@@ -51,6 +148,7 @@ static int sLogicalRetraceInterval = 1;
 // is a discrete, edge-shaped input: events arrive once per notch and are gone,
 // so they have to be banked here until a logical tick collects them, exactly
 // like the pad's edge-shaped buttons.
+static Uint32 sMousePressedMask = 0; // buttons pressed since the last take
 static int sMouseWheelSteps = 0;
 static float sTouchZoomDelta = 0.0f;
 static float sTouchCameraDrag = 0.0f;
@@ -236,6 +334,20 @@ bool pc_window_last_input_is_gamepad(void)
 	return sLastInputIsGamepad;
 }
 
+static int sPromptPlayer = -1;
+void pc_window_set_prompt_player(int player) { sPromptPlayer = player; }
+
+// Teclado o mando para las etiquetas de un texto: el dispositivo asignado al
+// jugador al que va el texto, o el último usado si no hay asignación.
+static bool promptUsesGamepad()
+{
+	if (sPromptPlayer >= 0 && sPromptPlayer < 2 && sPlayerDeviceExplicit) {
+		if (sPlayerDevice[sPromptPlayer].kind == PC_INPUT_DEV_GAMEPAD) return true;
+		if (sPlayerDevice[sPromptPlayer].kind == PC_INPUT_DEV_KEYBOARD) return false;
+	}
+	return sLastInputIsGamepad;
+}
+
 static int messageTagToAction(char tag)
 {
 	switch (tag) {
@@ -276,7 +388,7 @@ void pc_window_message_control_label(char tag, char* buf, unsigned bufSize)
 		return;
 	}
 
-	if (sLastInputIsGamepad) {
+	if (promptUsesGamepad()) {
 		if (tag == 'c') {
 			snprintf(buf, bufSize, "C-Stick");
 			return;
@@ -412,6 +524,12 @@ void pc_window_reset_key_bindings(void) {
     for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
         sKeyBindings[i] = kDefaultKeyBindings[i];
     }
+}
+
+Uint32 pc_window_take_mouse_pressed(void) {
+    const Uint32 m = sMousePressedMask;
+    sMousePressedMask = 0;
+    return m;
 }
 
 const char* pc_window_binding_name(int binding) {
@@ -553,6 +671,7 @@ bool pc_window_init(const char* title, int width, int height) {
         return false;
     }
 
+    pc_icon_apply(sWindow);
     sGLContext = SDL_GL_CreateContext(sWindow);
     if (!sGLContext) {
 #if !PIKI_USE_GLES
@@ -607,15 +726,7 @@ bool pc_window_init(const char* title, int width, int height) {
 
     // Check for connected controllers
     for (int i = 0; i < SDL_NumJoysticks(); ++i) {
-        if (SDL_IsGameController(i) && !pc_joystick_is_secondary(i)) {
-            sController = SDL_GameControllerOpen(i);
-            if (sController) {
-                sLastInputIsGamepad = true;
-                printf("[PC Port] Opened Game Controller: %s\n", SDL_GameControllerName(sController));
-                fflush(stdout);
-                break;
-            }
-        }
+        pc_controller_open_slot(i);
     }
 
     printf("[PC Port] SDL2 window and GL context initialized successfully (%dx%d)\n", sWindowWidth, sWindowHeight);
@@ -626,6 +737,87 @@ bool pc_window_init(const char* title, int width, int height) {
 #if defined(PIKI_PC_PORT) && defined(PIKI_PC_SETTINGS_MENU)
 #include "settings/pc_settings.h"
 #endif
+
+// Vuelca el estado de un mando SDL sobre un pad GC. Devuelve true si el mando
+// se está usando (para decidir entre iconos de teclado y de mando).
+static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& stickX, s8& stickY,
+                                   s8& substickX, s8& substickY, u8& triggerL, u8& triggerR, bool& swarmHeld)
+{
+    auto boundButtonPressed = [ctl](int action) {
+        return pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(action));
+    };
+    if (boundButtonPressed(PC_KEY_ACT_A)) button |= PAD_BUTTON_A;
+    if (boundButtonPressed(PC_KEY_ACT_B)) button |= PAD_BUTTON_B;
+    if (boundButtonPressed(PC_KEY_ACT_X)) button |= PAD_BUTTON_X;
+    if (boundButtonPressed(PC_KEY_ACT_Y)) button |= PAD_BUTTON_Y;
+    if (boundButtonPressed(PC_KEY_ACT_Z)) button |= PAD_TRIGGER_Z;
+    if (boundButtonPressed(PC_KEY_ACT_L)) {
+        button |= PAD_TRIGGER_L;
+        triggerL = 255;
+    }
+    if (boundButtonPressed(PC_KEY_ACT_R)) {
+        button |= PAD_TRIGGER_R;
+        triggerR = 255;
+    }
+    if (boundButtonPressed(PC_KEY_ACT_START)) button |= PAD_BUTTON_START;
+
+    if (boundButtonPressed(PC_KEY_ACT_DPAD_UP))    button |= PAD_BUTTON_UP;
+    if (boundButtonPressed(PC_KEY_ACT_DPAD_DOWN))  button |= PAD_BUTTON_DOWN;
+    if (boundButtonPressed(PC_KEY_ACT_DPAD_LEFT))  button |= PAD_BUTTON_LEFT;
+    if (boundButtonPressed(PC_KEY_ACT_DPAD_RIGHT)) button |= PAD_BUTTON_RIGHT;
+
+    // Triggers
+    Sint16 axisL = SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_TRIGGERLEFT);
+    Sint16 axisR = SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
+    const int axisDeadZone = sStickDeadZone * 256;
+    if (axisL > axisDeadZone) {
+        triggerL = (u8)(axisL / 128);
+        if (axisL > 30000) button |= PAD_TRIGGER_L;
+    }
+    if (axisR > axisDeadZone) {
+        triggerR = (u8)(axisR / 128);
+        if (axisR > 30000) button |= PAD_TRIGGER_R;
+    }
+
+    // Left Stick
+    int lx = SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_LEFTX);
+    int ly = SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_LEFTY);
+    if (sStickInvert & 1) lx = -lx;
+    if (sStickInvert & 2) ly = -ly;
+    if (abs(lx) > axisDeadZone) stickX = pc_pad_axis_from_sdl(lx);
+    if (abs(ly) > axisDeadZone) stickY = pc_pad_axis_from_sdl(-ly); // SDL Y-down to GC Y-up
+
+    // Right Stick (C-Stick)
+    int rx = SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_RIGHTX);
+    int ry = SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_RIGHTY);
+    if (sCStickInvert & 1) rx = -rx;
+    if (sCStickInvert & 2) ry = -ry;
+    if (abs(rx) > axisDeadZone) substickX = pc_pad_axis_from_sdl(rx);
+    if (abs(ry) > axisDeadZone) substickY = pc_pad_axis_from_sdl(-ry);
+
+    // Optional digital bindings for stick directions are merged after the
+    // analog axes, so every action exposed by the remapping UI is effective.
+    if (boundButtonPressed(PC_KEY_ACT_STICK_LEFT)) stickX = -127;
+    if (boundButtonPressed(PC_KEY_ACT_STICK_RIGHT)) stickX = 127;
+    if (boundButtonPressed(PC_KEY_ACT_STICK_UP)) stickY = 127;
+    if (boundButtonPressed(PC_KEY_ACT_STICK_DOWN)) stickY = -127;
+    if (boundButtonPressed(PC_KEY_ACT_CSTICK_LEFT)) substickX = -127;
+    if (boundButtonPressed(PC_KEY_ACT_CSTICK_RIGHT)) substickX = 127;
+    if (boundButtonPressed(PC_KEY_ACT_CSTICK_UP)) substickY = 127;
+    if (boundButtonPressed(PC_KEY_ACT_CSTICK_DOWN)) substickY = -127;
+    if (boundButtonPressed(PC_KEY_ACT_SWARM)) swarmHeld = true;
+
+    const int noticeZone = axisDeadZone < 16384 ? 16384 : axisDeadZone;
+    return boundButtonPressed(PC_KEY_ACT_A) || boundButtonPressed(PC_KEY_ACT_B)
+        || boundButtonPressed(PC_KEY_ACT_X) || boundButtonPressed(PC_KEY_ACT_Y)
+        || boundButtonPressed(PC_KEY_ACT_Z) || boundButtonPressed(PC_KEY_ACT_L)
+        || boundButtonPressed(PC_KEY_ACT_R) || boundButtonPressed(PC_KEY_ACT_START)
+        || boundButtonPressed(PC_KEY_ACT_DPAD_UP) || boundButtonPressed(PC_KEY_ACT_DPAD_DOWN)
+        || boundButtonPressed(PC_KEY_ACT_DPAD_LEFT) || boundButtonPressed(PC_KEY_ACT_DPAD_RIGHT)
+        || axisL > noticeZone || axisR > noticeZone
+        || abs(lx) > noticeZone || abs(ly) > noticeZone
+        || abs(rx) > noticeZone || abs(ry) > noticeZone;
+}
 
 void pc_window_poll_events(PADStatus* pad) {
 #if PIKI_USE_JAUDIO
@@ -681,6 +873,12 @@ void pc_window_poll_events(PADStatus* pad) {
                 break;
             }
 #endif
+            case SDL_MOUSEBUTTONDOWN:
+                // Edge mask for binding capture: a click shorter than a frame
+                // is invisible to SDL_GetMouseState, so remember every press.
+                if (event.button.button >= 1 && event.button.button <= 8)
+                    sMousePressedMask |= SDL_BUTTON(event.button.button);
+                break;
             case SDL_MOUSEWHEEL: {
                 // SDL reports natural-scroll flipping through the direction
                 // field; undo it so a notch away from the user is always
@@ -706,23 +904,22 @@ void pc_window_poll_events(PADStatus* pad) {
                 }
                 break;
             case SDL_CONTROLLERDEVICEADDED:
-                if (!sController && !pc_joystick_is_secondary(event.cdevice.which)) {
-                    sController = SDL_GameControllerOpen(event.cdevice.which);
-                    if (sController) {
-                        sLastInputIsGamepad = true;
-                        printf("[PC Port] Connected Game Controller: %s\n", SDL_GameControllerName(sController));
-                    }
-                }
+                pc_controller_open_slot(event.cdevice.which);
                 break;
             case SDL_CONTROLLERDEVICEREMOVED:
-                if (sController && SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(sController)) == event.cdevice.which) {
-                    SDL_GameControllerClose(sController);
-                    sController = nullptr;
-                    sLastInputIsGamepad = false;
-                    printf("[PC Port] Game Controller disconnected\n");
-                }
+                pc_controller_close_instance(event.cdevice.which);
+                break;
+            case SDL_CONTROLLERBUTTONDOWN:
+                sLastPressKind = PC_INPUT_DEV_GAMEPAD;
+                sLastPressId   = event.cbutton.which;
+                sLastPressSerial++;
                 break;
             case SDL_KEYDOWN:
+                if (!event.key.repeat && event.key.keysym.scancode != SDL_SCANCODE_ESCAPE) {
+                    sLastPressKind = PC_INPUT_DEV_KEYBOARD;
+                    sLastPressId   = -1;
+                    sLastPressSerial++;
+                }
                 // Toggle relative mouse mode with Tab key
                 if (event.key.keysym.scancode == SDL_SCANCODE_TAB
                     && sControlMode == PC_CONTROL_MOUSE_CURSOR && !sSettingsMenuOpen) {
@@ -839,82 +1036,20 @@ void pc_window_poll_events(PADStatus* pad) {
     bool usedGamepad = false;
     sSwarmHeld = held(PC_KEY_ACT_SWARM);
 
+    // Si el teclado está asignado a P2, lo que se ha leído arriba es suyo:
+    // se aparta para el pad 1 y el pad 0 empieza de cero.
+    u16 kbButton2 = 0; s8 kbStickX2 = 0, kbStickY2 = 0, kbSubX2 = 0, kbSubY2 = 0; u8 kbTrigL2 = 0, kbTrigR2 = 0;
+    bool kbSwarm2 = false;
+    if (sKeyboardOwner == 1) {
+        kbButton2 = button; kbStickX2 = stickX; kbStickY2 = stickY; kbSubX2 = substickX; kbSubY2 = substickY;
+        kbTrigL2 = triggerL; kbTrigR2 = triggerR; kbSwarm2 = sSwarmHeld;
+        button = 0; stickX = stickY = substickX = substickY = 0; triggerL = triggerR = 0; sSwarmHeld = false;
+    }
+
     // ── Gamepad Mapping (overrides / merges if controller connected) ──
     if (sController) {
-        auto boundButtonPressed = [](int action) {
-            return pc_window_gamepad_bind_held(sController, pc_window_get_gamepad_binding(action));
-        };
-        if (boundButtonPressed(PC_KEY_ACT_A)) button |= PAD_BUTTON_A;
-        if (boundButtonPressed(PC_KEY_ACT_B)) button |= PAD_BUTTON_B;
-        if (boundButtonPressed(PC_KEY_ACT_X)) button |= PAD_BUTTON_X;
-        if (boundButtonPressed(PC_KEY_ACT_Y)) button |= PAD_BUTTON_Y;
-        if (boundButtonPressed(PC_KEY_ACT_Z)) button |= PAD_TRIGGER_Z;
-        if (boundButtonPressed(PC_KEY_ACT_L)) {
-            button |= PAD_TRIGGER_L;
-            triggerL = 255;
-        }
-        if (boundButtonPressed(PC_KEY_ACT_R)) {
-            button |= PAD_TRIGGER_R;
-            triggerR = 255;
-        }
-        if (boundButtonPressed(PC_KEY_ACT_START)) button |= PAD_BUTTON_START;
-
-        if (boundButtonPressed(PC_KEY_ACT_DPAD_UP))    button |= PAD_BUTTON_UP;
-        if (boundButtonPressed(PC_KEY_ACT_DPAD_DOWN))  button |= PAD_BUTTON_DOWN;
-        if (boundButtonPressed(PC_KEY_ACT_DPAD_LEFT))  button |= PAD_BUTTON_LEFT;
-        if (boundButtonPressed(PC_KEY_ACT_DPAD_RIGHT)) button |= PAD_BUTTON_RIGHT;
-
-        // Triggers
-        Sint16 axisL = SDL_GameControllerGetAxis(sController, SDL_CONTROLLER_AXIS_TRIGGERLEFT);
-        Sint16 axisR = SDL_GameControllerGetAxis(sController, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
-        const int axisDeadZone = sStickDeadZone * 256;
-        if (axisL > axisDeadZone) {
-            triggerL = (u8)(axisL / 128);
-            if (axisL > 30000) button |= PAD_TRIGGER_L;
-        }
-        if (axisR > axisDeadZone) {
-            triggerR = (u8)(axisR / 128);
-            if (axisR > 30000) button |= PAD_TRIGGER_R;
-        }
-
-        // Left Stick
-        int lx = SDL_GameControllerGetAxis(sController, SDL_CONTROLLER_AXIS_LEFTX);
-        int ly = SDL_GameControllerGetAxis(sController, SDL_CONTROLLER_AXIS_LEFTY);
-        if (sStickInvert & 1) lx = -lx;
-        if (sStickInvert & 2) ly = -ly;
-        if (abs(lx) > axisDeadZone) stickX = pc_pad_axis_from_sdl(lx);
-        if (abs(ly) > axisDeadZone) stickY = pc_pad_axis_from_sdl(-ly); // SDL Y-down to GC Y-up
-
-        // Right Stick (C-Stick)
-        int rx = SDL_GameControllerGetAxis(sController, SDL_CONTROLLER_AXIS_RIGHTX);
-        int ry = SDL_GameControllerGetAxis(sController, SDL_CONTROLLER_AXIS_RIGHTY);
-        if (sCStickInvert & 1) rx = -rx;
-        if (sCStickInvert & 2) ry = -ry;
-        if (abs(rx) > axisDeadZone) substickX = pc_pad_axis_from_sdl(rx);
-        if (abs(ry) > axisDeadZone) substickY = pc_pad_axis_from_sdl(-ry);
-
-        // Optional digital bindings for stick directions are merged after the
-        // analog axes, so every action exposed by the remapping UI is effective.
-        if (boundButtonPressed(PC_KEY_ACT_STICK_LEFT)) stickX = -127;
-        if (boundButtonPressed(PC_KEY_ACT_STICK_RIGHT)) stickX = 127;
-        if (boundButtonPressed(PC_KEY_ACT_STICK_UP)) stickY = 127;
-        if (boundButtonPressed(PC_KEY_ACT_STICK_DOWN)) stickY = -127;
-        if (boundButtonPressed(PC_KEY_ACT_CSTICK_LEFT)) substickX = -127;
-        if (boundButtonPressed(PC_KEY_ACT_CSTICK_RIGHT)) substickX = 127;
-        if (boundButtonPressed(PC_KEY_ACT_CSTICK_UP)) substickY = 127;
-        if (boundButtonPressed(PC_KEY_ACT_CSTICK_DOWN)) substickY = -127;
-        if (boundButtonPressed(PC_KEY_ACT_SWARM)) sSwarmHeld = true;
-
-        const int noticeZone = axisDeadZone < 16384 ? 16384 : axisDeadZone;
-        usedGamepad = boundButtonPressed(PC_KEY_ACT_A) || boundButtonPressed(PC_KEY_ACT_B)
-            || boundButtonPressed(PC_KEY_ACT_X) || boundButtonPressed(PC_KEY_ACT_Y)
-            || boundButtonPressed(PC_KEY_ACT_Z) || boundButtonPressed(PC_KEY_ACT_L)
-            || boundButtonPressed(PC_KEY_ACT_R) || boundButtonPressed(PC_KEY_ACT_START)
-            || boundButtonPressed(PC_KEY_ACT_DPAD_UP) || boundButtonPressed(PC_KEY_ACT_DPAD_DOWN)
-            || boundButtonPressed(PC_KEY_ACT_DPAD_LEFT) || boundButtonPressed(PC_KEY_ACT_DPAD_RIGHT)
-            || axisL > noticeZone || axisR > noticeZone
-            || abs(lx) > noticeZone || abs(ly) > noticeZone
-            || abs(rx) > noticeZone || abs(ry) > noticeZone;
+        usedGamepad = pc_window_read_gamepad(sController, button, stickX, stickY, substickX, substickY,
+                                             triggerL, triggerR, sSwarmHeld);
     }
     if (usedGamepad)
         sLastInputIsGamepad = true;
@@ -991,15 +1126,22 @@ void pc_window_poll_events(PADStatus* pad) {
             }
         }
         
-        // Also map mouse buttons to A/B for convenience
+        // Also map mouse buttons to A/B for convenience. El ratón va con el
+        // dueño del teclado (P2 si se le asignó el teclado).
+        u16 mouseButton = 0;
         if (mouseState & SDL_BUTTON(SDL_BUTTON_LEFT)) {
-            button |= PAD_BUTTON_A;
+            mouseButton |= PAD_BUTTON_A;
         }
         if (mouseState & SDL_BUTTON(SDL_BUTTON_RIGHT)) {
-            button |= PAD_BUTTON_B;
+            mouseButton |= PAD_BUTTON_B;
         }
         if (mouseState & SDL_BUTTON(SDL_BUTTON_MIDDLE)) {
-            button |= PAD_TRIGGER_Z;
+            mouseButton |= PAD_TRIGGER_Z;
+        }
+        if (sKeyboardOwner == 1) {
+            kbButton2 |= mouseButton;
+        } else {
+            button |= mouseButton;
         }
     }
 
@@ -1010,17 +1152,36 @@ void pc_window_poll_events(PADStatus* pad) {
     pad[0].substickY  = substickY;
     pad[0].triggerLeft  = triggerL;
     pad[0].triggerRight = triggerR;
+
+    // Pad 1 = segundo mando físico (P2 en cooperativo). Solo mando: nada de
+    // teclado, ratón ni táctil.
+    sSwarmHeldP2 = kbSwarm2;
+    if (sControllers[1] || sKeyboardOwner == 1) {
+        u16 b2 = kbButton2; s8 sx2 = kbStickX2, sy2 = kbStickY2, cx2 = kbSubX2, cy2 = kbSubY2; u8 tl2 = kbTrigL2, tr2 = kbTrigR2;
+        if (sControllers[1])
+            pc_window_read_gamepad(sControllers[1], b2, sx2, sy2, cx2, cy2, tl2, tr2, sSwarmHeldP2);
+        pad[1].err          = PAD_ERR_NONE;
+        pad[1].button       = b2;
+        pad[1].stickX       = sx2;
+        pad[1].stickY       = sy2;
+        pad[1].substickX    = cx2;
+        pad[1].substickY    = cy2;
+        pad[1].triggerLeft  = tl2;
+        pad[1].triggerRight = tr2;
+    }
 #if defined(PIKI_PC_PORT) && defined(PIKI_PC_SETTINGS_MENU)
     // While the settings menu is open, consume the pad so the game underneath
     // does not react to the same input.
     if (pc_settings_consume_game_input()) {
-        pad[0].button      = 0;
-        pad[0].stickX     = 0;
-        pad[0].stickY     = 0;
-        pad[0].substickX  = 0;
-        pad[0].substickY  = 0;
-        pad[0].triggerLeft  = 0;
-        pad[0].triggerRight = 0;
+        for (int i = 0; i < 2; i++) {
+            pad[i].button      = 0;
+            pad[i].stickX     = 0;
+            pad[i].stickY     = 0;
+            pad[i].substickX  = 0;
+            pad[i].substickY  = 0;
+            pad[i].triggerLeft  = 0;
+            pad[i].triggerRight = 0;
+        }
     }
 #endif
 }
@@ -1079,10 +1240,10 @@ void pc_window_shutdown(void) {
     StopAudioThread();
 #endif
     pc_audio_shutdown();
-    if (sController) {
-        SDL_GameControllerClose(sController);
-        sController = nullptr;
-    }
+    for (const PcOpenPad& p : sOpenPads)
+        SDL_GameControllerClose(p.ctl);
+    sOpenPads.clear();
+    sControllers[0] = sControllers[1] = nullptr;
     if (sGLContext) {
         SDL_GL_DeleteContext(sGLContext);
         sGLContext = nullptr;
@@ -1202,6 +1363,55 @@ const char* pc_window_get_last_error(void) {
 SDL_GameController* pc_window_get_controller(void) {
     return sController;
 }
+
+SDL_GameController* pc_window_get_controller_p2(void) {
+    return sControllers[1];
+}
+
+int pc_window_num_gamepads(void) { return (int)sOpenPads.size(); }
+
+int pc_window_get_keyboard_owner(void) { return sKeyboardOwner; }
+
+void pc_window_input_reset_assignment(void) {
+    sPlayerDeviceExplicit = false;
+    for (int p = 0; p < 2; p++) {
+        sPlayerDevice[p].kind = PC_INPUT_DEV_NONE;
+        sPlayerDevice[p].id   = -1;
+    }
+    resolvePlayerPads();
+}
+
+void pc_window_input_assign(int player, int kind, int gamepadId) {
+    if (player < 0 || player > 1) return;
+    sPlayerDeviceExplicit = true;
+    sPlayerDevice[player].kind = kind;
+    sPlayerDevice[player].id   = kind == PC_INPUT_DEV_GAMEPAD ? gamepadId : -1;
+    resolvePlayerPads();
+}
+
+int pc_window_input_get_assignment(int player, int* gamepadId) {
+    if (player < 0 || player > 1) return PC_INPUT_DEV_NONE;
+    if (gamepadId) *gamepadId = sPlayerDevice[player].id;
+    return sPlayerDevice[player].kind;
+}
+
+const char* pc_window_gamepad_name(int gamepadId) {
+    SDL_GameController* ctl = pc_find_open_pad(gamepadId);
+    const char* name = ctl ? SDL_GameControllerName(ctl) : nullptr;
+    return name ? name : "Controller";
+}
+
+bool pc_window_take_button_press(int* kind, int* gamepadId) {
+    if (sLastPressSerial == sLastPressTaken) return false;
+    sLastPressTaken = sLastPressSerial;
+    if (kind) *kind = sLastPressKind;
+    if (gamepadId) *gamepadId = sLastPressId;
+    return true;
+}
+
+void pc_window_discard_button_presses(void) { sLastPressTaken = sLastPressSerial; }
+
+bool pc_window_swarm_held_p2(void) { return sSwarmHeldP2; }
 
 // Control mode functions
 void pc_window_set_control_mode(int mode) {

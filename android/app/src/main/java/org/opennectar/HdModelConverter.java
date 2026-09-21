@@ -61,14 +61,18 @@ public final class HdModelConverter {
 
     // Mismo orden que las filas del submenú HD Models (pc_settings.cpp).
     public static final int KIND_OLIMAR = 0;
-    public static final int KIND_PIKMIN = 1;
-    public static final int KIND_BULBORB = 2;
-    public static final int KIND_DWARF_BULBORB = 3;
-    private static final String[] KIND_NAMES = { "Olimar", "Pikmin", "Bulborb", "Dwarf Bulborb" };
+    public static final int KIND_LOUIE = 1;    // Pikmin 2 rip (co-op captain)
+    public static final int KIND_LOUIE_HD = 2; // Pikmin 3 rip (playerD)
+    public static final int KIND_PIKMIN = 3;
+    public static final int KIND_BULBORB = 4;
+    public static final int KIND_DWARF_BULBORB = 5;
+    private static final String[] KIND_NAMES = { "Olimar", "Louie", "Louie HD", "Pikmin", "Bulborb", "Dwarf Bulborb" };
 
     /** Identifica el rip por el .dae que contiene; -1 si no es ninguno conocido. */
     private static int detect(ZipFile zip) {
         if (entry(zip, "playerE.dae") != null) return KIND_OLIMAR;
+        if (entry(zip, "luzy_565.png") != null) return KIND_LOUIE; // Olimar's P2 rip shares orima3.dae
+        if (entry(zip, "playerD.dae") != null) return KIND_LOUIE_HD;
         if (entry(zip, "piki_p3_red.dae") != null) return KIND_PIKMIN;
         if (entry(zip, "red bulborb/model.dae") != null) return KIND_BULBORB;
         if (entry(zip, "kochappy.dae") != null) return KIND_DWARF_BULBORB;
@@ -90,6 +94,12 @@ public final class HdModelConverter {
                 case KIND_OLIMAR:
                     buildOlimar(zip, new File(modelsRoot, "OlimarHD"));
                     return new Result("OlimarHD", 1);
+                case KIND_LOUIE:
+                    buildLouie(zip, new File(modelsRoot, "Louie"));
+                    return new Result("Louie", 1);
+                case KIND_LOUIE_HD:
+                    buildCaptainP3(zip, new File(modelsRoot, "LouieHD"), "playerD", "louie_hd.nhm");
+                    return new Result("LouieHD", 1);
                 case KIND_PIKMIN:
                     buildPikmin(zip, new File(modelsRoot, "PikminHD"));
                     return new Result("PikminHD", 6);
@@ -484,8 +494,206 @@ public final class HdModelConverter {
 
     // ── Olimar ─────────────────────────────────────────────────────────────
 
+    // ── Louie (Pikmin 2, "Captain Louie/orima3.dae") ───────────────────────
+    // Mismo rig que Pikmin 1 (nombres en los nodos de escena; el skin usa
+    // jointnodeN), sin normales en el rip, <polylist> de triángulos.
+    private static final int LOUIE_SOTO_ALPHA = 56; // cristal casi transparente, como Olimar HD
+    private static final byte[] LOUIE_NAKA_RGBA = { 60, 120, (byte) 255, 28 };
+
+    private static void collectJointNames(Element e, Map<String, String> out) {
+        if ("node".equals(e.getLocalName()) && "JOINT".equals(e.getAttribute("type"))) {
+            String name = e.getAttribute("name").isEmpty() ? e.getAttribute("id") : e.getAttribute("name");
+            out.put(e.getAttribute("id"), name);
+            if (!e.getAttribute("sid").isEmpty()) out.put(e.getAttribute("sid"), name);
+        }
+        for (Node n = e.getFirstChild(); n != null; n = n.getNextSibling()) {
+            if (n.getNodeType() == Node.ELEMENT_NODE) collectJointNames((Element) n, out);
+        }
+    }
+
+    /** <polylist> de triángulos con POSITION + TEXCOORD; normales suaves por índice de posición. */
+    private static List<float[]> expandPolylist(Element geometry, Skins skins, String[] jointNames,
+                                                float uvScale, float uvOffset) throws Exception {
+        Element mesh = child(geometry, "mesh");
+        Map<String, Source> data = sourceData(mesh);
+        Element prim = child(mesh, "polylist");
+        if (prim == null) prim = child(mesh, "triangles");
+        if (prim == null) throw new Exception("Geometry without <polylist>.");
+        Element verticesNode = child(mesh, "vertices");
+        Map<String, Integer> offsets = new HashMap<>();
+        Map<String, String> sources = new HashMap<>();
+        int stride = 0;
+        for (Element in : children(prim, "input")) {
+            int offset = Integer.parseInt(in.getAttribute("offset"));
+            stride = Math.max(stride, offset);
+            String semantic = in.getAttribute("semantic");
+            if ("VERTEX".equals(semantic)) {
+                for (Element sub : children(verticesNode, "input")) {
+                    offsets.put(sub.getAttribute("semantic"), offset);
+                    sources.put(sub.getAttribute("semantic"), ref(sub, "source"));
+                }
+            } else {
+                offsets.put(semantic, offset);
+                sources.put(semantic, ref(in, "source"));
+            }
+        }
+        stride += 1;
+        Element vcount = child(prim, "vcount");
+        if (vcount != null) for (int c : ints(vcount)) if (c != 3) throw new Exception("polylist with non-triangles.");
+        int[] indices = ints(child(prim, "p"));
+        Influence[] influences = skins.controllers.get(geometry.getAttribute("id"));
+        if (influences == null) throw new Exception("No skin for geometry " + geometry.getAttribute("id") + ".");
+        Map<String, Integer> jointIndex = new HashMap<>();
+        for (int i = 0; i < jointNames.length; i++) jointIndex.put(jointNames[i], i);
+        Source P = data.get(sources.get("POSITION")), T = data.get(sources.get("TEXCOORD"));
+        if (P == null || T == null) throw new Exception("Mesh lacks POSITION/TEXCOORD.");
+        int po = offsets.get("POSITION"), to = offsets.get("TEXCOORD");
+        Map<Integer, float[]> acc = new HashMap<>();
+        for (int base = 0; base + stride * 3 <= indices.length; base += stride * 3) {
+            int[] ids = { indices[base + po], indices[base + stride + po], indices[base + 2 * stride + po] };
+            float[] a = Arrays.copyOfRange(P.floats, ids[0] * P.stride, ids[0] * P.stride + 3);
+            float[] b = Arrays.copyOfRange(P.floats, ids[1] * P.stride, ids[1] * P.stride + 3);
+            float[] c = Arrays.copyOfRange(P.floats, ids[2] * P.stride, ids[2] * P.stride + 3);
+            float[] u = { b[0] - a[0], b[1] - a[1], b[2] - a[2] };
+            float[] w = { c[0] - a[0], c[1] - a[1], c[2] - a[2] };
+            float[] n = { u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0] };
+            for (int id : ids) {
+                float[] e = acc.computeIfAbsent(id, k -> new float[3]);
+                e[0] += n[0]; e[1] += n[1]; e[2] += n[2];
+            }
+        }
+        List<float[]> out = new ArrayList<>(indices.length / stride);
+        for (int base = 0; base + stride <= indices.length; base += stride) {
+            int pi = indices[base + po], ti = indices[base + to];
+            float[] n = acc.getOrDefault(pi, new float[] { 0, 1, 0 });
+            float len = (float) Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+            if (len <= 0) len = 1;
+            Influence skin = influences[pi];
+            float[] vtx = new float[16];
+            vtx[0] = P.floats[pi * P.stride]; vtx[1] = P.floats[pi * P.stride + 1]; vtx[2] = P.floats[pi * P.stride + 2];
+            vtx[3] = n[0] / len; vtx[4] = n[1] / len; vtx[5] = n[2] / len;
+            vtx[6] = CLAMP.apply(T.floats[ti * T.stride] * uvScale + uvOffset);
+            vtx[7] = CLAMP.apply((1f - T.floats[ti * T.stride + 1]) * uvScale + uvOffset);
+            for (int k = 0; k < skin.joints.length && k < 4; k++) {
+                Integer idx = jointIndex.get(skin.joints[k]);
+                if (idx == null) throw new Exception("Unknown joint " + skin.joints[k] + ".");
+                vtx[8 + k] = idx;
+                vtx[12 + k] = skin.weights[k];
+            }
+            out.add(vtx);
+        }
+        return out;
+    }
+
+    private static final int FLAG_NOTINT = 4; // ignora el tinte del juego (cabeza/visor del capitán)
+
+    /** Por triángulo: a `head` cuando la mayor parte del peso cae en cabeza/antena. */
+    private static void splitHead(List<float[]> in, List<float[]> suit, List<float[]> head) {
+        final int[] headJoints = { 5, 6, 7, 8 }; // headjnt, happajnt1-3
+        for (int i = 0; i + 3 <= in.size(); i += 3) {
+            float weight = 0;
+            for (int k = 0; k < 3; k++) for (int b = 0; b < 4; b++) for (int hj : headJoints)
+                if ((int) in.get(i + k)[8 + b] == hj) weight += in.get(i + k)[12 + b];
+            (weight > 1.5f ? head : suit).addAll(in.subList(i, i + 3));
+        }
+    }
+
+    private static List<float[]> flipWinding(List<float[]> in) {
+        List<float[]> out = new ArrayList<>(in.size());
+        for (int i = 0; i + 3 <= in.size(); i += 3) {
+            for (float[] t : new float[][] { in.get(i), in.get(i + 2), in.get(i + 1) }) {
+                float[] v = t.clone();
+                v[3] = -v[3]; v[4] = -v[4]; v[5] = -v[5];
+                out.add(v);
+            }
+        }
+        return out;
+    }
+
+    private static void buildLouie(ZipFile zip, File outDir) throws Exception {
+        Element root = dae(zip, "orima3.dae");
+        Map<String, String> nodeName = new HashMap<>();
+        collectJointNames(root, nodeName);
+        Skins raw = readSkins(root);
+        Skins skins = new Skins();
+        for (Map.Entry<String, float[]> kv : raw.bindByJoint.entrySet()) {
+            skins.bindByJoint.put(nodeName.getOrDefault(kv.getKey(), kv.getKey()), kv.getValue());
+        }
+        for (Map.Entry<String, Influence[]> kv : raw.controllers.entrySet()) {
+            Influence[] rows = new Influence[kv.getValue().length];
+            for (int i = 0; i < rows.length; i++) {
+                Influence inf = kv.getValue()[i];
+                String[] j = new String[inf.joints.length];
+                for (int k = 0; k < j.length; k++) j[k] = nodeName.getOrDefault(inf.joints[k], inf.joints[k]);
+                rows[i] = new Influence(j, inf.weights);
+            }
+            skins.controllers.put(kv.getKey(), rows);
+        }
+        // geometría -> imagen: nodo de escena -> controller -> material -> effect -> image.
+        Map<String, String> imageFile = new HashMap<>();
+        for (Element img : children(child(root, "library_images"), "image")) {
+            Element init = child(img, "init_from");
+            if (init != null) imageFile.put(img.getAttribute("id"), init.getTextContent().trim());
+        }
+        Map<String, String> materialImage = new HashMap<>();
+        for (Element m : children(child(root, "library_materials"), "material")) {
+            String effectId = ref(child(m, "instance_effect"), "url");
+            String image = "";
+            for (Element e : children(child(root, "library_effects"), "effect")) {
+                if (!effectId.equals(e.getAttribute("id"))) continue;
+                List<Element> inits = descendants(e, "init_from");
+                if (!inits.isEmpty()) image = inits.get(0).getTextContent().trim();
+            }
+            materialImage.put(m.getAttribute("id"), image);
+        }
+        Map<String, String> controllerGeometry = new HashMap<>();
+        for (Element c : children(child(root, "library_controllers"), "controller")) {
+            Element skin = child(c, "skin");
+            if (skin != null) controllerGeometry.put(c.getAttribute("id"), ref(skin, "source"));
+        }
+        Map<String, String> geometryMaterial = new HashMap<>();
+        for (Element inst : descendants(root, "instance_controller")) {
+            List<Element> mats = descendants(inst, "instance_material");
+            String g = controllerGeometry.get(ref(inst, "url"));
+            if (g != null && !mats.isEmpty()) geometryMaterial.put(g, ref(mats.get(0), "target"));
+        }
+        List<float[]> body = new ArrayList<>(), naka = new ArrayList<>(), soto = new ArrayList<>();
+        for (Element g : geometries(root)) {
+            String image = materialImage.getOrDefault(geometryMaterial.get(g.getAttribute("id")), "");
+            String file = imageFile.getOrDefault(image, image).toLowerCase(Locale.ROOT);
+            if (file.contains("luzy")) body.addAll(expandPolylist(g, skins, JOINTS, 1f, 0f));
+            else if (file.contains("helkan")) soto.addAll(expandPolylist(g, skins, JOINTS, 0.5f, 0.5f));
+            else naka.addAll(expandPolylist(g, skins, JOINTS, 1f, 0f));
+        }
+        naka = flipWinding(naka); // el interior del visor viene con las caras hacia dentro
+        // luzy_565 es una paleta 8x8 (celdas 2x2): ampliar a 64x64 sin filtrar.
+        Texture palette = rgba(zip, "luzy_565.png");
+        byte[] px = new byte[64 * 64 * 4];
+        for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+            int sx = x * palette.width / 64, sy = y * palette.height / 64;
+            System.arraycopy(palette.rgba, (sy * palette.width + sx) * 4, px, (y * 64 + x) * 4, 4);
+        }
+        byte[] nakaPx = new byte[4 * 4 * 4];
+        for (int i = 0; i < 16; i++) System.arraycopy(LOUIE_NAKA_RGBA, 0, nakaPx, i * 4, 4);
+        // El tinte coop solo colorea el traje: cabeza y visor sin tinte.
+        List<float[]> suit = new ArrayList<>(), head = new ArrayList<>();
+        splitHead(body, suit, head);
+        Texture bodyTex = new Texture(64, 64, px);
+        List<Part> parts = new ArrayList<>();
+        parts.add(new Part(suit, bodyTex));
+        parts.add(new Part(head, bodyTex, FLAG_NOTINT));
+        parts.add(new Part(naka, new Texture(4, 4, nakaPx), FLAG_NOTINT));
+        parts.add(new Part(soto, rgba(zip, "helkan_8ia.png").translucent(LOUIE_SOTO_ALPHA), FLAG_NOTINT));
+        writePack(new File(outDir, "louie.nhm"), bonesFor(JOINTS, skins), parts);
+    }
+
     private static void buildOlimar(ZipFile zip, File outDir) throws Exception {
-        Element root = dae(zip, "playerE.dae");
+        buildCaptainP3(zip, outDir, "playerE", "olimar_hd.nhm");
+    }
+
+    /** Capitán de Pikmin 3 (playerE Olimar / playerD Louie): cabeza y visor sin tinte. */
+    private static void buildCaptainP3(ZipFile zip, File outDir, String prefix, String file) throws Exception {
+        Element root = dae(zip, prefix + ".dae");
         Skins skins = readSkins(root);
         // Solo head_m usa playerE_head; traje, metal, luz y ambas capas del
         // casco (naka interior, soto cristal) usan playerE_body. El cristal va
@@ -497,12 +705,12 @@ public final class HdModelConverter {
                 : ("naka_m".equals(m) || "soto_m".equals(m)) ? glass : body;
             target.addAll(expand(g, skins, JOINTS, CLAMP, null));
         }
-        Texture bodyTex = rgba(zip, "playerE_body.png");
+        Texture bodyTex = rgba(zip, prefix + "_body.png");
         List<Part> parts = new ArrayList<>();
         parts.add(new Part(body, bodyTex));
-        parts.add(new Part(head, rgba(zip, "playerE_head.png")));
-        parts.add(new Part(glass, bodyTex.translucent(GLASS_ALPHA)));
-        writePack(new File(outDir, "olimar_hd.nhm"), bonesFor(JOINTS, skins), parts);
+        parts.add(new Part(head, rgba(zip, prefix + "_head.png"), FLAG_NOTINT));
+        parts.add(new Part(glass, bodyTex.translucent(GLASS_ALPHA), FLAG_NOTINT));
+        writePack(new File(outDir, file), bonesFor(JOINTS, skins), parts);
     }
 
     // ── Pikmin ─────────────────────────────────────────────────────────────

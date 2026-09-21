@@ -76,8 +76,9 @@ void CylinderTypeCallBack::hitCheckCommon(zen::particleGenerator* ptclGen, Creat
  */
 void CylinderTypeCallBack::hitCheck(zen::particleGenerator* ptclGen)
 {
-	Navi* navi = naviMgr->getNavi();
-	hitCheckCommon(ptclGen, navi);
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+		hitCheckCommon(ptclGen, naviMgr->getNavi(ni));
+	}
 
 	Iterator iter(pikiMgr);
 	CI_LOOP(iter)

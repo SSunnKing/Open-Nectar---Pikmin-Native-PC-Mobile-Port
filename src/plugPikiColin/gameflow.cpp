@@ -602,7 +602,11 @@ void GameFlow::hardReset(BaseApp* baseApp)
 	mMoviePlayer = new MoviePlayer();
 
 	// set up controller rumble manager
+#if defined(PIKI_PC_PORT)
+	rumbleMgr = new RumbleMgr(true, true, false, false); // P2 en cooperativo
+#else
 	rumbleMgr = new RumbleMgr(true, false, false, false);
+#endif
 	rumbleMgr->reset();
 	rumbleMgr->rumbleOption(true);
 

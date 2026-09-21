@@ -1,4 +1,5 @@
 #include "installer_ui.h"
+#include "../pc_icon.h"
 
 #include <SDL.h>
 #include <algorithm>
@@ -247,6 +248,7 @@ bool InstallerWindow::open(std::string& error)
         error = SDL_GetError();
         return false;
     }
+    pc_icon_apply(mImpl->window);
     // Sin PRESENTVSYNC: aquí no hay animación que sincronizar, y con vsync cada
     // presentación bloqueaba hasta el siguiente refresco de la pantalla, lo que
     // sumaba cerca de un minuto de espera pura a lo largo de la instalación.

@@ -352,6 +352,8 @@ public:
 	// PC: tinte del generador. Sustituye el tono de cada partícula por este
 	// color conservando su brillo y su alfa animados (estela del cursor).
 	void setTint(immut Colour& c) { mTint = c; mHasTint = true; }
+	void beginTintTexSwap();
+	void endTintTexSwap();
 	void clearTint() { mHasTint = false; }
 	void applyTint(Colour& col);
 	void stopGen() { mControlFlags |= PTCLCTRL_GenStopped; }

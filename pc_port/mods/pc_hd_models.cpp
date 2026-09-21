@@ -37,6 +37,7 @@ struct Bone {
 
 constexpr unsigned kPartFlagRepeat = 1; // texture wraps instead of clamping
 constexpr unsigned kPartFlagNoCull = 2; // thin two-sided pieces (eye discs)
+constexpr unsigned kPartFlagNoTint = 4; // ignores the caller's tint (a captain's head/visor)
 
 struct Part {
 	std::vector<Vertex> vertices;
@@ -110,6 +111,10 @@ struct Entry {
 // front-facing, hence GX_CULL_FRONT keeps the outside of the meshes.
 const Entry kEntries[PC_HD_MODEL_COUNT] = {
 	{ "OlimarHD", "olimar_hd.nhm", BIND_ENGINE, GX_CULL_FRONT, kNaviRig, 12 },
+	// Louie's rest pose is Pikmin 1's rig with slightly different proportions,
+	// so its own inverse binds skin it onto the engine's animation.
+	{ "Louie", "louie.nhm", BIND_PACK, GX_CULL_FRONT, kNaviRig, 12 },
+	{ "LouieHD", "louie_hd.nhm", BIND_ENGINE, GX_CULL_FRONT, kNaviRig, 12 },
 	{ "PikminHD", "piki_blue.nhm", BIND_PACK, GX_CULL_FRONT, kNaviRig, 12 },
 	{ "PikminHD", "piki_red.nhm", BIND_PACK, GX_CULL_FRONT, kNaviRig, 12 },
 	{ "PikminHD", "piki_yellow.nhm", BIND_PACK, GX_CULL_FRONT, kNaviRig, 12 },
@@ -311,7 +316,11 @@ void drawModel(Graphics& gfx, const Model& model, const Entry& entry, const std:
 	}
 	GXSetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
 	GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_COPY);
-	for (const Part& part : model.parts) drawPart(model, entry, part, matrices);
+	static const GXColor kWhite = { 255, 255, 255, 255 };
+	for (const Part& part : model.parts) {
+		GXSetChanMatColor(GX_COLOR0A0, (part.flags & kPartFlagNoTint) ? kWhite : tint);
+		drawPart(model, entry, part, matrices);
+	}
 	gfx.setLighting(prevLighting, nullptr);
 	// Put back what the engine had: its materials are display lists that do
 	// not restate every mode, so a leaked GX_CULL_FRONT or blend mode hit the

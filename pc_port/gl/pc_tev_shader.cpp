@@ -1,4 +1,5 @@
 #include "pc_tev_shader.h"
+#include "pc_gx_lighting_glsl.h"
 
 #include <cstdio>
 #include <cstring>
@@ -340,6 +341,9 @@ std::string pc_tev_build_fragment_source(const PcTevShaderKey& key)
 	out += kGlslPrecision;
 	out += "in vec3 vLit0;\n";
 	if (usesChannel1) out += "in vec3 vLit1;\n";
+	// Iluminación GX compartida + selector por píxel (uPerPixel).
+	out += kGxLightingGlsl;
+	out += kGxLightingFragGlsl;
 	out += "in vec4 vColor;\n";
 	out += "in vec2 vTexCoord0;\n";
 	out += "in vec2 vTexCoord1;\n";
@@ -371,6 +375,7 @@ std::string pc_tev_build_fragment_source(const PcTevShaderKey& key)
 	const bool needsRef1 = !compare_is_static(key.alphaComp1);
 	if (needsRef0) out += "uniform float uAlphaRef0;\n";
 	if (needsRef1) out += "uniform float uAlphaRef1;\n";
+	out += "uniform vec3 uOutTint;\n"; // multiplicador final (HUD de J2 en coop)
 
 	out += "void main() {\n";
 
@@ -380,12 +385,14 @@ std::string pc_tev_build_fragment_source(const PcTevShaderKey& key)
 	         key.useMaterialRgb ? "uMaterialColor.rgb" : "vColor.rgb",
 	         key.useMaterialAlpha ? "uMaterialColor.a" : "vColor.a");
 	out += line;
-	out += "\tvec4 rast0 = (vLit0.x < -0.5) ? base0 : vec4(clamp(base0.rgb * vLit0, 0.0, 1.0), base0.a);\n";
+	out += "\tvec3 lit0 = gxPixelLit0(vLit0);\n";
+	out += "\tvec4 rast0 = (lit0.x < -0.5) ? base0 : vec4(clamp(base0.rgb * lit0, 0.0, 1.0), base0.a);\n";
 	if (usesChannel1) {
 		snprintf(line, sizeof(line), "\tvec4 base1 = vec4(%s, base0.a);\n",
 		         key.useMaterialRgb1 ? "uMaterialColor1.rgb" : "vColor.rgb");
 		out += line;
-		out += "\tvec4 rast1 = (vLit1.x < -0.5) ? base1 : vec4(clamp(base1.rgb * vLit1, 0.0, 1.0), base1.a);\n";
+		out += "\tvec3 lit1 = gxPixelLit1(vLit1);\n";
+		out += "\tvec4 rast1 = (lit1.x < -0.5) ? base1 : vec4(clamp(base1.rgb * lit1, 0.0, 1.0), base1.a);\n";
 	}
 
 	out += "\tvec4 prev = uTevPrev;\n";
@@ -448,7 +455,7 @@ std::string pc_tev_build_fragment_source(const PcTevShaderKey& key)
 		out += "\tprev.rgb = mix(prev.rgb, uFogColour.rgb, fogAmount);\n";
 	}
 
-	out += "\tfragColor = prev;\n";
+	out += "\tfragColor = vec4(prev.rgb * uOutTint, prev.a);\n";
 	out += "}\n";
 	return out;
 }

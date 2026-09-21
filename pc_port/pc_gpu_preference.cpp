@@ -64,6 +64,23 @@ void pc_gpu_preference_apply(void)
 
     PcGpuDecision decision = pc_gpu_preference_decide(evidence);
 
+    // prime-run (issue #44) exporta __NV_PRIME_RENDER_OFFLOAD y el vendor GLX,
+    // pero no el de EGL: en Wayland SDL crea el contexto por EGL y glvnd
+    // sigue respondiendo con Mesa, es decir, la Intel. Se completa la ruta que
+    // el usuario ya pidió en vez de dejarla a medias; nunca se cambia una
+    // variable que él haya puesto.
+    if (evidence.userAlreadyChose && !evidence.optedOut && evidence.nvidiaKernelModuleLoaded
+        && getenv("__NV_PRIME_RENDER_OFFLOAD") != nullptr) {
+        const bool wayland = pc_gpu_preference_session_is_wayland();
+        if (wayland && getenv("__EGL_VENDOR_LIBRARY_FILENAMES") == nullptr && evidence.eglVendorFilePresent) {
+            setenv("__EGL_VENDOR_LIBRARY_FILENAMES", kPcGpuEglVendorPath, 1);
+            printf("[PC Port] GPU preference: PRIME offload requested by the environment; adding the NVIDIA EGL vendor for Wayland\n");
+        } else if (!wayland && getenv("__GLX_VENDOR_LIBRARY_NAME") == nullptr) {
+            setenv("__GLX_VENDOR_LIBRARY_NAME", "nvidia", 1);
+            printf("[PC Port] GPU preference: PRIME offload requested by the environment; adding the NVIDIA GLX vendor\n");
+        }
+    }
+
     if (decision.requestOffload) setenv("__NV_PRIME_RENDER_OFFLOAD", "1", 1);
 
     // Xwayland speaks Mesa GLX. Pinning the NVIDIA GLX vendor there makes

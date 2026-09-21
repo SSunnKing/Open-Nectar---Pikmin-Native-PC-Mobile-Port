@@ -12,6 +12,9 @@
 ###############################################################################
 cmake_minimum_required(VERSION 3.16)
 project(PikminPC VERSION 0.1.0 LANGUAGES C CXX)
+if (WIN32)
+    enable_language(RC) # icono .rc de los ejecutables (windres de MinGW)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_C_STANDARD 11)
@@ -235,6 +238,10 @@ set(PC_PORT_SOURCES
     pc_port/pc_menu_repeat.cpp
     pc_port/pc_photo_mode.cpp
     pc_port/pc_permadeath.cpp
+    pc_port/pc_coop.cpp
+    pc_port/pc_art.cpp
+    pc_port/pc_icon.cpp
+    pc_port/settings/pc_glass_menu.cpp
     pc_port/pc_gpu_preference.cpp
     pc_port/mods/pc_hd_models.cpp
     pc_port/mods/pc_hd_model_convert.cpp
@@ -459,6 +466,10 @@ if (ANDROID)
     add_library(${NECTAR_GAME} SHARED ${PC_PORT_SOURCES})
 else()
     add_executable(${NECTAR_GAME} ${PC_PORT_SOURCES})
+    if (WIN32)
+        # Icono del .exe (recurso Windows).
+        target_sources(${NECTAR_GAME} PRIVATE packaging/windows/nectar.rc)
+    endif()
 endif()
 target_compile_options(${NECTAR_GAME} PRIVATE ${NATIVE_COMPILE_OPTIONS})
 target_link_libraries(${NECTAR_GAME} PRIVATE ${NECTAR_LEGACY})
@@ -599,7 +610,11 @@ if(PIKMIN_BUILD_LAUNCHER)
     add_executable(pikmin_launcher
         pc_port/launcher/launcher_main.cpp
         pc_port/launcher/installer_ui.cpp
+        pc_port/pc_icon.cpp
         ${LAUNCHER_PLATFORM_SOURCE})
+    if (WIN32)
+        target_sources(pikmin_launcher PRIVATE packaging/windows/nectar.rc)
+    endif()
     target_include_directories(pikmin_launcher PRIVATE ${SDL2_INCLUDE_DIRS})
     target_link_libraries(pikmin_launcher PRIVATE pikmin_disc_image ${SDL2_LIBRARIES} Threads::Threads)
     if (WIN32)
@@ -634,7 +649,8 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
 
     add_executable(installer_ui_test
         pc_port/launcher/installer_ui_test.cpp
-        pc_port/launcher/installer_ui.cpp)
+        pc_port/launcher/installer_ui.cpp
+        pc_port/pc_icon.cpp)
     target_include_directories(installer_ui_test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/pc_port/launcher
         ${SDL2_INCLUDE_DIRS})

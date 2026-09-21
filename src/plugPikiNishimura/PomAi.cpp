@@ -316,7 +316,7 @@ int PomAi::killStickPiki()
 void PomAi::createPikiHead()
 {
 	int seedCount = killStickPiki();
-	Navi* player  = naviMgr->getNavi();
+	Navi* player  = naviMgr->getNearestNavi(mPom->mSRT.t);
 	f32 baseAngle = atan2f(mPom->mSRT.t.x - player->mSRT.t.x, mPom->mSRT.t.z - player->mSRT.t.z);
 
 	f32 spreadAngle = PI * (C_POM_PARM(mPom, mDischargeAngle) / 360.0f);

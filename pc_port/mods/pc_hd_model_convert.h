@@ -13,6 +13,9 @@
 // already newer than their source are left alone. Returns how many packs
 // were written.
 int pc_hd_models_convert_sources(void);
+/// Escritorio: extrae un zip de pack de texturas en Load/Textures (misma
+/// regla de rutas que el instalador Android). Devuelve ficheros escritos.
+int pc_texpack_install_zip(const char* zipPath, char* message, unsigned long messageSize);
 
 // Converts one zip or folder chosen by the user (the F1 picker). `expected`
 // is the HD Models submenu row (0 Olimar, 1 Pikmin, 2 Bulborb, 3 Dwarf

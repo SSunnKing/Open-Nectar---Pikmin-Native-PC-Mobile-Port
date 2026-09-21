@@ -12,6 +12,8 @@
  */
 
 #include "settings/pc_settings.h"
+#include "settings/pc_settings_rows.h"
+#include "settings/pc_glass_menu.h"
 #include "mods/pc_hd_models.h"
 #include "mods/pc_hd_model_convert.h"
 #include "pc_file_dialog.h"
@@ -39,6 +41,9 @@
 
 #include "pc_window.h"
 #include "pc_permadeath.h"
+#include "pc_coop.h"
+#include "pc_art.h"
+#include "Texture.h"
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
 #endif
@@ -108,10 +113,25 @@ struct PcConfig {
     int pikiLimit = 100;
     // Minutes of play per in-game day, as shown in the menu. 10 is the original.
     int dayMinutes = 10;
+    // Última elección del selector 1P/2P, solo para preseleccionarla. La
+    // partida en sí no la guarda (PLAN_COOP).
+    int coopPlayers = 1;
+    // Pantalla partida: 0 = vertical (izq/der), 1 = horizontal (arriba/abajo).
+    // En táctil (móvil apaisado) por defecto horizontal.
+#if PIKI_PC_TOUCH
+    int coopSplit = 1;
+#else
+    int coopSplit = 0;
+#endif
+    // Cámara cooperativa dinámica: una sola cámara con los Olimar cerca y
+    // división fluida al alejarse. 0 = pantalla partida fija.
+    int coopMergeCamera = 0;
     // Colour grading. Neutral by default: the port should look like the game
     // until someone asks otherwise.
     int antialiasing = 0;   // 0 off, 1 FXAA
     int fog = 1;            // the game's own fog, on by default
+    int perPixelLighting = 0; // 0 por vértice (GX original), 1 por píxel
+    int shadows = 0;          // sombras del sol: 0 off, 1 suave, 2 normal, 3 fuerte
     int bloom = 0;          // 0 off, 1 subtle, 2 normal, 3 strong
     int ssao = 0;           // 0 off, 1 subtle, 2 normal, 3 strong
     int dof = 0;            // 0 off, 1 subtle, 2 normal, 3 strong
@@ -149,8 +169,17 @@ struct PcConfig {
         mouseWheelAction = 0;
         pikiLimit = 100;
         dayMinutes = 10;
+        coopPlayers = 1;
+#if PIKI_PC_TOUCH
+        coopSplit = 1;
+#else
+        coopSplit = 0;
+#endif
+        coopMergeCamera = 0;
         antialiasing  = 0;
         fog           = 1;
+        perPixelLighting = 0;
+        shadows = 0;
         bloom         = 0;
         ssao          = 0;
         dof           = 0;
@@ -304,14 +333,14 @@ constexpr int kAdvancedRowCount = 4;
 // reference machine is a GTX 1050 -- so nothing here may be mandatory.
 bool sInGraphicsSubmenu = false;
 int sGraphicsSelection = 0;
-constexpr int kGraphicsRowCount = 12;
+constexpr int kGraphicsRowCount = 14; // 12 = Lighting, 13 = Shadows
 
 // Texture packs submenu state (PLAN_TEXTURAS_HD fase 2). La instalación la
 // hace el selector de archivos de Android y termina en un hilo Java; el
 // resultado llega por pc_texpack_install_finished() y se pinta aquí.
 bool sInTexturePacksSubmenu = false;
 bool sInHdModelsSubmenu = false;
-// Fila del submenú HD Models: 0 Olimar, 1 Pikmin, 2 Bulborb, 3 Dwarf Bulborb.
+// Fila del submenú HD Models: 0 Olimar, 1 Louie (Pikmin 2), 2 Louie HD (Pikmin 3), 3 Pikmin, 4 Bulborb, 5 Dwarf Bulborb.
 int sHdModelsSelection = 0;
 std::atomic<bool> sHdModelInstallActive{false};
 bool sHdModelRestartPrompt = false;
@@ -358,10 +387,10 @@ constexpr int kSaturationStopCount = int(sizeof(kSaturationStops) / sizeof(kSatu
 bool sInModsSubmenu = false;
 int sModsSelection = 0;
 #if PIKI_DEBUG_KEYS
-constexpr int kModsRowCount = 7;
+constexpr int kModsRowCount = 9;
 #else
 // The debug row is the last one, so leaving it off simply shortens the list.
-constexpr int kModsRowCount = 6;
+constexpr int kModsRowCount = 8;
 #endif
 
 // Field-limit stops. 100 is what the original game uses.
@@ -515,7 +544,20 @@ void applyGraphics(const PcConfig& config) {
     PcPostEffects fx;
     pc_gfx_set_fog_allowed(config.fog);
     pc_gfx_set_anisotropy(config.anisotropy);
+    pc_gfx_set_per_pixel_lighting(config.perPixelLighting);
     fx.fxaa          = config.antialiasing != 0;
+    // Sombras del sol: la fuerza es cuánto oscurece; el mapa es más pequeño
+    // en móvil, donde la pasada extra pesa más.
+    static const float kShadowStrength[4] = { 0.0f, 0.25f, 0.38f, 0.5f };
+    const int shadowStep = (config.shadows >= 0 && config.shadows <= 3) ? config.shadows : 0;
+    fx.shadows        = shadowStep != 0;
+    fx.shadowStrength = kShadowStrength[shadowStep];
+#ifdef __ANDROID__
+    fx.shadowMapSize  = 1024;
+#else
+    fx.shadowMapSize  = 2048;
+#endif
+
     // Presets rather than sliders: bloom looks wrong across most of the range
     // a slider would offer, and three named steps are easier to choose between
     // than a number whose good values are not obvious.
@@ -586,6 +628,18 @@ void startVideoConfirm() {
 }
 
 void saveConfig(); // defined below
+void mainRowChange(int row, bool left, bool right, bool ok);
+void mainRowValue(int row, char* out, size_t n);
+const char* mainRowLabel(int row);
+void advancedRowChange(int row, bool left, bool right);
+void graphicsRowChange(int row, bool left, bool right, bool ok);
+void modsRowChange(int row, bool left, bool right);
+void saveDataRowAction(int row);
+void texturePacksRowAction(int row, const std::vector<std::string>& packs);
+void hdModelsRowAction(int row);
+void pollKeyCapture(SDL_GameController* ctl);
+bool pollButtonCapture(SDL_GameController* ctl);
+void pcCaptainPromptInput();
 
 void confirmVideoSettings() {
     sConfig = sPending;
@@ -757,8 +811,13 @@ void saveConfig() {
     out << "mouseWheelAction = " << sConfig.mouseWheelAction << "\n";
     out << "pikiLimit = " << sConfig.pikiLimit << "\n";
     out << "dayMinutes = " << sConfig.dayMinutes << "\n";
+    out << "coopPlayers = " << sConfig.coopPlayers << "\n";
+    out << "coopSplit = " << sConfig.coopSplit << "\n";
+    out << "coopMergeCamera = " << sConfig.coopMergeCamera << "\n";
     out << "antialiasing = " << sConfig.antialiasing << "\n";
     out << "fog = " << sConfig.fog << "\n";
+    out << "perPixelLighting = " << sConfig.perPixelLighting << "\n";
+    out << "shadows = " << sConfig.shadows << "\n";
     out << "bloom = " << sConfig.bloom << "\n";
     out << "ssao = " << sConfig.ssao << "\n";
     out << "dof = " << sConfig.dof << "\n";
@@ -884,6 +943,13 @@ void loadConfig() {
         else if (key == "fog") {
             sConfig.fog = atoi(val.c_str()) ? 1 : 0;
         }
+        else if (key == "perPixelLighting") {
+            sConfig.perPixelLighting = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "shadows") {
+            sConfig.shadows = std::clamp(atoi(val.c_str()), 0, 3);
+        }
+
         else if (key == "antialiasing") {
             sConfig.antialiasing = atoi(val.c_str()) ? 1 : 0;
         }
@@ -905,6 +971,15 @@ void loadConfig() {
         else if (key == "dayMinutes") {
             sConfig.dayMinutes = atoi(val.c_str());
             if (sConfig.dayMinutes < 1 || sConfig.dayMinutes > 120) sConfig.dayMinutes = 10;
+        }
+        else if (key == "coopPlayers") {
+            sConfig.coopPlayers = atoi(val.c_str()) == 2 ? 2 : 1;
+        }
+        else if (key == "coopSplit") {
+            sConfig.coopSplit = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "coopMergeCamera") {
+            sConfig.coopMergeCamera = atoi(val.c_str()) ? 1 : 0;
         }
         else if (key == "debugKeys") {
             sConfig.debugKeys = atoi(val.c_str()) ? 1 : 0;
@@ -1048,10 +1123,13 @@ void latchKeys() {
 // prompt has to read input from inside this function: keys are latched right
 // after it returns, so anything polling later in the frame sees no edges.
 void pcNewGamePromptInput();
+void pcPlayerCountPromptInput();
+void pcDevAssignPromptInput();
 
 static bool sToggleRequested = false;
 static bool sTouchTapPending = false;
 static float sTouchTapX = 0.0f, sTouchTapY = 0.0f;
+static float sTouchDragY = 0.0f; // acumulado entre lecturas, normalizado
 
 void pollMenuInput() {
     sTouchFrameButtons = sTouchButtons;
@@ -1075,6 +1153,36 @@ void pollMenuInput() {
         // settings menu over a modal that is deciding a save file's rules
         // would leave two menus fighting for the same keys.
         pcNewGamePromptInput();
+        return;
+    }
+    if (pc_playercount_prompt_active()) {
+#if PIKI_PC_TOUCH
+        pc_touch_claim_game_menu();
+#endif
+        pcPlayerCountPromptInput();
+        return;
+    }
+    if (pc_devassign_prompt_active()) {
+#if PIKI_PC_TOUCH
+        pc_touch_claim_game_menu();
+#endif
+        pcDevAssignPromptInput();
+        return;
+    }
+    if (pc_captain_prompt_active()) {
+#if PIKI_PC_TOUCH
+        pc_touch_claim_game_menu();
+#endif
+        pcCaptainPromptInput();
+        return;
+    }
+    // Menú de cristal del título (Advanced Options): es dueño de la entrada
+    // mientras está abierto; F1 no lo pisa.
+    if (pc_glass_menu_active()) {
+#if PIKI_PC_TOUCH
+        pc_touch_claim_port_menu();
+#endif
+        pc_glass_menu_input();
         return;
     }
 
@@ -1147,39 +1255,7 @@ void pollMenuInput() {
     // Controls submenu (key capture mode).
     if (sInControlsSubmenu) {
         if (sWaitingForKey) {
-            if (keyWentDown(SDL_SCANCODE_ESCAPE) || padNavB(ctl)) {
-                sWaitingForKey = false;
-                sCaptureWaitRelease = false;
-                return;
-            }
-            if (sCaptureWaitRelease) {
-                if (!captureConfirmHeld(ctl))
-                    sCaptureWaitRelease = false;
-                return;
-            }
-            for (int sc = 0; sc < SDL_NUM_SCANCODES; sc++) {
-                if (!keyWentDown(static_cast<SDL_Scancode>(sc)))
-                    continue;
-                if (isCaptureModifierScancode(sc))
-                    continue;
-                sPending.keyboardBindings[sControlSelection] = sc;
-                sWaitingForKey = false;
-                break;
-            }
-            // Mouse buttons are bindable too (issue #42). Left and right stay
-            // out: they are the fixed cursor conveniences and the click that
-            // opened the capture would bind itself.
-            if (sWaitingForKey) {
-                const Uint32 mouseNow = SDL_GetMouseState(NULL, NULL);
-                const Uint32 mouseWent = mouseNow & ~sCapturePrevMouse;
-                sCapturePrevMouse = mouseNow;
-                for (int b = SDL_BUTTON_MIDDLE; b <= PC_BIND_MOUSE_LAST - PC_BIND_MOUSE_BASE; b++) {
-                    if (b == SDL_BUTTON_RIGHT || !(mouseWent & SDL_BUTTON(b))) continue;
-                    sPending.keyboardBindings[sControlSelection] = PC_BIND_MOUSE_BASE + b;
-                    sWaitingForKey = false;
-                    break;
-                }
-            }
+            pollKeyCapture(ctl);
             return;
         }
 
@@ -1214,6 +1290,7 @@ void pollMenuInput() {
         if (ok) {
             sWaitingForKey = true;
             sCapturePrevMouse = SDL_GetMouseState(NULL, NULL);
+            pc_window_take_mouse_pressed(); // drop presses from before capture
             sCaptureWaitRelease = true;
             return;
         }
@@ -1234,35 +1311,7 @@ void pollMenuInput() {
 
     // Gamepad submenu (button capture mode).
     if (sInGamepadSubmenu) {
-        if (sWaitingForButton) {
-            // B/Circle is a bindable face button. Only Esc cancels capture.
-            if (keyWentDown(SDL_SCANCODE_ESCAPE)) {
-                sWaitingForButton = false;
-                sCaptureWaitRelease = false;
-                return;
-            }
-            if (sCaptureWaitRelease) {
-                if (!captureConfirmHeld(ctl))
-                    sCaptureWaitRelease = false;
-                return;
-            }
-            if (ctl || sTouchFrameButtons) {
-                const int bind = pc_window_gamepad_first_held_binding(ctl);
-                if (bind >= 0) {
-                    sPending.gamepadBindings[sGamepadSelection] = bind;
-                    sWaitingForButton = false;
-                    sCaptureWaitRelease = true;
-                }
-            }
-            return;
-        }
-
-        // The button just bound is still held; do not treat it as Back.
-        if (sCaptureWaitRelease) {
-            if (!pc_window_gamepad_any_held(ctl) && !captureConfirmHeld(ctl))
-                sCaptureWaitRelease = false;
-            return;
-        }
+        if (pollButtonCapture(ctl)) return;
 
         // Navigation in gamepad list.
         bool up = keyWentDown(SDL_SCANCODE_UP) || keyWentDown(SDL_SCANCODE_W);
@@ -1348,30 +1397,7 @@ void pollMenuInput() {
             return;
         }
 
-        // Sensitivity (0.1 - 5.0, step 0.1)
-        if (sAdvancedSelection == 0) {
-            float step = 0.1f;
-            if (left) sPending.mouseSensitivity = fmaxf(0.1f, sPending.mouseSensitivity - step);
-            if (right) sPending.mouseSensitivity = fminf(5.0f, sPending.mouseSensitivity + step);
-        }
-        // Stick dead zone (0 - 127, step 4)
-        else if (sAdvancedSelection == 1) {
-            int step = 4;
-            if (left) sPending.stickDeadZone = std::max(0, sPending.stickDeadZone - step);
-            if (right) sPending.stickDeadZone = std::min(127, sPending.stickDeadZone + step);
-        }
-        // Stick invert (bitmask)
-        else if (sAdvancedSelection == 2) {
-            if (left || right) {
-                sPending.stickInvert ^= 3; // toggle X and Y bits
-            }
-        }
-        // C-stick invert (bitmask)
-        else if (sAdvancedSelection == 3) {
-            if (left || right) {
-                sPending.cStickInvert ^= 3; // toggle X and Y bits
-            }
-        }
+        advancedRowChange(sAdvancedSelection, left, right);
         return;
     }
 
@@ -1455,32 +1481,11 @@ void pollMenuInput() {
             if (padNavA(ctl)) ok = true;
             if (padNavB(ctl)) cancel = true;
         }
-        const int rowCount = 4;
+        const int rowCount = 6;
         if (up) { sHdModelsSelection = (sHdModelsSelection + rowCount - 1) % rowCount; return; }
         if (down) { sHdModelsSelection = (sHdModelsSelection + 1) % rowCount; return; }
         if (cancel) { sInHdModelsSubmenu = false; return; }
-        if (ok && !sTexturePackPickerActive) {
-#ifdef __ANDROID__
-            sTexturePackPickerActive = true;
-            sHdModelInstallActive = true;
-            pc_modelpack_android_open_picker(sHdModelsSelection);
-#else
-            // Desktop: native picker, then convert the chosen rip in place.
-            static const char* kTitles[4] = {
-                "Choose the Pikmin 3 Olimar zip", "Choose the Pikmin 3 Pikmin zip",
-                "Choose the Pikmin 3 Bulborb zip", "Choose the Pikmin 3 Dwarf Bulborb zip",
-            };
-            char chosen[4096];
-            if (pc_file_dialog_open(kTitles[sHdModelsSelection], "Model zip", "*.zip *.ZIP", chosen, sizeof(chosen))) {
-                char msg[192];
-                const int written = pc_hd_models_convert_file(chosen, sHdModelsSelection, msg, sizeof(msg));
-                texturePackNotice(written <= 0, msg);
-                if (written > 0) sHdModelRestartPrompt = true;
-            } else if (chosen[0] != '\0') {
-                texturePackNotice(true, chosen); // no dialog available: says why
-            }
-#endif
-        }
+        if (ok) hdModelsRowAction(sHdModelsSelection);
         return;
     }
 
@@ -1538,61 +1543,7 @@ void pollMenuInput() {
         if (down) { sTexturePacksSelection = (sTexturePacksSelection + 1) % rowCount; return; }
         if (cancel) { sInTexturePacksSubmenu = false; return; }
 
-        if (sTexturePacksSelection == kTexturePackInstallRow) {
-            if ((ok || left || right) && !sTexturePackPickerActive) {
-#ifdef __ANDROID__
-                sTexturePackPickerActive = true;
-                pc_texpack_android_open_picker();
-#else
-                // Desktop has no in-app zip extractor; say exactly where the
-                // pack has to go, as an absolute path, because "Load/Textures"
-                // is relative to the game folder and finding it was the part
-                // the report could not manage (issue #35). Create it too, so
-                // the instruction points at a folder that exists.
-                std::error_code locEc;
-                std::filesystem::path texRoot = std::filesystem::absolute(
-                    std::filesystem::path("Load") / "Textures", locEc);
-                std::filesystem::create_directories(texRoot, locEc);
-                char tip[256];
-                snprintf(tip, sizeof(tip),
-                         "Unzip the pack into:  %s  then restart.",
-                         locEc ? "Load/Textures" : texRoot.string().c_str());
-                texturePackNotice(static_cast<bool>(locEc), tip);
-#endif
-            }
-            return;
-        }
-
-        const int packIndex = sTexturePacksSelection - kTexturePackInstallRow - 1;
-        if (packIndex >= 0 && packIndex < static_cast<int>(packs.size())) {
-            const std::string folder = packs[packIndex];
-            const bool active = sConfig.texturePackEnabled && folder == sConfig.texturePack;
-            if ((ok || left || right) && sTexturePackPickerActive) {
-                // Con el zip a medio extraer, activar y reiniciar mataría la
-                // instalación: es justo lo que dejaba packs con 126 ficheros
-                // de 3000 y el menú diciendo "Active".
-                texturePackNotice(true, "Wait: the pack is still being installed.");
-            } else if (ok || left || right) {
-                if (active) {
-                    // Retirar el pack: también requiere reinicio para reconstruir
-                    // el índice sin él, pero no merece un modal: ya está visible
-                    // en marcha, solo seguirá indexándolo hasta el próximo arranque.
-                    sConfig.texturePackEnabled = 0;
-                    sConfig.texturePack.clear();
-                    sPending.texturePackEnabled = 0;
-                    sPending.texturePack.clear();
-                    saveConfig();
-                    texturePackNotice(false, "Pack desactivado. Se aplica al reiniciar.");
-                } else {
-                    sConfig.texturePack = folder;
-                    sConfig.texturePackEnabled = 1;
-                    sPending.texturePack = folder;
-                    sPending.texturePackEnabled = 1;
-                    saveConfig();
-                    sTexturePackRestartPrompt = true;
-                }
-            }
-        }
+        if (ok || left || right) texturePacksRowAction(sTexturePacksSelection, packs);
         return;
     }
 
@@ -1628,83 +1579,7 @@ void pollMenuInput() {
             return;
         }
 
-        // Texture packs lives in the Graphics page: it is a rendering choice,
-        // it needs restarting to take effect, and it is opened rather than
-        // cycled so the install entry has room next to the pack list.
-        if (sGraphicsSelection == 10) {
-            if (ok) {
-#if !defined(__ANDROID__)
-                // Create the folder the manual-install instruction names, so a
-                // user who goes looking for it finds it (issue #35).
-                std::error_code shareEc;
-                std::filesystem::create_directories(
-                    std::filesystem::path("Load") / "Textures", shareEc);
-#endif
-                sInTexturePacksSubmenu = true;
-                sTexturePacksSelection = 0;
-            }
-            return;
-        }
-        if (sGraphicsSelection == 11) {
-            if (ok) {
-                sInHdModelsSubmenu = true;
-                sHdModelsSelection = 0;
-                // Zips dropped straight into Load/Models are converted here
-                // too, so the rows below reflect them without a restart.
-                pc_hd_models_convert_sources();
-            }
-            return;
-        }
-
-        // Stepped through meaningful values rather than one hundredth at a
-        // time: the menu repeats slowly on purpose, and a fine slider would
-        // take hundreds of presses to cross the range.
-        auto step = [](float current, const float* stops, int count, bool back) {
-            int idx = 0;
-            for (int i = 0; i < count; i++) {
-                if (stops[i] == current) { idx = i; break; }
-            }
-            idx = back ? (idx + count - 1) % count : (idx + 1) % count;
-            return stops[idx];
-        };
-
-        if (sGraphicsSelection == 0) {
-            if (left || right) sPending.antialiasing = sPending.antialiasing ? 0 : 1;
-        } else if (sGraphicsSelection == 1) {
-            if (left || right) sPending.fog = sPending.fog ? 0 : 1;
-        } else if (sGraphicsSelection == 2) {
-            if (left) sPending.bloom = (sPending.bloom + 3) % 4;
-            else if (right) sPending.bloom = (sPending.bloom + 1) % 4;
-        } else if (sGraphicsSelection == 3) {
-            if (left) sPending.ssao = (sPending.ssao + 3) % 4;
-            else if (right) sPending.ssao = (sPending.ssao + 1) % 4;
-        } else if (sGraphicsSelection == 4) {
-            if (left) sPending.dof = (sPending.dof + 3) % 4;
-            else if (right) sPending.dof = (sPending.dof + 1) % 4;
-        } else if (sGraphicsSelection == 5) {
-            // 0, 2, 4, 8, 16. Anything the driver will not give is clamped
-            // where it is applied rather than hidden from the menu, so the
-            // setting reads the same on every machine.
-            static const int kAniso[5] = { 0, 2, 4, 8, 16 };
-            int idx = 0;
-            for (int i = 0; i < 5; i++) {
-                if (kAniso[i] == sPending.anisotropy) { idx = i; break; }
-            }
-            if (left) idx = (idx + 4) % 5;
-            else if (right) idx = (idx + 1) % 5;
-            sPending.anisotropy = kAniso[idx];
-        } else if (sGraphicsSelection == 6) {
-            if (left || right) sPending.colourGrading = sPending.colourGrading ? 0 : 1;
-        } else if (sGraphicsSelection == 7) {
-            if (left || right) sPending.gamma = step(sPending.gamma, kGammaStops, kGammaStopCount, left);
-        } else if (sGraphicsSelection == 8) {
-            if (left || right) sPending.brightness = step(sPending.brightness, kBrightnessStops, kBrightnessStopCount, left);
-        } else if (sGraphicsSelection == 9) {
-            if (left || right) sPending.saturation = step(sPending.saturation, kSaturationStops, kSaturationStopCount, left);
-        }
-        // Applied as you move, so the effect can be judged against the scene
-        // behind the menu instead of by reading numbers.
-        applyGraphics(sPending);
+        graphicsRowChange(sGraphicsSelection, left, right, ok);
         return;
     }
 
@@ -1743,53 +1618,7 @@ void pollMenuInput() {
             return;
         }
 
-        // Control scheme: Classic (GameCube) or Mouse Cursor.
-        if (sModsSelection == 0) {
-            if (left) sPending.controlMode = (sPending.controlMode - 1 + 2) % 2;
-            else if (right) sPending.controlMode = (sPending.controlMode + 1) % 2;
-        }
-        // Chain Pikmin actions.
-        else if (sModsSelection == 1) {
-            if (left || right) sPending.chainActions = sPending.chainActions ? 0 : 1;
-        }
-        // Hold Extract to keep plucking after the first sprout.
-        else if (sModsSelection == 2) {
-            if (left || right) sPending.holdToPluck = sPending.holdToPluck ? 0 : 1;
-        }
-        // What the mouse wheel controls.
-        else if (sModsSelection == 3) {
-            if (left || right) sPending.mouseWheelAction = sPending.mouseWheelAction ? 0 : 1;
-        }
-        // Pikmin field limit. Stepped through meaningful values rather than one
-        // at a time: the menu has no key repeat, so a fine slider would take
-        // hundreds of presses to cross the range.
-        else if (sModsSelection == 4) {
-            if (pc_hardmode_active())
-                return;
-            int idx = 0;
-            for (int i = 0; i < kPikiLimitCount; i++) {
-                if (kPikiLimits[i] == sPending.pikiLimit) { idx = i; break; }
-            }
-            if (left) idx = (idx + kPikiLimitCount - 1) % kPikiLimitCount;
-            else if (right) idx = (idx + 1) % kPikiLimitCount;
-            sPending.pikiLimit = kPikiLimits[idx];
-        }
-        // Day length.
-        else if (sModsSelection == 5) {
-            if (pc_hardmode_active())
-                return;
-            int idx = 0;
-            for (int i = 0; i < kDayMinutesCount; i++) {
-                if (kDayMinutes[i] == sPending.dayMinutes) { idx = i; break; }
-            }
-            if (left) idx = (idx + kDayMinutesCount - 1) % kDayMinutesCount;
-            else if (right) idx = (idx + 1) % kDayMinutesCount;
-            sPending.dayMinutes = kDayMinutes[idx];
-        }
-        // Debug shortcuts.
-        else if (sModsSelection == 6) {
-            if (left || right) sPending.debugKeys = sPending.debugKeys ? 0 : 1;
-        }
+        modsRowChange(sModsSelection, left, right);
         return;
     }
 
@@ -1825,21 +1654,7 @@ void pollMenuInput() {
         // clears sSaveTransferActive.
         if (cancel) { sInSaveDataSubmenu = false; return; }
 
-        if (ok || left || right) {
-#ifdef __ANDROID__
-            if (sSaveTransferActive) {
-                texturePackNotice(true, "Wait: a transfer is already running.");
-            } else {
-                sSaveTransferActive = true;
-                if (sSaveDataSelection == 0) pc_save_android_open_backup();
-                else pc_save_android_open_restore();
-            }
-#else
-            texturePackNotice(false,
-                "Desktop saves live in the game's 'save' folder (card0 / card1). "
-                "Copy that folder to transfer.");
-#endif
-        }
+        if (ok || left || right) saveDataRowAction(sSaveDataSelection);
         return;
     }
 
@@ -1907,7 +1722,419 @@ void pollMenuInput() {
         return;
     }
 
-    // Left/Right/OK/Cancel handling via switch.
+    mainRowChange(sSelection, left, right, ok);
+
+    // Esc / B closes the menu (reverting unconfirmed changes).
+    if (cancel) {
+        closeMenu();
+    }
+}
+
+// Captura de tecla/botón de ratón para la fila seleccionada (Controls).
+void pollKeyCapture(SDL_GameController* ctl) {
+    if (keyWentDown(SDL_SCANCODE_ESCAPE) || padNavB(ctl)) {
+        sWaitingForKey = false;
+        sCaptureWaitRelease = false;
+        return;
+    }
+    if (sCaptureWaitRelease) {
+        if (!captureConfirmHeld(ctl))
+            sCaptureWaitRelease = false;
+        return;
+    }
+    for (int sc = 0; sc < SDL_NUM_SCANCODES; sc++) {
+        if (!keyWentDown(static_cast<SDL_Scancode>(sc)))
+            continue;
+        if (isCaptureModifierScancode(sc))
+            continue;
+        sPending.keyboardBindings[sControlSelection] = sc;
+        sWaitingForKey = false;
+        break;
+    }
+    // Mouse buttons are bindable too (issue #42). Capture starts from
+    // Enter/Space/pad A, never from a click, so every button is fair
+    // game; buttons already held when capture opened are ignored.
+    // Use the event edge mask so a click shorter than a frame counts.
+    if (sWaitingForKey) {
+        const Uint32 mouseWent = pc_window_take_mouse_pressed() & ~sCapturePrevMouse;
+        sCapturePrevMouse = SDL_GetMouseState(NULL, NULL);
+        for (int b = SDL_BUTTON_LEFT; b <= PC_BIND_MOUSE_LAST - PC_BIND_MOUSE_BASE; b++) {
+            if (!(mouseWent & SDL_BUTTON(b))) continue;
+            sPending.keyboardBindings[sControlSelection] = PC_BIND_MOUSE_BASE + b;
+            sWaitingForKey = false;
+            break;
+        }
+    }
+}
+
+// Captura de botón de mando (Gamepad); true mientras la captura o la
+// espera de soltar consumen la entrada.
+bool pollButtonCapture(SDL_GameController* ctl) {
+    if (sWaitingForButton) {
+        // B/Circle is a bindable face button. Only Esc cancels capture.
+        if (keyWentDown(SDL_SCANCODE_ESCAPE)) {
+            sWaitingForButton = false;
+            sCaptureWaitRelease = false;
+            return true;
+        }
+        if (sCaptureWaitRelease) {
+            if (!captureConfirmHeld(ctl))
+                sCaptureWaitRelease = false;
+            return true;
+        }
+        if (ctl || sTouchFrameButtons) {
+            const int bind = pc_window_gamepad_first_held_binding(ctl);
+            if (bind >= 0) {
+                sPending.gamepadBindings[sGamepadSelection] = bind;
+                sWaitingForButton = false;
+                sCaptureWaitRelease = true;
+            }
+        }
+        return true;
+    }
+
+    // The button just bound is still held; do not treat it as Back.
+    if (sCaptureWaitRelease) {
+        if (!pc_window_gamepad_any_held(ctl) && !captureConfirmHeld(ctl))
+            sCaptureWaitRelease = false;
+        return true;
+    }
+
+    return false;
+}
+
+void advancedRowChange(int row, bool left, bool right) {
+    // Sensitivity (0.1 - 5.0, step 0.1)
+    if (row == 0) {
+        float step = 0.1f;
+        if (left) sPending.mouseSensitivity = fmaxf(0.1f, sPending.mouseSensitivity - step);
+        if (right) sPending.mouseSensitivity = fminf(5.0f, sPending.mouseSensitivity + step);
+    }
+    // Stick dead zone (0 - 127, step 4)
+    else if (row == 1) {
+        int step = 4;
+        if (left) sPending.stickDeadZone = std::max(0, sPending.stickDeadZone - step);
+        if (right) sPending.stickDeadZone = std::min(127, sPending.stickDeadZone + step);
+    }
+    // Stick invert (bitmask)
+    else if (row == 2) {
+        if (left || right) {
+            sPending.stickInvert ^= 3; // toggle X and Y bits
+        }
+    }
+    // C-stick invert (bitmask)
+    else if (row == 3) {
+        if (left || right) {
+            sPending.cStickInvert ^= 3; // toggle X and Y bits
+        }
+    }
+}
+
+void graphicsRowChange(int row, bool left, bool right, bool ok) {
+    // Texture packs lives in the Graphics page: it is a rendering choice,
+    // it needs restarting to take effect, and it is opened rather than
+    // cycled so the install entry has room next to the pack list.
+    if (row == 10) {
+        if (ok) {
+#if !defined(__ANDROID__)
+            // Create the folder the manual-install instruction names, so a
+            // user who goes looking for it finds it (issue #35).
+            std::error_code shareEc;
+            std::filesystem::create_directories(
+                std::filesystem::path("Load") / "Textures", shareEc);
+#endif
+            sInTexturePacksSubmenu = true;
+            sTexturePacksSelection = 0;
+        }
+        return;
+    }
+    if (row == 11) {
+        if (ok) {
+            sInHdModelsSubmenu = true;
+            sHdModelsSelection = 0;
+            // Zips dropped straight into Load/Models are converted here
+            // too, so the rows below reflect them without a restart.
+            pc_hd_models_convert_sources();
+        }
+        return;
+    }
+
+    // Stepped through meaningful values rather than one hundredth at a
+    // time: the menu repeats slowly on purpose, and a fine slider would
+    // take hundreds of presses to cross the range.
+    auto step = [](float current, const float* stops, int count, bool back) {
+        int idx = 0;
+        for (int i = 0; i < count; i++) {
+            if (stops[i] == current) { idx = i; break; }
+        }
+        idx = back ? (idx + count - 1) % count : (idx + 1) % count;
+        return stops[idx];
+    };
+
+    if (row == 12) {
+        if (left || right) sPending.perPixelLighting = sPending.perPixelLighting ? 0 : 1;
+    } else if (row == 13) {
+        if (left) sPending.shadows = (sPending.shadows + 3) % 4;
+        else if (right) sPending.shadows = (sPending.shadows + 1) % 4;
+    } else if (row == 0) {
+        if (left || right) sPending.antialiasing = sPending.antialiasing ? 0 : 1;
+    } else if (row == 1) {
+        if (left || right) sPending.fog = sPending.fog ? 0 : 1;
+    } else if (row == 2) {
+        if (left) sPending.bloom = (sPending.bloom + 3) % 4;
+        else if (right) sPending.bloom = (sPending.bloom + 1) % 4;
+    } else if (row == 3) {
+        if (left) sPending.ssao = (sPending.ssao + 3) % 4;
+        else if (right) sPending.ssao = (sPending.ssao + 1) % 4;
+    } else if (row == 4) {
+        if (left) sPending.dof = (sPending.dof + 3) % 4;
+        else if (right) sPending.dof = (sPending.dof + 1) % 4;
+    } else if (row == 5) {
+        // 0, 2, 4, 8, 16. Anything the driver will not give is clamped
+        // where it is applied rather than hidden from the menu, so the
+        // setting reads the same on every machine.
+        static const int kAniso[5] = { 0, 2, 4, 8, 16 };
+        int idx = 0;
+        for (int i = 0; i < 5; i++) {
+            if (kAniso[i] == sPending.anisotropy) { idx = i; break; }
+        }
+        if (left) idx = (idx + 4) % 5;
+        else if (right) idx = (idx + 1) % 5;
+        sPending.anisotropy = kAniso[idx];
+    } else if (row == 6) {
+        if (left || right) sPending.colourGrading = sPending.colourGrading ? 0 : 1;
+    } else if (row == 7) {
+        if (left || right) sPending.gamma = step(sPending.gamma, kGammaStops, kGammaStopCount, left);
+    } else if (row == 8) {
+        if (left || right) sPending.brightness = step(sPending.brightness, kBrightnessStops, kBrightnessStopCount, left);
+    } else if (row == 9) {
+        if (left || right) sPending.saturation = step(sPending.saturation, kSaturationStops, kSaturationStopCount, left);
+    }
+    // Applied as you move, so the effect can be judged against the scene
+    // behind the menu instead of by reading numbers.
+    applyGraphics(sPending);
+}
+
+void modsRowChange(int row, bool left, bool right) {
+    // Control scheme: Classic (GameCube) or Mouse Cursor.
+    if (row == 0) {
+        if (left) sPending.controlMode = (sPending.controlMode - 1 + 2) % 2;
+        else if (right) sPending.controlMode = (sPending.controlMode + 1) % 2;
+    }
+    // Chain Pikmin actions.
+    else if (row == 1) {
+        if (left || right) sPending.chainActions = sPending.chainActions ? 0 : 1;
+    }
+    // Hold Extract to keep plucking after the first sprout.
+    else if (row == 2) {
+        if (left || right) sPending.holdToPluck = sPending.holdToPluck ? 0 : 1;
+    }
+    // What the mouse wheel controls.
+    else if (row == 3) {
+        if (left || right) sPending.mouseWheelAction = sPending.mouseWheelAction ? 0 : 1;
+    }
+    // Pikmin field limit. Stepped through meaningful values rather than one
+    // at a time: the menu has no key repeat, so a fine slider would take
+    // hundreds of presses to cross the range.
+    else if (row == 4) {
+        if (pc_hardmode_active())
+            return;
+        int idx = 0;
+        for (int i = 0; i < kPikiLimitCount; i++) {
+            if (kPikiLimits[i] == sPending.pikiLimit) { idx = i; break; }
+        }
+        if (left) idx = (idx + kPikiLimitCount - 1) % kPikiLimitCount;
+        else if (right) idx = (idx + 1) % kPikiLimitCount;
+        sPending.pikiLimit = kPikiLimits[idx];
+    }
+    // Day length.
+    else if (row == 5) {
+        if (pc_hardmode_active())
+            return;
+        int idx = 0;
+        for (int i = 0; i < kDayMinutesCount; i++) {
+            if (kDayMinutes[i] == sPending.dayMinutes) { idx = i; break; }
+        }
+        if (left) idx = (idx + kDayMinutesCount - 1) % kDayMinutesCount;
+        else if (right) idx = (idx + 1) % kDayMinutesCount;
+        sPending.dayMinutes = kDayMinutes[idx];
+    }
+    // Pantalla partida cooperativa: vertical u horizontal.
+    else if (row == 6) {
+        if (left || right) sPending.coopSplit = sPending.coopSplit ? 0 : 1;
+    }
+    // Cámara cooperativa dinámica.
+    else if (row == 7) {
+        if (left || right) sPending.coopMergeCamera = sPending.coopMergeCamera ? 0 : 1;
+    }
+    // Debug shortcuts.
+    else if (row == 8) {
+        if (left || right) sPending.debugKeys = sPending.debugKeys ? 0 : 1;
+    }
+}
+
+void saveDataRowAction(int row) {
+#ifdef __ANDROID__
+    if (sSaveTransferActive) {
+        texturePackNotice(true, "Wait: a transfer is already running.");
+    } else {
+        sSaveTransferActive = true;
+        if (row == 0) pc_save_android_open_backup();
+        else pc_save_android_open_restore();
+    }
+#else
+    texturePackNotice(false,
+        "Desktop saves live in the game's 'save' folder (card0 / card1). "
+        "Copy that folder to transfer.");
+#endif
+}
+
+void texturePacksRowAction(int row, const std::vector<std::string>& packs) {
+    if (row == kTexturePackInstallRow) {
+        if (!sTexturePackPickerActive) {
+#ifdef __ANDROID__
+            sTexturePackPickerActive = true;
+            pc_texpack_android_open_picker();
+#else
+            // Desktop: native picker, then the zip is extracted into
+            // Load/Textures with the same path rule as Android.
+            char chosen[4096];
+            if (pc_file_dialog_open("Choose the texture pack zip", "Texture pack zip", "*.zip *.ZIP", chosen, sizeof(chosen))) {
+                char msg[192];
+                const int written = pc_texpack_install_zip(chosen, msg, sizeof(msg));
+                texturePackNotice(written <= 0, msg);
+            } else if (chosen[0] != '\0') {
+                texturePackNotice(true, chosen); // no dialog available: says why
+            }
+#endif
+        }
+        return;
+    }
+
+    const int packIndex = row - kTexturePackInstallRow - 1;
+    if (packIndex >= 0 && packIndex < static_cast<int>(packs.size())) {
+        const std::string folder = packs[packIndex];
+        const bool active = sConfig.texturePackEnabled && folder == sConfig.texturePack;
+        if (sTexturePackPickerActive) {
+            // Con el zip a medio extraer, activar y reiniciar mataría la
+            // instalación: es justo lo que dejaba packs con 126 ficheros
+            // de 3000 y el menú diciendo "Active".
+            texturePackNotice(true, "Wait: the pack is still being installed.");
+        } else {
+            if (active) {
+                // Retirar el pack: también requiere reinicio para reconstruir
+                // el índice sin él, pero no merece un modal: ya está visible
+                // en marcha, solo seguirá indexándolo hasta el próximo arranque.
+                sConfig.texturePackEnabled = 0;
+                sConfig.texturePack.clear();
+                sPending.texturePackEnabled = 0;
+                sPending.texturePack.clear();
+                saveConfig();
+                texturePackNotice(false, "Pack desactivado. Se aplica al reiniciar.");
+            } else {
+                sConfig.texturePack = folder;
+                sConfig.texturePackEnabled = 1;
+                sPending.texturePack = folder;
+                sPending.texturePackEnabled = 1;
+                saveConfig();
+                sTexturePackRestartPrompt = true;
+            }
+        }
+    }
+}
+
+void hdModelsRowAction(int row) {
+    if (sTexturePackPickerActive) return;
+#ifdef __ANDROID__
+    sTexturePackPickerActive = true;
+    sHdModelInstallActive = true;
+    pc_modelpack_android_open_picker(row);
+#else
+    // Desktop: native picker, then convert the chosen rip in place.
+    static const char* kTitles[6] = {
+        "Choose the Pikmin 3 Olimar zip", "Choose the Pikmin 2 Louie zip", "Choose the Pikmin 3 Louie zip",
+        "Choose the Pikmin 3 Pikmin zip", "Choose the Pikmin 3 Bulborb zip", "Choose the Pikmin 3 Dwarf Bulborb zip",
+    };
+    char chosen[4096];
+    if (pc_file_dialog_open(kTitles[row], "Model zip", "*.zip *.ZIP", chosen, sizeof(chosen))) {
+        char msg[192];
+        const int written = pc_hd_models_convert_file(chosen, row, msg, sizeof(msg));
+        texturePackNotice(written <= 0, msg);
+        if (written > 0) sHdModelRestartPrompt = true;
+    } else if (chosen[0] != '\0') {
+        texturePackNotice(true, chosen); // no dialog available: says why
+    }
+#endif
+        
+}
+
+// Texto del valor de una fila de la página principal (compartido con
+// pc_settings_rows). Calcula la tabla completa y devuelve la fila pedida.
+void mainRowValue(int row, char* out, size_t n) {
+    if (row < 0 || row >= ROW_CONTROLS) { if (n) out[0] = '\0'; return; }
+    const char* modeNames[3] = { "Windowed", "Fullscreen", "Borderless" };
+    const char* aspectNames[5] = { "Auto", "4:3", "16:10", "16:9", "21:9" };
+    char aspectBuf[32];
+    snprintf(aspectBuf, sizeof(aspectBuf), "%s", aspectNames[sPending.aspectRatioMode >= 0 && sPending.aspectRatioMode < 5 ? sPending.aspectRatioMode : 0]);
+
+    const char* fpsModeNames[3] = { "30 FPS (stable)", "60 FPS (experimental)", "120 FPS (experimental)" };
+    char fpsModeBuf[32];
+    snprintf(fpsModeBuf, sizeof(fpsModeBuf), "%s", fpsModeNames[sPending.fpsMode >= 0 && sPending.fpsMode < 3 ? sPending.fpsMode : 0]);
+
+    char valueBuf[ROW_CONTROLS][128];
+    snprintf(valueBuf[0], sizeof(valueBuf[0]), "%s",
+             modeNames[sPending.displayMode >= 0 && sPending.displayMode < 3 ? sPending.displayMode : 0]);
+    if (sPending.displayMode == PC_WINDOW_FULLSCREEN_BORDERLESS) {
+        if (sDesktopW > 0) {
+            snprintf(valueBuf[1], sizeof(valueBuf[1]), "Desktop (%dx%d)", sDesktopW, sDesktopH);
+        } else {
+            snprintf(valueBuf[1], sizeof(valueBuf[1]), "Desktop");
+        }
+    } else {
+        char aspectTag[16];
+        aspectLabel(sPending.windowWidth, sPending.windowHeight, aspectTag, sizeof(aspectTag));
+        const bool native = sPending.windowWidth == sDesktopW && sPending.windowHeight == sDesktopH;
+        snprintf(valueBuf[1], sizeof(valueBuf[1]), "%dx%d  %s%s", sPending.windowWidth,
+                 sPending.windowHeight, aspectTag, native ? "  (native)" : "");
+    }
+    snprintf(valueBuf[2], sizeof(valueBuf[2]), "%s", aspectBuf);
+    {
+        float rs = sPending.renderScale;
+        if (fabsf(rs - 2.0f / 3.0f) < 0.01f) snprintf(valueBuf[3], sizeof(valueBuf[3]), "Auto (native)");
+        else snprintf(valueBuf[3], sizeof(valueBuf[3]), "%.2fx", rs);
+    }
+    if (sPending.refreshRate <= 0.0) snprintf(valueBuf[4], sizeof(valueBuf[4]), "Auto");
+    else snprintf(valueBuf[4], sizeof(valueBuf[4]), "%.0f Hz", sPending.refreshRate);
+    snprintf(valueBuf[5], sizeof(valueBuf[5]), "%s", sPending.vsync ? "On" : "Off");
+    snprintf(valueBuf[ROW_FPS_MODE], sizeof(valueBuf[0]), "%s", fpsModeBuf);
+#if defined(VERSION_GPIP01)
+    {
+        static const char* const kNames[] = { "English", "Deutsch", "Francais",
+                                              "Espanol", "Italiano", "Nederlands" };
+        const unsigned char language = pc_settings_get_language();
+        snprintf(valueBuf[ROW_LANGUAGE], sizeof(valueBuf[0]), "%s%s", kNames[language],
+                 language == pc_settings_startup_language() ? "" : "  (on restart)");
+    }
+#endif
+
+    snprintf(out, n, "%s", valueBuf[row]);
+}
+
+const char* mainRowLabel(int row) {
+    static const char* labels[ROW_COUNT] = {
+        "Display Mode", "Resolution", "Aspect Ratio", "3D Resolution", "Refresh Rate", "Frame Sync (VSync)",
+        "FPS Mode",
+#if defined(VERSION_GPIP01)
+        "Language",
+#endif
+        "Controls", "Gamepad", "Advanced Settings", "Graphics", "Mods", "Save Data",
+        "Reset to Defaults", "Save", "Close",
+    };
+    return (row >= 0 && row < ROW_COUNT) ? labels[row] : "";
+}
+
+// Cambio de una fila de la página principal (compartido con pc_settings_rows).
+void mainRowChange(int row, bool left, bool right, bool ok) {
     auto cycleResolution = [](int dir) {
         // Borderless siempre usa el escritorio, asi que la fila no se toca.
         if (sPending.displayMode == PC_WINDOW_FULLSCREEN_BORDERLESS) return;
@@ -1923,7 +2150,7 @@ void pollMenuInput() {
         }
     };
 
-    switch (sSelection) {
+    switch (row) {
     case ROW_DISPLAY_MODE:
         if (left) sPending.displayMode = (sPending.displayMode + 3 - 1) % 3;
         else if (right) sPending.displayMode = (sPending.displayMode + 1) % 3;
@@ -2067,11 +2294,6 @@ void pollMenuInput() {
         break;
     default:
         break;
-    }
-
-    // Esc / B closes the menu (reverting unconfirmed changes).
-    if (cancel) {
-        closeMenu();
     }
 }
 
@@ -2349,7 +2571,8 @@ void pc_settings_init(void) {
 }
 
 bool pc_settings_consume_game_input(void) {
-    const bool promptWasOpen = pc_newgame_prompt_active();
+    const bool promptWasOpen = pc_newgame_prompt_active() || pc_playercount_prompt_active() || pc_devassign_prompt_active()
+                            || pc_captain_prompt_active() || pc_glass_menu_active();
     pollMenuInput();   // edge-detect using the previous frame's snapshot
     latchKeys();       // snapshot AFTER polling so next frame sees this one
     // Swallow the frame the prompt closes on too, or the button that dismissed
@@ -2533,6 +2756,9 @@ void pcNewGamePromptInput() {
             sNewGamePromptStep   = 1;
             sNewGamePromptChoice = 0;
             pc_menu_edge_reset();
+            // El reset olvida que A/B siguen pulsados y el frame siguiente
+            // los tomaría como pulsación nueva (autoaceptaba la dificultad).
+            if (ctl) { promptPadA(ctl); promptPadB(ctl); }
             return;
         }
         sNewGamePromptHard   = sNewGamePromptChoice != 0;
@@ -2544,6 +2770,7 @@ void pcNewGamePromptInput() {
             sNewGamePromptStep   = 0;
             sNewGamePromptChoice = sNewGamePromptRules;
             pc_menu_edge_reset();
+            if (ctl) { promptPadA(ctl); promptPadB(ctl); }
             return;
         }
         sNewGamePromptResult = PC_NEWGAME_CANCELLED;
@@ -2631,6 +2858,591 @@ void pc_newgame_prompt_draw(void) {
                     "%s", Colour(150, 165, 195, 255), Colour(8, 12, 28, 255), help);
 }
 
+
+// ─── Selector 1P / 2P ───
+//
+// Se abre al entrar en la selección de slot desde "Empezar". Con 2 jugadores
+// y sin segundo mando el prompt pasa a un estado de espera hasta que
+// pc_window ve el SDL_CONTROLLERDEVICEADDED y lo abre en la ranura 1.
+
+namespace {
+bool sPlayerCountOpen    = false;
+int  sPlayerCountChoice  = 0;   // 0 = 1 jugador, 1 = 2 jugadores
+int  sPlayerCountResult  = PC_PLAYERCOUNT_PENDING;
+
+bool playerCountSpanish() { return pc_settings_get_language() == 3; } // OS_LANG_SPANISH
+}
+
+void pc_playercount_prompt_open(void) {
+    sPlayerCountOpen    = true;
+    sPlayerCountChoice  = sConfig.coopPlayers == 2 ? 1 : 0;
+    sPlayerCountResult  = PC_PLAYERCOUNT_PENDING;
+    pc_menu_edge_reset();
+}
+
+bool pc_playercount_prompt_active(void) { return sPlayerCountOpen; }
+
+int pc_playercount_prompt_result(void) { return sPlayerCountResult; }
+
+namespace {
+void pcPlayerCountPromptInput() {
+    if (!sPlayerCountOpen) return;
+
+    bool left   = keyWentDown(SDL_SCANCODE_LEFT)  || keyWentDown(SDL_SCANCODE_A);
+    bool right  = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
+    bool accept = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
+    bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE);
+
+    left |= (sTouchFrameButtons & PAD_BUTTON_LEFT) != 0;
+    right |= (sTouchFrameButtons & PAD_BUTTON_RIGHT) != 0;
+    accept |= (sTouchFrameButtons & PAD_BUTTON_A) != 0;
+    cancel |= (sTouchFrameButtons & PAD_BUTTON_B) != 0;
+
+    if (sTouchTapPending) {
+        sTouchTapPending = false;
+        int dw = 0, dh = 0;
+        pc_gfx_get_drawable_size(&dw, &dh);
+        const float aspect = dh > 0 ? float(dw) / float(dh) : 4.0f / 3.0f;
+        const float screenW = aspect * 480.0f;
+        const float x = sTouchTapX * screenW;
+        const float y = sTouchTapY * 480.0f;
+        const float panelX = screenW * 0.5f - 310.0f;
+        const float panelY = 110.0f;
+        const float optY = panelY + 108.0f;
+        for (int i = 0; i < 2; ++i) {
+            const float boxX = panelX + 40.0f + i * 270.0f;
+            if (x >= boxX && x <= boxX + 230.0f && y >= optY - 8.0f && y <= optY + 52.0f) {
+                sPlayerCountChoice = i;
+                accept = true;
+                break;
+            }
+        }
+    }
+
+    SDL_GameController* ctl = pc_window_get_controller();
+    if (ctl) {
+        if (padNavLeft(ctl))  left   = true;
+        if (padNavRight(ctl)) right  = true;
+        if (promptPadA(ctl))  accept = true;
+        if (promptPadB(ctl))  cancel = true;
+    }
+
+    if (left || right) sPlayerCountChoice = sPlayerCountChoice ? 0 : 1;
+
+    if (accept) {
+        sConfig.coopPlayers = sPlayerCountChoice ? 2 : 1;
+        saveConfig();
+        sPlayerCountResult = sPlayerCountChoice ? PC_PLAYERCOUNT_TWO : PC_PLAYERCOUNT_ONE;
+        sPlayerCountOpen   = false;
+    } else if (cancel) {
+        sPlayerCountResult = PC_PLAYERCOUNT_CANCELLED;
+        sPlayerCountOpen   = false;
+    }
+}
+} // namespace
+
+void pc_playercount_prompt_draw(void) {
+    if (!sPlayerCountOpen) return;
+    if (!gsys || !gsys->mDGXGfx) return;
+    DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+    ensureFont();
+    if (!sFont) return;
+
+    const bool es = playerCountSpanish();
+
+    const int screenW = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
+    const int screenH = gfx->mScreenHeight;
+    PcSettingsP2DFrame nativeFrame(screenW, screenH);
+
+    Matrix4f ortho;
+    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
+
+    gfx->setColour(Colour(0, 0, 0, 170), true);
+    gfx->setAuxColour(Colour(0, 0, 0, 170));
+    gfx->fillRectangle(RectArea(0, 0, screenW, screenH));
+
+    const int panelW = 620;
+    const int panelH = 260;
+    const int panelX = screenW / 2 - panelW / 2;
+    const int panelY = screenH / 2 - panelH / 2;
+
+    drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
+    drawPikminHeader(gfx, panelX, panelY, panelW, es ? "Jugadores" : "Players");
+
+    const char* line1 = es ? "¿Cuántos van a jugar?" : "How many are playing?";
+    drawTextOutline(panelX + panelW / 2 - menuTextWidth(line1) / 2, panelY + 62,
+                    "%s", Colour(214, 224, 245, 255), Colour(8, 12, 28, 255), line1);
+
+    const char* options[2] = { es ? "1 jugador" : "1 player", es ? "2 jugadores" : "2 players" };
+    const int optY = panelY + 108;
+    for (int i = 0; i < 2; i++) {
+        const bool sel = (i == sPlayerCountChoice);
+        const int boxW = 230;
+        const int boxX = panelX + 40 + i * (boxW + 40);
+        if (pc_settings_p2d_active()) {
+            if (sel) pc_settings_p2d_plate(boxX, optY, boxW, 44, 2);
+            pc_settings_p2d_plate(boxX, optY, boxW, 44, 1);
+            if (sel) pc_settings_p2d_text(boxX + 16, optY + 12, ">", Colour(255,229,120,255));
+        } else {
+            gfx->setColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220), true);
+            gfx->setAuxColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220));
+            gfx->fillRectangle(RectArea(boxX, optY, boxX + boxW, optY + 40));
+        }
+        const int tw = menuTextWidth(options[i]);
+        drawTextOutline(boxX + boxW / 2 - tw / 2, optY + 12, "%s",
+                        sel ? Colour(255, 229, 120, 255) : Colour(170, 180, 200, 255),
+                        Colour(8, 12, 28, 255), options[i]);
+    }
+
+    const char* detail = sPlayerCountChoice
+        ? (es ? "Cooperativo a pantalla partida. Luego se asignan los mandos."
+              : "Split-screen co-op. Controllers are assigned next.")
+        : (es ? "La aventura original, un solo Olimar."
+              : "The original adventure, a single Olimar.");
+    drawTextOutline(panelX + panelW / 2 - menuTextWidth(detail) / 2, panelY + 172,
+                    "%s", Colour(190, 200, 220, 255), Colour(8, 12, 28, 255), detail);
+
+    const char* help = es ? "Izq/Der: elegir    A / Intro: seguir    B / Esc: volver"
+                          : "Left/Right: choose    A / Enter: next    B / Esc: back";
+    drawTextOutline(panelX + panelW / 2 - menuTextWidth(help) / 2, panelY + 212,
+                    "%s", Colour(150, 165, 195, 255), Colour(8, 12, 28, 255), help);
+}
+
+
+// ─── Asignación de mandos por jugador ───
+//
+// Tras elegir 2 jugadores. Primero "Player 1, press a button", luego P2, y
+// al final una pantalla de confirmación con lo asignado. Un dispositivo no
+// puede ir a los dos: si P2 pulsa el de P1 se ignora. Tras cada asignación se
+// descartan las pulsaciones durante un rato para que un mando que el sistema
+// expone dos veces no se cuele como P2.
+
+namespace {
+// Cada jugador reclama su mando y, acto seguido, elige capitán (Olimar o
+// Louie) con ese mismo mando; al final la confirmación.
+enum { DEVASSIGN_WaitP1 = 0, DEVASSIGN_PickP1 = 1, DEVASSIGN_WaitP2 = 2, DEVASSIGN_PickP2 = 3, DEVASSIGN_Confirm = 4 };
+bool   sDevAssignOpen   = false;
+int    sDevAssignStep   = DEVASSIGN_WaitP1;
+int    sDevAssignCaptain[2] = { PC_CAPTAIN_OLIMAR, PC_CAPTAIN_LOUIE }; // cursor/elección por jugador
+int    sDevAssignChoice = 0; // confirm: 0 = Start, 1 = Reassign
+int    sDevAssignResult = PC_DEVASSIGN_PENDING;
+Uint32 sDevAssignIgnoreUntil = 0;
+int    sDevAssignKind[2] = { PC_INPUT_DEV_NONE, PC_INPUT_DEV_NONE };
+int    sDevAssignId[2]   = { -1, -1 };
+
+int devAssignPlayer() { return sDevAssignStep <= DEVASSIGN_PickP1 ? 0 : 1; }
+
+void devAssignRestart() {
+    sDevAssignStep = DEVASSIGN_WaitP1;
+    for (int p = 0; p < 2; p++) { sDevAssignKind[p] = PC_INPUT_DEV_NONE; sDevAssignId[p] = -1; }
+    pc_window_input_reset_assignment();
+    pc_window_discard_button_presses();
+    sDevAssignIgnoreUntil = SDL_GetTicks() + 300;
+    pc_menu_edge_reset();
+}
+
+const char* devAssignCaptainName(int captain) { return captain == PC_CAPTAIN_LOUIE ? "Louie" : "Olimar"; }
+
+bool devAssignLouieInstalled() {
+    std::error_code ec;
+    return std::filesystem::is_regular_file(pc_hd_model_path(PC_HD_MODEL_LOUIE), ec)
+        || std::filesystem::is_regular_file(pc_hd_model_path(PC_HD_MODEL_LOUIE_HD), ec);
+}
+Uint32 sDevAssignLouieNoticeUntil = 0;
+
+const char* devAssignName(int player) {
+    if (sDevAssignKind[player] == PC_INPUT_DEV_KEYBOARD) return "Keyboard";
+    if (sDevAssignKind[player] == PC_INPUT_DEV_GAMEPAD) return pc_window_gamepad_name(sDevAssignId[player]);
+    return "-";
+}
+
+// Selector de capitán (Olimar/Louie) compartido por el prompt de mandos del
+// coop y el de 1 jugador. Devuelve 0 nada, 1 aceptado, 2 atrás.
+int captainPickInput(int player, bool keyboardOk, SDL_GameController* ctl, int* captain, bool ignoreWindow) {
+    bool left = false, right = false, accept = false, back = false;
+    if (keyboardOk) {
+        left   = keyWentDown(SDL_SCANCODE_LEFT)  || keyWentDown(SDL_SCANCODE_A);
+        right  = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
+        accept = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
+        back   = keyWentDown(SDL_SCANCODE_ESCAPE);
+    }
+    if (player == 0) {
+        left |= (sTouchFrameButtons & PAD_BUTTON_LEFT) != 0;
+        right |= (sTouchFrameButtons & PAD_BUTTON_RIGHT) != 0;
+        accept |= (sTouchFrameButtons & PAD_BUTTON_A) != 0;
+        back |= (sTouchFrameButtons & PAD_BUTTON_B) != 0;
+        if (sTouchTapPending) {
+            // Toque directo sobre una de las dos cajas (misma geometría que el dibujo).
+            sTouchTapPending = false;
+            int dw = 0, dh = 0;
+            pc_gfx_get_drawable_size(&dw, &dh);
+            const float aspect = dh > 0 ? float(dw) / float(dh) : 4.0f / 3.0f;
+            const float screenW = aspect * 480.0f;
+            const float x = sTouchTapX * screenW, y = sTouchTapY * 480.0f;
+            const float panelX = screenW * 0.5f - 310.0f, boxY = 110.0f + 84.0f;
+            for (int i = 0; i < 2; ++i) {
+                const float boxX = panelX + 40.0f + i * 270.0f;
+                if (x >= boxX && x <= boxX + 230.0f && y >= boxY && y <= boxY + 120.0f) {
+                    *captain = i == 0 ? PC_CAPTAIN_OLIMAR : PC_CAPTAIN_LOUIE;
+                    accept = true;
+                }
+            }
+        }
+    }
+    if (ctl) {
+        const bool hLeft  = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || menuStickHorizontal(ctl, -1);
+        const bool hRight = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || menuStickHorizontal(ctl, 1);
+        const bool hA     = pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_A));
+        const bool hB     = pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_B));
+        if (padEdge(hLeft, 2))  left   = true;
+        if (padEdge(hRight, 3)) right  = true;
+        if (padEdge(hA, 4))     accept = true;
+        if (padEdge(hB, 5))     back   = true;
+    }
+    if (ignoreWindow) return 0;
+    if (left || right) *captain = *captain == PC_CAPTAIN_OLIMAR ? PC_CAPTAIN_LOUIE : PC_CAPTAIN_OLIMAR;
+    if (accept && *captain == PC_CAPTAIN_LOUIE && !devAssignLouieInstalled()) {
+        // Sin el modelo no se puede jugar con Louie: aviso y se queda.
+        sDevAssignLouieNoticeUntil = SDL_GetTicks() + 3000;
+        accept = false;
+    }
+    if (accept) return 1;
+    if (back) return 2;
+    return 0;
+}
+
+// Dibujo del selector dentro de un panel (panelX/Y/W del prompt).
+void captainPickDraw(DGXGraphics* gfx, int panelX, int panelY, int panelW, int player, int captain, const char* helpDefault) {
+    char line1[64];
+    snprintf(line1, sizeof(line1), "Player %d, choose your captain", player + 1);
+    drawTextOutline(panelX + panelW / 2 - menuTextWidth(line1) / 2, panelY + 56,
+                    "%s", Colour(255, 229, 120, 255), Colour(8, 12, 28, 255), line1);
+    static const char* kArt[2]  = { "coop_olimar", "coop_louie" };
+    static const char* kName[2] = { "Olimar", "Louie" };
+    const int boxW = 230, boxH = 120;
+    const int boxY = panelY + 84;
+    for (int i = 0; i < 2; i++) {
+        const bool sel = (captain == (i == 0 ? PC_CAPTAIN_OLIMAR : PC_CAPTAIN_LOUIE));
+        const int boxX = panelX + 40 + i * (boxW + 40);
+        if (pc_settings_p2d_active()) {
+            if (sel) pc_settings_p2d_plate(boxX, boxY, boxW, boxH, 2);
+            pc_settings_p2d_plate(boxX, boxY, boxW, boxH, 1);
+        } else {
+            gfx->setColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220), true);
+            gfx->setAuxColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220));
+            gfx->fillRectangle(RectArea(boxX, boxY, boxX + boxW, boxY + boxH));
+        }
+        // Sprite (Pikmin 2-e) al doble de tamaño, centrado sobre el nombre.
+        int aw = 0, ah = 0;
+        Texture* art = pc_art_texture(kArt[i]);
+        if (art && pc_art_size(kArt[i], &aw, &ah)) {
+            const int dw = aw * 2, dh = ah * 2;
+            const int dx = boxX + boxW / 2 - dw / 2, dy = boxY + 10;
+            const Colour tint(255, 255, 255, sel ? 255 : 190);
+            if (pc_settings_p2d_active()) {
+                pc_settings_p2d_image(dx, dy, dw, dh, art, float(aw) / art->mWidth, float(ah) / art->mHeight, tint);
+            } else {
+                gfx->setColour(tint, true);
+                gfx->setAuxColour(tint);
+                gfx->useTexture(art, GX_TEXMAP0);
+                gfx->drawRectangle(RectArea(dx, dy, dx + dw, dy + dh), RectArea(0, 0, aw, ah), nullptr);
+                gfx->useTexture(nullptr, GX_TEXMAP0);
+            }
+        }
+        const int tw = menuTextWidth(kName[i]);
+        drawTextOutline(boxX + boxW / 2 - tw / 2, boxY + boxH - 30, "%s",
+                        sel ? Colour(255, 229, 120, 255) : Colour(170, 180, 200, 255),
+                        Colour(8, 12, 28, 255), kName[i]);
+    }
+    const bool louieMissing = !devAssignLouieInstalled();
+    const bool noticing = louieMissing && SDL_GetTicks() < sDevAssignLouieNoticeUntil;
+    const char* help = noticing ? "Louie model not installed: Advanced Options > HD Models (Louie zip)."
+                     : (louieMissing ? "Louie: model not installed (Advanced Options > HD Models)." : helpDefault);
+    drawTextOutline(panelX + panelW / 2 - menuTextWidth(help) / 2, panelY + 220,
+                    "%s", noticing ? Colour(255, 160, 120, 255) : Colour(150, 165, 195, 255),
+                    Colour(8, 12, 28, 255), help);
+}
+}
+
+// ── Selector de capitán de 1 jugador ──────────────────────────────────────
+namespace {
+bool sCaptainPromptOpen = false;
+int  sCaptainPromptChoice = PC_CAPTAIN_OLIMAR;
+int  sCaptainPromptResult = PC_DEVASSIGN_PENDING;
+Uint32 sCaptainPromptIgnoreUntil = 0;
+
+void pcCaptainPromptInput() {
+    if (!sCaptainPromptOpen) return;
+    const int r = captainPickInput(0, true, pc_window_get_controller(), &sCaptainPromptChoice,
+                                   SDL_GetTicks() < sCaptainPromptIgnoreUntil);
+    if (r == 1) {
+        pc_coop_set_captain(0, sCaptainPromptChoice);
+        sCaptainPromptResult = PC_DEVASSIGN_OK;
+        sCaptainPromptOpen   = false;
+    } else if (r == 2) {
+        sCaptainPromptResult = PC_DEVASSIGN_CANCELLED;
+        sCaptainPromptOpen   = false;
+    }
+}
+}
+
+void pc_captain_prompt_open(void) {
+    sCaptainPromptOpen   = true;
+    sCaptainPromptChoice = PC_CAPTAIN_OLIMAR;
+    sCaptainPromptResult = PC_DEVASSIGN_PENDING;
+    sCaptainPromptIgnoreUntil = SDL_GetTicks() + 250; // el A del título sigue pulsado
+    pc_menu_edge_reset();
+}
+bool pc_captain_prompt_active(void) { return sCaptainPromptOpen; }
+int pc_captain_prompt_result(void) { return sCaptainPromptResult; }
+
+void pc_captain_prompt_draw(void) {
+    if (!sCaptainPromptOpen) return;
+    if (!gsys || !gsys->mDGXGfx) return;
+    DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+    ensureFont();
+    if (!sFont) return;
+    const int screenW = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
+    const int screenH = gfx->mScreenHeight;
+    PcSettingsP2DFrame nativeFrame(screenW, screenH);
+    Matrix4f ortho;
+    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
+    gfx->setColour(Colour(0, 0, 0, 170), true);
+    gfx->setAuxColour(Colour(0, 0, 0, 170));
+    gfx->fillRectangle(RectArea(0, 0, screenW, screenH));
+    const int panelW = 620, panelH = 260;
+    const int panelX = screenW / 2 - panelW / 2, panelY = screenH / 2 - panelH / 2;
+    drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
+    drawPikminHeader(gfx, panelX, panelY, panelW, "Captain");
+    captainPickDraw(gfx, panelX, panelY, panelW, 0, sCaptainPromptChoice,
+                    "Left/Right: choose    A / Enter: confirm    B / Esc: back");
+}
+
+void pc_devassign_prompt_open(void) {
+    sDevAssignOpen   = true;
+    sDevAssignChoice = 0;
+    sDevAssignResult = PC_DEVASSIGN_PENDING;
+    // Capitanes por defecto (no se guardan): P1 Olimar, P2 Louie.
+    sDevAssignCaptain[0] = PC_CAPTAIN_OLIMAR;
+    sDevAssignCaptain[1] = PC_CAPTAIN_LOUIE;
+    pc_coop_set_captain(0, sDevAssignCaptain[0]);
+    pc_coop_set_captain(1, sDevAssignCaptain[1]);
+    devAssignRestart();
+}
+
+bool pc_devassign_prompt_active(void) { return sDevAssignOpen; }
+
+int pc_devassign_prompt_result(void) { return sDevAssignResult; }
+
+namespace {
+void pcDevAssignPromptInput() {
+    if (!sDevAssignOpen) return;
+
+    // Esc / B cancelan en cualquier paso (vuelven al selector 1P/2P). B se
+    // acepta desde cualquier mando abierto, aún sin asignar.
+    bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE);
+    cancel |= (sTouchFrameButtons & PAD_BUTTON_B) != 0;
+
+    if (sDevAssignStep == DEVASSIGN_WaitP1 || sDevAssignStep == DEVASSIGN_WaitP2) {
+        const int player = devAssignPlayer();
+        int kind = PC_INPUT_DEV_NONE, id = -1;
+        bool pressed = pc_window_take_button_press(&kind, &id);
+#if PIKI_PC_TOUCH
+        // Pantalla táctil: un toque cuenta como "P1 = pantalla" (la capa
+        // táctil siempre va al pad 0). Para P2 no vale: necesita un mando.
+        if (sTouchTapPending) {
+            sTouchTapPending = false;
+            if (player == 0 && !pressed) {
+                pressed = true;
+                kind    = PC_INPUT_DEV_KEYBOARD;
+                id      = -1;
+            }
+        }
+#endif
+        if (cancel) {
+            sDevAssignResult = PC_DEVASSIGN_CANCELLED;
+            sDevAssignOpen   = false;
+            return;
+        }
+        if (!pressed || SDL_GetTicks() < sDevAssignIgnoreUntil) return;
+        // El dispositivo de P1 no puede repetirse en P2.
+        if (player == 1 && kind == sDevAssignKind[0] && (kind != PC_INPUT_DEV_GAMEPAD || id == sDevAssignId[0])) return;
+        sDevAssignKind[player] = kind;
+        sDevAssignId[player]   = id;
+        pc_window_input_assign(player, kind, id);
+        pc_window_discard_button_presses();
+        sDevAssignIgnoreUntil = SDL_GetTicks() + 400;
+        sDevAssignStep = player == 0 ? DEVASSIGN_PickP1 : DEVASSIGN_PickP2;
+        sDevAssignChoice = 0;
+        pc_menu_edge_reset();
+        return;
+    }
+
+    if (sDevAssignStep == DEVASSIGN_PickP1 || sDevAssignStep == DEVASSIGN_PickP2) {
+        // Elección de capitán con el dispositivo del propio jugador (teclado
+        // si es el suyo, o para P1 siempre; táctil para P1).
+        const int player = devAssignPlayer();
+        const bool keyboardOk = player == 0 || sDevAssignKind[player] == PC_INPUT_DEV_KEYBOARD;
+        SDL_GameController* ctl = player == 0 ? pc_window_get_controller() : pc_window_get_controller_p2();
+        const bool padOk = ctl && sDevAssignKind[player] == PC_INPUT_DEV_GAMEPAD;
+        pc_window_discard_button_presses();
+        if (cancel) {
+            sDevAssignResult = PC_DEVASSIGN_CANCELLED;
+            sDevAssignOpen   = false;
+            return;
+        }
+        // El botón con el que se acaba de reclamar el mando sigue pulsado.
+        const int r = captainPickInput(player, keyboardOk, padOk ? ctl : nullptr, &sDevAssignCaptain[player],
+                                       SDL_GetTicks() < sDevAssignIgnoreUntil);
+        if (r == 1) {
+            pc_coop_set_captain(player, sDevAssignCaptain[player]);
+            sDevAssignStep   = player == 0 ? DEVASSIGN_WaitP2 : DEVASSIGN_Confirm;
+            sDevAssignChoice = 0;
+            pc_menu_edge_reset();
+            if (ctl) { promptPadA(ctl); promptPadB(ctl); }
+            sDevAssignIgnoreUntil = SDL_GetTicks() + 300;
+        } else if (r == 2) {
+            devAssignRestart();
+        }
+        return;
+    }
+
+    // Confirmación: navegable con teclado y con los dos mandos asignados.
+    bool left   = keyWentDown(SDL_SCANCODE_LEFT)  || keyWentDown(SDL_SCANCODE_A);
+    bool right  = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
+    bool accept = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
+    left |= (sTouchFrameButtons & PAD_BUTTON_LEFT) != 0;
+    right |= (sTouchFrameButtons & PAD_BUTTON_RIGHT) != 0;
+    accept |= (sTouchFrameButtons & PAD_BUTTON_A) != 0;
+    // Los flancos (padEdge) se guardan por acción, no por mando: hay que
+    // combinar primero el estado de los dos mandos y detectar el flanco una
+    // sola vez, o el mando que no pulsa "suelta" el slot cada frame y el otro
+    // dispara un flanco nuevo en cada tick.
+    SDL_GameController* pads[2] = { pc_window_get_controller(), pc_window_get_controller_p2() };
+    bool hLeft = false, hRight = false, hA = false, hB = false;
+    for (int i = 0; i < 2; i++) {
+        SDL_GameController* ctl = pads[i];
+        if (!ctl) continue;
+        hLeft  |= SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || menuStickHorizontal(ctl, -1);
+        hRight |= SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || menuStickHorizontal(ctl, 1);
+        hA     |= pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_A));
+        hB     |= pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_B));
+    }
+    if (padEdge(hLeft, 2))  left   = true;
+    if (padEdge(hRight, 3)) right  = true;
+    if (padEdge(hA, 4))     accept = true;
+    if (padEdge(hB, 5))     cancel = true;
+    pc_window_discard_button_presses();
+    // El botón con el que P2 se acaba de asignar sigue pulsado: los flancos
+    // ya se han latcheado arriba, pero no se actúa hasta pasar la ventana.
+    if (SDL_GetTicks() < sDevAssignIgnoreUntil) return;
+
+    if (left || right) sDevAssignChoice = sDevAssignChoice ? 0 : 1;
+    if (accept) {
+        if (sDevAssignChoice == 1) { devAssignRestart(); return; }
+        sDevAssignResult = PC_DEVASSIGN_OK;
+        sDevAssignOpen   = false;
+    } else if (cancel) {
+        sDevAssignResult = PC_DEVASSIGN_CANCELLED;
+        sDevAssignOpen   = false;
+    }
+}
+} // namespace
+
+void pc_devassign_prompt_draw(void) {
+    if (!sDevAssignOpen) return;
+    if (!gsys || !gsys->mDGXGfx) return;
+    DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+    ensureFont();
+    if (!sFont) return;
+
+    const int screenW = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
+    const int screenH = gfx->mScreenHeight;
+    PcSettingsP2DFrame nativeFrame(screenW, screenH);
+
+    Matrix4f ortho;
+    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
+
+    gfx->setColour(Colour(0, 0, 0, 170), true);
+    gfx->setAuxColour(Colour(0, 0, 0, 170));
+    gfx->fillRectangle(RectArea(0, 0, screenW, screenH));
+
+    const int panelW = 620;
+    const int panelH = 260;
+    const int panelX = screenW / 2 - panelW / 2;
+    const int panelY = screenH / 2 - panelH / 2;
+
+    drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
+    drawPikminHeader(gfx, panelX, panelY, panelW, "Controllers");
+
+    if (sDevAssignStep == DEVASSIGN_PickP1 || sDevAssignStep == DEVASSIGN_PickP2) {
+        const int player = devAssignPlayer();
+        captainPickDraw(gfx, panelX, panelY, panelW, player, sDevAssignCaptain[player],
+                        "Left/Right: choose    A / Enter: confirm    B: reassign    Esc: back");
+        return;
+    }
+
+    if (sDevAssignStep != DEVASSIGN_Confirm) {
+        const int player = devAssignPlayer();
+        char line1[64];
+        snprintf(line1, sizeof(line1), "Player %d, press a button on your controller", player + 1);
+#if PIKI_PC_TOUCH
+        const char* line2 = player == 0 ? "Any gamepad button, or tap the screen." : "Any gamepad button.";
+#else
+        const char* line2 = "Any gamepad button, or a keyboard key.";
+#endif
+        drawTextOutline(panelX + panelW / 2 - menuTextWidth(line1) / 2, panelY + 90,
+                        "%s", Colour(255, 229, 120, 255), Colour(8, 12, 28, 255), line1);
+        drawTextOutline(panelX + panelW / 2 - menuTextWidth(line2) / 2, panelY + 130,
+                        "%s", Colour(190, 200, 220, 255), Colour(8, 12, 28, 255), line2);
+        if (player == 1) {
+            char p1[96];
+            snprintf(p1, sizeof(p1), "Player 1: %s  (%s)", devAssignName(0), devAssignCaptainName(sDevAssignCaptain[0]));
+            drawTextOutline(panelX + panelW / 2 - menuTextWidth(p1) / 2, panelY + 166,
+                            "%s", Colour(150, 165, 195, 255), Colour(8, 12, 28, 255), p1);
+        }
+        const char* help = "Esc: back";
+        drawTextOutline(panelX + panelW / 2 - menuTextWidth(help) / 2, panelY + 212,
+                        "%s", Colour(150, 165, 195, 255), Colour(8, 12, 28, 255), help);
+        return;
+    }
+
+    for (int p = 0; p < 2; p++) {
+        char row[96];
+        snprintf(row, sizeof(row), "Player %d:  %s  -  %s", p + 1, devAssignName(p), devAssignCaptainName(sDevAssignCaptain[p]));
+        drawTextOutline(panelX + 40, panelY + 62 + p * 28, "%s",
+                        Colour(214, 224, 245, 255), Colour(8, 12, 28, 255), row);
+    }
+
+    const char* options[2] = { "Start", "Reassign" };
+    const int optY = panelY + 130;
+    for (int i = 0; i < 2; i++) {
+        const bool sel = (i == sDevAssignChoice);
+        const int boxW = 230;
+        const int boxX = panelX + 40 + i * (boxW + 40);
+        if (pc_settings_p2d_active()) {
+            if (sel) pc_settings_p2d_plate(boxX, optY, boxW, 44, 2);
+            pc_settings_p2d_plate(boxX, optY, boxW, 44, 1);
+            if (sel) pc_settings_p2d_text(boxX + 16, optY + 12, ">", Colour(255,229,120,255));
+        } else {
+            gfx->setColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220), true);
+            gfx->setAuxColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220));
+            gfx->fillRectangle(RectArea(boxX, optY, boxX + boxW, optY + 40));
+        }
+        const int tw = menuTextWidth(options[i]);
+        drawTextOutline(boxX + boxW / 2 - tw / 2, optY + 12, "%s",
+                        sel ? Colour(255, 229, 120, 255) : Colour(170, 180, 200, 255),
+                        Colour(8, 12, 28, 255), options[i]);
+    }
+
+    const char* detail = sDevAssignChoice ? "Pick the controllers again." : "Continue to file select.";
+    drawTextOutline(panelX + panelW / 2 - menuTextWidth(detail) / 2, panelY + 186,
+                    "%s", Colour(190, 200, 220, 255), Colour(8, 12, 28, 255), detail);
+    const char* help = "Left/Right: choose    A / Enter: confirm    B / Esc: back";
+    drawTextOutline(panelX + panelW / 2 - menuTextWidth(help) / 2, panelY + 212,
+                    "%s", Colour(150, 165, 195, 255), Colour(8, 12, 28, 255), help);
+}
+
 void pc_settings_draw(void) {
     if (!sMenuOpen) return;
     if (!gsys || !gsys->mDGXGfx) return;
@@ -2708,49 +3520,8 @@ void pc_settings_draw(void) {
     bool actionRow[ROW_COUNT] = {};
     actionRow[ROW_RESET] = actionRow[ROW_SAVE] = actionRow[ROW_CLOSE] = true;
 
-    const char* aspectNames[5] = { "Auto", "4:3", "16:10", "16:9", "21:9" };
-    char aspectBuf[32];
-    snprintf(aspectBuf, sizeof(aspectBuf), "%s", aspectNames[sPending.aspectRatioMode >= 0 && sPending.aspectRatioMode < 5 ? sPending.aspectRatioMode : 0]);
-
-    const char* fpsModeNames[3] = { "30 FPS (stable)", "60 FPS (experimental)", "120 FPS (experimental)" };
-    char fpsModeBuf[32];
-    snprintf(fpsModeBuf, sizeof(fpsModeBuf), "%s", fpsModeNames[sPending.fpsMode >= 0 && sPending.fpsMode < 3 ? sPending.fpsMode : 0]);
-
     char valueBuf[ROW_CONTROLS][128];
-    snprintf(valueBuf[0], sizeof(valueBuf[0]), "%s",
-             modeNames[sPending.displayMode >= 0 && sPending.displayMode < 3 ? sPending.displayMode : 0]);
-    if (sPending.displayMode == PC_WINDOW_FULLSCREEN_BORDERLESS) {
-        if (sDesktopW > 0) {
-            snprintf(valueBuf[1], sizeof(valueBuf[1]), "Desktop (%dx%d)", sDesktopW, sDesktopH);
-        } else {
-            snprintf(valueBuf[1], sizeof(valueBuf[1]), "Desktop");
-        }
-    } else {
-        char aspectTag[16];
-        aspectLabel(sPending.windowWidth, sPending.windowHeight, aspectTag, sizeof(aspectTag));
-        const bool native = sPending.windowWidth == sDesktopW && sPending.windowHeight == sDesktopH;
-        snprintf(valueBuf[1], sizeof(valueBuf[1]), "%dx%d  %s%s", sPending.windowWidth,
-                 sPending.windowHeight, aspectTag, native ? "  (native)" : "");
-    }
-    snprintf(valueBuf[2], sizeof(valueBuf[2]), "%s", aspectBuf);
-    {
-        float rs = sPending.renderScale;
-        if (fabsf(rs - 2.0f / 3.0f) < 0.01f) snprintf(valueBuf[3], sizeof(valueBuf[3]), "Auto (native)");
-        else snprintf(valueBuf[3], sizeof(valueBuf[3]), "%.2fx", rs);
-    }
-    if (sPending.refreshRate <= 0.0) snprintf(valueBuf[4], sizeof(valueBuf[4]), "Auto");
-    else snprintf(valueBuf[4], sizeof(valueBuf[4]), "%.0f Hz", sPending.refreshRate);
-    snprintf(valueBuf[5], sizeof(valueBuf[5]), "%s", sPending.vsync ? "On" : "Off");
-    snprintf(valueBuf[ROW_FPS_MODE], sizeof(valueBuf[0]), "%s", fpsModeBuf);
-#if defined(VERSION_GPIP01)
-    {
-        static const char* const kNames[] = { "English", "Deutsch", "Francais",
-                                              "Espanol", "Italiano", "Nederlands" };
-        const unsigned char language = pc_settings_get_language();
-        snprintf(valueBuf[ROW_LANGUAGE], sizeof(valueBuf[0]), "%s%s", kNames[language],
-                 language == pc_settings_startup_language() ? "" : "  (on restart)");
-    }
-#endif
+    for (int i = 0; i < ROW_CONTROLS; i++) mainRowValue(i, valueBuf[i], sizeof(valueBuf[i]));
 
     // The rows before ROW_CONTROLS carry a computed value; from there to
     // ROW_RESET they open a submenu and all read "Open >".
@@ -2999,6 +3770,8 @@ void pc_settings_draw(void) {
 
         std::error_code modelEc;
         const bool olimarInstalled = std::filesystem::is_regular_file(pc_hd_model_path(PC_HD_MODEL_OLIMAR), modelEc);
+        const bool louieInstalled = std::filesystem::is_regular_file(pc_hd_model_path(PC_HD_MODEL_LOUIE), modelEc);
+        const bool louieHdInstalled = std::filesystem::is_regular_file(pc_hd_model_path(PC_HD_MODEL_LOUIE_HD), modelEc);
         const bool pikminInstalled = std::filesystem::is_regular_file(pc_hd_model_path(PC_HD_MODEL_PIKI_RED), modelEc)
             && std::filesystem::is_regular_file(pc_hd_model_path(PC_HD_MODEL_PIKI_YELLOW), modelEc)
             && std::filesystem::is_regular_file(pc_hd_model_path(PC_HD_MODEL_PIKI_BLUE), modelEc);
@@ -3006,9 +3779,9 @@ void pc_settings_draw(void) {
         const bool dwarfInstalled = std::filesystem::is_regular_file(pc_hd_model_path(PC_HD_MODEL_BULBORB_DWARF), modelEc);
         // Una fila por modelo: cada una abre el selector para su propio zip
         // (los rips originales de Pikmin 3 o un pack .nhm ya convertido).
-        const char* labels[4] = { "Olimar HD", "Pikmin HD (red/yellow/blue)", "Bulborb HD", "Dwarf Bulborb HD" };
-        const bool installed[4] = { olimarInstalled, pikminInstalled, bulborbInstalled, dwarfInstalled };
-        for (int row = 0; row < 4; row++) {
+        const char* labels[6] = { "Olimar HD", "Louie (Pikmin 2 zip)", "Louie HD (Pikmin 3 zip)", "Pikmin HD (red/yellow/blue)", "Bulborb HD", "Dwarf Bulborb HD" };
+        const bool installed[6] = { olimarInstalled, louieInstalled, louieHdInstalled, pikminInstalled, bulborbInstalled, dwarfInstalled };
+        for (int row = 0; row < 6; row++) {
             char value[96];
             const bool busy = sTexturePackPickerActive && row == sHdModelsSelection;
             if (busy && sTexturePackInstallFiles.load() > 0)
@@ -3022,8 +3795,8 @@ void pc_settings_draw(void) {
         }
         // The installer converts the public Pikmin 3 rips (Collada + PNG zips
         // from The Models Resource) on the device, so no external tool is needed.
-        const char* hint = "Pick the original Pikmin 3 model zip from The Models Resource.";
-        drawTextOutline(subX + subW / 2 - menuTextWidth(hint) / 2, subY + 70 + 4 * 28 + 8, "%s",
+        const char* hint = "Pick the original Pikmin 3 (or Pikmin 2 Louie) model zip from The Models Resource.";
+        drawTextOutline(subX + subW / 2 - menuTextWidth(hint) / 2, subY + 70 + 6 * 28 + 8, "%s",
                         Colour(150, 160, 190, 255), Colour(10, 16, 36, 255), hint);
         drawTimedNotice(subX + subW / 2, subY + subH - 8);
 
@@ -3167,8 +3940,22 @@ void pc_settings_draw(void) {
 
     // Graphics submenu overlay.
     if (sInGraphicsSubmenu) {
-        const int subX = px1 + 18, subY = py1 + 44;
-        const int subW = panelW - 36, subH = panelH - 58;
+        // The list is taller than the parent panel on short screens, so size
+        // the surface to the rows (header + rows + help lines) and centre it,
+        // shrinking the row pitch only when the screen itself is too small.
+        int itemH = 22;
+        const int headerH = 62, footerH = 48;
+        int neededH = headerH + kGraphicsRowCount * itemH + footerH;
+        if (neededH > screenH - 8) {
+            itemH = (screenH - 8 - headerH - footerH) / kGraphicsRowCount;
+            neededH = headerH + kGraphicsRowCount * itemH + footerH;
+        }
+        const int subX = px1 + 18;
+        const int subW = panelW - 36;
+        const int subH = (neededH > panelH - 58) ? neededH : panelH - 58;
+        int subY = py1 + 44;
+        if (subY + subH > screenH - 4) subY = screenH / 2 - subH / 2;
+        if (subY < 4) subY = 4;
         drawSubmenuSurface(gfx, subX, subY, subW, subH, "Graphics",
                            "Left/Right: change   These change how the game looks",
                            "Up/Down: select   Esc/B: back");
@@ -3186,10 +3973,11 @@ void pc_settings_draw(void) {
             "Saturation",
             "Texture Packs",
             "HD Models",
+            "Lighting",
+            "Shadows",
         };
 
-        const int listStartY = subY + 62;
-        const int itemH = 22;
+        const int listStartY = subY + headerH;
         const bool gradingOn = sPending.colourGrading != 0;
 
         for (int i = 0; i < kGraphicsRowCount; i++) {
@@ -3224,6 +4012,11 @@ void pc_settings_draw(void) {
                 // Rowing into a submenu rather than cycling a value. Mirror the
                 // main-list convention so the row reads like the others.
                 snprintf(value, sizeof(value), "Manage >");
+            } else if (i == 12) {
+                snprintf(value, sizeof(value), "%s", sPending.perPixelLighting ? "Per-pixel" : "Per-vertex (original)");
+            } else if (i == 13) {
+                const char* names[4] = { "Off (original)", "Soft", "Normal", "Strong" };
+                snprintf(value, sizeof(value), "%s", names[(sPending.shadows >= 0 && sPending.shadows <= 3) ? sPending.shadows : 0]);
             } else if (!gradingOn) {
                 // The three sliders do nothing while grading is off. Saying so
                 // beats letting someone move them and conclude it is broken.
@@ -3257,6 +4050,8 @@ void pc_settings_draw(void) {
             "Mouse Wheel",
             "Pikmin Limit",
             "Day Length",
+            "Co-op Split Screen",
+            "Co-op Merged Camera",
 #if PIKI_DEBUG_KEYS
             "Debug Keys (F5/F6)",
 #endif
@@ -3284,6 +4079,12 @@ void pc_settings_draw(void) {
                 snprintf(value, sizeof(value), "%s",
                          sPending.mouseWheelAction ? "Camera Zoom" : "Pikmin Colour");
             } else if (i == 6) {
+                snprintf(value, sizeof(value), "%s",
+                         sPending.coopSplit ? "Horizontal (top/bottom)" : "Vertical (left/right)");
+            } else if (i == 7) {
+                snprintf(value, sizeof(value), "%s",
+                         sPending.coopMergeCamera ? "On (dynamic)" : "Off (static split)");
+            } else if (i == 8) {
                 snprintf(value, sizeof(value), "%s",
                          sPending.debugKeys ? "On" : "Off");
             } else if (i == 5) {
@@ -3388,6 +4189,441 @@ int pc_settings_get_day_minutes(void) {
     return sConfig.dayMinutes;
 }
 
+int pc_settings_get_coop_split(void) { return sConfig.coopSplit; }
+int pc_settings_get_shadows(void) { return sConfig.shadows; }
+int pc_settings_get_coop_merge_camera(void) { return sConfig.coopMergeCamera; }
+
 int pc_settings_get_debug_keys(void) {
     return sConfig.debugKeys;
 }
+
+// ---------------------------------------------------------------------------
+// Modelo de filas para otras interfaces (pc_settings_rows.h)
+// ---------------------------------------------------------------------------
+
+const char* pc_settings_group_name(int group) {
+    switch (group) {
+    case PC_SET_GROUP_DISPLAY: return "Display";
+    case PC_SET_GROUP_CONTROLS: return "Controls";
+    case PC_SET_GROUP_GRAPHICS: return "Graphics";
+    case PC_SET_GROUP_MODS: return "Mods";
+    case PC_SET_GROUP_SAVEDATA: return "Save Data";
+    case PC_SET_PICKER_TEXPACKS: return "Texture Packs";
+    case PC_SET_PICKER_HDMODELS: return "HD Models";
+    default: return "";
+    }
+}
+
+namespace {
+// Controls: 4 filas de Advanced, luego teclado y mando (PC_KEY_ACT_COUNT cada uno).
+constexpr int kCtlAdvanced = kAdvancedRowCount;
+constexpr int kCtlKeyboard = kCtlAdvanced;
+constexpr int kCtlGamepad  = kCtlKeyboard + PC_KEY_ACT_COUNT;
+constexpr int kCtlCount    = kCtlGamepad + PC_KEY_ACT_COUNT;
+constexpr int kSaveDataRows = 3; // export, import, reset defaults
+
+const char* kGraphicsLabels[kGraphicsRowCount] = {
+    "Antialiasing", "Fog", "Bloom", "Ambient Occlusion", "Depth of Field", "Texture Filtering",
+    "Colour Grading", "Gamma", "Brightness", "Saturation", "Texture Packs", "HD Models", "Lighting", "Shadows",
+};
+const char* kModsLabels[kModsRowCount] = {
+    "Control Scheme", "Chain Pikmin Actions", "Hold to Pluck", "Mouse Wheel", "Pikmin Limit", "Day Length",
+    "Co-op Split Screen", "Co-op Merged Camera",
+#if PIKI_DEBUG_KEYS
+    "Debug Keys (F5/F6)",
+#endif
+};
+const char* kAdvancedLabels[kAdvancedRowCount] = {
+    "Mouse Sensitivity", "Stick Dead Zone", "Stick Invert (X/Y)", "C-Stick Invert (X/Y)",
+};
+const char* kHdModelLabels[6] = { "Olimar HD", "Louie (Pikmin 2 zip)", "Louie HD (Pikmin 3 zip)", "Pikmin HD (red/yellow/blue)", "Bulborb HD", "Dwarf Bulborb HD" };
+
+void graphicsRowValue(int i, char* value, size_t n) {
+    const bool gradingOn = sPending.colourGrading != 0;
+    const char* levels[4] = { "Off", "Subtle", "Normal", "Strong" };
+    auto level = [&](int v) { return levels[(v >= 0 && v <= 3) ? v : 0]; };
+    switch (i) {
+    case 0: snprintf(value, n, "%s", sPending.antialiasing ? "FXAA" : "Off"); break;
+    case 1: snprintf(value, n, "%s", sPending.fog ? "On  (original)" : "Off"); break;
+    case 2: snprintf(value, n, "%s", level(sPending.bloom)); break;
+    case 3: snprintf(value, n, "%s", level(sPending.ssao)); break;
+    case 4: snprintf(value, n, "%s", level(sPending.dof)); break;
+    case 5:
+        if (sPending.anisotropy <= 1) snprintf(value, n, "Trilinear");
+        else snprintf(value, n, "Anisotropic %dx", sPending.anisotropy);
+        break;
+    case 6: snprintf(value, n, "%s", gradingOn ? "On" : "Off"); break;
+    case 7: if (!gradingOn) snprintf(value, n, "--"); else snprintf(value, n, sPending.gamma == 1.0f ? "%.2f  (neutral)" : "%.2f", sPending.gamma); break;
+    case 8: if (!gradingOn) snprintf(value, n, "--"); else snprintf(value, n, sPending.brightness == 0.0f ? "%+.2f  (neutral)" : "%+.2f", sPending.brightness); break;
+    case 9: if (!gradingOn) snprintf(value, n, "--"); else snprintf(value, n, sPending.saturation == 1.0f ? "%.2f  (neutral)" : "%.2f", sPending.saturation); break;
+    case 10: {
+        std::vector<std::string> packs = pc_texpack_list_packs();
+        if (sConfig.texturePackEnabled && !sConfig.texturePack.empty()) snprintf(value, n, "%s  >", sConfig.texturePack.c_str());
+        else snprintf(value, n, "%d installed  >", (int)packs.size());
+        break;
+    }
+    case 11: {
+        std::error_code ec;
+        int installed = 0;
+        for (int id = 0; id < PC_HD_MODEL_COUNT; id++)
+            if (std::filesystem::is_regular_file(pc_hd_model_path((PcHdModelId)id), ec)) installed++;
+        snprintf(value, n, "%d / %d files  >", installed, (int)PC_HD_MODEL_COUNT);
+        break;
+    }
+    case 12: snprintf(value, n, "%s", sPending.perPixelLighting ? "Per-pixel" : "Per-vertex (original)"); break;
+    case 13: {
+        const char* names[4] = { "Off (original)", "Soft", "Normal", "Strong" };
+        snprintf(value, n, "%s", names[(sPending.shadows >= 0 && sPending.shadows <= 3) ? sPending.shadows : 0]);
+        break;
+    }
+
+    default: value[0] = '\0';
+    }
+}
+
+void modsRowValue(int i, char* value, size_t n) {
+    switch (i) {
+    case 0: snprintf(value, n, "%s", sPending.controlMode == PC_CONTROL_CLASSIC ? "Classic (original)" : "Mouse Cursor"); break;
+    case 1: snprintf(value, n, "%s", sPending.chainActions ? "On" : "Off (original)"); break;
+    case 2: snprintf(value, n, "%s", sPending.holdToPluck ? "On" : "Off (original)"); break;
+    case 3: snprintf(value, n, "%s", sPending.mouseWheelAction ? "Camera Zoom" : "Pikmin Colour"); break;
+    case 4:
+        if (pc_hardmode_active()) snprintf(value, n, "%d (Hard)", PC_HARDMODE_PIKI_LIMIT);
+        else if (sPending.pikiLimit == 100) snprintf(value, n, "100 (original)");
+        else if (sPending.pikiLimit > 200) snprintf(value, n, "%d  (may cost performance)", sPending.pikiLimit);
+        else snprintf(value, n, "%d", sPending.pikiLimit);
+        break;
+    case 5:
+        if (pc_hardmode_active()) snprintf(value, n, "%d min (Hard)", PC_HARDMODE_DAY_MINUTES);
+        else if (sPending.dayMinutes == 10) snprintf(value, n, "10 min (original)");
+        else snprintf(value, n, "%d min", sPending.dayMinutes);
+        break;
+    case 6: snprintf(value, n, "%s", sPending.coopSplit ? "Horizontal (top/bottom)" : "Vertical (left/right)"); break;
+    case 7: snprintf(value, n, "%s", sPending.coopMergeCamera ? "On (dynamic)" : "Off (static split)"); break;
+    case 8: snprintf(value, n, "%s", sPending.debugKeys ? "On" : "Off"); break;
+    default: value[0] = '\0';
+    }
+}
+
+void advancedRowValue(int i, char* value, size_t n) {
+    switch (i) {
+    case 0: snprintf(value, n, "%.2f", sPending.mouseSensitivity); break;
+    case 1: snprintf(value, n, "%d", sPending.stickDeadZone); break;
+    case 2: snprintf(value, n, "%s / %s", (sPending.stickInvert & 1) ? "InvX" : "NorX", (sPending.stickInvert & 2) ? "InvY" : "NorY"); break;
+    case 3: snprintf(value, n, "%s / %s", (sPending.cStickInvert & 1) ? "InvX" : "NorX", (sPending.cStickInvert & 2) ? "InvY" : "NorY"); break;
+    default: value[0] = '\0';
+    }
+}
+
+bool hdModelInstalled(int row) {
+    std::error_code ec;
+    auto is = [&](PcHdModelId id) { return std::filesystem::is_regular_file(pc_hd_model_path(id), ec); };
+    switch (row) {
+    case 0: return is(PC_HD_MODEL_OLIMAR);
+    case 1: return is(PC_HD_MODEL_LOUIE);
+    case 2: return is(PC_HD_MODEL_LOUIE_HD);
+    case 3: return is(PC_HD_MODEL_PIKI_RED) && is(PC_HD_MODEL_PIKI_YELLOW) && is(PC_HD_MODEL_PIKI_BLUE);
+    case 4: return is(PC_HD_MODEL_BULBORB);
+    case 5: return is(PC_HD_MODEL_BULBORB_DWARF);
+    default: return false;
+    }
+}
+} // namespace
+
+namespace {
+// Resoluciones elegibles para el modo de vídeo pendiente (mismo criterio que
+// el submenú del overlay F1).
+std::vector<int> pickerResolutionChoices() {
+    std::vector<int> out;
+    for (size_t i = 0; i < sResolutions.size(); i++)
+        if (resolutionSelectable(sResolutions[i], sPending.displayMode)) out.push_back((int)i);
+    return out;
+}
+}
+
+int pc_settings_rows_count(int group) {
+    switch (group) {
+    case PC_SET_GROUP_DISPLAY: return (int)ROW_CONTROLS; // Display Mode .. FPS Mode [.. Language]
+    case PC_SET_GROUP_CONTROLS: return kCtlCount;
+    case PC_SET_GROUP_GRAPHICS: return kGraphicsRowCount;
+    case PC_SET_GROUP_MODS: return kModsRowCount;
+    case PC_SET_GROUP_SAVEDATA: return kSaveDataRows;
+    case PC_SET_PICKER_RESOLUTION: return (int)pickerResolutionChoices().size();
+    case PC_SET_PICKER_TEXPACKS: return 1 + (int)pc_texpack_list_packs().size();
+    case PC_SET_PICKER_HDMODELS: return 6;
+    default: return 0;
+    }
+}
+
+int pc_settings_row_opens_picker(int group, int row) {
+    if (group == PC_SET_GROUP_DISPLAY && row == ROW_RESOLUTION && sPending.displayMode != PC_WINDOW_FULLSCREEN_BORDERLESS)
+        return PC_SET_PICKER_RESOLUTION;
+    if (group == PC_SET_GROUP_GRAPHICS && row == 10) return PC_SET_PICKER_TEXPACKS;
+    if (group == PC_SET_GROUP_GRAPHICS && row == 11) return PC_SET_PICKER_HDMODELS;
+    return 0;
+}
+
+int pc_settings_picker_current(int picker) {
+    if (picker == PC_SET_PICKER_RESOLUTION) {
+        std::vector<int> c = pickerResolutionChoices();
+        for (size_t k = 0; k < c.size(); k++)
+            if (sResolutions[c[k]].w == sPending.windowWidth && sResolutions[c[k]].h == sPending.windowHeight) return (int)k;
+    }
+    return 0;
+}
+
+const char* pc_settings_row_label(int group, int row) {
+    static char label[96];
+    if (group == PC_SET_GROUP_DISPLAY) return mainRowLabel(row);
+    if (group == PC_SET_GROUP_CONTROLS) {
+        if (row < kCtlKeyboard) return kAdvancedLabels[row];
+        if (row < kCtlGamepad) { snprintf(label, sizeof(label), "Key: %s", pc_window_get_key_action_name(row - kCtlKeyboard)); return label; }
+        if (row < kCtlCount) { snprintf(label, sizeof(label), "Pad: %s", pc_window_get_key_action_name(row - kCtlGamepad)); return label; }
+        return "";
+    }
+    if (group == PC_SET_GROUP_GRAPHICS) return (row >= 0 && row < kGraphicsRowCount) ? kGraphicsLabels[row] : "";
+    if (group == PC_SET_GROUP_MODS) return (row >= 0 && row < kModsRowCount) ? kModsLabels[row] : "";
+    if (group == PC_SET_GROUP_SAVEDATA) {
+        static const char* k[kSaveDataRows] = { "Export save to ZIP", "Import save from ZIP", "Reset all settings to defaults" };
+        return (row >= 0 && row < kSaveDataRows) ? k[row] : "";
+    }
+    if (group == PC_SET_PICKER_TEXPACKS) {
+        if (row == 0) return "Install pack...";
+        std::vector<std::string> packs = pc_texpack_list_packs();
+        if (row - 1 < 0 || row - 1 >= (int)packs.size()) return "";
+        snprintf(label, sizeof(label), "%s", packs[row - 1].c_str());
+        return label;
+    }
+    if (group == PC_SET_PICKER_HDMODELS) return (row >= 0 && row < 6) ? kHdModelLabels[row] : "";
+    if (group == PC_SET_PICKER_RESOLUTION) {
+        static char label[32];
+        std::vector<int> c = pickerResolutionChoices();
+        if (row < 0 || row >= (int)c.size()) return "";
+        snprintf(label, sizeof(label), "%dx%d", sResolutions[c[row]].w, sResolutions[c[row]].h);
+        return label;
+    }
+    return "";
+}
+
+void pc_settings_row_value(int group, int row, char* out, unsigned long n) {
+    if (!out || !n) return;
+    out[0] = '\0';
+    if (group == PC_SET_GROUP_DISPLAY) mainRowValue(row, out, (size_t)n);
+    if (group == PC_SET_GROUP_CONTROLS) {
+        if (row < kCtlKeyboard) { advancedRowValue(row, out, (size_t)n); return; }
+        if (row < kCtlGamepad) {
+            const int i = row - kCtlKeyboard;
+            if (sWaitingForKey && sControlSelection == i) { snprintf(out, n, "[Press a key or mouse button...]"); return; }
+            const char* name = pc_window_binding_name(sPending.keyboardBindings[i]);
+            snprintf(out, n, "%s", name ? name : "None");
+            return;
+        }
+        if (row < kCtlCount) {
+            const int i = row - kCtlGamepad;
+            if (sWaitingForButton && sGamepadSelection == i) { snprintf(out, n, "[Press a button...]"); return; }
+            int bound = sPending.gamepadBindings[i];
+            if (bound < 0) bound = kDefaultGamepadBindings[i];
+            const char* name = pc_window_get_gamepad_button_name(bound);
+            snprintf(out, n, "%s", name ? name : "None");
+            return;
+        }
+    }
+    if (group == PC_SET_GROUP_GRAPHICS) graphicsRowValue(row, out, (size_t)n);
+    if (group == PC_SET_GROUP_MODS) modsRowValue(row, out, (size_t)n);
+    if (group == PC_SET_GROUP_SAVEDATA) {
+#ifdef __ANDROID__
+        if (row < 2) snprintf(out, n, "%s", sSaveTransferActive ? "Opening picker..." : "System picker");
+#else
+        if (row < 2) snprintf(out, n, "card0 / card1");
+#endif
+        else snprintf(out, n, "A: reset");
+    }
+    if (group == PC_SET_PICKER_TEXPACKS) {
+        if (row == 0) snprintf(out, n, "%s", sTexturePackPickerActive ? "Installing..." : "A: choose zip");
+        else {
+            std::vector<std::string> packs = pc_texpack_list_packs();
+            if (row - 1 >= 0 && row - 1 < (int)packs.size()) {
+                const bool active = sConfig.texturePackEnabled && packs[row - 1] == sConfig.texturePack;
+                snprintf(out, n, "%s", active ? "Active" : "");
+            }
+        }
+    }
+    if (group == PC_SET_PICKER_HDMODELS) {
+        if (sTexturePackPickerActive && sHdModelsSelection == row) snprintf(out, n, "Installing...");
+        else snprintf(out, n, "%s", hdModelInstalled(row) ? "Installed" : "Not installed");
+    }
+    if (group == PC_SET_PICKER_RESOLUTION) {
+        std::vector<int> c = pickerResolutionChoices();
+        if (row < 0 || row >= (int)c.size()) return;
+        const Resolution& r = sResolutions[c[row]];
+        char aspectTag[16];
+        aspectLabel(r.w, r.h, aspectTag, sizeof(aspectTag));
+        const bool current = r.w == sPending.windowWidth && r.h == sPending.windowHeight;
+        snprintf(out, n, "%s%s%s", aspectTag, r.isNative ? "  (native)" : (r.isDerived ? "  (window)" : ""),
+                 current ? "  <" : "");
+    }
+}
+
+void pc_settings_row_change(int group, int row, int dir, bool ok) {
+    if (group == PC_SET_GROUP_DISPLAY) {
+        // Filas de valor: A/Enter equivale a "siguiente" (la resolución abre
+        // su selector: pc_settings_row_opens_picker).
+        const bool right = dir > 0 || ok;
+        mainRowChange(row, dir < 0, right, false);
+    } else if (group == PC_SET_PICKER_RESOLUTION && ok) {
+        std::vector<int> c = pickerResolutionChoices();
+        if (row < 0 || row >= (int)c.size()) return;
+        sResolutionIdx = c[row];
+        sPending.windowWidth = sResolutions[c[row]].w;
+        sPending.windowHeight = sResolutions[c[row]].h;
+        applyVideo();
+        startVideoConfirm();
+    } else if (group == PC_SET_GROUP_CONTROLS) {
+        if (row < kCtlKeyboard) {
+            advancedRowChange(row, dir < 0, dir > 0 || ok);
+        } else if (row < kCtlGamepad) {
+            const int i = row - kCtlKeyboard;
+            if (ok) {
+                sControlSelection = i;
+                sWaitingForKey = true;
+                sCapturePrevMouse = SDL_GetMouseState(NULL, NULL);
+                pc_window_take_mouse_pressed();
+                sCaptureWaitRelease = true;
+            } else if (dir) {
+                sPending.keyboardBindings[i] = kDefaultKeyBindings[i];
+            }
+        } else if (row < kCtlCount) {
+            const int i = row - kCtlGamepad;
+            if (ok) {
+                sGamepadSelection = i;
+                sWaitingForButton = true;
+                sCaptureWaitRelease = true;
+            } else if (dir) {
+                sPending.gamepadBindings[i] = -1;
+            }
+        }
+    } else if (group == PC_SET_GROUP_GRAPHICS) {
+        if (row == 10 || row == 11) return; // selectores: pc_settings_row_opens_picker
+        graphicsRowChange(row, dir < 0, dir > 0 || ok, false);
+    } else if (group == PC_SET_GROUP_MODS) {
+        modsRowChange(row, dir < 0, dir > 0 || ok);
+    } else if (group == PC_SET_GROUP_SAVEDATA) {
+        if (!ok) return;
+        if (row < 2) saveDataRowAction(row);
+        else resetToDefaults();
+    } else if (group == PC_SET_PICKER_TEXPACKS && ok) {
+        texturePacksRowAction(row, pc_texpack_list_packs());
+    } else if (group == PC_SET_PICKER_HDMODELS && ok) {
+        sHdModelsSelection = row;
+        hdModelsRowAction(row);
+    }
+}
+
+bool pc_settings_capture_active(void) { return sWaitingForKey || sWaitingForButton || sCaptureWaitRelease; }
+
+void pc_settings_capture_poll(void) {
+    SDL_GameController* ctl = pc_window_get_controller();
+    if (sWaitingForKey) { pollKeyCapture(ctl); return; }
+    if (sWaitingForButton || sCaptureWaitRelease) pollButtonCapture(ctl);
+}
+
+bool pc_settings_notice(char* out, unsigned long n, bool* isError) {
+    std::lock_guard<std::mutex> lock(sTexturePackNoticeMutex);
+    const bool fresh = SDL_GetTicks() - sTexturePackNoticeMs < kTexturePackNoticeTimeoutMs;
+    if (!fresh || !sTexturePackNotice[0]) return false;
+    if (out && n) snprintf(out, n, "%s", sTexturePackNotice);
+    if (isError) *isError = sTexturePackNoticeError;
+    return true;
+}
+
+bool pc_settings_restart_prompt_active(void) { return sTexturePackRestartPrompt || sHdModelRestartPrompt; }
+
+void pc_settings_restart_prompt_answer(bool restart) {
+    const bool hd = sHdModelRestartPrompt;
+    sTexturePackRestartPrompt = false;
+    sHdModelRestartPrompt = false;
+    if (!restart) return;
+#ifdef __ANDROID__
+    pc_texpack_android_restart();
+#else
+    texturePackNotice(!hd, hd ? "HD model installed. Restart the game to apply it."
+                              : "Texture pack active. Restart the game to apply it.");
+#endif
+}
+
+void pc_settings_rows_begin(void) {
+    sPending = sConfig;
+    sPending.controlMode = pc_window_get_control_mode();
+    sVideoConfirmActive = false;
+    rebuildResolutionList();
+    const int idx = resolutionIndexFor(pc_window_get_width(), pc_window_get_height());
+    sResolutionIdx = idx >= 0 ? idx : defaultResolutionIndex();
+}
+
+void pc_settings_rows_end(bool save) {
+    if (save && !sVideoConfirmActive) {
+        sConfig = sPending;
+        applyVideo();
+        applyControls(sConfig);
+        applyGraphics(sConfig);
+        saveConfig();
+        return;
+    }
+    if (sVideoConfirmActive) {
+        revertVideoSettings();
+    } else if (isVideoSettingChanged()) {
+        sPending = sConfig;
+        applyVideo();
+        syncResolutionIndex();
+    }
+}
+
+bool pc_settings_video_confirm_active(void) { return sVideoConfirmActive; }
+
+int pc_settings_video_confirm_seconds_left(void) {
+    if (!sVideoConfirmActive) return 0;
+    const Uint32 elapsed = SDL_GetTicks() - sVideoConfirmStartMs;
+    if (elapsed >= kVideoConfirmDurationMs) return 0;
+    return (int)((kVideoConfirmDurationMs - elapsed + 999) / 1000);
+}
+
+void pc_settings_video_confirm(bool keep) {
+    if (!sVideoConfirmActive) return;
+    if (keep) confirmVideoSettings();
+    else revertVideoSettings();
+}
+
+PcNavEdges pc_settings_read_nav_edges(void) {
+    PcNavEdges e = {};
+    // Teclado con repetición al mantener (mismo retardo/cadencia que el
+    // mando): en listas largas como la de resoluciones se baja solo.
+    int numKeys = 0;
+    const Uint8* keys = SDL_GetKeyboardState(&numKeys);
+    auto held = [&](SDL_Scancode a, SDL_Scancode b) { return (a < numKeys && keys[a]) || (b < numKeys && keys[b]); };
+    e.up     = padEdge(held(SDL_SCANCODE_UP, SDL_SCANCODE_W), 6);
+    e.down   = padEdge(held(SDL_SCANCODE_DOWN, SDL_SCANCODE_S), 7);
+    e.left   = padEdge(held(SDL_SCANCODE_LEFT, SDL_SCANCODE_A), 8);
+    e.right  = padEdge(held(SDL_SCANCODE_RIGHT, SDL_SCANCODE_D), 9);
+    e.ok     = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
+    e.cancel = keyWentDown(SDL_SCANCODE_ESCAPE);
+    SDL_GameController* ctl = pc_window_get_controller();
+    if (ctl || sTouchFrameButtons) {
+        if (padNavUp(ctl)) e.up = true;
+        if (padNavDown(ctl)) e.down = true;
+        if (padNavLeft(ctl)) e.left = true;
+        if (padNavRight(ctl)) e.right = true;
+        if (padNavA(ctl)) e.ok = true;
+        if (padNavB(ctl)) e.cancel = true;
+    }
+    if (sTouchTapPending) {
+        sTouchTapPending = false;
+        e.tap  = true;
+        e.tapX = sTouchTapX;
+        e.tapY = sTouchTapY;
+    }
+    e.dragY = sTouchDragY * 480.0f;
+    sTouchDragY = 0.0f;
+    return e;
+}
+
+void pc_settings_touch_drag(float dy) { sTouchDragY += dy; }

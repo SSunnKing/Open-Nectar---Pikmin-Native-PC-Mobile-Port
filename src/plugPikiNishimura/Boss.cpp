@@ -498,7 +498,7 @@ int Boss::getMapAttribute(immut Vector3f& pos)
 bool Boss::insideAndInSearch()
 {
 	if (aiCullable()) {
-		Navi* navi = naviMgr->getNavi();
+		Navi* navi = naviMgr->getNearestNavi(mSRT.t);
 		if (qdist2(mSRT.t.x, mSRT.t.z, navi->mSRT.t.x, navi->mSRT.t.z) < BOSS_PARM(mSearchRadius)) {
 			return true;
 		}

@@ -455,7 +455,26 @@ public:
 	ID32& getCorpsePartID(int paraID) { return mTekiParams->mParaIDs[paraID]; }
 
 	void setCreaturePointer(int idx, Creature* target) { mTargetCreatures[idx].set(target); }
+#if defined(PIKI_PC_PORT)
+	/// Cooperativo: si el objetivo es un Olimar caído, pasa al otro si está
+	/// dentro del rango de visión; si no, se queda el cuerpo y la IA se
+	/// desengancha sola (el reconocimiento exige isAlive).
+	Creature* pcRetargetDeadNavi(Creature* target);
+	Creature* getCreaturePointer(int idx)
+	{
+		Creature* c = mTargetCreatures[idx].getPtr();
+		if (c && c->mObjType == OBJTYPE_Navi && !c->isAlive()) {
+			Creature* other = pcRetargetDeadNavi(c);
+			if (other) {
+				mTargetCreatures[idx].set(other);
+				c = other;
+			}
+		}
+		return c;
+	}
+#else
 	Creature* getCreaturePointer(int idx) { return mTargetCreatures[idx].getPtr(); }
+#endif
 	void clearCreaturePointer(int idx) { mTargetCreatures[idx].clear(); }
 
 	f32 getScaleRate() { return getParameterF(TPF_Scale) * getPersonalityF(TekiPersonality::FLT_Size); }

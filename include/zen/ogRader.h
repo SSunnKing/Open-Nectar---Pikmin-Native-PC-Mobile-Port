@@ -12,6 +12,10 @@ class Graphics;
 class P2DScreen;
 
 namespace zen {
+#if defined(PIKI_PC_PORT)
+/// Olimar en el que se centra el radar (0/1); lo fija quien dibuja el menú.
+extern int gRaderNaviIndex;
+#endif
 
 struct PikaAlphaMgr;
 
@@ -105,6 +109,9 @@ private:
 	P2DPicture* mYellowPikiIconTemplate;    // _64
 	P2DPicture* mSeedIconTemplate;          // _68
 	P2DPicture* mOlimarIcon;                // _6C
+#if defined(PIKI_PC_PORT)
+	P2DPicture* mOlimarIcon2 = nullptr;     // marcador del otro Olimar (cooperativo), azulado
+#endif
 	P2DPicture* mBlueContainerIcon;         // _70
 	P2DPicture* mRedContainerIcon;          // _74
 	P2DPicture* mYellowContainerIcon;       // _78

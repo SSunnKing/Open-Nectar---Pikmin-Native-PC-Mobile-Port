@@ -23,6 +23,8 @@ public:
     MenuPane() : P2DPicture(plates[0]) { hide(); }
     bool isText = false;
     bool isIcon = false;
+    bool isImage = false;
+    float imageU1 = 1.0f, imageV1 = 1.0f;
     int fontWidth = 12, fontHeight = 18;
     char text[512] = {};
     Colour color;
@@ -41,6 +43,10 @@ protected:
         }
         if (isIcon) {
             P2DPicture::drawSelf(x, y, view);
+            return;
+        }
+        if (isImage) {
+            drawTexCoord(0, 0, getWidth(), getHeight(), 0, 0, imageU1, 0, 0, imageV1, imageU1, imageV1, view);
             return;
         }
         // Nine slices preserve the original rounded corners instead of
@@ -110,6 +116,7 @@ void pc_settings_p2d_text(int x, int y, const char* text, Colour color, int font
         if (!pane) return;
         pane->isText = false;
         pane->isIcon = true;
+        pane->isImage = false;
         pane->setTexture(plates[3], 0);
         pane->setWhite(Colour(255, 220, 80, 255));
         return;
@@ -142,12 +149,29 @@ void pc_settings_p2d_text(int x, int y, const char* text, Colour color, int font
     std::snprintf(pane->text, sizeof(pane->text), "%s", text);
 }
 
+void pc_settings_p2d_image(int x, int y, int w, int h, Texture* texture, float u1, float v1, Colour tint)
+{
+    if (!texture) return;
+    MenuPane* pane = next(x, y, w, h);
+    if (!pane) return;
+    pane->isText = false;
+    pane->isIcon = false;
+    pane->isImage = true;
+    pane->imageU1 = u1;
+    pane->imageV1 = v1;
+    pane->setTexture(texture, 0);
+    pane->initBlack();
+    pane->setWhite(tint);
+    pane->setAlpha(tint.a);
+}
+
 void pc_settings_p2d_plate(int x, int y, int w, int h, int style)
 {
     MenuPane* pane = next(x,y,w,h);
     if (!pane) return;
     pane->isText = false;
     pane->isIcon = false;
+    pane->isImage = false;
     pane->initWhite();
     pane->setTexture(plates[std::clamp(style, 0, 2)], 0);
     if (style == 0) {

@@ -107,8 +107,9 @@ void MizuAi::naviGeyzerJump()
 	Vector3f targetPos = mMizu->mSRT.t + dir;
 	targetPos.y        = mapMgr->getMinY(targetPos.x, targetPos.z, true);
 
-	Navi* navi = naviMgr->getNavi();
-	navi->stimulate(InteractGeyzer(mMizu, targetPos));
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+		naviMgr->getNavi(ni)->stimulate(InteractGeyzer(mMizu, targetPos));
+	}
 }
 
 /**
@@ -237,7 +238,7 @@ void MizuAi::waitState()
 void MizuAi::readyState()
 {
 	if (!mMizu->_3B8) {
-		Navi* navi = naviMgr->getNavi();
+		Navi* navi = naviMgr->getNearestNavi(mMizu->mSRT.t);
 		f32 absX   = NsLibMath<f32>::abs(mMizu->mSRT.t.x - navi->mSRT.t.x);
 		if (absX < 7.5f) {
 			f32 absZ = NsLibMath<f32>::abs(mMizu->mSRT.t.z - navi->mSRT.t.z);

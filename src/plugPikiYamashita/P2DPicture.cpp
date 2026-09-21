@@ -102,6 +102,27 @@ P2DPicture::P2DPicture(P2DPane* parent, RandomAccessStream* input, u16 paneType)
 	initWhite();
 }
 
+#if defined(PIKI_PC_PORT)
+P2DPicture::P2DPicture(immut P2DPicture& src, u32 tag)
+    : P2DPane()
+{
+	pcCopyPaneFrom(src);
+	pcSetTag(tag);
+	mTexName      = src.mTexName;
+	mTextures[0]  = src.mTextures[0];
+	mAlpha        = src.mAlpha;
+	mTextureCount = src.mTextureCount;
+	_F2[0]        = src._F2[0];
+	mBinding      = src.mBinding;
+	mMirror       = src.mMirror;
+	mTumble       = src.mTumble;
+	mWrapS        = src.mWrapS;
+	mWrapT        = src.mWrapT;
+	mWhite        = src.mWhite;
+	mBlack        = src.mBlack;
+}
+#endif
+
 /**
  * @todo: Documentation
  */

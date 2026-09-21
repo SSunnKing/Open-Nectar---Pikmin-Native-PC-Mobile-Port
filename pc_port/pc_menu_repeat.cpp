@@ -6,7 +6,7 @@
 #include "pc_menu_repeat.h"
 
 namespace {
-constexpr int kSlots = 6;
+constexpr int kSlots = 10; // 0-5 mando, 6-9 teclado (menú de cristal)
 bool sHeld[kSlots]                 = {};
 std::uint32_t sNextRepeat[kSlots]  = {};
 } // namespace

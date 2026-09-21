@@ -279,7 +279,11 @@ void ActKinoko::animationKeyUpdated(immut PaniAnimKeyEvent& event)
 	switch (event.mEventType) {
 	case KEY_Action0:
 		if (mState == STATE_Stick) {
+#if defined(PIKI_PC_PORT)
+			Navi* navi = naviMgr->getNearestNavi(mPiki->mSRT.t);
+#else
 			Navi* navi = naviMgr->getNavi();
+#endif
 			if (!navi) {
 				ERROR("kinoko no navi!\n");
 			}

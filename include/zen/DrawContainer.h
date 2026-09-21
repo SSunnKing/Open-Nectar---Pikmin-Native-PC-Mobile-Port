@@ -55,6 +55,10 @@ public:
 	};
 
 	DrawContainer();
+#if defined(PIKI_PC_PORT)
+	/// playerNum: 1 ó 2, mando que maneja este menú (cooperativo).
+	explicit DrawContainer(int playerNum);
+#endif
 
 	void start(containerType, int, int, int, int, int, int);
 	void draw(Graphics&);
@@ -903,5 +907,8 @@ protected:
 } // namespace zen
 
 extern zen::DrawContainer* containerWindow;
+#if defined(PIKI_PC_PORT)
+extern zen::DrawContainer* containerWindow2; // menú de cebolla de P2 (cooperativo)
+#endif
 
 #endif

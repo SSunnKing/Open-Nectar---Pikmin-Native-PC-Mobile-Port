@@ -318,6 +318,20 @@ void RumbleMgr::start(int type, int ctrlNum, f32* valuePtr)
 void RumbleMgr::start(int type, int ctrlNum, immut Vector3f& sourcePos)
 {
 	if (!mRumblePaused && mRumbleEnable) {
+#if defined(PIKI_PC_PORT)
+		// Vibración posicional (pisadas, explosiones): cada Olimar con su
+		// propia distancia a la fuente, en su propio mando.
+		if (ctrlNum == 0 && naviMgr && naviMgr->getNaviCount() > 1) {
+			for (int i = 0; i < naviMgr->getNaviCount() && i < 4; i++) {
+				Navi* navi = naviMgr->getNavi(i);
+				if (navi && mControlerMgrs[i]) {
+					f32 dist = navi->getPosition().distance(sourcePos);
+					start(type, i, &dist);
+				}
+			}
+			return;
+		}
+#endif
 		if (mControlerMgrs[ctrlNum]) {
 			Navi* navi = naviMgr->getNavi(ctrlNum);
 			f32 dist   = navi->getPosition().distance(sourcePos);

@@ -61,7 +61,7 @@ public:
 protected:
 	bool setTargetPosition(Teki& teki)
 	{
-		Navi* navi = naviMgr->getNavi();
+		Navi* navi = naviMgr->getNearestNavi(teki.getPosition());
 		Vector3f offset;
 		bool res = false;
 		offset.set(teki.getPosition() - navi->getPosition());

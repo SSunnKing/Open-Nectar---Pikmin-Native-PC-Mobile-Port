@@ -38,7 +38,12 @@ public:
 
 	void startCamera(Creature*);
 	void updateVibrationEvent();
+#if defined(PIKI_PC_PORT)
+	// mirror=false: solo esta cámara (daño propio de un Olimar).
+	void startVibrationEvent(int, immut Vector3f&, bool mirror = true);
+#else
 	void startVibrationEvent(int, immut Vector3f&);
+#endif
 	void outputNaviPosition(Vector3f&);
 
 	// unused/inlined:
@@ -54,5 +59,20 @@ public:
 };
 
 extern PcamCameraManager* cameraMgr;
+#if defined(PIKI_PC_PORT)
+// Cooperativo: segundo manager (cámara de P2). Las vibraciones que recibe
+// `cameraMgr` se reenvían aquí; cada cámara aplica su propio filtro de
+// distancia a su Olimar.
+extern PcamCameraManager* cameraMgrP2;
+// Manager de P1 estable (cameraMgr se conmuta durante la pasada de P2).
+extern PcamCameraManager* cameraMgrP1;
+/// Manager de la cámara del Olimar con ese mNaviID (P2 si existe, si no P1).
+inline PcamCameraManager* pcCameraMgrForNavi(int naviID)
+{
+	if (naviID == 1 && cameraMgrP2)
+		return cameraMgrP2;
+	return cameraMgrP1 ? cameraMgrP1 : cameraMgr;
+}
+#endif
 
 #endif

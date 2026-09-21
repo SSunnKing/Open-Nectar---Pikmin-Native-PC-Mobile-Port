@@ -12,6 +12,7 @@
 
 #if defined(PIKI_PC_PORT) && defined(PIKI_PC_SETTINGS_MENU)
 #include "settings/pc_settings.h"
+#include "settings/pc_glass_menu.h"
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
 #endif
@@ -37,6 +38,7 @@ void VIWaitForRetrace(void)    {
     // Draw the settings overlay through the game GX stack before the native
     // framebuffer is blitted to the window, so it appears on top.
     pc_settings_draw();
+    pc_glass_menu_draw();
 #endif
     pc_gfx_present();
 #if PIKI_PC_TOUCH

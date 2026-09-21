@@ -111,6 +111,9 @@ public:
 	returnStatusFlag update(Controller* pController, CardQuickInfo& outCardInfo);
 	void start(bool isSaveMode, int fileSelectMode);
 	void draw(Graphics& gfx);
+#if defined(PIKI_PC_PORT)
+	void drawFxOnly(Graphics& gfx);
+#endif
 	void quit();
 
 private:
@@ -167,6 +170,9 @@ private:
 	FileOperateMode mOperation;                            // _24
 	bool mSaveMode;                                        // _28
 	CardQuickInfo mCardInfo[3];                            // _2C
+#if defined(PIKI_PC_PORT)
+	bool mPcKeepScreenOnExit = false; ///< Slot vacío: salir sin círculo ni fundido (sigue el prompt).
+#endif
 	SpectrumCursorMgr mCopyLeftCursor;                     // _A4
 	SpectrumCursorMgr mCopyRightCursor;                    // _D4
 	f32 mCopyCursorLPosX[3];                               // _104

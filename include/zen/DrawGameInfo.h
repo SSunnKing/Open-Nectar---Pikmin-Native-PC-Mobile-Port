@@ -98,6 +98,16 @@ public:
 	}
 
 	void draw(P2DPerspGraph* perspGraph, int xOffs = 0) { mScreen.draw(xOffs, 0, perspGraph); }
+#if defined(PIKI_PC_PORT)
+	/// Dibujo con desplazamiento y escala (HUD reducido en pantalla partida).
+	void drawAt(P2DPerspGraph* perspGraph, int xOffs, int yOffs, f32 scale)
+	{
+		mScreen.setScale(scale);
+		mScreen.draw(xOffs, yOffs, perspGraph);
+	}
+	P2DPane* search(u32 tag) { return mScreen.search(tag, false); }
+	P2DPane* root() { return &mScreen; }
+#endif
 
 	void makeResident() { P2DPaneLibrary::makeResident(&mScreen); }
 
@@ -172,6 +182,21 @@ public:
 	};
 
 	DrawGameInfo(playModeFlag);
+#if defined(PIKI_PC_PORT)
+	/// naviIndex: Olimar cuyo HUD es este (0 = P1, 1 = P2).
+	DrawGameInfo(playModeFlag, int naviIndex);
+	/// Solo la parte compartida (día/sol) a pantalla completa.
+	void drawShared(Graphics&);
+	/// Solo la parte del jugador (retrato/vida, pelotón/contadores) dentro
+	/// del sub-rectángulo GX activo (pc_gfx_set_view_subrect).
+	void drawPlayer(Graphics&);
+	GameInfo* info() { return &mInfo; }
+	int mNaviIndex = 0;
+	/// play_day.blo es plano: el día (dc*, dico) y los contadores conviven
+	/// en la misma pantalla; en partida se muestran por separado.
+	void setDatePanesVisible(bool on);
+	DGIScreenMgr* mDateScreenMgr = nullptr; ///< solo el día, para la parte compartida
+#endif
 
 	void update();
 	void draw(Graphics&);
@@ -199,6 +224,11 @@ protected:
 };
 
 extern GameInfo* pGameInfo;
+#if defined(PIKI_PC_PORT)
+/// Olimar que leen los callbacks del HUD (vida, retrato, daño). Lo fija cada
+/// DrawGameInfo antes de update/draw; 0 en 1 jugador.
+extern int gHudNaviIndex;
+#endif
 
 } // namespace zen
 

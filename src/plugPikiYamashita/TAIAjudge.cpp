@@ -153,7 +153,7 @@ bool TAIAcheckInsideRangePiki::act(Teki& teki)
 bool TAIAinsideTerritoryRangeNavi::act(Teki& teki)
 {
 	bool res   = false;
-	Navi* navi = naviMgr->getNavi();
+	Navi* navi = naviMgr->getNearestNavi(teki.getPosition());
 	if (navi) {
 		teki.mTargetPosition = NVector3f(navi->getPosition());
 		f32 dist             = teki.mTargetPosition.distance(teki.mPersonality->mNestPosition);
@@ -172,7 +172,7 @@ bool TAIAinsideTerritoryRangeNavi::act(Teki& teki)
 bool TAIAoutsideTerritoryRangeNavi::act(Teki& teki)
 {
 	bool res   = false;
-	Navi* navi = naviMgr->getNavi();
+	Navi* navi = naviMgr->getNearestNavi(teki.getPosition());
 	if (navi) {
 		teki.mTargetPosition = NVector3f(navi->getPosition());
 		f32 dist             = teki.mTargetPosition.distance(teki.mPersonality->mNestPosition);
@@ -189,7 +189,7 @@ bool TAIAoutsideTerritoryRangeNavi::act(Teki& teki)
  */
 bool TAIAvisibleNavi::act(Teki& teki)
 {
-	Navi* navi = naviMgr->getNavi();
+	Navi* navi = naviMgr->getNearestNavi(teki.getPosition());
 	if (teki.visibleCreature(*navi)) {
 		teki.setCreaturePointer(0, navi);
 		return true;

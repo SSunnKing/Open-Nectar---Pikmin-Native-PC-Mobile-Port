@@ -238,7 +238,7 @@ public:
 
 		if (teki.mCurrentAnimEvent == KEY_Action0) {
 			PRINT("BARK! \n");
-			Navi* navi = naviMgr->getNavi();
+			Navi* navi = naviMgr->getNearestNavi(teki.getPosition());
 			Iterator iter(itemMgr->getPikiHeadMgr());
 			CI_LOOP(iter)
 			{
@@ -494,10 +494,12 @@ protected:
 		}
 
 		f32 range  = part->mRadius * 1.5f;
-		Navi* navi = naviMgr->getNavi();
-		if (part->mCentre.distance(navi->getPosition()) < range) {
-			InteractAttack attack(&teki, nullptr, teki.getParameterF(TPF_AttackPower), false);
-			navi->stimulate(attack);
+		for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+			Navi* navi = naviMgr->getNavi(ni);
+			if (navi && part->mCentre.distance(navi->getPosition()) < range) {
+				InteractAttack attack(&teki, nullptr, teki.getParameterF(TPF_AttackPower), false);
+				navi->stimulate(attack);
+			}
 		}
 
 		Iterator iter(pikiMgr);

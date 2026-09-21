@@ -1138,7 +1138,17 @@ void zen::ogScrFileSelectMgr::OperateSelect(Controller* controller)
 
 	if (controller->keyClick(KBBTN_A)) {
 		SeSystem::playSysSe(ogEnumFix(SYSSE_DECIDE1, JACSYS_Decide1));
+#if defined(PIKI_PC_PORT)
+		// Slot vacío: sigue el prompt de partida nueva encima de esta misma
+		// pantalla. Se mantiene la animación del icono (sube con estela) pero
+		// sin el círculo que se expande ni el fundido a negro del final.
+		mPcKeepScreenOnExit = mCardInfo[mCurrSlotIdx].mSaveStatus != PlayState::ReadyToSave;
+		if (!mPcKeepScreenOnExit) {
+			KetteiEffectStart();
+		}
+#else
 		KetteiEffectStart();
+#endif
 		if (mSaveMode) {
 			mSelectState                 = ExitRequested;
 			mSelectionConfirmEffectTimer = 0.0f;
@@ -1413,6 +1423,14 @@ zen::ogScrFileSelectMgr::returnStatusFlag zen::ogScrFileSelectMgr::update(Contro
 		mIconEmptyPanes[mCurrSlotIdx]->setScale(scale);
 
 		if (mMainInteractTimer > 1.0f) {
+#if defined(PIKI_PC_PORT)
+			if (mPcKeepScreenOnExit) {
+				mSelectionConfirmEffectOnyon->finish();
+				mSelectionConfirmEffectPikminGroup->finish();
+				mSelectState = mCurrSlotIdx == 0 ? SelectionA : mCurrSlotIdx == 1 ? SelectionB : SelectionC;
+				return mSelectState;
+			}
+#endif
 			BeginFadeOut();
 			mSelectionConfirmEffectOnyon->finish();
 			mSelectionConfirmEffectPikminGroup->finish();
@@ -1489,6 +1507,23 @@ zen::ogScrFileSelectMgr::returnStatusFlag zen::ogScrFileSelectMgr::update(Contro
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+void zen::ogScrFileSelectMgr::drawFxOnly(Graphics& gfx)
+{
+	pc_gfx_begin_menu_2d();
+	const int virtW = pc_gfx_menu_virt_width();
+	P2DPerspGraph perspGraph(0, 0, virtW, 480, 30.0f, 1.0f, 5000.0f);
+	perspGraph.setPort();
+	pc_gfx_set_menu_clip_43(1);
+	pc_gfx_apply_menu_clip_43();
+	mFxMgr->draw(gfx);
+	gfx.setFog(false);
+	GXSetZMode(GX_FALSE, GX_ALWAYS, GX_FALSE);
+	pc_gfx_set_menu_clip_43(0);
+	pc_gfx_set_scissor(0, 0, (u32)virtW, 480);
+}
+#endif
+
 void zen::ogScrFileSelectMgr::draw(Graphics& gfx)
 {
 	if (mSelectState == Inactive) {

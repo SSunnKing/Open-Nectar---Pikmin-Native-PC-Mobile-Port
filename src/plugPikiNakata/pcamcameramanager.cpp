@@ -119,9 +119,23 @@ void PcamCameraManager::updateVibrationEvent()
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+PcamCameraManager* cameraMgrP2 = nullptr;
+PcamCameraManager* cameraMgrP1 = nullptr;
+#endif
+
+#if defined(PIKI_PC_PORT)
+void PcamCameraManager::startVibrationEvent(int eventIdx, immut Vector3f& p2, bool mirror)
+#else
 void PcamCameraManager::startVibrationEvent(int eventIdx, immut Vector3f& p2)
+#endif
 {
 	PRINT("startVibrationEvent:%d,%d\n", mCurrEventIndex, eventIdx);
+#if defined(PIKI_PC_PORT)
+	if (mirror && cameraMgrP2 && this != cameraMgrP2 && this == cameraMgr) {
+		cameraMgrP2->startVibrationEvent(eventIdx, p2, false);
+	}
+#endif
 	if (mCurrEventIndex < 0 || mCurrEventIndex >= eventIdx) {
 		NVector3f vec1;
 		outputNaviPosition(vec1);

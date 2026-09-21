@@ -177,6 +177,19 @@ public:
 
 	Navi* getNavi();
 	Navi* getNavi(int);
+#if defined(PIKI_PC_PORT)
+	// Cooperativo (PLAN_COOP fase 2). getNavi() sigue siendo P1.
+	/// Navi vivo más cercano a `pos`; si no hay ninguno vivo, P1 (nunca null
+	/// mientras exista un navi, para no cambiar el contrato de getNavi()).
+	Navi* getNearestNavi(const Vector3f& pos);
+	/// Número de navis (1 ó 2).
+	int getNaviCount() { return mNumObjects; }
+	/// Navi que protagoniza la cinemática en curso: el que la disparó, o P1.
+	/// Se fija justo antes de setFlag/setTimer y se limpia en endMovie.
+	Navi* getMovieNavi();
+	void setMovieNavi(Navi* navi) { mMovieNavi = navi; }
+	Navi* mMovieNavi = nullptr;
+#endif
 	void refresh2d(Graphics&);
 	void renderCircle(Graphics&);
 	void drawShadow(Graphics&);

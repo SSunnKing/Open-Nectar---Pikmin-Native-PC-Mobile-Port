@@ -83,7 +83,14 @@ void test_unused_stage_tail_is_ignored()
 void test_no_runtime_interpretation()
 {
 	const std::string source = pc_tev_build_fragment_source(modulate_key());
-	check(!contains(source, "for ("), "no loop over stages");
+	// El único bucle permitido es el de luces de la iluminación GX compartida.
+	std::string body = source;
+	const size_t lightsAt = body.find("vec3 gxDoLights(");
+	if (lightsAt != std::string::npos) {
+		const size_t lightsEnd = body.find("void main()", lightsAt);
+		body.erase(lightsAt, lightsEnd == std::string::npos ? std::string::npos : lightsEnd - lightsAt);
+	}
+	check(!contains(body, "for ("), "no loop over stages");
 	check(!contains(source, "uNumStages"), "stage count is not a uniform");
 	check(!contains(source, "uTevCSel"), "operand selectors are not uniforms");
 	check(!contains(source, "uTevCOps"), "combiner ops are not uniforms");
@@ -220,6 +227,11 @@ void test_uniform_names_are_a_subset_of_the_ubershader()
 		"uMaterialColor", "uMaterialColor1",
 		"uTevPrev", "uTevReg0", "uTevReg1", "uTevReg2",
 		"uTevKonst", "uAlphaRef0", "uAlphaRef1",
+		// Iluminación GX compartida (pc_gx_lighting_glsl.h) y su selector.
+		"uNumLights", "uLightPos", "uLightColor", "uLightK", "uAmbColor",
+		"uChan0En", "uChan1En", "uChan0AttnFn", "uChan1AttnFn",
+		"uNumLights1", "uLightPos1", "uLightColor1", "uLightK1", "uAmbColor1",
+		"uSpecHalf1", "uSpecAttn1", "uPerPixel", "uOutTint",
 	};
 
 	PcTevShaderKey key = modulate_key();
