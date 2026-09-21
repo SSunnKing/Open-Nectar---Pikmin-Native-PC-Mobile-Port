@@ -7,7 +7,7 @@ settings moved into a menu that looks like the game's own, a texture pack
 installer on desktop, and a handful of fixes to the new-game flow.
 
 Downloads: `open_nectar_0.8.apk` (Android, arm64), `nectar-windows.zip`,
-`nectar-linux.tar.gz`. Saves and settings from 0.7 carry over. The desktop
+`nectar-linux.tar.gz`. Saves and settings from 0.6.5 carry over. The desktop
 builds now carry the Open Nectar icon (executables and installer on Windows;
 window icon plus a `.desktop` file and PNG on Linux).
 
@@ -42,9 +42,9 @@ window icon plus a `.desktop` file and PNG on Linux).
   and split smoothly as they walk apart; each half's side follows where that
   player is on screen (left/right, or top/bottom with the horizontal split).
   Controls follow the camera each player actually sees, so nothing inverts
-  when the shared camera turns. Off keeps the static split from 0.7.
+  when the shared camera turns. Off keeps the static split from 0.6.5.
 - **HUD per player** in each player's half, whichever side it is on.
-- Player 2's Olimar keeps the blue tint from 0.7 when both play Olimar.
+- Player 2's Olimar keeps the blue tint from 0.6.5 when both play Olimar.
 
 ## Advanced Options (new settings menu)
 
