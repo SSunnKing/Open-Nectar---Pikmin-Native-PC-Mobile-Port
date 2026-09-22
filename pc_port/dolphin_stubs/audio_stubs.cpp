@@ -753,6 +753,21 @@ BOOL Jac_DemoFrame(int frame) {
     }
     return TRUE;
 }
+// Only the native JAudio build gets the real one, from pikidemo.c; that file
+// is compiled solely when PIKMIN_NATIVE_JAUDIO is on, while the caller in
+// MoviePlayer::skipScene is guarded by PIKI_PC_PORT and so is always built.
+// Without this the default configuration has a call with no definition.
+//
+// There the flag clears bit 0x20 of the cutscene's audio config, the bit
+// marking music that is meant to carry on into the scene that follows. This
+// layer spells that same idea sKeepDemoStreamOnFinish, so clearing it is the
+// equivalent: a cutscene the player skipped has nothing to carry into, and
+// Jac_FinishDemo below fades the stream out rather than leaving it playing
+// over the next scene.
+extern "C" void Jac_NoteDemoSkipped(void) {
+    sKeepDemoStreamOnFinish = false;
+}
+
 void Jac_FinishDemo() {
     const u32 finishedDemo = sCurrentDemo >= 0
         ? static_cast<u32>(sCurrentDemo) : UINT32_MAX;

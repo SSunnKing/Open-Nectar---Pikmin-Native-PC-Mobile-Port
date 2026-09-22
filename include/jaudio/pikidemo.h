@@ -36,9 +36,20 @@ void Jac_SetDemoPartsCount(int);                            // args
 END_SCOPE_EXTERN_C
 
 #ifdef PIKI_PC_PORT
+BEGIN_SCOPE_EXTERN_C
 /// Records that the current cutscene was skipped rather than watched to the
 /// end, so finishing it also stops a stream that would otherwise carry over.
+///
+/// The extern "C" scope is load-bearing. This declaration sat outside it, so
+/// every C++ caller looked for a mangled Jac_NoteDemoSkipped(), while the
+/// definition it resolves to is unmangled either way: pikidemo.c is a C file
+/// when the native JAudio engine is compiled in, and the replacement in
+/// dolphin_stubs/audio_stubs.cpp has to match whichever of the two is built.
+/// Pinning the linkage here makes the caller and both definitions agree
+/// instead of depending on whether some header above happened to open an
+/// extern "C" block first.
 void Jac_NoteDemoSkipped(void);
+END_SCOPE_EXTERN_C
 #endif
 
 #endif
