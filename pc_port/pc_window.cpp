@@ -7,6 +7,9 @@
 #include "gl/pc_gfx.h"
 #include "touch/pc_touch.h"
 #endif
+// GL entry points are otherwise only pulled in with touch support; the
+// macOS swap path below needs glBindFramebuffer and glGetIntegerv.
+#include "gl/pc_opengl.h"
 #if defined(__ANDROID__)
 #include "android/pc_android.h"
 #elif defined(__linux__)
@@ -607,10 +610,19 @@ bool pc_window_init(const char* title, int width, int height) {
         return false;
     }
 
-    // The current GX translation backend intentionally uses compatibility
-    // features (GLSL 1.20 attribute/varying syntax and GL_QUADS). A Core
-    // profile accepts the context but rejects every draw, producing a black
-    // window without an SDL error.
+    // The current GX translation backend uses #version 140 core-style shaders
+    // (in/out qualifiers, no gl_FragColor, no GL_QUADS/immediate mode
+    // anywhere in this backend) but still requests a Compatibility profile
+    // first because that is what Linux/Mesa and Windows both happily hand
+    // back for a 3.3 request, and it is the safer default where a
+    // Compatibility profile exists at all.
+    //
+    // macOS never offers a Compatibility profile: only Legacy 2.1
+    // (fixed-function, GLSL capped at 1.20) or Core 3.2+. Legacy 2.1 accepts
+    // the context and then rejects both shaders outright ("version '140' is
+    // not supported"), which looks like audio and input working with
+    // nothing ever drawn. See the __APPLE__ retry below, which asks for a
+    // Core 3.3 context before falling all the way back to Legacy 2.1.
     //
     // GLES mode (PIKI_USE_GLES) requests an ES 3.0 context instead, which has
     // no compatibility/core distinction.
@@ -619,6 +631,21 @@ bool pc_window_init(const char* title, int width, int height) {
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+#elif defined(__APPLE__)
+        // Ask for Core up front here, not Compatibility. macOS offers no
+        // Compatibility profile at all, so requesting one guarantees the
+        // first SDL_GL_CreateContext fails -- and by then SDL_CreateWindow
+        // has already built the window and its view against those attributes.
+        // The Core context created on the retry below then attaches to a view
+        // that was set up for a pixel format which was never obtained. That
+        // context is perfectly usable for rendering (it reports 4.1 Metal,
+        // compiles shaders, and reads back correct pixels) but nothing drawn
+        // through it ever reaches the screen, with no error from GL or SDL at
+        // any point. Requesting Core first means the context succeeds on the
+        // first attempt, against the attributes the window was made with.
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 #else
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
@@ -676,10 +703,26 @@ bool pc_window_init(const char* title, int width, int height) {
     if (!sGLContext) {
 #if !PIKI_USE_GLES
         printf("[PC Port Warning] SDL_GL_CreateContext Compatibility Profile failed: %s. Retrying with default profile...\n", SDL_GetError());
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, 0);
+#if defined(__APPLE__)
+        // macOS has no Compatibility profile to fall back to -- only Legacy
+        // 2.1 or Core 3.2+ -- and the shaders in this backend need a Core
+        // context to compile at all (see the comment above applyGlAttrs()).
+        // Try Core 3.3 before giving up and falling to Legacy 2.1, which
+        // would accept the context and then fail both shaders silently.
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
         sGLContext = SDL_GL_CreateContext(sWindow);
+        if (!sGLContext) {
+            printf("[PC Port Warning] SDL_GL_CreateContext Core 3.3 Profile failed: %s. Retrying with default profile...\n", SDL_GetError());
+        }
+#endif
+        if (!sGLContext) {
+            SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+            SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+            SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, 0);
+            sGLContext = SDL_GL_CreateContext(sWindow);
+        }
 #else
         printf("[PC Port Error] SDL_GL_CreateContext ES 3.0 failed: %s\n", SDL_GetError());
 #endif
@@ -1188,7 +1231,30 @@ void pc_window_poll_events(PADStatus* pad) {
 
 void pc_window_swap_buffers(void) {
     if (sWindow) {
+#if defined(__APPLE__)
+        // macOS presents the drawable that the context is pointed at when
+        // flushBuffer runs, and pc_gfx_present() leaves the offscreen render
+        // target bound on its way out. With a non-zero framebuffer bound the
+        // swap reports success and shows nothing: framebuffer 0 really does
+        // hold the finished frame (the blit puts it there, and glReadPixels
+        // reads it back), GL raises no error, and the window stays black.
+        // Point the context at the window for the swap, then hand the
+        // renderer back exactly what it had.
+        static PFNGLBINDFRAMEBUFFERPROC bindfb =
+            (PFNGLBINDFRAMEBUFFERPROC)SDL_GL_GetProcAddress("glBindFramebuffer");
+#ifndef GL_FRAMEBUFFER_BINDING
+#define GL_FRAMEBUFFER_BINDING 0x8CA6
+#endif
+        GLint previousFbo = 0;
+        if (bindfb) {
+            glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousFbo);
+            if (previousFbo != 0) bindfb(GL_FRAMEBUFFER, 0);
+        }
+#endif
         SDL_GL_SwapWindow(sWindow);
+#if defined(__APPLE__)
+        if (bindfb && previousFbo != 0) bindfb(GL_FRAMEBUFFER, (GLuint)previousFbo);
+#endif
         // VSync Off must not retain the software presentation limiter. Game
         // simulation uses the fixed-step scheduler independently.
         if (sVsyncEnabled) {
