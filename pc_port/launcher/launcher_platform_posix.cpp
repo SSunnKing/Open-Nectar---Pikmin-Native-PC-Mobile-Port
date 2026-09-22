@@ -4,6 +4,10 @@
 
 #include "launcher_platform.h"
 
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
+
 #include <cstdlib>
 #include <cerrno>
 #include <cstring>
@@ -89,11 +93,28 @@ fs::path executablePath()
     if (env != nullptr) {
         return fs::path(env);
     }
+#if defined(__APPLE__)
+    // macOS has no /proc of any kind, so there is no symlink to read. The
+    // equivalent is this libSystem call, which reports the size it needs when
+    // the buffer is too small -- hence the retry. The path it returns may still
+    // carry symlinks or .. segments, and callers take parent_path() of it and
+    // compare that against real directories, so it is canonicalised first.
+    std::vector<char> path(4096);
+    uint32_t size = static_cast<uint32_t>(path.size());
+    if (_NSGetExecutablePath(path.data(), &size) != 0) {
+        path.resize(size);
+        if (_NSGetExecutablePath(path.data(), &size) != 0) return {};
+    }
+    std::error_code ec;
+    const fs::path resolved = fs::weakly_canonical(fs::path(path.data()), ec);
+    return ec ? fs::path(path.data()) : resolved;
+#else
     std::vector<char> path(4096);
     const ssize_t count = readlink("/proc/self/exe", path.data(), path.size() - 1);
     if (count <= 0) return {};
     path[static_cast<std::size_t>(count)] = '\0';
     return fs::path(path.data());
+#endif
 }
 
 fs::path defaultDataRoot()
