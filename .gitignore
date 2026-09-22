@@ -124,3 +124,6 @@ third_party/SDL2-mingw64/
 .Spotlight-V100
 .Trashes
 *.dSYM/
+
+# Build logs
+*.log
