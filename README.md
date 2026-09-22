@@ -27,6 +27,8 @@ This project builds upon the decompilation by [projectPiki/pikmin](https://githu
 - **Local co-op**: Olimar and Louie, two controllers, split screen that can
   merge into a single camera; Louie also playable in single player
 - HD character models from Pikmin 3 rips
+- Per-pixel lighting and real-time shadow maps (Off/Soft/Normal/Strong),
+  both optional
 
 **In development:**
 - Some minor graphical differences
