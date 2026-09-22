@@ -24,10 +24,12 @@ This project builds upon the decompilation by [projectPiki/pikmin](https://githu
 - Post-processing: antialiasing, restored fog, bloom, ambient occlusion, depth
   of field, texture filtering and colour grading — every one of them optional
 - Custom texture packs
+- **Local co-op**: Olimar and Louie, two controllers, split screen that can
+  merge into a single camera; Louie also playable in single player
+- HD character models from Pikmin 3 rips
 
 **In development:**
 - Some minor graphical differences
-- Planning multiplayer coop mode
 
 ## Play directly (without compiling)
 
