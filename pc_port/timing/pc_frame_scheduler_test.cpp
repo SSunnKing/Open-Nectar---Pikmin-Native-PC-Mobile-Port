@@ -1,5 +1,8 @@
 #include "pc_frame_scheduler.h"
 
+// <algorithm> for std::min: libstdc++ happens to pull it in through other
+// headers, libc++ (macOS) does not.
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
