@@ -46,6 +46,11 @@ DEFINE_PRINT("sysNew");
 // reset would corrupt them. Until allocation carries per-thread heap
 // context, routing global new into arenas is unsafe; game systems that need
 // arena lifetimes go through System::alloc explicitly.
+//
+// None of the state below (header layout, bucket table, mmap helpers, size-
+// class stats) is used on macOS -- see the __APPLE__ branch further down --
+// so it is compiled out there rather than sitting unused.
+#if !defined(__APPLE__)
 struct alignas(std::max_align_t) BootBlockHeader {
 	u32 mMagic;
 	u32 mPad;
@@ -107,7 +112,62 @@ static size_t allocationBucket(const void* ptr)
 	value ^= value >> 17;
 	return value & (BOOT_BUCKET_COUNT - 1);
 }
+#endif // !__APPLE__
 
+#if defined(__APPLE__)
+// macOS cannot use the header-prepending allocator below: this process also
+// loads AppleMetalOpenGLRenderer.framework (macOS's OpenGL-over-Metal
+// compatibility shim; unlike Mesa/GLX/WGL elsewhere, it is itself written in
+// C++), and the very first SDL_GL_CreateContext() call has it allocate a
+// bookkeeping object through *our* overridden operator new -- weak symbol
+// interposition redirects it here same as our own code. So far so good, but
+// its matching delete for that same object does not reliably come back
+// through our overridden operator delete (apparently a quirk of how the
+// dyld shared cache pre-resolves operator delete for system frameworks); it
+// can land on the system's default delete instead, which just calls
+// free(ptr) directly. The header-based allocator below returns header + 1,
+// past what malloc()/calloc() actually gave out, so that free() aborts with
+// "pointer being freed was not allocated" (confirmed against an
+// AddressSanitizer report pointing exactly at the header-sized offset into
+// the block). Returning the malloc()/calloc() pointer completely unmodified,
+// as below, makes free(ptr) valid no matter which operator delete ends up
+// calling it, at the cost of the per-size-class stats and the mmap path for
+// huge blocks the header made possible (both are diagnostics/an optimisation
+// only -- macOS's own malloc already mmaps large allocations internally, so
+// piki_pc_dump_alloc_stats is simply a no-op here).
+void piki_pc_dump_alloc_stats(void)
+{
+	// Not tracked on macOS -- see the comment above.
+}
+
+void* piki_pc_alloc(size_t size)
+{
+	if (size == 0) {
+		size = 1;
+	}
+	if (size & 0x3) {
+		if (size > std::numeric_limits<size_t>::max() - 3) {
+			throw std::bad_alloc();
+		}
+		size = (size + 3) & ~static_cast<size_t>(0x3);
+	}
+	// Zeroed memory is part of the contract (the console heaps zeroed every
+	// block); calloc keeps that without an extra memset pass, and macOS's
+	// malloc already hands back lazily-zeroed fresh pages for large sizes,
+	// so there is no need for this port's own mmap path on top of it.
+	void* result = std::calloc(1, size);
+	if (!result) {
+		ERROR("allocation of %zu bytes failed", size);
+		throw std::bad_alloc();
+	}
+	return result;
+}
+
+void piki_pc_free(void* ptr)
+{
+	std::free(ptr);
+}
+#else
 void piki_pc_dump_alloc_stats(void)
 {
 	std::lock_guard<std::mutex> lock(sAllocMutex);
@@ -231,6 +291,7 @@ void piki_pc_free(void* ptr)
 	}
 	sUnknownFrees++;
 }
+#endif // __APPLE__
 
 void* operator new(size_t size)
 {
