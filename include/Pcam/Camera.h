@@ -178,6 +178,10 @@ public:
 	int mAttentionState;                    // _9C, see AttentionState enum
 	int mRadiusMode;                        // _A0, see RadiusMode enum
 	f32 mDistanceMultiplier;                // _A4
+#if defined(PIKI_PC_PORT)
+	f32 mPcFovZoom = 0.0f; ///< Mod "First Person": desplazamiento del campo de visión.
+	f32 mPcPitch   = -0.15f; ///< Mod "First Person": cabeceo de la vista (radianes, negativo = abajo).
+#endif
 	f32 mStoredRadius;                      // _A8
 	f32 mCurrDistance;                      // _AC
 	f32 mCurrentAzimuth;                    // _B0

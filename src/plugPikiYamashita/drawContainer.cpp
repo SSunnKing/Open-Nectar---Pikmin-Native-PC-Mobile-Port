@@ -8,6 +8,7 @@
 #include "zen/TexAnim.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
+#include "settings/pc_settings.h"
 #endif
 
 /**
@@ -258,6 +259,20 @@ bool zen::DrawContainer::operationStatus()
 	mWindowPaneMgr->update(WindowPaneMgr::MODE_Hold, 0.0f, 0.0f);
 	mMarkerPicture->move(RoundOff(NMathF::sin(mFrameTimer) * 50.0f + mMarkerBasePosition.x),
 	                     RoundOff(NMathF::sin(2.0f * mFrameTimer) * 30.0f + mMarkerBasePosition.y));
+#if defined(PIKI_PC_PORT)
+	// Mod "Onion: Y for Steps of 10": con Y sujeto, cada pulsación o
+	// repetición de arriba/abajo mueve 10 de golpe. Los topes de abajo recortan
+	// al máximo posible y avisan igual que con pasos de 1.
+	const bool pcStep10 = pc_settings_get_onion_step10() && mController->keyDown(KBBTN_Y);
+	if (pcStep10) {
+		mTransferSpeed = 0.0f;
+		if (mZenController.keyRepeat(KBBTN_MSTICK_UP) || mController->keyClick(KBBTN_MSTICK_UP)) {
+			mTransferDelta += 10;
+		} else if (mZenController.keyRepeat(KBBTN_MSTICK_DOWN) || mController->keyClick(KBBTN_MSTICK_DOWN)) {
+			mTransferDelta -= 10;
+		}
+	} else
+#endif
 	if (mZenController.keyRepeat(KBBTN_MSTICK_UP) || mController->keyClick(KBBTN_MSTICK_UP)) {
 		if (mController->keyClick(KBBTN_MSTICK_UP)) {
 			mTransferSpeed = 1.0f;

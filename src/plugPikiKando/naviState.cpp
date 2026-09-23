@@ -1796,9 +1796,9 @@ void NaviGatherState::exec(Navi* navi)
 			navi->mWhistleTimer = C_NAVI_PARM(navi, mWhistleExpandTime);
 
 			if (!gameflow.mPauseAll) {
-				navi->callPikis(C_NAVI_PARM(navi, mWhistleMaxRadius));
+				navi->callPikis(NAVI_WHISTLE_MAX_RADIUS(navi));
 			} else {
-				navi->callDebugs(C_NAVI_PARM(navi, mWhistleMaxRadius));
+				navi->callDebugs(NAVI_WHISTLE_MAX_RADIUS(navi));
 			}
 			navi->mWhistleRadiusFrac = navi->mWhistleTimer / C_NAVI_PARM(navi, mWhistleExpandTime);
 			navi->mWhistleTimer      = 0.0f;
@@ -1810,7 +1810,7 @@ void NaviGatherState::exec(Navi* navi)
 	if (navi->mWhistleCircleMode == 1 && up) {
 		f32 scale                = navi->mWhistleTimer / C_NAVI_PARM(navi, mWhistleExpandTime);
 		navi->mWhistleRadiusFrac = scale;
-		scale *= (C_NAVI_PARM(navi, mWhistleMaxRadius) - C_NAVI_PARM(navi, mWhistleMinRadius));
+		scale *= (NAVI_WHISTLE_MAX_RADIUS(navi) - C_NAVI_PARM(navi, mWhistleMinRadius));
 		scale += C_NAVI_PARM(navi, mWhistleMinRadius);
 
 		check                    = true;
@@ -2005,6 +2005,15 @@ void NaviThrowWaitState::restart(Navi* navi)
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+/// Mod "Throw Speed": cuánto se alarga el alcance para coger (nunca se acorta).
+static f32 pcThrowReachScale()
+{
+	const f32 scale = pc_settings_get_throw_speed_scale();
+	return scale > 1.0f ? scale : 1.0f;
+}
+#endif
+
 void NaviThrowWaitState::init(Navi* navi)
 {
 	navi->mThrowHoldTime = 0.0f;
@@ -2085,7 +2094,14 @@ void NaviThrowWaitState::init(Navi* navi)
 		fflush(stderr);
 	}
 #endif
+#if defined(PIKI_PC_PORT)
+	// Mod "Throw Speed": por encima del 100 % también se alarga el alcance
+	// para coger. Si no, con el grupo detrás cada Pikmin tiene que andar hasta
+	// la mano y esa caminata, no la animación, marca la cadencia.
+	if (maxDist <= C_NAVI_PARM(navi, mPluckGrabRange) * pcThrowReachScale()) {
+#else
 	if (maxDist <= C_NAVI_PARM(navi, mPluckGrabRange)) {
+#endif
 		mHeldThrowPiki = throwPiki;
 	} else {
 		mPendingThrowPiki = throwPiki;
@@ -2149,6 +2165,38 @@ void NaviThrowWaitState::lockHangPiki(Navi* navi)
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+/**
+ * @brief Alcance efectivo para recoger el Pikmin que viene a la mano.
+ *
+ * Mod "Throw While Moving". El relevo se cierra cuando el Pikmin llega a
+ * mPluckGrabRange del capitán, pero si el capitán anda, el Pikmin persigue un
+ * blanco que se mueve y el relevo tarda o vence el temporizador de 3 s. Con el
+ * mod, el alcance crece con la velocidad del capitán, que es justo el terreno
+ * que el Pikmin no consigue recuperar.
+ */
+static f32 pcGrabRange(Navi* navi)
+{
+	f32 range = C_NAVI_PARM(navi, mPluckGrabRange) * pcThrowReachScale();
+	if (pc_settings_get_throw_while_moving()) {
+		Vector3f vel = navi->mVelocity;
+		vel.y        = 0.0f;
+		range += vel.length() * 0.5f;
+	}
+	return range;
+}
+
+/// Distancia al Pikmin: con el mod, solo en horizontal, para que una cuesta
+/// no cuente como distancia que el Pikmin tiene que recuperar.
+static f32 pcGrabDist(immut Vector3f& diff)
+{
+	if (pc_settings_get_throw_while_moving()) {
+		return speedy_sqrtf(diff.x * diff.x + diff.z * diff.z);
+	}
+	return diff.length();
+}
+#endif
+
 void NaviThrowWaitState::exec(Navi* navi)
 {
 	if (navi->demoCheck()) {
@@ -2175,8 +2223,8 @@ void NaviThrowWaitState::exec(Navi* navi)
 #endif
 			}
 			Vector3f diff = mPendingThrowPiki->mSRT.t - navi->mSRT.t;
-			f32 d         = diff.length();
-			if (d <= C_NAVI_PARM(navi, mPluckGrabRange)) {
+			f32 d         = pcGrabDist(diff);
+			if (d <= pcGrabRange(navi)) {
 				navi->mMotionSpeed = 30.0f;
 				navi->startMotion(PaniMotionInfo(PIKIANIM_ThrowWait, navi), PaniMotionInfo(PIKIANIM_ThrowWait));
 				navi->enableMotionBlend();
@@ -2232,6 +2280,22 @@ void NaviThrowWaitState::exec(Navi* navi)
 	}
 
 #if defined(PIKI_PC_PORT)
+	// Mod "Cancel Throw With B": con A sujeto, B devuelve el Pikmin al grupo en
+	// vez de lanzarlo. Walk solo entra en ThrowWait con una pulsación nueva de
+	// A, así que soltarla después no lo vuelve a coger.
+	if (pc_settings_get_throw_cancel_b() && (mHeldThrowPiki || mPendingThrowPiki)
+	    && navi->mKontroller->keyClick(KeyConfig::_instance->mSetCursorKey.mBind)) {
+		Piki* piki = mHeldThrowPiki ? mHeldThrowPiki : mPendingThrowPiki;
+		if (piki->isAlive()) {
+			piki->mFSM->transit(piki, PIKISTATE_Normal);
+		}
+		mHeldThrowPiki    = nullptr;
+		mPendingThrowPiki = nullptr;
+		navi->mNextThrowPiki = nullptr;
+		transit(navi, NAVISTATE_Walk);
+		return;
+	}
+
 	// keyUp is level-triggered. A release while a nearby Pikmin is still
 	// waiting for the grab keyframe used to sit here until the ThrowWait
 	// animation reached KEY_Action0, which put a whole grab animation between

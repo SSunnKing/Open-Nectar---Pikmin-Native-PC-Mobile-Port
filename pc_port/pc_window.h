@@ -55,6 +55,11 @@ enum {
     // Swarm (issue #29): while held the squad is pushed toward the cursor,
     // like Down on the Wii D-pad. Appended so saved key_N indices stay valid.
     PC_KEY_ACT_SWARM        = 20,
+    // Lock-On y Charge (mods de Pikmin 3). Añadidos al final para que los
+    // key_N ya guardados sigan apuntando a la misma acción.
+    PC_KEY_ACT_LOCKON       = 21,
+    PC_KEY_ACT_FIRSTPERSON  = 22,
+    PC_KEY_ACT_GYRO_RECENTER = 23,
     PC_KEY_ACT_COUNT
 };
 void pc_window_set_key_binding(int action, SDL_Scancode scancode);
@@ -71,6 +76,14 @@ static inline bool pc_bind_is_valid(int binding) { return binding >= 0 && bindin
 // Whether the swarm binding (keyboard, mouse or gamepad) is held right now.
 bool pc_window_swarm_held(void);
 bool pc_window_swarm_held_p2(void);
+/// Flanco de subida: true una sola vez por pulsación, y se consume al leerlo.
+bool pc_window_take_lockon_press(void);
+/// Flanco del botón de swarm: con el Charge activo es el que lanza la carga.
+bool pc_window_take_swarm_press(void);
+/// Inyecta la pulsación desde la capa táctil, que no pasa por los bindings.
+void pc_window_request_lockon_press(void);
+void pc_window_request_firstperson_press(void);
+void pc_window_request_charge_press(void);
 // Name for either kind of binding ("Mouse 4", "Space", ...).
 const char* pc_window_binding_name(int binding);
 // Whether a binding is currently held, given the keyboard and mouse state.
@@ -175,8 +188,10 @@ extern "C" void pc_window_add_cursor_delta(float dx, float dy);
 // pulls the camera back; negative brings it closer.
 extern "C" void pc_window_add_touch_zoom(float delta);
 extern "C" float pc_window_take_touch_zoom(void);
-extern "C" void pc_window_add_touch_camera_drag(float normalizedDx);
-extern "C" float pc_window_take_touch_camera_drag(void);
+extern "C" void pc_window_add_camera_drag(float normalizedDx);
+extern "C" float pc_window_take_camera_drag(void);
+extern "C" void pc_window_add_camera_pitch(float normalizedDy);
+extern "C" float pc_window_take_camera_pitch(void);
 
 #ifdef __cplusplus
 }

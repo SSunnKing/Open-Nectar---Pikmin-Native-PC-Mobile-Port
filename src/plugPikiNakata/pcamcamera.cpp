@@ -1,6 +1,7 @@
 #include "CPlate.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_window.h"
+#include "pc_gyro.h"
 #include "settings/pc_settings.h"
 #endif
 #include "Creature.h"
@@ -240,7 +241,40 @@ void PcamCamera::control(Controller& controller)
 	}
 #endif
 
+#if defined(PIKI_PC_PORT)
+	// En primera persona los gatillos dejan de rotar y de alternar zoom para
+	// hacer zoom continuo: R acerca, L aleja. Fuera del modo no cambia nada.
+	if (pc_first_person_active()) {
+		const f32 fTime = NSystem::getFrameTime();
+		if (controller.mTriggerR > 40) {
+			mPcFovZoom -= 40.0f * fTime;
+		}
+		if (controller.mTriggerL > 40) {
+			mPcFovZoom += 40.0f * fTime;
+		}
+		if (mPcFovZoom < -35.0f) mPcFovZoom = -35.0f;
+		if (mPcFovZoom > 20.0f) mPcFovZoom = 20.0f;
+	} else if (mPcFovZoom != 0.0f) {
+		mPcFovZoom = 0.0f;
+	}
+	// Cabeceo con el ratón en primera persona. Se consume siempre para que
+	// no se acumule movimiento mientras se juega en tercera persona.
+	{
+		const float pitchDrag = pc_window_take_camera_pitch();
+		if (pc_gyro_take_recenter_view()) {
+			mPcPitch = -0.15f; // cabeceo neutro, el mismo del arranque
+		}
+		if (pc_first_person_active()) {
+			mPcPitch += pitchDrag * 3.2f;
+			if (mPcPitch < -1.2f) mPcPitch = -1.2f;
+			if (mPcPitch > 1.0f) mPcPitch = 1.0f;
+		}
+	}
+	bool doRotate = !pc_first_person_active()
+	             && controller.mTriggerL / 170.0f >= getParameterF(PCAMF_RotationButtonThreshold);
+#else
 	bool doRotate = controller.mTriggerL / 170.0f >= getParameterF(PCAMF_RotationButtonThreshold);
+#endif
 	bool isZClick = false;
 	if (controller.keyClick(KBBTN_Z)) {
 		isZClick = true;
@@ -253,14 +287,14 @@ void PcamCamera::control(Controller& controller)
 	info.init(true, doRotate, controller.keyClick(KBBTN_L) != 0, controller.keyClick(KBBTN_R) && !controller.keyDown(KBBTN_X), isZClick,
 	          false, false, controller.getMainStickX(), xSubY, controller.getSubStickY());
 	control(info);
-#if PIKI_PC_TOUCH
-	const float touchCameraDrag = pc_window_take_touch_camera_drag();
-	if (mIsActive && mControlsEnabled && touchCameraDrag != 0.0f) {
+	// Arrastre de cámara: el pellizco táctil, y con el mod "Free Camera" el
+	// ratón y el stick derecho. Mismo acumulador para los tres.
+	const float cameraDrag = pc_window_take_camera_drag();
+	if (mIsActive && mControlsEnabled && cameraDrag != 0.0f) {
 		// Aproximadamente media vuelta por una pasada de un ancho de pantalla.
-		mPolarDir.rotateAzimuth(touchCameraDrag * 3.2f);
+		mPolarDir.rotateAzimuth(cameraDrag * 3.2f);
 		mPolarDir.roundAzimuth();
 	}
-#endif
 }
 
 /**
@@ -405,11 +439,55 @@ void PcamCamera::makePosture()
 	polar.add2(getViewpoint(), moveDir);
 	makeWatchObjectViewpoint(target, polar);
 
+#if defined(PIKI_PC_PORT)
+	// Mod "First Person". La orientación ya viene suavizada en la pareja
+	// (polar, target), así que en vez de rehacer la trigonometría se toma esa
+	// dirección y se mueve el ojo a la cabeza del capitán. Así la cámara libre,
+	// la atención y el homing siguen funcionando igual que en tercera persona.
+	const bool pcFirstPerson = pc_first_person_active() && mTargetCreature != nullptr;
+	if (pcFirstPerson) {
+		NVector3f NRef eye = NVector3f();
+		eye.set(mTargetCreature->mSRT.t.x, mTargetCreature->mSRT.t.y + 22.0f, mTargetCreature->mSRT.t.z);
+
+		// La dirección sale de mPolarDir y no de (target - polar): esos dos
+		// vienen suavizados desde el viewpoint/watchpoint del frame anterior,
+		// que en primera persona ya son el ojo y el punto de mira, y la
+		// realimentación hacía girar la cámara sin control.
+		NVector3f NRef fwd = NVector3f();
+		mPolarDir.output(fwd);
+		fwd.set(-fwd.x, 0.0f, -fwd.z);
+		if (fwd.length() > 0.0001f) {
+			fwd.normalise();
+			fwd.y = NMathF::tan(mPcPitch); // cabeceo del ratón
+		}
+		if (fwd.length() > 0.0001f) {
+			fwd.normalise();
+		} else {
+			fwd.set(0.0f, 0.0f, 1.0f);
+		}
+
+		NVector3f NRef look = NVector3f();
+		look.set(eye.x + fwd.x * 100.0f, eye.y + fwd.y * 100.0f, eye.z + fwd.z * 100.0f);
+
+		polar  = eye;
+		target = look;
+	}
+#endif
+
 	NPosture3D NRef posture = NPosture3D(polar, target);
 	inputPosture(posture);
 
 	f32 fov = getFov();
 	fov += (getCurrentFov() - fov) * getParameterF(PCAMF_FovHomingSpeed);
+#if defined(PIKI_PC_PORT)
+	// El zoom de primera persona es campo de visión, no distancia: el ojo está
+	// clavado en la cabeza y no hay radio que acortar.
+	if (pcFirstPerson) {
+		fov += mPcFovZoom;
+		if (fov < 20.0f) fov = 20.0f;
+		if (fov > 90.0f) fov = 90.0f;
+	}
+#endif
 	setFov(fov);
 	setBlur(getCurrentBlur());
 

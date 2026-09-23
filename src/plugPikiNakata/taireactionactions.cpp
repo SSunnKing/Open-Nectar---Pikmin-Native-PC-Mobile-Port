@@ -1,3 +1,4 @@
+#include "settings/pc_settings.h"
 #include "DebugLog.h"
 #include "PikiState.h"
 #include "Stickers.h"
@@ -39,7 +40,7 @@ void TaiLifeZeroAction::start(Teki& teki)
  */
 void TaiLifeDamageAction::start(Teki& teki)
 {
-	teki.mHealth -= mDamage;
+	teki.mHealth -= pc_mods_teki_damage(mDamage);
 }
 
 /**

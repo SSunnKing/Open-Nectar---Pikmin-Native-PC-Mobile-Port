@@ -443,17 +443,70 @@ RamStream* MemoryCard::getGameFileStream(int idx)
 /**
  * @todo: Documentation
  */
+// El mismo criterio que usa Stream para decidir si hay que intercambiar bytes;
+// allí es un #define local del .cpp, no un macro compartido.
+#if defined(_WIN32) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#define PIKI_CARD_LITTLE_ENDIAN 1
+#else
+#define PIKI_CARD_LITTLE_ENDIAN 0
+#endif
+
+#if PIKI_CARD_LITTLE_ENDIAN
+static inline u32 cardSwap32(u32 value)
+{
+	return (value >> 24) | ((value >> 8) & 0xFF00) | ((value << 8) & 0xFF0000) | (value << 24);
+}
+#endif
+
 u32 MemoryCard::calcChecksum(void* dataptr, u32 length)
 {
 	u32 sum = 0x32546532;
 	for (int i = 0; i < length >> 2; i++) {
 		u8 i2   = i;
 		u32 val = *((u32*)dataptr + i);
+#if PIKI_CARD_LITTLE_ENDIAN
+		// The card is big-endian wherever it is read: Stream::readInt already
+		// swaps, but this sum read the words raw, so on a little-endian host
+		// it produced a number no GameCube would ever agree with. That made
+		// every genuine save look corrupt -- and the repair path then
+		// overwrote it. Swap here too, so a card is the same card everywhere.
+		val = cardSwap32(val);
+#endif
 		sum += (i2 << 24) | (((i2 + 1) & 0xFF) << 16) | (((i2 - 1) & 0xFF) << 8) | ((i2 + 2) & 0xFF);
 		sum += val;
 	}
 	sum = 0x32546532 - sum;
 	return sum;
+}
+
+/**
+ * @brief Checksum as builds before the endianness fix wrote it.
+ *
+ * Cards written by those builds carry a host-order sum. Reading one is not an
+ * error, so they are accepted and then re-summed correctly the next time the
+ * game saves over them.
+ */
+u32 MemoryCard::calcChecksumLegacy(void* dataptr, u32 length)
+{
+	u32 sum = 0x32546532;
+	for (int i = 0; i < length >> 2; i++) {
+		u8 i2 = i;
+		sum += (i2 << 24) | (((i2 + 1) & 0xFF) << 16) | (((i2 - 1) & 0xFF) << 8) | ((i2 + 2) & 0xFF);
+		sum += *((u32*)dataptr + i);
+	}
+	return 0x32546532 - sum;
+}
+
+bool MemoryCard::checksumMatches(void* dataptr, u32 length, u32 stored)
+{
+	if (stored == calcChecksum(dataptr, length)) {
+		return true;
+	}
+#if PIKI_CARD_LITTLE_ENDIAN
+	return stored == calcChecksumLegacy(dataptr, length);
+#else
+	return false;
+#endif
 }
 
 /**
@@ -788,13 +841,12 @@ s32 MemoryCard::getNewestOptionsIndex()
 	int optionCount = -1;
 	int targetIdx   = -1;
 	for (int i = 0; i < 2; i++) {
-		u32 sum           = calcChecksum(&cardData[0x2000 * i + 0x2000], 0x1FF8);
 		RamStream* stream = getOptionsStream(i);
 		stream->setPosition(0x1FF8);
 		int nextOptionCount = stream->readInt();
 		int nextSum         = stream->readInt();
 
-		if (nextSum == sum && nextOptionCount > optionCount) {
+		if (checksumMatches(&cardData[0x2000 * i + 0x2000], 0x1FF8, (u32)nextSum) && nextOptionCount > optionCount) {
 			optionCount = nextOptionCount;
 			targetIdx   = i;
 		}
@@ -1213,11 +1265,10 @@ u32 MemoryCard::getOkSections()
 {
 	STACK_PAD_VAR(2);
 	u32 flag          = (0x1 | 0x2 | 0x4 | 0x8 | 0x10 | 0x20 | 0x40);
-	u32 sum           = calcChecksum(getBannerPtr(), 0x1FFC);
 	RamStream* stream = getBannerStream();
 	stream->setPosition(0x1FFC);
 	int val = stream->readInt();
-	if (val != sum) {
+	if (!checksumMatches(getBannerPtr(), 0x1FFC, (u32)val)) {
 		flag &= ~0x1;
 	}
 
@@ -1225,12 +1276,11 @@ u32 MemoryCard::getOkSections()
 	int i;
 	int j = 1;
 	for (i = 0; i < 2; i++) {
-		u32 sum           = calcChecksum(TERNARY_BUILD_MATCHING(&cardData[0x2000 * i + 0x2000], getOptionsPtr(i)), 0x1FF8);
 		RamStream* stream = getOptionsStream(i);
 		stream->setPosition(0x1FF8);
 		stream->readInt();
 		int val = stream->readInt();
-		if (val != sum) {
+		if (!checksumMatches(TERNARY_BUILD_MATCHING(&cardData[0x2000 * i + 0x2000], getOptionsPtr(i)), 0x1FF8, (u32)val)) {
 			flag &= ~(1 << j);
 		} else {
 			mValidOptionsCount++;
@@ -1244,14 +1294,13 @@ u32 MemoryCard::getOkSections()
 	mValidSlots[1]   = FALSE;
 	mValidSlots[2]   = FALSE;
 	for (i = 0; i < 4; i++) {
-		u32 sum           = calcChecksum(TERNARY_BUILD_MATCHING(&cardData[0x8000 * i + 0x6000], getGameFilePtr(i)), 0x7FF8);
 		RamStream* stream = getGameFileStream(i);
 		state.read(*stream);
 		int idx = state.mSaveSlot;
 		stream->setPosition(0x7FF8);
 		stream->readInt();
 		int val = stream->readInt();
-		if (val != sum) {
+		if (!checksumMatches(TERNARY_BUILD_MATCHING(&cardData[0x8000 * i + 0x6000], getGameFilePtr(i)), 0x7FF8, (u32)val)) {
 			flag &= ~(1 << j);
 		} else if (!mValidSlots[idx]) {
 			mValidSlots[idx] = TRUE;
@@ -1386,12 +1435,11 @@ void MemoryCard::getQuickInfos(CardQuickInfo* infos)
 	pc_permadeath_clear_slots();
 #endif
 	for (i = 0; i < 4; i++) {
-		u32 sum           = calcChecksum(TERNARY_BUILD_MATCHING(&cardData[i * 0x8000 + 0x6000], getGameFilePtr(i)), 0x7FF8);
 		RamStream* stream = getGameFileStream(i);
 		stream->setPosition(0x7FF8);
 		int saveCountFromCard = stream->readInt();
 		int sumFromCard       = stream->readInt();
-		if (sumFromCard != sum) {
+		if (!checksumMatches(TERNARY_BUILD_MATCHING(&cardData[i * 0x8000 + 0x6000], getGameFilePtr(i)), 0x7FF8, (u32)sumFromCard)) {
 			gameflow.mGamePrefs.mSpareMemCardSaveIndex = i + 1;
 		} else {
 			if (saveCountFromCard > maxSaveCount) {
@@ -1407,7 +1455,7 @@ void MemoryCard::getQuickInfos(CardQuickInfo* infos)
 				if (state.mSaveStatus) {
 					u8 slot                  = state.mSaveSlot;
 					CardQuickInfo& info      = infos[slot];
-					info.mCrc                = sum;
+					info.mCrc                = calcChecksum(TERNARY_BUILD_MATCHING(&cardData[i * 0x8000 + 0x6000], getGameFilePtr(i)), 0x7FF8);
 					info.mMostRecentSaveSlot = saveCountFromCard;
 					info.mMemCardSaveIndex   = i;
 					info.mGameSaveSlot       = slot;

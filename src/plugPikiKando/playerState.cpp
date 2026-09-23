@@ -85,7 +85,13 @@ void TimeGraph::set(u16 time, int color, int num)
 {
 	int entryIdx = time - mStartTime;
 	if (entryIdx < 0 || entryIdx >= (mEndTime - mStartTime + 1)) {
+#if defined(PIKI_PC_PORT)
+		// Una hora fuera del día (p. ej. la tecla F6 pasando del atardecer) no
+		// tiene casilla en el gráfico: se ignora en vez de parar el juego.
+		return;
+#else
 		ERROR("illegal time int %d\n", time);
+#endif
 	}
 	mEntries[entryIdx].set(color, num);
 }

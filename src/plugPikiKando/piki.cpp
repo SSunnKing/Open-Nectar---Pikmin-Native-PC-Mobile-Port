@@ -23,6 +23,7 @@
 #include "UtilityKando.h"
 #include "WeedsItem.h"
 #include "WorkObject.h"
+#include "settings/pc_settings.h"
 #include "bugprint.h"
 #include "gameflow.h"
 #include "teki.h"
@@ -1759,6 +1760,70 @@ bool Piki::mayIstick()
 	return false;
 }
 
+#if defined(PIKI_PC_PORT)
+/**
+ * @brief Mod "Blues Only In Water": saca del agua a un Pikmin que entró solo.
+ *
+ * Solo PIKISTATE_Normal cuenta como "por su cuenta": lanzado (Flying) o
+ * golpeado dentro (Flick, Flown) se sigue ahogando, así que el agua no deja
+ * de ser un peligro. Devuelve true si lo ha reubicado.
+ */
+bool Piki::pcStepOutOfWater()
+{
+	if (!pc_settings_get_blues_only_water()) {
+		return false;
+	}
+	if (mColor == Blue || !isAlive()) {
+		return false;
+	}
+
+	// Lista de estados en los que el agua sí debe hacer daño: lanzado por el
+	// capitán, golpeado dentro por un enemigo, o ya fuera de juego. Todo lo
+	// demás -- andar, venir al silbato (LookAt), seguir en formación -- es el
+	// Pikmin moviéndose por su cuenta, y ahí es donde el mod actúa. Antes solo
+	// cubría PIKISTATE_Normal, así que al silbarlos se ahogaban igual.
+	switch (getState()) {
+	case PIKISTATE_Flying:
+	case PIKISTATE_Flown:
+	case PIKISTATE_Flick:
+	case PIKISTATE_Bullet:
+	case PIKISTATE_Hanged:
+	case PIKISTATE_WaterHanged:
+	case PIKISTATE_Drown:
+	case PIKISTATE_Pressed:
+	case PIKISTATE_Swallowed:
+	case PIKISTATE_Dying:
+	case PIKISTATE_Dead:
+		return false;
+	default:
+		break;
+	}
+
+	// Al último suelo seco propio, no al waypoint más cercano: ese podía estar
+	// al otro lado del agua, y el Pikmin aparecía lejos y volvía corriendo.
+	if (mPcHasDryPos) {
+		mSRT.t = mPcLastDryPos;
+	} else {
+		WayPoint* dryWP = routeMgr->findNearestWayPoint('test', mSRT.t, true);
+		if (!dryWP) {
+			return false;
+		}
+		mSRT.t = dryWP->mPosition;
+	}
+
+	mVelocity     = Vector3f(0.0f, 0.0f, 0.0f);
+	mInWaterTimer = 0;
+	mIsPanicked   = false;
+
+	// No se le cambia el modo. Echarlo del escuadrón aquí creaba un bucle:
+	// al silbarlo volvía a entrar, tocaba el agua en el mismo frame y salía
+	// otra vez, así que se quedaba clavado en la orilla para siempre. Sigue
+	// en el escuadrón; lo único que no puede es pisar el agua, y en cuanto
+	// el capitán vuelve a tierra lo sigue con normalidad.
+	return true;
+}
+#endif
+
 /**
  * @todo: Documentation
  */
@@ -1797,6 +1862,12 @@ void Piki::bounceCallback()
 			}
 		}
 	}
+
+#if defined(PIKI_PC_PORT)
+	if (isDrownSurface && pcStepOutOfWater()) {
+		return;
+	}
+#endif
 
 	if (isDrownSurface && isAlive() && state != PIKISTATE_Dead && state != PIKISTATE_Dying && state != PIKISTATE_Pressed
 	    && state != PIKISTATE_WaterHanged) {
@@ -2682,6 +2753,14 @@ void Piki::realAI()
 		}
 	}
 
+#if defined(PIKI_PC_PORT)
+	// Caminar al agua entra por aquí, no por bounceCallback: el rescate tiene
+	// que estar en los dos caminos.
+	if (isInWater && pcStepOutOfWater()) {
+		isInWater = false;
+	}
+#endif
+
 	if (isInWater && getState() != PIKISTATE_WaterHanged) {
 		if (mInWaterTimer == 0) {
 			EffectParm rippleParm(&mShadowPos);
@@ -2710,6 +2789,13 @@ void Piki::realAI()
 			}
 		}
 	} else {
+#if defined(PIKI_PC_PORT)
+		// Suelo seco: lo recordamos por si hay que devolverlo aquí.
+		if (mGroundTriangle) {
+			mPcLastDryPos = mSRT.t;
+			mPcHasDryPos  = true;
+		}
+#endif
 		if (mInWaterTimer) {
 			mInWaterTimer = 0;
 			mRippleEffect->kill();
@@ -2765,6 +2851,25 @@ void Piki::doAI()
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+/**
+ * @brief Mod "Charge": manda este Pikmin contra un objetivo concreto.
+ *
+ * changeMode(AttackMode) pasa el capitán y deja que ActAttack elija por su
+ * cuenta; aquí el objetivo es el que el jugador ha fijado, así que se inicia
+ * la acción con él directamente.
+ */
+void Piki::pcChargeAt(Creature* target)
+{
+	if (!target || playerState->inDayEnd()) {
+		return;
+	}
+	mActiveAction->abandon(nullptr);
+	mActiveAction->mCurrActionIdx = PikiAction::Attack;
+	mActiveAction->mChildActions[mActiveAction->mCurrActionIdx].initialise(target);
+}
+#endif
+
 void Piki::changeMode(int newMode, Navi* navi)
 {
 	STACK_PAD_VAR(6); // idk

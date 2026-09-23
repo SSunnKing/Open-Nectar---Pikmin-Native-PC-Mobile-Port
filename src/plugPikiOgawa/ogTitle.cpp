@@ -211,8 +211,10 @@ static void pcRelabelTextPanes(P2DPane* pane, immut char* from, char* to)
 void zen::ogScrTitleMgr::pcSetupAdvancedMenu()
 {
 	static char sTitle[] = "Advanced";
-	static char* sLabels[7] = { (char*)"Display", (char*)"Controls", (char*)"Graphics", (char*)"Mods",
-		                         (char*)"Save Data", (char*)"Save", (char*)"Back" };
+	// Mismo orden que PcSettingsGroup. Salir guarda (como F1), así que no hay
+	// fila "Save": Back guarda y vuelve.
+	static char* sLabels[7] = { (char*)"Display", (char*)"Graphics", (char*)"Controls", (char*)"Camera",
+		                         (char*)"Gameplay", (char*)"Data", (char*)"Back" };
 	// option.blo trae 4 huecos (el 1 oculto): se muestran los 4 y se clonan 3
 	// más, con el paso compactado y el cristal estirado (PcMenuExtend).
 	const PcMenuExtend ext = { 3, 30, -44, 'yoko', 0 };
@@ -381,15 +383,15 @@ zen::ogScrTitleMgr::TitleStatus zen::ogScrTitleMgr::update(Controller* input)
 		if (flagA != 0) {
 			break;
 		}
-		// 0 Display, 1 Controls, 2 Graphics, 3 Mods, 4 Save Data, 5 Save, 6 Back.
+		// 0 Display, 1 Graphics, 2 Controls, 3 Camera, 4 Gameplay, 5 Data, 6 Back.
 		const bool cancelled = mAdvancedMenu->checkSelectMenuCancel();
 		if (!cancelled && mCurrentSelection >= 0 && mCurrentSelection < PC_SET_GROUP_COUNT) {
 			pc_glass_menu_open_list(mCurrentSelection);
 			mAdvancedMenu->start(mCurrentSelection);
 			break;
 		}
-		if (cancelled || mCurrentSelection == 5 || mCurrentSelection == 6) {
-			pc_settings_rows_end(!cancelled && mCurrentSelection == 5);
+		if (cancelled || mCurrentSelection == PC_SET_GROUP_COUNT) {
+			pc_settings_rows_end(true); // salir guarda, igual que cerrar F1
 			mAdvancedMenu->setCancelSelectMenuNo(-1);
 			mMainMenu->start(-1);
 			mCurrentMenuID = MENU_MainMenu;

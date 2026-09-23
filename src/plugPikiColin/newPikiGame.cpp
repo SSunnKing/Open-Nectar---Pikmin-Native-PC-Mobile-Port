@@ -2295,7 +2295,7 @@ public:
 			}
 
 			gfx.setCamera(&mGameCamera);
-			mGameCamera.update(f32(gfx.mScreenWidth) / f32(gfx.mScreenHeight), mGameCamera.mFov, 100.0f, mCameraFarClip);
+			mGameCamera.update(f32(gfx.mScreenWidth) / f32(gfx.mScreenHeight), mGameCamera.mFov, pc_first_person_active() ? 3.0f : 100.0f, mCameraFarClip);
 		}
 
 #if defined(PIKI_PC_PORT)
@@ -2420,7 +2420,15 @@ public:
 				    = profiling ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count()
 				                : 0.0;
 				if (!gameflow.mPauseAll && !gameflow.mIsUIOverlayActive) {
-					if (!gameflow.mMoviePlayer->mIsActive && (mUpdateFlags & UPDATE_WORLD_CLOCK) && !playerState->isTutorial()) {
+#if defined(PIKI_PC_PORT)
+					pc_settings_note_gameplay_frame();
+#endif
+					// Mod "Infinite Day": only the playable clock is held. The
+					// title screen keeps its own clock running, so its sky
+					// still moves.
+					const bool pcClockHeld = pc_settings_get_infinite_day() != 0;
+					if (!pcClockHeld && !gameflow.mMoviePlayer->mIsActive && (mUpdateFlags & UPDATE_WORLD_CLOCK)
+					    && !playerState->isTutorial()) {
 						f32 tod = gameflow.mWorldClock.mTimeOfDay;
 						gameflow.mWorldClock.update(1.0f);
 						f32 tod2 = gameflow.mWorldClock.mTimeOfDay;

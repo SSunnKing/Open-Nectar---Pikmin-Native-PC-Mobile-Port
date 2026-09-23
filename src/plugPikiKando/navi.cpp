@@ -5,13 +5,24 @@
 #include "pc_permadeath.h"
 #include "pc_coop.h"
 #include "pc_window.h"
+#include "pc_gyro.h"
 #include "settings/pc_settings.h"
 #include "mods/pc_hd_models.h"
 #include "gl/pc_gfx.h"
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
 #endif
-static f32 pcNaviHurt(f32 damage) { return pc_hardmode_navi_damage(damage); }
+static f32 pcNaviHurt(f32 damage)
+{
+	// Mod "Olimar Health". Scaling incoming damage rather than his health
+	// keeps the life gauge and the "below a quarter" warnings honest, since
+	// both read the health prop as the maximum.
+	const int pct = pc_settings_get_navi_health_pct();
+	if (pct != 100 && pct > 0) {
+		damage = damage * 100.0f / f32(pct);
+	}
+	return pc_hardmode_navi_damage(damage);
+}
 
 #else
 static f32 pcNaviHurt(f32 damage) { return damage; }
@@ -1000,8 +1011,178 @@ void Navi::postUpdate(int unused, f32 deltaTime)
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+/**
+ * @brief Mod "Lock-On": fija el enemigo más cercano al cursor.
+ *
+ * El objetivo se valida cada frame recorriendo tekiMgr, en vez de guardar un
+ * puntero y confiar en él: un enemigo puede morir y desaparecer entre frames.
+ */
+void Navi::pcUpdateLockOn()
+{
+	// Se consume siempre, esté activo el mod o no, para que una pulsación no
+	// quede encolada y salte sola al activarlo.
+	const bool lockPressed   = pc_window_take_lockon_press();
+	const bool chargePressed = pc_window_take_swarm_press();
+
+	static const bool kDebug = getenv("NECTAR_LOCKON_DEBUG") != nullptr;
+	if (kDebug && lockPressed) {
+		fprintf(stderr, "[lock-on] tecla leida  mod=%d naviID=%d tekiMgr=%p cursor=(%.1f %.1f %.1f)\n",
+		        pc_settings_get_lock_on(), mNaviID, (void*)tekiMgr, mCursorWorldPos.x, mCursorWorldPos.y, mCursorWorldPos.z);
+		fflush(stderr);
+	}
+
+	if (!pc_settings_get_lock_on() || !tekiMgr || mNaviID != 0) {
+		mPcLockTarget = nullptr;
+		pc_settings_note_lock_on(0);
+		return;
+	}
+
+	if (mPcLockTarget) {
+		bool stillValid = false;
+		Iterator iter(tekiMgr);
+		CI_LOOP(iter)
+		{
+			Creature* teki = *iter;
+			if (teki == mPcLockTarget) {
+				// Se suelta si muere, si deja de verse, o si el capitán se
+				// aleja: el doble del alcance del cursor, así que la distancia
+				// va con la escala del juego y no con un número inventado.
+				Vector3f away  = teki->mSRT.t - mSRT.t;
+				away.y         = 0.0f;
+				const f32 keep = NAVI_PARM(mCursorMaxRadius) * 2.0f;
+				stillValid     = teki->isAlive() && teki->isVisible() && away.length() < keep;
+				break;
+			}
+		}
+		if (!stillValid) {
+			mPcLockTarget = nullptr;
+		}
+	}
+
+	if (lockPressed) {
+		if (mPcLockTarget) {
+			mPcLockTarget = nullptr; // segunda pulsación suelta el objetivo
+		} else {
+			// El alcance sale del tamaño del propio enemigo, no de un radio
+			// fijo: con uno fijo se enganchaba al bicho más cercano al cursor
+			// aunque estuvieses apuntando a campo abierto.
+			Creature* best = nullptr;
+			f32 bestDist   = 0.0f;
+			Iterator iter(tekiMgr);
+			CI_LOOP(iter)
+			{
+				Creature* teki = *iter;
+				if (!teki->isTeki() || !teki->isAlive() || !teki->isVisible()) {
+					continue;
+				}
+				Vector3f sep = teki->mSRT.t - mCursorWorldPos;
+				f32 dist     = speedy_sqrtf(sep.x * sep.x + sep.z * sep.z);
+				f32 reach    = teki->getSize() + 12.0f;
+				if (dist > reach) {
+					continue;
+				}
+				if (!best || dist < bestDist) {
+					best     = teki;
+					bestDist = dist;
+				}
+			}
+			mPcLockTarget = best;
+			if (kDebug) {
+				fprintf(stderr, "[lock-on] objetivo=%p dist=%.1f\n", (void*)best, bestDist);
+				fflush(stderr);
+			}
+		}
+	}
+
+	pc_settings_note_lock_on(mPcLockTarget != nullptr);
+
+	if (mPcLockTarget && chargePressed && pc_settings_get_charge()) {
+		Iterator iterPiki(pikiMgr);
+		CI_LOOP(iterPiki)
+		{
+			Piki* piki = static_cast<Piki*>(*iterPiki);
+			if (piki->mNavi != this || !piki->isAlive()) {
+				continue;
+			}
+			// Solo los que están en formación: los que ya trabajan siguen a lo suyo.
+			if (piki->mActiveAction->mCurrActionIdx != PikiAction::Crowd) {
+				continue;
+			}
+			piki->pcChargeAt(mPcLockTarget);
+		}
+	}
+}
+#endif
+
+#if defined(PIKI_PC_PORT)
+/**
+ * @brief Clava el cursor en el objetivo fijado.
+ *
+ * mCursorPosition es un desplazamiento respecto al capitán, y de él salen el
+ * anillo, la estela y el destino del lanzamiento, así que fijarlo aquí deja
+ * todo eso pegado al enemigo sin tocar el dibujo.
+ */
+void Navi::pcPinCursorToLock()
+{
+	if (!mPcLockTarget) {
+		pcPinCursorFirstPerson();
+		return;
+	}
+	Vector3f offset = mPcLockTarget->mSRT.t - mSRT.t;
+	offset.y        = 0.0f;
+	mCursorPosition       = offset;
+	mCursorTargetPosition = offset;
+	mCursorNaviDist       = offset.length();
+}
+#endif
+
+/**
+ * @brief Mod "First Person": deja el cursor a distancia fija delante de la vista.
+ *
+ * Sin cabeceo libre no hay nada que trazar contra el suelo -- el rayo cortaría
+ * siempre a la misma distancia --, así que el cursor se coloca directamente a
+ * una distancia fija en la dirección en la que se mira. Se apunta girando. La
+ * altura la resuelve luego el propio juego, que pega el cursor al terreno.
+ *
+ * La distancia no la limita el tiro: `throwPiki` divide la distancia al cursor
+ * entre un tiempo de vuelo fijo, así que el Pikmin cae en el cursor esté donde
+ * esté. El tope es el mismo que en tercera persona, para no apuntar a sitios
+ * que la cámara no enseña.
+ */
+void Navi::pcPinCursorFirstPerson()
+{
+	if (!pc_first_person_active()) {
+		return;
+	}
+	Camera* cam = controlCamera();
+	if (!cam) {
+		return;
+	}
+
+	// mFocus solo se rellena en cooperativo; la matriz de vista está siempre
+	// al día. Su fila 2 es (ojo - objetivo) normalizado: hacia atrás.
+	Vector3f fwd(-cam->mLookAtMtx.mMtx[2][0], 0.0f, -cam->mLookAtMtx.mMtx[2][2]);
+	const f32 len = speedy_sqrtf(fwd.x * fwd.x + fwd.z * fwd.z);
+	if (len < 0.0001f) {
+		return;
+	}
+	fwd.x /= len;
+	fwd.z /= len;
+
+	const f32 reach = NAVI_PARM(mCursorMaxRadius) * 0.8f;
+	Vector3f offset(fwd.x * reach, 0.0f, fwd.z * reach);
+
+	mCursorPosition       = offset;
+	mCursorTargetPosition = offset;
+	mCursorNaviDist       = reach;
+}
+
 void Navi::update()
 {
+#if defined(PIKI_PC_PORT)
+	pcUpdateLockOn();
+#endif
 	if (!mGroundTriangle) {
 		f32 maxY = mapMgr->getMaxY(mSRT.t.x, mSRT.t.z, true);
 		if (maxY > mSRT.t.y) {
@@ -1078,7 +1259,18 @@ void Navi::update()
 	mPlateMgr->update();
 	updateWalkAnimation();
 	mWalkAnimPrevPos = mSRT.t;
+#if defined(PIKI_PC_PORT)
+	// Mod "Throw Speed". Se aplica aquí y no al fijar mMotionSpeed: la
+	// animación de andar lo repone a 30 en cada frame en que Olimar no camina.
+	f32 pcMotionSpeed = mMotionSpeed;
+	const int pcUpperMotion = mNaviAnimMgr.getUpperAnimator().getCurrentMotionIndex();
+	if (pcUpperMotion == PIKIANIM_Throw || pcUpperMotion == PIKIANIM_ThrowWait) {
+		pcMotionSpeed *= pc_settings_get_throw_speed_scale();
+	}
+	mNaviAnimMgr.updateAnimation(pcMotionSpeed);
+#else
 	mNaviAnimMgr.updateAnimation(mMotionSpeed);
+#endif
 
 	STACK_PAD_VAR(1);
 
@@ -1244,6 +1436,22 @@ void Navi::callPikis(f32 radius)
 					C_SAI(bomb)->procMsg(bomb, &msg);
 				}
 
+#if defined(PIKI_PC_PORT)
+				// Mod "Instant Whistle Response": lo que hacen el inicio y el
+				// final de LookAt (aviso, soltarse, pasar a formación) sin la
+				// espera aleatoria ni la animación de girarse a mirar.
+				if (pc_settings_get_instant_whistle()) {
+					SeSystem::playPlayerSe(SE_PIKI_CALLED);
+					seSystem->playPikiSound(SEF_PIKI_CALLED, piki->mSRT.t);
+					piki->endStickObject();
+					piki->endStick();
+					piki->changeMode(PikiMode::FormationMode, this);
+					if (piki->getState() != PIKISTATE_Normal) {
+						piki->mFSM->transit(piki, PIKISTATE_Normal);
+					}
+					continue;
+				}
+#endif
 				piki->mFSM->transit(piki, PIKISTATE_LookAt);
 			} else {
 				piki->mNavi             = this;
@@ -2015,6 +2223,19 @@ void Navi::makeVelocity(bool isSunset)
 	// El ratón y el cursor virtual van con el jugador que tiene el teclado;
 	// el otro usa siempre el modo clásico.
 	const bool mouseIsMine = mNaviID == pc_window_get_keyboard_owner();
+	// "Gyro Recenter": el cursor vuelve delante del capitán, en la dirección
+	// de la cámara, para corregir la deriva acumulada del giroscopio.
+	if (mouseIsMine && pc_gyro_take_recenter_cursor()) {
+		Vector3f fwd(-ctrlCam->mLookAtMtx.mMtx[2][0], 0.0f, -ctrlCam->mLookAtMtx.mMtx[2][2]);
+		const f32 len = speedy_sqrtf(fwd.x * fwd.x + fwd.z * fwd.z);
+		if (len > 0.0001f) {
+			const f32 reach = NAVI_PARM(mCursorMaxRadius) * 0.5f;
+			mCursorPosition.set(fwd.x / len * reach, 0.0f, fwd.z / len * reach);
+			mCursorTargetPosition = mCursorPosition;
+			mCursorNaviDist       = reach;
+		}
+		pc_window_clear_mouse_cursor_delta();
+	}
 	if (mouseIsMine
 	    && (pc_window_get_control_mode() == PC_CONTROL_MOUSE_CURSOR
 	        || pc_window_get_mouse_cursor_delta_x() != 0.0f
@@ -2056,6 +2277,7 @@ void Navi::makeVelocity(bool isSunset)
 		f32 dist              = targetPos.length();
 		mCursorNaviDist       = dist;
 		mCursorTargetPosition = targetPos;
+		pcPinCursorToLock();
 
 		// For cursor-facing logic: use delta magnitude (activity-based)
 		f32 moveStickMag = stickMag;
@@ -2125,6 +2347,9 @@ void Navi::makeVelocity(bool isSunset)
 	f32 dist              = targetPos.length();
 	mCursorNaviDist       = dist;
 	mCursorTargetPosition = targetPos;
+#if defined(PIKI_PC_PORT)
+	pcPinCursorToLock();
+#endif
 
 	// Use movement stick magnitude for movement-related checks
 	f32 moveStickMag = stickMag;
@@ -2194,8 +2419,11 @@ void Navi::makeCStick(bool isSunset)
 	// Swarm button (issue #29): with the C-stick idle, steer the squad at the
 	// cursor. The input is expressed in camera space here and rotated into
 	// the world below, so the world-space direction is rotated back first.
-	const bool swarmHeld = mNaviID == 0 ? pc_window_swarm_held() : pc_window_swarm_held_p2();
-	if (!isSunset && swarmHeld && cStickInput.length() < 0.05f) {
+	// Con el Charge activo el botón de swarm pasa a lanzar la carga contra el
+	// objetivo fijado, así que aquí deja de dirigir al pelotón.
+	const bool swarmIsCharge = pc_settings_get_charge() != 0;
+	const bool swarmHeld     = mNaviID == 0 ? pc_window_swarm_held() : pc_window_swarm_held_p2();
+	if (!isSunset && !swarmIsCharge && swarmHeld && cStickInput.length() < 0.05f) {
 		NVector3f toCursor(mCursorWorldPos.x - mSRT.t.x, 0.0f, mCursorWorldPos.z - mSRT.t.z);
 		if (toCursor.length() > 1.0f) {
 			toCursor.normalise();
@@ -2508,8 +2736,14 @@ void Navi::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 	const GXColor hdTint = pcTint();
 	if (tinted) pc_gfx_set_mat_color_tint(hdTint);
 	// Louie: primero el pack HD de Pikmin 3, si no el de Pikmin 2; Olimar HD o el original.
-	bool drawn = false;
-	if (pcCaptain() == PC_CAPTAIN_LOUIE) {
+	// Mod "First Person": la cámara está dentro de la cabeza del capitán, así
+	// que dibujarlo llena la pantalla con su nuca. Solo se oculta el que
+	// controla el jugador; en cooperativo el otro se sigue viendo. Se salta
+	// solo el dibujado: la animación y updateInfo siguen corriendo, y de ahí
+	// salen las esferas de colisión (sin ellas no se abre la cebolla).
+	bool drawn = mNaviID == 0 && pc_first_person_active();
+	if (drawn) {
+	} else if (pcCaptain() == PC_CAPTAIN_LOUIE) {
 		drawn = pc_hd_model_draw_skinned(gfx, mNaviShapeObject->mShape, PC_HD_MODEL_LOUIE_HD, hdTint)
 		     || pc_hd_model_draw_skinned(gfx, mNaviShapeObject->mShape, PC_HD_MODEL_LOUIE, hdTint);
 	} else {
@@ -2601,18 +2835,18 @@ void Navi::renderCircle(Graphics& gfx)
 	switch (mWhistleCircleMode) {
 	case 0:
 	{
-		rad = NAVI_PARM(mWhistleMinRadius) + mWhistleRadiusFrac * (NAVI_PARM(mWhistleMaxRadius) - NAVI_PARM(mWhistleMinRadius));
+		rad = NAVI_PARM(mWhistleMinRadius) + mWhistleRadiusFrac * (NAVI_WHISTLE_MAX_RADIUS(this) - NAVI_PARM(mWhistleMinRadius));
 		break;
 	}
 	case 1:
 	{
 		tmp = (mWhistleTimer / NAVI_PARM(mWhistleExpandTime));
-		rad = NAVI_PARM(mWhistleMinRadius) + tmp * (NAVI_PARM(mWhistleMaxRadius) - NAVI_PARM(mWhistleMinRadius));
+		rad = NAVI_PARM(mWhistleMinRadius) + tmp * (NAVI_WHISTLE_MAX_RADIUS(this) - NAVI_PARM(mWhistleMinRadius));
 		break;
 	}
 	default:
 	{
-		rad = NAVI_PARM(mWhistleMinRadius) + mWhistleRadiusFrac * (NAVI_PARM(mWhistleMaxRadius) - NAVI_PARM(mWhistleMinRadius));
+		rad = NAVI_PARM(mWhistleMinRadius) + mWhistleRadiusFrac * (NAVI_WHISTLE_MAX_RADIUS(this) - NAVI_PARM(mWhistleMinRadius));
 		break;
 	}
 	}
@@ -3053,7 +3287,16 @@ void Navi::throwPiki(Piki* piki, immut Vector3f& pos)
 
 	piki->mVelocity.set(hSpeed * sinf(throwAngle), vSpeed, hSpeed * cosf(throwAngle));
 
-	piki->mVelocity       = piki->mVelocity + mVelocity;
+	// El lanzamiento hereda el impulso del capitán, que con él en marcha
+	// desvía al Pikmin hacia donde se mueve. Con un objetivo fijado eso
+	// contradice el sentido del Lock-On: el tiro va al enemigo y punto.
+#if defined(PIKI_PC_PORT)
+	if (!mPcLockTarget) {
+		piki->mVelocity = piki->mVelocity + mVelocity;
+	}
+#else
+	piki->mVelocity = piki->mVelocity + mVelocity;
+#endif
 	piki->mTargetVelocity = piki->mVelocity;
 	piki->mVolatileVelocity.set(0.0f, 0.0f, 0.0f);
 }

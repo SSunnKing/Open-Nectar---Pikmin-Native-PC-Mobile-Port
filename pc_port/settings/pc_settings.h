@@ -57,6 +57,53 @@ int pc_settings_get_shadows(void);
 // breaks it and then carries the pellet to the Onion. Off by default, so the
 // stock port stays faithful.
 int pc_settings_get_chain_actions(void);
+int pc_settings_get_better_pathfinding(void);
+int pc_settings_get_blues_only_water(void);
+int pc_settings_get_idle_counter(void);
+/// Vida como porcentaje de la original (100 = sin cambio). Se aplica como
+/// divisor del daño entrante, no redimensionando la barra de vida.
+int pc_settings_get_navi_health_pct(void);
+int pc_settings_get_teki_health_pct(void);
+int pc_settings_get_infinite_day(void);
+int pc_settings_get_free_camera(void);
+/// Radio máximo del silbato, % del original (100 = sin cambio).
+int pc_settings_get_whistle_radius_pct(void);
+/// Multiplicador de la velocidad de las animaciones de coger y lanzar (1 = original).
+float pc_settings_get_throw_speed_scale(void);
+/// B con un Pikmin en la mano (A sujeto) lo devuelve al grupo.
+int pc_settings_get_throw_cancel_b(void);
+/// Los Pikmin del grupo no tropiezan al correr.
+int pc_settings_get_no_trip(void);
+/// En el menú de la cebolla, Y + arriba/abajo mueve de 10 en 10.
+int pc_settings_get_onion_step10(void);
+/// Los Pikmin silbados se unen al grupo al instante, sin la reacción de LookAt.
+int pc_settings_get_instant_whistle(void);
+/// Apuntado con giroscopio (mandos compatibles y el sensor del móvil).
+int pc_settings_get_gyro_enabled(void);
+float pc_settings_get_gyro_sensitivity(void);
+int pc_settings_get_gyro_invert(void); ///< bit 0 horizontal, bit 1 vertical
+void pc_settings_get_gyro_bias(float out[3]);
+void pc_settings_set_gyro_bias(const float bias[3]);
+int pc_settings_get_lock_on(void);
+int pc_settings_get_charge(void);
+int pc_settings_get_throw_while_moving(void);
+int pc_settings_get_first_person(void);
+/// Estado en marcha de la vista en primera persona (la fila de Mods solo la
+/// habilita; la tecla bindeable entra y sale de ella).
+int pc_first_person_active(void);
+void pc_first_person_toggle(void);
+/// Daño a un enemigo, ya escalado por "Enemy Health".
+float pc_mods_teki_damage(float damage);
+/// Contador de Pikmin ociosos sobre el juego. Lo llama vi_stubs en el retrace,
+/// antes del overlay F1, para que el menú quede por encima.
+void pc_settings_draw_idle_counter(void);
+/// Latido del bucle de juego: lo llama newPikiGame en cada tick de simulación.
+/// Sin él, el contador de ociosos seguiría dibujándose en los menús, porque
+/// GameStat::freePikis conserva su valor al salir de la fase.
+void pc_settings_note_gameplay_frame(void);
+/// Estado del Lock-On para el HUD: lo fija Navi cada frame.
+void pc_settings_note_lock_on(int hasTarget);
+void pc_settings_draw_lock_on(void);
 
 // Returns 1 while hold-to-continue-plucking is enabled, 0 otherwise.
 //

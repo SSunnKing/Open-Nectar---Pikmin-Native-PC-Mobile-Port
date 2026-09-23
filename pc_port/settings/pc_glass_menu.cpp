@@ -33,6 +33,8 @@ constexpr int kScreenW = 640, kScreenH = 480;
 constexpr int kListPanelX = 127, kListPanelY = 231, kListPanelW = 400, kListPanelH = 196;
 constexpr int kTitleX = 238, kTitleY = 220, kTitleW = 164, kTitleH = 46;
 constexpr int kListRowH = 24, kListVisible = 6;
+// Ayuda de la fila seleccionada, en una placa bajo el cristal (dentro no cabe).
+constexpr int kHelpX = kListPanelX, kHelpY = kListPanelY + kListPanelH + 3, kHelpW = kListPanelW, kHelpH = 44;
 constexpr int kFontW = 12, kFontH = 17;
 constexpr int kBigFontW = 26, kBigFontH = 30;
 
@@ -40,6 +42,8 @@ const Colour kSelDark(255, 150, 0, 255);
 const Colour kText(205, 240, 255, 255);
 const Colour kDim(150, 175, 200, 255);
 const Colour kHelp(160, 185, 215, 255);
+const Colour kOff(95, 115, 135, 255);     // fila desactivada
+const Colour kSelOff(170, 120, 60, 255);  // fila desactivada y seleccionada
 
 int textW(const char* t, int fw) { return pc_settings_p2d_text_width(t, fw); }
 
@@ -93,11 +97,7 @@ bool inRect(const Rect& r, int x, int y) { return x >= r.x && x < r.x + r.w && y
 
 // Entrada ----------------------------------------------------------------------
 
-const char* listTitle()
-{
-	if (sGroup == PC_SET_PICKER_RESOLUTION) return "Resolution";
-	return pc_settings_group_name(sGroup);
-}
+const char* listTitle() { return pc_settings_group_name(sGroup); }
 
 void openPicker(int picker)
 {
@@ -178,8 +178,10 @@ void inputList(const PcNavEdges& e)
 	}
 	const int picker = pc_settings_row_opens_picker(sGroup, sRowSel);
 	if (picker && (ok || right)) { openPicker(picker); return; }
-	// Los selectores de packs/modelos y las acciones solo responden a A.
-	if (sGroup == PC_SET_PICKER_TEXPACKS || sGroup == PC_SET_PICKER_HDMODELS || sGroup == PC_SET_GROUP_SAVEDATA) {
+	// Las filas desactivadas no cambian (la ayuda dice qué activar antes).
+	if (!pc_settings_row_enabled(sGroup, sRowSel)) return;
+	// Las acciones (packs, modelos, exportar, calibrar...) solo responden a A.
+	if (pc_settings_row_is_action(sGroup, sRowSel)) {
 		if (ok) pc_settings_row_change(sGroup, sRowSel, 0, true);
 		return;
 	}
@@ -189,6 +191,36 @@ void inputList(const PcNavEdges& e)
 }
 
 // Dibujo -----------------------------------------------------------------------
+
+// Explicación de la fila seleccionada, partida en dos líneas si no cabe.
+void drawRowHelp()
+{
+	const char* text = pc_settings_row_help(sGroup, sRowSel);
+	if (!text || !text[0]) return;
+	constexpr int fw = 10, fh = 14;
+	const int maxW = kHelpW - 24;
+	char l1[200], l2[200];
+	l1[0] = l2[0] = '\0';
+	if (textW(text, fw) <= maxW) {
+		snprintf(l1, sizeof(l1), "%s", text);
+	} else {
+		size_t cut = 0;
+		for (size_t i = 0; text[i] && i < sizeof(l1) - 1; i++) {
+			if (text[i] != ' ') continue;
+			snprintf(l1, sizeof(l1), "%.*s", (int)i, text);
+			if (textW(l1, fw) > maxW) break;
+			cut = i;
+		}
+		if (cut == 0) cut = strlen(text);
+		snprintf(l1, sizeof(l1), "%.*s", (int)cut, text);
+		snprintf(l2, sizeof(l2), "%s", text[cut] ? text + cut + 1 : "");
+	}
+	pc_settings_p2d_plate(kHelpX, kHelpY, kHelpW, kHelpH, 1);
+	const bool on = pc_settings_row_enabled(sGroup, sRowSel);
+	const Colour c = on ? kText : Colour(255, 190, 110, 255);
+	textCentered(kHelpX + kHelpW / 2, kHelpY + (l2[0] ? 6 : 14), l1, c, fw, fh);
+	if (l2[0]) textCentered(kHelpX + kHelpW / 2, kHelpY + 23, l2, c, fw, fh);
+}
 
 void drawList()
 {
@@ -206,11 +238,14 @@ void drawList()
 		const int i  = sScroll + v;
 		Rect r       = listRow(v);
 		const bool s = i == sRowSel;
+		const bool on = pc_settings_row_enabled(sGroup, i);
 		if (s) pc_settings_p2d_plate(r.x - 4, r.y, r.w + 8, r.h - 2, 2);
 		char value[128];
 		pc_settings_row_value(sGroup, i, value, sizeof(value));
-		pc_settings_p2d_text(r.x + 6, r.y + 2, pc_settings_row_label(sGroup, i), s ? kSelDark : kText, kFontW, kFontH);
-		pc_settings_p2d_text(r.x + r.w - 6 - textW(value, kFontW), r.y + 2, value, s ? kSelDark : kDim, kFontW, kFontH);
+		const Colour label = !on ? (s ? kSelOff : kOff) : (s ? kSelDark : kText);
+		const Colour val   = !on ? (s ? kSelOff : kOff) : (s ? kSelDark : kDim);
+		pc_settings_p2d_text(r.x + 6, r.y + 2, pc_settings_row_label(sGroup, i), label, kFontW, kFontH);
+		pc_settings_p2d_text(r.x + r.w - 6 - textW(value, kFontW), r.y + 2, value, val, kFontW, kFontH);
 	}
 	if (hasScrollbar() && !modal) {
 		// Carril + pulgar proporcional (visibles/total), como en una página web.
@@ -241,14 +276,16 @@ void drawList()
 	} else {
 		char notice[256];
 		bool isError = false;
-		const char* help = sGroup >= PC_SET_PICKER_RESOLUTION || sGroup == PC_SET_GROUP_SAVEDATA
+		const bool bindings = sGroup == PC_SET_PICKER_KEYBOARD || sGroup == PC_SET_PICKER_GAMEPAD;
+		const char* help = bindings ? "A: rebind    Left/Right: default    B/Esc: back"
+		                 : (sGroup >= PC_SET_PICKER_RESOLUTION || pc_settings_row_is_action(sGroup, sRowSel))
 		                     ? "A: select    Up/Down: move    B/Esc: back"
-		                     : (sGroup == PC_SET_GROUP_CONTROLS ? "A: rebind    Left/Right: default    B/Esc: back"
-		                                                        : "Left/Right: change    A: open    B/Esc: back");
+		                     : "Left/Right: change    A: open    B/Esc: back";
 		if (pc_settings_notice(notice, sizeof(notice), &isError))
 			textCentered(p.x + p.w / 2, p.y + p.h - 20, notice, isError ? Colour(255, 150, 140, 255) : Colour(160, 240, 180, 255), 10, 14);
 		else
 			textCentered(p.x + p.w / 2, p.y + p.h - 20, help, kHelp, 10, 14);
+		drawRowHelp();
 	}
 }
 
@@ -296,6 +333,7 @@ void pc_glass_menu_draw(void)
 	pc_gfx_set_ui_43_no_bars(1);
 	pc_gfx_blur_gx_rect(kListPanelX + 6, kListPanelY + 6, kListPanelW - 12, kListPanelH - 12, 3);
 	pc_gfx_blur_gx_rect(kTitleX + 8, kTitleY + 8, kTitleW - 16, kTitleH - 16, 3);
+	pc_gfx_blur_gx_rect(kHelpX + 6, kHelpY + 6, kHelpW - 12, kHelpH - 12, 3);
 	Matrix4f ortho;
 	gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, kScreenW, kScreenH));
 	drawList();

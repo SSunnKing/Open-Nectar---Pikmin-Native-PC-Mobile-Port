@@ -11,6 +11,9 @@
 #include "ViewPiki.h"
 #include "gameflow.h"
 #include <stdlib.h>
+#if defined(PIKI_PC_PORT)
+#include "settings/pc_settings.h"
+#endif
 
 static bool newVer = true;
 
@@ -313,7 +316,11 @@ int ActCrowd::exec()
 
 		// idk why they did this in two rand checks, but go figure
 		// approximately a 0.003% chance of tripping
-		if (gsys->getRand(1.0f) >= 0.9999f && gsys->getRand(1.0f) > 0.7f) {
+		if (gsys->getRand(1.0f) >= 0.9999f && gsys->getRand(1.0f) > 0.7f
+#if defined(PIKI_PC_PORT)
+		    && !pc_settings_get_no_trip() // Mod "No Tripping"
+#endif
+		) {
 			mIsTripping      = true;
 			mTripLoopCounter = int((4.0f * gsys->getRand(1.0f))) + 3; // length of trip is a random number of anim loops, between 3 and 7
 			mPiki->startMotion(PaniMotionInfo(PIKIANIM_Korobu, mPiki), PaniMotionInfo(PIKIANIM_Korobu));

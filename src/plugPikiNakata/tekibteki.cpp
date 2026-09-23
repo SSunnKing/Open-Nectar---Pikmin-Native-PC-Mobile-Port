@@ -1,3 +1,4 @@
+#include "settings/pc_settings.h"
 #include "teki.h"
 #include "AIConstant.h"
 #include "AIPerf.h"
@@ -780,7 +781,7 @@ f32 BTeki::getTekiCollisionSize()
  */
 void BTeki::makeDamaged()
 {
-	mHealth -= mStoredDamage;
+	mHealth -= pc_mods_teki_damage(mStoredDamage);
 	if (mHealth < 0.0f) {
 		mHealth = 0.0f;
 	}

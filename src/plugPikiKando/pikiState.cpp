@@ -18,6 +18,9 @@
 #include "PikiAI.h"
 #include "PikiHeadItem.h"
 #include "PikiMgr.h"
+#if defined(PIKI_PC_PORT)
+#include "settings/pc_settings.h"
+#endif
 #include "PlayerState.h"
 #include "RumbleMgr.h"
 #include "SoundMgr.h"
@@ -1694,6 +1697,12 @@ void PikiGoHangState::exec(Piki* piki)
 	if (dist > 2.0f * C_NAVI_PARM(piki->mNavi, mPluckGrabRange)) {
 		speedFactor = 2.0f;
 	}
+#if defined(PIKI_PC_PORT)
+	// Mod "Throw Speed": el Pikmin que va a la mano corre en proporción.
+	if (pc_settings_get_throw_speed_scale() > 1.0f) {
+		speedFactor *= pc_settings_get_throw_speed_scale();
+	}
+#endif
 	piki->mTargetVelocity = dir * C_PIKI_PARM(piki, mMaxLeafMoveSpeed) * speedFactor;
 	if (piki->mNavi->getCurrState()->getID() != NAVISTATE_ThrowWait) {
 		transit(piki, PIKISTATE_Normal);

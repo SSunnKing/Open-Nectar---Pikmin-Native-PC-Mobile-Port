@@ -2537,17 +2537,18 @@ bool zen::DrawWorldMap::update(Controller* controller)
 void zen::DrawWorldMap::draw(Graphics& gfx)
 {
 	if (mCurrentMode != DrawWorldMapMode::Diary) {
-		mBackScreen->draw();
 #if defined(PIKI_PC_PORT)
 		// Las pantallas del mapa dibujan con el ortho 640x480 por defecto.
 		pc_gfx_note_menu_tap_space(640, 480);
 		// Los .blo del mapa guardan paneles fuera del 640x480 (ventanas que
 		// entran deslizándose, marcos en su posición de reposo). En 4:3 nunca
 		// se veían; en el marco ancho asomaban por los lados como bandas
-		// translúcidas. Solo el fondo se deja desbordar; el resto se recorta
-		// al 640x480, como el título y el selector de fichero.
+		// translúcidas. El fondo también se recorta (issue #46): su degradado
+		// y la placa de cristal de arriba asomaban por los lados. Queda con
+		// bandas negras, como el título y el selector de fichero.
 		pc_gfx_set_menu_clip_43(1);
 #endif
+		mBackScreen->draw();
 		mLineScreen->draw();
 		mPointScreen->draw();
 		mData1Screen->draw();

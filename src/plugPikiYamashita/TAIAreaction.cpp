@@ -1,3 +1,4 @@
+#include "settings/pc_settings.h"
 #include "DebugLog.h"
 #include "MapCode.h"
 #include "PikiState.h"
@@ -203,7 +204,7 @@ bool TAIAinWaterDamage::act(Teki& teki)
 {
 	bool res = TAIAinWater::act(teki);
 	if (res) {
-		teki.mHealth -= gsys->getFrameTime() * mDamage;
+		teki.mHealth -= pc_mods_teki_damage(gsys->getFrameTime() * mDamage);
 	}
 
 	if (_0C) {
@@ -243,7 +244,7 @@ bool TAIAinWaterDamage::actByEvent(immut TekiEvent& event)
 	bool res = TAIAinWater::actByEvent(event);
 	if (res) {
 		Teki* teki = event.mTeki;
-		teki->mHealth -= gsys->getFrameTime() * mDamage;
+		teki->mHealth -= pc_mods_teki_damage(gsys->getFrameTime() * mDamage);
 	}
 
 	return res;

@@ -385,7 +385,11 @@ void GameCoreSection::endMovie(int movieIdx)
 		cameraMgr->update();
 	}
 #if defined(PIKI_PC_PORT)
-	naviMgr->setMovieNavi(nullptr);
+	// Issues #47/#48: la escena de fin de día termina después de exitStage(),
+	// que ya ha puesto naviMgr a nullptr al desmontar la fase.
+	if (naviMgr) {
+		naviMgr->setMovieNavi(nullptr);
+	}
 #endif
 
 	STACK_PAD_VAR(6);
@@ -1878,7 +1882,15 @@ void GameCoreSection::update()
 #if defined(PIKI_PC_PORT)
 	// Los textos de tutorial muestran los controles del jugador que los
 	// disparó (setMovieNavi se fija en cada disparador, fase 2).
-	pc_window_set_prompt_player(mNavi2 ? naviMgr->getMovieNavi()->mNaviID : -1);
+	Navi* promptNavi = (mNavi2 && naviMgr) ? naviMgr->getMovieNavi() : nullptr;
+	pc_window_set_prompt_player(promptNavi ? promptNavi->mNaviID : -1);
+
+	// Issue #40: con una escena, un texto (la nave, un tutorial) o la pausa en
+	// pantalla, Navi no lee el ratón y su movimiento se acumula. Al volver, el
+	// cursor salía disparado todo lo acumulado. Se descarta mientras dura.
+	if (gameflow.mMoviePlayer->mIsActive || gameflow.mIsUIOverlayActive || gameflow.mPauseAll) {
+		pc_window_clear_mouse_cursor_delta();
+	}
 #endif
 
 
@@ -2457,7 +2469,7 @@ void GameCoreSection::drawDownedLabel(Graphics& gfx, Navi* navi, f32 viewAspect)
 	gfx.setScissor(RectArea(0, 0, virtW, virtH));
 	gfx.setFog(false);
 	gfx.useTexture(nullptr, GX_TEXMAP0);
-	const char* text = pc_settings_get_language() == 3 ? "OLIMAR CAIDO" : "OLIMAR DOWN";
+	const char* text = "OLIMAR DOWN";
 	const int textW  = gsys->mConsFont->stringWidth(text);
 	const int x      = (virtW - textW) / 2;
 	const int y      = virtH / 2 - gsys->mConsFont->mCharHeight / 2;
@@ -2499,7 +2511,7 @@ void GameCoreSection::beginView(Graphics& gfx, int view, f32 farClip)
 	const f32 shift       = 0.5f * mSplitBlend * (viewSide(view) == 0 ? 1.0f : -1.0f);
 	pc_gfx_set_proj_offset(horizontal ? 0.0f : -shift, horizontal ? shift : 0.0f);
 	gfx.setCamera(cam);
-	cam->update(pc_gfx_get_window_aspect_ratio(), cam->mFov, 100.0f, farClip);
+	cam->update(pc_gfx_get_window_aspect_ratio(), cam->mFov, pc_first_person_active() ? 3.0f : 100.0f, farClip);
 	gfx.setViewport(AREA_FULL_SCREEN(gfx));
 	gfx.setScissor(currentViewRect(gfx));
 	// initRender() vacía luces y shapes cacheadas una vez por frame; cada

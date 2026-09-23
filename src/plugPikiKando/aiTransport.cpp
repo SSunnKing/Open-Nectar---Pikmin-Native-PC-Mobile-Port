@@ -18,6 +18,7 @@
 #include "PlayerState.h"
 #include "SoundMgr.h"
 #include "Stickers.h"
+#include "settings/pc_settings.h"
 #include "UfoItem.h"
 #include "UtilityKando.h"
 #include "bugprint.h"
@@ -1556,6 +1557,39 @@ int ActTransport::moveToWayPoint()
 		mPiki->endStickObject();
 		return ACTOUT_Continue;
 	}
+
+#if defined(PIKI_PC_PORT)
+	// Mod "Better Pathfinding". A carry party wedged against geometry keeps
+	// pushing at the same waypoint forever, because the route is only rebuilt
+	// when a waypoint closes, never when the party simply stops moving. Watch
+	// the pellet: if it has not covered any ground for a few seconds, rebuild
+	// the route from where it actually is.
+	if (pc_settings_get_better_pathfinding() && isStickLeader()) {
+		const f32 kStallSeconds = 3.0f;
+		const f32 kStallDistSq  = 100.0f; // 10 units of travel is "moving"
+		Vector3f here           = pel->mSRT.t;
+		if (!mPcStallArmed) {
+			mPcStallCheckPos = here;
+			mPcStallTimer    = 0.0f;
+			mPcStallArmed    = true;
+		} else {
+			mPcStallTimer += gsys->getFrameTime();
+			Vector3f delta = here - mPcStallCheckPos;
+			delta.y        = 0.0f;
+			if (delta.x * delta.x + delta.z * delta.z > kStallDistSq) {
+				mPcStallCheckPos = here;
+				mPcStallTimer    = 0.0f;
+			} else if (mPcStallTimer > kStallSeconds) {
+				mPcStallTimer    = 0.0f;
+				mPcStallCheckPos = here;
+				doLift();
+				return ACTOUT_Continue;
+			}
+		}
+	} else {
+		mPcStallArmed = false;
+	}
+#endif
 
 	if (isStickLeader() && mPathIndex != -1) {
 		if (!mCanCarry) {

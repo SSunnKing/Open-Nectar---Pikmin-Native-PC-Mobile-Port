@@ -73,6 +73,8 @@ public:
 
 protected:
 	u32 calcChecksum(void*, u32);
+	u32 calcChecksumLegacy(void*, u32);
+	bool checksumMatches(void*, u32, u32);
 	void waitPolling();
 	void createFile(CARDStat&);
 	void writeOneBanner();

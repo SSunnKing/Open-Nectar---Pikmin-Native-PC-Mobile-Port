@@ -2,6 +2,9 @@
 #include "FormationMgr.h"
 #include "Navi.h"
 #include "PikiAI.h"
+#if defined(PIKI_PC_PORT)
+#include "settings/pc_settings.h"
+#endif
 
 /**
  * @todo: Documentation
@@ -196,6 +199,9 @@ int ActFormation::exec()
 	}
 
 	if (!mIsIdling && !mIsOnFloorTripped && gsys->getRand(1.0f) > 0.99f && gsys->getRand(1.0f) > 0.99f
+#if defined(PIKI_PC_PORT)
+	    && !pc_settings_get_no_trip() // Mod "No Tripping"
+#endif
 	    && mPiki->mVelocity.length() > mPiki->getSpeed(0.5f)) {
 		mPiki->mPikiAnimMgr.finishMotion(this);
 		mIsTripping       = FALSE;

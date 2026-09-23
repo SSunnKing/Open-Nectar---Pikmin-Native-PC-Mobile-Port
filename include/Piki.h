@@ -120,6 +120,12 @@ public:
 	virtual void wallCallback(immut Plane&, DynCollObject*);   // _B4
 	virtual void offwallCallback(DynCollObject*);              // _B8
 	virtual void stickToCallback(Creature*);                   // _C4
+#if defined(PIKI_PC_PORT)
+	bool pcStepOutOfWater();
+	void pcChargeAt(Creature* target);
+	Vector3f mPcLastDryPos;
+	bool mPcHasDryPos = false;
+#endif
 	virtual void dump();                                       // _C8
 	virtual bool isRopable();                                  // _D4
 	virtual bool mayIstick();                                  // _D8

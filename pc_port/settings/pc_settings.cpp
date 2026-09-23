@@ -40,6 +40,7 @@
 #include <mutex>
 
 #include "pc_window.h"
+#include "pc_gyro.h"
 #include "pc_permadeath.h"
 #include "pc_coop.h"
 #include "pc_art.h"
@@ -50,6 +51,7 @@
 #include "gl/pc_gfx.h"
 #include "gl/pc_postprocess.h"
 #include "Graphics.h"
+#include "GameStat.h"
 #include "Font.h"
 #include "Colour.h"
 #include "Matrix4f.h"
@@ -86,6 +88,12 @@ struct PcConfig {
     // Mouse sensitivity (0.1 - 5.0, default 1.0)
     float mouseSensitivity = 1.0f;
 
+    // Gyro aiming (compatible pads and the Android device's own sensor).
+    int gyroEnabled = 0;
+    float gyroSensitivity = 1.0f; // 0.1 - 5.0
+    int gyroInvert = 0;           // bit 0 = horizontal, bit 1 = vertical
+    float gyroBias[3] = { 0.0f, 0.0f, 0.0f }; // rad/s, measured by Calibrate
+
     // Stick dead zone (0 - 127, default 8)
     int stickDeadZone = 8;
 
@@ -103,6 +111,36 @@ struct PcConfig {
     int chainActions = 0;
     // Hold Extract to keep plucking (0=off/faithful, 1=on). Off by default.
     int holdToPluck = 0;
+    // Mod: unstick Pikmin that stop making progress along a route (0=off, 1=on).
+    int betterPathfinding = 0;
+    // Mod: a non-blue Pikmin that wanders into water on its own is pushed back
+    // to dry land instead of drowning. Being thrown in still drowns it.
+    int bluesOnlyWater = 0;
+    // Mod: show how many Pikmin are idle on the map (0=off, 1=on).
+    int idleCounter = 0;
+    // Mods: health as a percentage of the original. Applied as a divisor on
+    // incoming damage rather than by resizing the health bar, so the life
+    // gauge and every "below a quarter" check keep reading correctly.
+    int naviHealthPct = 100;
+    int tekiHealthPct = 100;
+    // Mod: the playable day never advances (0=off, 1=on).
+    int infiniteDay = 0;
+    // Mod: free camera. Shift + mouse orbits on keyboard, the right stick
+    // orbits on a pad, and the squad moves to the Swarm button.
+    int freeCamera = 0;
+    int whistleRadiusPct = 100; // radio máximo del silbato, % del original
+    int throwSpeedPct = 100;    // velocidad de las animaciones de coger y lanzar
+    int throwCancelB = 0;       // B con un Pikmin en la mano lo devuelve al grupo
+    int noTrip = 0;             // los Pikmin no tropiezan al correr
+    int onionStep10 = 0;        // Y + arriba/abajo en la cebolla mueve de 10 en 10
+    int instantWhistle = 0;     // los Pikmin silbados se unen sin la reacción de girarse
+    // Mods de Pikmin 3: fijar objetivo, y mandar el escuadrón contra él.
+    int lockOn = 0;
+    int charge = 0;
+    // Mod: cerrar el relevo del lanzamiento con el capitán en marcha.
+    int throwWhileMoving = 0;
+    // Mod: vista en primera persona, conmutada en marcha con su propia tecla.
+    int firstPerson = 0;
     // What the mouse wheel does: 0 = pick the Pikmin colour to throw,
     // 1 = zoom the camera. One setting rather than two toggles, so the two
     // uses cannot both be on or both be off.
@@ -161,11 +199,32 @@ struct PcConfig {
         fpsMode = 0;
         controlMode = PC_CONTROL_CLASSIC;
         mouseSensitivity = 1.0f;
+        gyroEnabled = 0;
+        gyroSensitivity = 1.0f;
+        gyroInvert = 0;
+        gyroBias[0] = gyroBias[1] = gyroBias[2] = 0.0f;
         stickDeadZone = 8;
         stickInvert = 0;
         cStickInvert = 0;
         chainActions = 0;
         holdToPluck = 0;
+        betterPathfinding = 0;
+        bluesOnlyWater = 0;
+        idleCounter = 0;
+        naviHealthPct = 100;
+        tekiHealthPct = 100;
+        infiniteDay = 0;
+        freeCamera = 0;
+        whistleRadiusPct = 100;
+        throwSpeedPct = 100;
+        throwCancelB = 0;
+        noTrip = 0;
+        onionStep10 = 0;
+        instantWhistle = 0;
+        lockOn = 0;
+        charge = 0;
+        throwWhileMoving = 0;
+        firstPerson = 0;
         mouseWheelAction = 0;
         pikiLimit = 100;
         dayMinutes = 10;
@@ -249,17 +308,14 @@ enum Row {
     // disc the row would be a control with one position.
     ROW_LANGUAGE,
 #endif
-    ROW_CONTROLS,
-    ROW_GAMEPAD,
-    ROW_ADVANCED,
-    ROW_GRAPHICS,
-    ROW_MODS,
-    ROW_SAVE_DATA,
-    ROW_RESET,
-    ROW_SAVE,
-    ROW_CLOSE,
-    ROW_COUNT,
+    ROW_DISPLAY_COUNT, ///< filas del grupo Display (el resto son grupos en pc_settings_rows)
 };
+
+// Lista principal de F1: un grupo por fila (PcSettingsGroup) y "Close".
+constexpr int kMainCloseRow = PC_SET_GROUP_COUNT;
+constexpr int kMainRowCount = PC_SET_GROUP_COUNT + 1;
+constexpr int kMainListTop = 58;   // primera fila, desde el borde superior del panel
+constexpr int kMainRowPitch = 30;  // nombre del grupo a la izquierda, resumen a la derecha
 
 // La lista de resoluciones se construye en ejecucion a partir de lo que el
 // monitor declara, en vez de la tabla fija que habia antes (un 4:3 y seis
@@ -319,21 +375,9 @@ bool sInGamepadSubmenu = false;
 int sGamepadSelection = 0;
 bool sWaitingForButton = false;
 
-// Advanced settings submenu state.
-bool sInAdvancedSubmenu = false;
-int sAdvancedSelection = 0; // 0=sensitivity, 1=dead zone, 2=stick invert, 3=c-stick invert
-constexpr int kAdvancedRowCount = 4;
-
-// Graphics submenu state. Everything here changes how the game *looks* without
-// changing how it plays, which is why it is kept apart from Mods: someone
-// chasing frame rate and someone chasing fidelity are looking for different
-// pages, and neither wants the other's rows in the way.
-//
-// Every effect is switchable. The port runs on modest hardware -- the
-// reference machine is a GTX 1050 -- so nothing here may be mandatory.
-bool sInGraphicsSubmenu = false;
-int sGraphicsSelection = 0;
-constexpr int kGraphicsRowCount = 14; // 12 = Lighting, 13 = Shadows
+// Grupo abierto desde la lista principal (-1 = ninguno) y su fila.
+int sOpenGroup = -1;
+int sGroupSel = 0;
 
 // Texture packs submenu state (PLAN_TEXTURAS_HD fase 2). La instalación la
 // hace el selector de archivos de Android y termina en un hilo Java; el
@@ -359,8 +403,6 @@ constexpr Uint32 kTexturePackNoticeTimeoutMs = 6000;
 // Submenú "Save Data" (issue #36): exportar/importar la tarjeta de memoria en
 // Android a través del selector SAF. El .zip lo escribe Java en un hilo; el
 // resultado llega por pc_save_transfer_finished() y se pinta aquí.
-bool sInSaveDataSubmenu = false;
-int sSaveDataSelection = 0;         // 0 = exportar, 1 = importar
 std::atomic<bool> sSaveTransferActive{false}; // picker abierto o transferencia en curso (hilo Java)
 
 void texturePackNotice(bool error, const char* message)
@@ -380,18 +422,6 @@ constexpr int kBrightnessStopCount = int(sizeof(kBrightnessStops) / sizeof(kBrig
 constexpr float kSaturationStops[] = { 0.0f, 0.5f, 0.8f, 1.0f, 1.2f, 1.5f, 2.0f };
 constexpr int kSaturationStopCount = int(sizeof(kSaturationStops) / sizeof(kSaturationStops[0]));
 
-// Mods submenu state. Everything here changes how the game *plays* rather than
-// how it looks or reads input hardware, so it lives apart from the rest: a
-// player who wants the original experience only has to leave this one page
-// alone.
-bool sInModsSubmenu = false;
-int sModsSelection = 0;
-#if PIKI_DEBUG_KEYS
-constexpr int kModsRowCount = 9;
-#else
-// The debug row is the last one, so leaving it off simply shortens the list.
-constexpr int kModsRowCount = 8;
-#endif
 
 // Field-limit stops. 100 is what the original game uses.
 constexpr int kPikiLimits[]   = { 50, 100, 150, 200, 300, 500, 750, 999 };
@@ -402,6 +432,47 @@ constexpr int kPikiLimitCount = int(sizeof(kPikiLimits) / sizeof(kPikiLimits[0])
 // the menu shows the half the player experiences. 10 is the original.
 constexpr int kDayMinutes[]    = { 5, 7, 10, 15, 20, 30 };
 constexpr int kDayMinutesCount = int(sizeof(kDayMinutes) / sizeof(kDayMinutes[0]));
+
+// Health stops, as a percentage of the original. Shared by Olimar and the
+// enemies so both rows read the same way.
+// Radio del silbato y velocidad de lanzamiento, en % del original.
+constexpr int kWhistlePcts[]    = { 50, 75, 100, 125, 150, 200, 250, 300 };
+constexpr int kWhistlePctCount  = int(sizeof(kWhistlePcts) / sizeof(kWhistlePcts[0]));
+constexpr int kThrowSpeedPcts[] = { 50, 75, 100, 125, 150, 175, 200 };
+constexpr int kThrowSpeedCount  = int(sizeof(kThrowSpeedPcts) / sizeof(kThrowSpeedPcts[0]));
+
+int stepPct(int current, const int* stops, int count, bool back) {
+    int idx = 0;
+    for (int i = 0; i < count; i++) {
+        if (stops[i] == current) { idx = i; break; }
+    }
+    return stops[back ? (idx + count - 1) % count : (idx + 1) % count];
+}
+
+constexpr int kHealthPcts[]    = { 25, 50, 75, 100, 150, 200, 300, 500 };
+constexpr int kHealthPctCount  = int(sizeof(kHealthPcts) / sizeof(kHealthPcts[0]));
+
+int clampHealthPct(int pct) {
+    for (int i = 0; i < kHealthPctCount; i++) {
+        if (kHealthPcts[i] == pct) return pct;
+    }
+    return 100;
+}
+
+int stepHealthPct(int pct, bool left) {
+    int idx = 0;
+    for (int i = 0; i < kHealthPctCount; i++) {
+        if (kHealthPcts[i] == pct) { idx = i; break; }
+    }
+    idx = left ? (idx + kHealthPctCount - 1) % kHealthPctCount : (idx + 1) % kHealthPctCount;
+    return kHealthPcts[idx];
+}
+
+void healthPctLabel(int pct, char* value, size_t n) {
+    if (pc_hardmode_active()) snprintf(value, n, "100%% (Hard)");
+    else if (pct == 100) snprintf(value, n, "100%% (original)");
+    else snprintf(value, n, "%d%%", pct);
+}
 
 // Submenu de resolucion. La lista sale del monitor, asi que puede traer veinte
 // o cuarenta entradas segun el panel: recorrerlas de una en una con
@@ -630,8 +701,8 @@ void startVideoConfirm() {
 void saveConfig(); // defined below
 void mainRowChange(int row, bool left, bool right, bool ok);
 void mainRowValue(int row, char* out, size_t n);
-const char* mainRowLabel(int row);
 void advancedRowChange(int row, bool left, bool right);
+void advancedRowValue(int i, char* value, size_t n);
 void graphicsRowChange(int row, bool left, bool right, bool ok);
 void modsRowChange(int row, bool left, bool right);
 void saveDataRowAction(int row);
@@ -664,15 +735,30 @@ void revertVideoSettings() {
     sVideoConfirmActive = false;
 }
 
-void closeMenu() {
-    // Revert any video settings that were not confirmed.
-    if (sVideoConfirmActive) {
-        revertVideoSettings();
-    } else if (isVideoSettingChanged()) {
-        sPending = sConfig;
+// Al salir de cualquiera de los dos menús se guarda todo lo cambiado. La
+// excepción es un cambio de vídeo que sigue esperando confirmación: solo esos
+// campos vuelven a lo guardado, sin arrastrar el resto de cambios con ellos.
+void commitPendingOnExit() {
+    if (sVideoConfirmActive || isVideoSettingChanged()) {
+        sPending.windowWidth     = sConfig.windowWidth;
+        sPending.windowHeight    = sConfig.windowHeight;
+        sPending.displayMode     = sConfig.displayMode;
+        sPending.vsync           = sConfig.vsync;
+        sPending.renderScale     = sConfig.renderScale;
+        sPending.aspectRatioMode = sConfig.aspectRatioMode;
+        sPending.refreshRate     = sConfig.refreshRate;
+        sVideoConfirmActive      = false;
         applyVideo();
         syncResolutionIndex();
     }
+    sConfig = sPending;
+    applyControls(sConfig);
+    applyGraphics(sConfig);
+    saveConfig();
+}
+
+void closeMenu() {
+    commitPendingOnExit();
     // No dejar el menu memorizado dentro de la lista: al reabrir F1 se espera
     // la pagina principal.
     sInResolutionSubmenu = false;
@@ -680,7 +766,12 @@ void closeMenu() {
     sInHdModelsSubmenu = false;
     sTexturePackRestartPrompt = false;
     sHdModelRestartPrompt = false;
-    sInSaveDataSubmenu = false;
+    sInControlsSubmenu = false;
+    sInGamepadSubmenu = false;
+    sWaitingForKey = false;
+    sWaitingForButton = false;
+    sCaptureWaitRelease = false;
+    sOpenGroup = -1;
     sMenuOpen = false;
     pc_window_set_settings_menu_open(false);
 }
@@ -808,6 +899,23 @@ void saveConfig() {
     out << "fpsMode = " << sConfig.fpsMode << "\n";
     out << "chainActions = " << sConfig.chainActions << "\n";
     out << "holdToPluck = " << sConfig.holdToPluck << "\n";
+    out << "betterPathfinding = " << sConfig.betterPathfinding << "\n";
+    out << "bluesOnlyWater = " << sConfig.bluesOnlyWater << "\n";
+    out << "idleCounter = " << sConfig.idleCounter << "\n";
+    out << "naviHealthPct = " << sConfig.naviHealthPct << "\n";
+    out << "tekiHealthPct = " << sConfig.tekiHealthPct << "\n";
+    out << "infiniteDay = " << sConfig.infiniteDay << "\n";
+    out << "freeCamera = " << sConfig.freeCamera << "\n";
+    out << "whistleRadiusPct = " << sConfig.whistleRadiusPct << "\n";
+    out << "throwSpeedPct = " << sConfig.throwSpeedPct << "\n";
+    out << "throwCancelB = " << sConfig.throwCancelB << "\n";
+    out << "noTrip = " << sConfig.noTrip << "\n";
+    out << "onionStep10 = " << sConfig.onionStep10 << "\n";
+    out << "instantWhistle = " << sConfig.instantWhistle << "\n";
+    out << "lockOn = " << sConfig.lockOn << "\n";
+    out << "charge = " << sConfig.charge << "\n";
+    out << "throwWhileMoving = " << sConfig.throwWhileMoving << "\n";
+    out << "firstPerson = " << sConfig.firstPerson << "\n";
     out << "mouseWheelAction = " << sConfig.mouseWheelAction << "\n";
     out << "pikiLimit = " << sConfig.pikiLimit << "\n";
     out << "dayMinutes = " << sConfig.dayMinutes << "\n";
@@ -831,6 +939,10 @@ void saveConfig() {
     out << "texturePackEnabled = " << sConfig.texturePackEnabled << "\n";
     out << "controlMode = " << sConfig.controlMode << "\n";
     out << "mouseSensitivity = " << sConfig.mouseSensitivity << "\n";
+    out << "gyroEnabled = " << sConfig.gyroEnabled << "\n";
+    out << "gyroSensitivity = " << sConfig.gyroSensitivity << "\n";
+    out << "gyroInvert = " << sConfig.gyroInvert << "\n";
+    out << "gyroBias = " << sConfig.gyroBias[0] << " " << sConfig.gyroBias[1] << " " << sConfig.gyroBias[2] << "\n";
     out << "stickDeadZone = " << sConfig.stickDeadZone << "\n";
     out << "stickInvert = " << sConfig.stickInvert << "\n";
     out << "cStickInvert = " << sConfig.cStickInvert << "\n";
@@ -895,6 +1007,21 @@ void loadConfig() {
             if (sConfig.mouseSensitivity < 0.1f) sConfig.mouseSensitivity = 0.1f;
             if (sConfig.mouseSensitivity > 5.0f) sConfig.mouseSensitivity = 5.0f;
         }
+        else if (key == "gyroEnabled") {
+            sConfig.gyroEnabled = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "gyroSensitivity") {
+            sConfig.gyroSensitivity = std::clamp((float)atof(val.c_str()), 0.1f, 5.0f);
+        }
+        else if (key == "gyroInvert") {
+            sConfig.gyroInvert = atoi(val.c_str()) & 3;
+        }
+        else if (key == "gyroBias") {
+            float b[3] = { 0.0f, 0.0f, 0.0f };
+            if (sscanf(val.c_str(), "%f %f %f", &b[0], &b[1], &b[2]) == 3) {
+                for (int i = 0; i < 3; i++) sConfig.gyroBias[i] = b[i];
+            }
+        }
         else if (key == "stickDeadZone") {
             sConfig.stickDeadZone = atoi(val.c_str());
             if (sConfig.stickDeadZone < 0) sConfig.stickDeadZone = 0;
@@ -915,6 +1042,57 @@ void loadConfig() {
         }
         else if (key == "holdToPluck") {
             sConfig.holdToPluck = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "betterPathfinding") {
+            sConfig.betterPathfinding = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "bluesOnlyWater") {
+            sConfig.bluesOnlyWater = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "idleCounter") {
+            sConfig.idleCounter = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "naviHealthPct") {
+            sConfig.naviHealthPct = clampHealthPct(atoi(val.c_str()));
+        }
+        else if (key == "tekiHealthPct") {
+            sConfig.tekiHealthPct = clampHealthPct(atoi(val.c_str()));
+        }
+        else if (key == "infiniteDay") {
+            sConfig.infiniteDay = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "freeCamera") {
+            sConfig.freeCamera = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "whistleRadiusPct") {
+            sConfig.whistleRadiusPct = std::clamp(atoi(val.c_str()), 50, 300);
+        }
+        else if (key == "throwSpeedPct") {
+            sConfig.throwSpeedPct = std::clamp(atoi(val.c_str()), 50, 200);
+        }
+        else if (key == "throwCancelB") {
+            sConfig.throwCancelB = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "noTrip") {
+            sConfig.noTrip = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "onionStep10") {
+            sConfig.onionStep10 = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "instantWhistle") {
+            sConfig.instantWhistle = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "lockOn") {
+            sConfig.lockOn = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "charge") {
+            sConfig.charge = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "throwWhileMoving") {
+            sConfig.throwWhileMoving = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "firstPerson") {
+            sConfig.firstPerson = atoi(val.c_str()) ? 1 : 0;
         }
         else if (key == "mouseWheelAction") {
             sConfig.mouseWheelAction = atoi(val.c_str());
@@ -1191,7 +1369,8 @@ void pollMenuInput() {
         sPending.controlMode = pc_window_get_control_mode();
         sMenuOpen = true;
         pc_window_set_settings_menu_open(true);
-        sSelection = ROW_DISPLAY_MODE;
+        sSelection = 0;
+        sOpenGroup = -1;
         sVideoConfirmActive = false;
         rebuildResolutionList();
         const int idx = resolutionIndexFor(pc_window_get_width(), pc_window_get_height());
@@ -1359,48 +1538,6 @@ void pollMenuInput() {
         return;
     }
 
-    // Advanced settings submenu.
-    if (sInAdvancedSubmenu) {
-        bool up = keyWentDown(SDL_SCANCODE_UP) || keyWentDown(SDL_SCANCODE_W);
-        bool down = keyWentDown(SDL_SCANCODE_DOWN) || keyWentDown(SDL_SCANCODE_S);
-        bool left = keyWentDown(SDL_SCANCODE_LEFT) || keyWentDown(SDL_SCANCODE_A);
-        bool right = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
-        bool ok = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
-        bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
-                      keyWentDown(SDL_SCANCODE_B);
-
-        if (ctl || sTouchFrameButtons) {
-            if (padNavUp(ctl))
-                up = true;
-            if (padNavDown(ctl))
-                down = true;
-            if (padNavLeft(ctl))
-                left = true;
-            if (padNavRight(ctl))
-                right = true;
-            if (padNavA(ctl))
-                ok = true;
-            if (padNavB(ctl))
-                cancel = true;
-        }
-
-        if (up) {
-            sAdvancedSelection = (sAdvancedSelection + kAdvancedRowCount - 1) % kAdvancedRowCount;
-            return;
-        }
-        if (down) {
-            sAdvancedSelection = (sAdvancedSelection + 1) % kAdvancedRowCount;
-            return;
-        }
-        if (cancel) {
-            sInAdvancedSubmenu = false;
-            return;
-        }
-
-        advancedRowChange(sAdvancedSelection, left, right);
-        return;
-    }
-
     // Resolution submenu.
     if (sInResolutionSubmenu) {
         bool up = keyWentDown(SDL_SCANCODE_UP) || keyWentDown(SDL_SCANCODE_W);
@@ -1547,8 +1684,10 @@ void pollMenuInput() {
         return;
     }
 
-    // Graphics submenu.
-    if (sInGraphicsSubmenu) {
+    // Grupo abierto: lista genérica sobre pc_settings_rows, la misma que usa
+    // el menú de cristal del título. Los selectores (resolución, packs,
+    // modelos, teclas) siguen siendo los submenús propios de arriba.
+    if (sOpenGroup >= 0) {
         bool up = keyWentDown(SDL_SCANCODE_UP) || keyWentDown(SDL_SCANCODE_W);
         bool down = keyWentDown(SDL_SCANCODE_DOWN) || keyWentDown(SDL_SCANCODE_S);
         bool left = keyWentDown(SDL_SCANCODE_LEFT) || keyWentDown(SDL_SCANCODE_A);
@@ -1556,7 +1695,6 @@ void pollMenuInput() {
         bool ok = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
         bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
                       keyWentDown(SDL_SCANCODE_B);
-
         if (ctl || sTouchFrameButtons) {
             if (padNavUp(ctl)) up = true;
             if (padNavDown(ctl)) down = true;
@@ -1566,95 +1704,49 @@ void pollMenuInput() {
             if (padNavB(ctl)) cancel = true;
         }
 
-        if (up) {
-            sGraphicsSelection = (sGraphicsSelection + kGraphicsRowCount - 1) % kGraphicsRowCount;
+        const int n = pc_settings_rows_count(sOpenGroup);
+        if (cancel || n <= 0) { sOpenGroup = -1; return; }
+        if (up) { sGroupSel = (sGroupSel + n - 1) % n; return; }
+        if (down) { sGroupSel = (sGroupSel + 1) % n; return; }
+        if (!left && !right && !ok) return;
+        if (!pc_settings_row_enabled(sOpenGroup, sGroupSel)) return;
+
+        const int picker = pc_settings_row_opens_picker(sOpenGroup, sGroupSel);
+        // La resolución abre la lista con A y con izquierda/derecha salta a la
+        // contigua; los demás selectores se abren con A o derecha.
+        if (picker == PC_SET_PICKER_RESOLUTION && !ok) {
+            pc_settings_row_change(sOpenGroup, sGroupSel, left ? -1 : 1, false);
             return;
         }
-        if (down) {
-            sGraphicsSelection = (sGraphicsSelection + 1) % kGraphicsRowCount;
+        if (picker) {
+            if (!ok && !right) return;
+            switch (picker) {
+            case PC_SET_PICKER_RESOLUTION: openResolutionSubmenu(); break;
+            case PC_SET_PICKER_TEXPACKS: graphicsRowChange(10, false, false, true); break;
+            case PC_SET_PICKER_HDMODELS: graphicsRowChange(11, false, false, true); break;
+            case PC_SET_PICKER_KEYBOARD:
+                sInControlsSubmenu = true;
+                sControlSelection = pc_settings_picker_current(picker);
+                sWaitingForKey = false;
+                sCaptureWaitRelease = false;
+                break;
+            case PC_SET_PICKER_GAMEPAD:
+                sInGamepadSubmenu = true;
+                sGamepadSelection = pc_settings_picker_current(picker);
+                sWaitingForButton = false;
+                sCaptureWaitRelease = false;
+                break;
+            default: break;
+            }
             return;
         }
-        if (cancel) {
-            sInGraphicsSubmenu = false;
+        if (pc_settings_row_is_action(sOpenGroup, sGroupSel)) {
+            if (ok) pc_settings_row_change(sOpenGroup, sGroupSel, 0, true);
             return;
         }
-
-        graphicsRowChange(sGraphicsSelection, left, right, ok);
-        return;
-    }
-
-    // Mods submenu.
-    if (sInModsSubmenu) {
-        bool up = keyWentDown(SDL_SCANCODE_UP) || keyWentDown(SDL_SCANCODE_W);
-        bool down = keyWentDown(SDL_SCANCODE_DOWN) || keyWentDown(SDL_SCANCODE_S);
-        bool left = keyWentDown(SDL_SCANCODE_LEFT) || keyWentDown(SDL_SCANCODE_A);
-        bool right = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
-        bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
-                      keyWentDown(SDL_SCANCODE_B);
-
-        if (ctl || sTouchFrameButtons) {
-            if (padNavUp(ctl))
-                up = true;
-            if (padNavDown(ctl))
-                down = true;
-            if (padNavLeft(ctl))
-                left = true;
-            if (padNavRight(ctl))
-                right = true;
-            if (padNavB(ctl))
-                cancel = true;
-        }
-
-        if (up) {
-            sModsSelection = (sModsSelection + kModsRowCount - 1) % kModsRowCount;
-            return;
-        }
-        if (down) {
-            sModsSelection = (sModsSelection + 1) % kModsRowCount;
-            return;
-        }
-        if (cancel) {
-            sInModsSubmenu = false;
-            return;
-        }
-
-        modsRowChange(sModsSelection, left, right);
-        return;
-    }
-
-    // Save Data submenu (issue #36). Android opens the SAF picker to export or
-    // import the memory card as a .zip. Desktop has no in-app picker: the card
-    // is plain files already, so the rows just say where instead of being
-    // buttons that appear to do nothing.
-    if (sInSaveDataSubmenu) {
-        bool up = keyWentDown(SDL_SCANCODE_UP) || keyWentDown(SDL_SCANCODE_W);
-        bool down = keyWentDown(SDL_SCANCODE_DOWN) || keyWentDown(SDL_SCANCODE_S);
-        bool left = keyWentDown(SDL_SCANCODE_LEFT) || keyWentDown(SDL_SCANCODE_A);
-        bool right = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
-        bool ok = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
-        bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
-                      keyWentDown(SDL_SCANCODE_B);
-
-        if (ctl || sTouchFrameButtons) {
-            if (padNavUp(ctl)) up = true;
-            if (padNavDown(ctl)) down = true;
-            if (padNavLeft(ctl)) left = true;
-            if (padNavRight(ctl)) right = true;
-            if (padNavA(ctl)) ok = true;
-            if (padNavB(ctl)) cancel = true;
-        }
-
-        constexpr int kSaveDataRowCount = 2; // 0 = export, 1 = import
-
-        if (up) { sSaveDataSelection = (sSaveDataSelection + kSaveDataRowCount - 1) % kSaveDataRowCount; return; }
-        if (down) { sSaveDataSelection = (sSaveDataSelection + 1) % kSaveDataRowCount; return; }
-        // Closing the submenu must not mark a background copy as finished:
-        // reopening it while the Java thread is still writing would start a
-        // second transfer over the first one. Only the JNI completion callback
-        // clears sSaveTransferActive.
-        if (cancel) { sInSaveDataSubmenu = false; return; }
-
-        if (ok || left || right) saveDataRowAction(sSaveDataSelection);
+        if (left) pc_settings_row_change(sOpenGroup, sGroupSel, -1, false);
+        else if (right) pc_settings_row_change(sOpenGroup, sGroupSel, 1, false);
+        else pc_settings_row_change(sOpenGroup, sGroupSel, 0, true);
         return;
     }
 
@@ -1686,15 +1778,13 @@ void pollMenuInput() {
         const float logicalX = sTouchTapX * aspect * 480.0f
                              - (aspect * 480.0f - 640.0f) * 0.5f;
         const float logicalY = sTouchTapY * 480.0f;
-        const int rowH = pc_settings_p2d_active() ? 20 : 18;
         const int panelY = pc_settings_p2d_active() ? 52 : 64;
-        const int row = int((logicalY - (panelY + 34 + 12)) / float(rowH));
-        if (logicalX >= 74.0f && logicalX <= 566.0f && row >= 0 && row < ROW_COUNT) {
+        const float rel = logicalY - (panelY + kMainListTop - 6);
+        const int row = rel >= 0.0f ? int(rel / float(kMainRowPitch)) : -1;
+        if (logicalX >= 74.0f && logicalX <= 566.0f && row >= 0 && row < kMainRowCount) {
+            // Tocar un grupo lo abre, como A.
             sSelection = row;
-            // Tocar una fila de valor avanza su valor; tocar una acción o
-            // submenú equivale a A. Así el texto visible es el control.
-            if (row < ROW_CONTROLS) right = true;
-            else ok = true;
+            ok = true;
         }
     }
 
@@ -1714,17 +1804,25 @@ void pollMenuInput() {
     }
 
     if (up) {
-        sSelection = (sSelection + ROW_COUNT - 1) % ROW_COUNT;
+        sSelection = (sSelection + kMainRowCount - 1) % kMainRowCount;
         return;
     }
     if (down) {
-        sSelection = (sSelection + 1) % ROW_COUNT;
+        sSelection = (sSelection + 1) % kMainRowCount;
         return;
     }
 
-    mainRowChange(sSelection, left, right, ok);
+    if (ok || right) {
+        if (sSelection == kMainCloseRow) {
+            if (ok) closeMenu();
+        } else {
+            sOpenGroup = sSelection;
+            sGroupSel = 0;
+        }
+        return;
+    }
 
-    // Esc / B closes the menu (reverting unconfirmed changes).
+    // Esc / B cierra el menú y guarda (un cambio de vídeo sin confirmar se revierte).
     if (cancel) {
         closeMenu();
     }
@@ -1827,6 +1925,24 @@ void advancedRowChange(int row, bool left, bool right) {
         if (left || right) {
             sPending.cStickInvert ^= 3; // toggle X and Y bits
         }
+    }
+    // Gyro on/off
+    else if (row == 4) {
+        if (left || right) sPending.gyroEnabled = sPending.gyroEnabled ? 0 : 1;
+    }
+    // Gyro sensitivity (0.1 - 5.0, step 0.1)
+    else if (row == 5) {
+        if (left) sPending.gyroSensitivity = fmaxf(0.1f, sPending.gyroSensitivity - 0.1f);
+        if (right) sPending.gyroSensitivity = fminf(5.0f, sPending.gyroSensitivity + 0.1f);
+    }
+    // Gyro invert: cycles None, X, Y, X+Y so each axis can be set alone.
+    else if (row == 6) {
+        if (right) sPending.gyroInvert = (sPending.gyroInvert + 1) & 3;
+        if (left) sPending.gyroInvert = (sPending.gyroInvert + 3) & 3;
+    }
+    // Gyro calibrate: measures the resting drift of the active sensor.
+    else if (row == 7) {
+        if (left || right) pc_gyro_calibrate_start();
     }
 }
 
@@ -1967,9 +2083,77 @@ void modsRowChange(int row, bool left, bool right) {
     else if (row == 7) {
         if (left || right) sPending.coopMergeCamera = sPending.coopMergeCamera ? 0 : 1;
     }
-    // Debug shortcuts.
+    // Desatascar Pikmin que dejan de avanzar por su ruta.
     else if (row == 8) {
+        if (left || right) sPending.betterPathfinding = sPending.betterPathfinding ? 0 : 1;
+    }
+    // Solo los azules entran al agua por su cuenta.
+    else if (row == 9) {
+        if (left || right) sPending.bluesOnlyWater = sPending.bluesOnlyWater ? 0 : 1;
+    }
+    // Contador de Pikmin ociosos en el HUD.
+    else if (row == 10) {
+        if (left || right) sPending.idleCounter = sPending.idleCounter ? 0 : 1;
+    }
+    // Vida de Olimar, en porcentaje de la original.
+    else if (row == 11) {
+        if (pc_hardmode_active())
+            return;
+        if (left || right) sPending.naviHealthPct = stepHealthPct(sPending.naviHealthPct, left);
+    }
+    // Vida de los enemigos, en porcentaje de la original.
+    else if (row == 12) {
+        if (pc_hardmode_active())
+            return;
+        if (left || right) sPending.tekiHealthPct = stepHealthPct(sPending.tekiHealthPct, left);
+    }
+    // El dia no avanza.
+    else if (row == 13) {
+        if (pc_hardmode_active())
+            return;
+        if (left || right) sPending.infiniteDay = sPending.infiniteDay ? 0 : 1;
+    }
+    // Camara libre.
+    else if (row == 14) {
+        if (left || right) sPending.freeCamera = sPending.freeCamera ? 0 : 1;
+    }
+    // Fijar objetivo.
+    else if (row == 15) {
+        if (left || right) sPending.lockOn = sPending.lockOn ? 0 : 1;
+    }
+    // Mandar el escuadrón contra el objetivo fijado.
+    else if (row == 16) {
+        if (left || right) sPending.charge = sPending.charge ? 0 : 1;
+    }
+    // Relevo del lanzamiento con el capitán en marcha.
+    else if (row == 17) {
+        if (left || right) sPending.throwWhileMoving = sPending.throwWhileMoving ? 0 : 1;
+    }
+    // Vista en primera persona.
+    else if (row == 18) {
+        if (left || right) sPending.firstPerson = sPending.firstPerson ? 0 : 1;
+    }
+    // Debug shortcuts.
+    else if (row == 19) {
         if (left || right) sPending.debugKeys = sPending.debugKeys ? 0 : 1;
+    }
+    else if (row == 20) {
+        if (left || right) sPending.whistleRadiusPct = stepPct(sPending.whistleRadiusPct, kWhistlePcts, kWhistlePctCount, left);
+    }
+    else if (row == 21) {
+        if (left || right) sPending.throwSpeedPct = stepPct(sPending.throwSpeedPct, kThrowSpeedPcts, kThrowSpeedCount, left);
+    }
+    else if (row == 22) {
+        if (left || right) sPending.throwCancelB = sPending.throwCancelB ? 0 : 1;
+    }
+    else if (row == 23) {
+        if (left || right) sPending.noTrip = sPending.noTrip ? 0 : 1;
+    }
+    else if (row == 24) {
+        if (left || right) sPending.onionStep10 = sPending.onionStep10 ? 0 : 1;
+    }
+    else if (row == 25) {
+        if (left || right) sPending.instantWhistle = sPending.instantWhistle ? 0 : 1;
     }
 }
 
@@ -2071,7 +2255,7 @@ void hdModelsRowAction(int row) {
 // Texto del valor de una fila de la página principal (compartido con
 // pc_settings_rows). Calcula la tabla completa y devuelve la fila pedida.
 void mainRowValue(int row, char* out, size_t n) {
-    if (row < 0 || row >= ROW_CONTROLS) { if (n) out[0] = '\0'; return; }
+    if (row < 0 || row >= ROW_DISPLAY_COUNT) { if (n) out[0] = '\0'; return; }
     const char* modeNames[3] = { "Windowed", "Fullscreen", "Borderless" };
     const char* aspectNames[5] = { "Auto", "4:3", "16:10", "16:9", "21:9" };
     char aspectBuf[32];
@@ -2081,7 +2265,7 @@ void mainRowValue(int row, char* out, size_t n) {
     char fpsModeBuf[32];
     snprintf(fpsModeBuf, sizeof(fpsModeBuf), "%s", fpsModeNames[sPending.fpsMode >= 0 && sPending.fpsMode < 3 ? sPending.fpsMode : 0]);
 
-    char valueBuf[ROW_CONTROLS][128];
+    char valueBuf[ROW_DISPLAY_COUNT][128];
     snprintf(valueBuf[0], sizeof(valueBuf[0]), "%s",
              modeNames[sPending.displayMode >= 0 && sPending.displayMode < 3 ? sPending.displayMode : 0]);
     if (sPending.displayMode == PC_WINDOW_FULLSCREEN_BORDERLESS) {
@@ -2118,19 +2302,6 @@ void mainRowValue(int row, char* out, size_t n) {
 #endif
 
     snprintf(out, n, "%s", valueBuf[row]);
-}
-
-const char* mainRowLabel(int row) {
-    static const char* labels[ROW_COUNT] = {
-        "Display Mode", "Resolution", "Aspect Ratio", "3D Resolution", "Refresh Rate", "Frame Sync (VSync)",
-        "FPS Mode",
-#if defined(VERSION_GPIP01)
-        "Language",
-#endif
-        "Controls", "Gamepad", "Advanced Settings", "Graphics", "Mods", "Save Data",
-        "Reset to Defaults", "Save", "Close",
-    };
-    return (row >= 0 && row < ROW_COUNT) ? labels[row] : "";
 }
 
 // Cambio de una fila de la página principal (compartido con pc_settings_rows).
@@ -2232,66 +2403,6 @@ void mainRowChange(int row, bool left, bool right, bool ok) {
         break;
     }
 #endif
-    case ROW_CONTROLS:
-        if (ok) {
-            sInControlsSubmenu = true;
-            sControlSelection = 0;
-            sWaitingForKey = false;
-            sCaptureWaitRelease = false;
-        }
-        break;
-    case ROW_GAMEPAD:
-        if (ok) {
-            sInGamepadSubmenu = true;
-            sGamepadSelection = 0;
-            sWaitingForButton = false;
-            sCaptureWaitRelease = false;
-        }
-        break;
-    case ROW_ADVANCED:
-        if (ok) {
-            sInAdvancedSubmenu = true;
-            sAdvancedSelection = 0;
-        }
-        break;
-    case ROW_GRAPHICS:
-        if (ok) {
-            sInGraphicsSubmenu = true;
-            sGraphicsSelection = 0;
-        }
-        break;
-    case ROW_MODS:
-        if (ok) {
-            sInModsSubmenu = true;
-            sModsSelection = 0;
-        }
-        break;
-    case ROW_SAVE_DATA:
-        if (ok) {
-            sInSaveDataSubmenu = true;
-            sSaveDataSelection = 0;
-        }
-        break;
-    case ROW_RESET:
-        if (ok) resetToDefaults();
-        break;
-    case ROW_SAVE:
-        if (ok) {
-            // Save pending changes (confirming video if applicable).
-            if (sVideoConfirmActive) {
-                confirmVideoSettings();
-            } else {
-                sConfig = sPending;
-                applyVideo();
-                applyControls(sConfig);
-                applyGraphics(sConfig);
-                saveConfig();
-            }
-        }
-        break;
-    case ROW_CLOSE:
-        if (ok) closeMenu();
-        break;
     default:
         break;
     }
@@ -2481,8 +2592,29 @@ void drawSubmenuSurface(DGXGraphics* gfx, int x, int y, int w, int h,
                     "%s", Colour(205, 239, 250, 255), Colour(0, 8, 13, 255), helpBottom);
 }
 
+// Parte la ayuda de una fila en dos líneas que quepan en maxW.
+void wrapHelpText(const char* text, int maxW, char* line1, char* line2, size_t n) {
+    line1[0] = line2[0] = '\0';
+    if (!text || !text[0]) return;
+    if (menuTextWidth(text) <= maxW) { snprintf(line1, n, "%s", text); return; }
+    // Último espacio que deja la primera línea dentro del ancho.
+    const size_t len = strlen(text);
+    size_t cut = 0;
+    char buf[256];
+    for (size_t i = 0; i < len && i < sizeof(buf) - 1; i++) {
+        if (text[i] != ' ') continue;
+        memcpy(buf, text, i);
+        buf[i] = '\0';
+        if (menuTextWidth(buf) > maxW) break;
+        cut = i;
+    }
+    if (cut == 0) { snprintf(line1, n, "%s", text); return; }
+    snprintf(line1, n, "%.*s", (int)cut, text);
+    snprintf(line2, n, "%s", text + cut + 1);
+}
+
 void drawSubmenuRow(DGXGraphics* gfx, int x, int y, int w,
-                    const char* label, const char* value, bool selected) {
+                    const char* label, const char* value, bool selected, bool enabled = true) {
     if (selected) {
         fillRoundRectGrad(gfx, x, y - 3, w, 22, 8,
                           Colour(58, 51, 31, 235), Colour(7, 7, 8, 245));
@@ -2491,6 +2623,7 @@ void drawSubmenuRow(DGXGraphics* gfx, int x, int y, int w,
     }
     Colour main = selected ? Colour(255, 190, 28, 255) : Colour(185, 237, 255, 255);
     Colour shadow = selected ? Colour(62, 25, 0, 255) : Colour(0, 9, 15, 255);
+    if (!enabled) main = selected ? Colour(170, 140, 90, 255) : Colour(95, 115, 135, 255);
     const int split = x + w / 2;
     drawTextOutline(split - 14 - menuTextWidth(label), y, "%s",
                     main, shadow, label);
@@ -3443,6 +3576,75 @@ void pc_devassign_prompt_draw(void) {
                     "%s", Colour(150, 165, 195, 255), Colour(8, 12, 28, 255), help);
 }
 
+// Contador de Pikmin ociosos. GameStat::freePikis ya es exactamente eso: lo
+// lleva ActFree al entrar y salir, así que no hace falta recorrer nada. Solo
+// aparece cuando hay alguno, como en Pikmin 3 y 4: un cero permanente se
+// vuelve ruido y se deja de mirar.
+static Uint32 sLastGameplayFrameMs = 0;
+static int sLockOnActive = 0;
+
+void pc_settings_note_lock_on(int hasTarget) {
+    sLockOnActive = hasTarget;
+}
+
+void pc_settings_note_gameplay_frame(void) {
+    sLastGameplayFrameMs = SDL_GetTicks();
+}
+
+// Aviso de objetivo fijado. Provisional hasta que haya un anillo sobre el
+// enemigo: sin nada en pantalla no hay forma de saber si el mod responde.
+void pc_settings_draw_lock_on(void) {
+    if (!sLockOnActive || !pc_settings_get_lock_on()) return;
+    if (sMenuOpen || pc_glass_menu_active()) return;
+    if (!gsys || !gsys->mDGXGfx) return;
+    if (sLastGameplayFrameMs == 0 || SDL_GetTicks() - sLastGameplayFrameMs > 250) return;
+
+    DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+    ensureFont();
+    if (!sFont) return;
+
+    const int screenW = gfx->mScreenWidth;
+    const int screenH = gfx->mScreenHeight;
+    PcSettingsP2DFrame nativeFrame(screenW, screenH);
+    Matrix4f ortho;
+    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
+
+    const char* txt = "LOCK ON";
+    drawTextOutline(screenW / 2 - menuTextWidth(txt) / 2, (int)(screenH * 0.12f),
+                    "%s", Colour(255, 90, 60, 255), Colour(30, 0, 0, 255), txt);
+}
+
+void pc_settings_draw_idle_counter(void) {
+    if (!pc_settings_get_idle_counter()) return;
+    if (sMenuOpen || pc_glass_menu_active()) return;
+    // Solo mientras el mundo se está simulando. 250 ms de margen cubre una
+    // pausa breve sin dejar el contador colgado en el menú o en el título.
+    if (sLastGameplayFrameMs == 0 || SDL_GetTicks() - sLastGameplayFrameMs > 250) return;
+    if (!gsys || !gsys->mDGXGfx) return;
+
+    const int idle = GameStat::freePikis;
+    if (idle <= 0) return;
+
+    DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+    ensureFont();
+    if (!sFont) return;
+
+    const int screenW = gfx->mScreenWidth;
+    const int screenH = gfx->mScreenHeight;
+    PcSettingsP2DFrame nativeFrame(screenW, screenH);
+
+    Matrix4f ortho;
+    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
+
+    char buf[32];
+    snprintf(buf, sizeof(buf), "IDLE %d", idle);
+    // Justo encima del total del HUD (la tercera cifra del contador), para
+    // que se lea como una cifra más del bloque y no como un aviso suelto.
+    const int x = (int)(screenW * 0.917f) - menuTextWidth(buf) / 2;
+    const int y = (int)(screenH * 0.790f);
+    drawTextOutline(x, y, "%s", Colour(255, 190, 28, 255), Colour(24, 12, 0, 255), buf);
+}
+
 void pc_settings_draw(void) {
     if (!sMenuOpen) return;
     if (!gsys || !gsys->mDGXGfx) return;
@@ -3508,65 +3710,26 @@ void pc_settings_draw(void) {
         return;
     }
 
-    const char* labels[ROW_COUNT] = {
-        "Display Mode", "Resolution", "Aspect Ratio", "3D Resolution", "Refresh Rate", "Frame Sync (VSync)",
-        "FPS Mode",
-#if defined(VERSION_GPIP01)
-        "Language",
-#endif
-        "Controls", "Gamepad", "Advanced Settings", "Graphics", "Mods", "Save Data",
-        "Reset to Defaults", "Save", "Close",
-    };
-    bool actionRow[ROW_COUNT] = {};
-    actionRow[ROW_RESET] = actionRow[ROW_SAVE] = actionRow[ROW_CLOSE] = true;
-
-    char valueBuf[ROW_CONTROLS][128];
-    for (int i = 0; i < ROW_CONTROLS; i++) mainRowValue(i, valueBuf[i], sizeof(valueBuf[i]));
-
-    // The rows before ROW_CONTROLS carry a computed value; from there to
-    // ROW_RESET they open a submenu and all read "Open >".
-    //
-    // This used to be a table with one entry per row, and it had one "Open >"
-    // too few: a submenu row was added without extending it, so the last one --
-    // Mods -- read a value-initialised null and drew "(null)" beside itself.
-    // Derived from the row index instead, it cannot fall out of step again.
-    auto rowValue = [&](int row) -> const char* {
-        return (row < ROW_CONTROLS) ? valueBuf[row] : "Open >";
-    };
-
-    const int rowH = pc_settings_p2d_active() ? 20 : 18;
-    const int labelRight = px1 + panelW / 2 - 12;
-    const int valueLeft = px1 + panelW / 2 + 20;
-    int y = py1 + headerH + 12;
-    for (int i = 0; i < ROW_COUNT; i++) {
-        bool selected = (i == sSelection);
-        if (actionRow[i]) {
-            int tx = px1 + panelW / 2 - menuTextWidth(labels[i]) / 2;
-            if (selected) {
-                if (pc_settings_p2d_active())
-                    drawTextOutline(px1 + 29, y, ">", Colour(255,232,130,255), Colour(0,0,0,255));
-                fillRoundRectGrad(gfx, px1 + 70, y - 3, panelW - 140, rowH + 4, 8,
-                                  Colour(47, 45, 35, 210), Colour(8, 8, 10, 220));
-            }
-            drawTextOutline(tx, y, "%s",
-                            selected ? Colour(255, 190, 28, 255) : Colour(211, 246, 255, 255),
-                            selected ? Colour(62, 25, 0, 255) : Colour(0, 10, 14, 255), labels[i]);
-        } else {
-            if (selected) {
-                fillRoundRectGrad(gfx, px1 + 48, y - 3, panelW - 96, rowH + 4, 8,
-                                  Colour(54, 49, 34, 210), Colour(8, 8, 10, 220));
-            }
-            Colour main = selected ? Colour(255, 190, 28, 255) : Colour(178, 235, 255, 255);
-            Colour shadow = selected ? Colour(62, 25, 0, 255) : Colour(0, 10, 18, 255);
-            drawTextOutline(labelRight - menuTextWidth(labels[i]), y, "%s",
-                            main, shadow, labels[i]);
-            drawTextOutline(valueLeft, y, "%s", main, shadow, rowValue(i));
-            if (selected) {
-                drawTextOutline(px1 + 29, y, ">", Colour(255, 232, 130, 255),
-                                Colour(45, 18, 0, 255));
-            }
+    // Lista principal: un grupo por fila con su resumen al lado, y Close.
+    const int labelRight = px1 + panelW / 2 - 40;
+    const int valueLeft = px1 + panelW / 2 - 12;
+    int y = py1 + kMainListTop;
+    for (int i = 0; i < kMainRowCount; i++) {
+        const bool selected = (i == sSelection);
+        const bool closeRow = (i == kMainCloseRow);
+        const char* name = closeRow ? "Close" : pc_settings_group_name(i);
+        const char* summary = closeRow ? "Saves your changes" : pc_settings_group_summary(i);
+        if (selected) {
+            fillRoundRectGrad(gfx, px1 + 48, y - 4, panelW - 96, kMainRowPitch - 6, 8,
+                              Colour(54, 49, 34, 210), Colour(8, 8, 10, 220));
+            drawTextOutline(px1 + 29, y, ">", Colour(255, 232, 130, 255), Colour(45, 18, 0, 255));
         }
-        y += rowH;
+        const Colour shadow = selected ? Colour(62, 25, 0, 255) : Colour(0, 10, 18, 255);
+        drawTextOutline(labelRight - menuTextWidth(name), y, "%s",
+                        selected ? Colour(255, 190, 28, 255) : Colour(178, 235, 255, 255), shadow, name);
+        drawTextOutline(valueLeft, y, "%s",
+                        selected ? Colour(240, 225, 185, 255) : Colour(140, 170, 200, 255), shadow, summary);
+        y += kMainRowPitch;
     }
 
     // Controls submenu overlay.
@@ -3666,49 +3829,6 @@ void pc_settings_draw(void) {
         }
 
         return; // Don't draw footer when gamepad submenu is open.
-    }
-
-    // Advanced settings submenu overlay.
-    if (sInAdvancedSubmenu) {
-        const int subX = px1 + 18, subY = py1 + 44;
-        const int subW = panelW - 36, subH = panelH - 58;
-        drawSubmenuSurface(gfx, subX, subY, subW, subH, "Advanced Settings",
-                           "Left/Right: adjust",
-                           "Up/Down: select   Esc/B: back");
-
-        const char* advancedLabels[kAdvancedRowCount] = {
-            "Mouse Sensitivity",
-            "Stick Dead Zone",
-            "Stick Invert (X/Y)",
-            "C-Stick Invert (X/Y)",
-        };
-
-        const int listStartY = subY + 62;
-        const int itemH = 28;
-
-        for (int i = 0; i < kAdvancedRowCount; i++) {
-            int itemY = listStartY + i * itemH;
-            bool selected = (i == sAdvancedSelection);
-
-            char value[64];
-            if (i == 0) {
-                snprintf(value, sizeof(value), "%.2f", sPending.mouseSensitivity);
-            } else if (i == 1) {
-                snprintf(value, sizeof(value), "%d", sPending.stickDeadZone);
-            } else if (i == 2) {
-                snprintf(value, sizeof(value), "%s / %s",
-                         (sPending.stickInvert & 1) ? "InvX" : "NorX",
-                         (sPending.stickInvert & 2) ? "InvY" : "NorY");
-            } else {
-                snprintf(value, sizeof(value), "%s / %s",
-                         (sPending.cStickInvert & 1) ? "InvX" : "NorX",
-                         (sPending.cStickInvert & 2) ? "InvY" : "NorY");
-            }
-            drawSubmenuRow(gfx, subX + 20, itemY, subW - 40,
-                           advancedLabels[i], value, selected);
-        }
-
-        return; // Don't draw footer when advanced submenu is open.
     }
 
     // Resolution submenu overlay.
@@ -3938,220 +4058,54 @@ void pc_settings_draw(void) {
         return; // Don't draw footer when texture packs submenu is open.
     }
 
-    // Graphics submenu overlay.
-    if (sInGraphicsSubmenu) {
-        // The list is taller than the parent panel on short screens, so size
-        // the surface to the rows (header + rows + help lines) and centre it,
-        // shrinking the row pitch only when the screen itself is too small.
-        int itemH = 22;
-        const int headerH = 62, footerH = 48;
-        int neededH = headerH + kGraphicsRowCount * itemH + footerH;
-        if (neededH > screenH - 8) {
-            itemH = (screenH - 8 - headerH - footerH) / kGraphicsRowCount;
-            neededH = headerH + kGraphicsRowCount * itemH + footerH;
-        }
-        const int subX = px1 + 18;
-        const int subW = panelW - 36;
-        const int subH = (neededH > panelH - 58) ? neededH : panelH - 58;
-        int subY = py1 + 44;
-        if (subY + subH > screenH - 4) subY = screenH / 2 - subH / 2;
-        if (subY < 4) subY = 4;
-        drawSubmenuSurface(gfx, subX, subY, subW, subH, "Graphics",
-                           "Left/Right: change   These change how the game looks",
-                           "Up/Down: select   Esc/B: back");
-
-        const char* labels[kGraphicsRowCount] = {
-            "Antialiasing",
-            "Fog",
-            "Bloom",
-            "Ambient Occlusion",
-            "Depth of Field",
-            "Texture Filtering",
-            "Colour Grading",
-            "Gamma",
-            "Brightness",
-            "Saturation",
-            "Texture Packs",
-            "HD Models",
-            "Lighting",
-            "Shadows",
-        };
-
-        const int listStartY = subY + headerH;
-        const bool gradingOn = sPending.colourGrading != 0;
-
-        for (int i = 0; i < kGraphicsRowCount; i++) {
-            const int itemY = listStartY + i * itemH;
-            const bool selected = (i == sGraphicsSelection);
-
-            char value[64];
-            if (i == 0) {
-                snprintf(value, sizeof(value), "%s", sPending.antialiasing ? "FXAA" : "Off");
-            } else if (i == 1) {
-                // The game draws fog of its own, so on is the original and off
-                // is the deviation. Say which is which.
-                snprintf(value, sizeof(value), "%s", sPending.fog ? "On  (original)" : "Off");
-            } else if (i == 2) {
-                const char* bloomNames[4] = { "Off", "Subtle", "Normal", "Strong" };
-                const int b = (sPending.bloom >= 0 && sPending.bloom <= 3) ? sPending.bloom : 0;
-                snprintf(value, sizeof(value), "%s", bloomNames[b]);
-            } else if (i == 3) {
-                const char* aoNames[4] = { "Off", "Subtle", "Normal", "Strong" };
-                const int a = (sPending.ssao >= 0 && sPending.ssao <= 3) ? sPending.ssao : 0;
-                snprintf(value, sizeof(value), "%s", aoNames[a]);
-            } else if (i == 4) {
-                const char* dofNames[4] = { "Off", "Subtle", "Normal", "Strong" };
-                const int d = (sPending.dof >= 0 && sPending.dof <= 3) ? sPending.dof : 0;
-                snprintf(value, sizeof(value), "%s", dofNames[d]);
-            } else if (i == 5) {
-                if (sPending.anisotropy <= 1) snprintf(value, sizeof(value), "Trilinear");
-                else snprintf(value, sizeof(value), "Anisotropic %dx", sPending.anisotropy);
-            } else if (i == 6) {
-                snprintf(value, sizeof(value), "%s", gradingOn ? "On" : "Off");
-            } else if (i == 10 || i == 11) {
-                // Rowing into a submenu rather than cycling a value. Mirror the
-                // main-list convention so the row reads like the others.
-                snprintf(value, sizeof(value), "Manage >");
-            } else if (i == 12) {
-                snprintf(value, sizeof(value), "%s", sPending.perPixelLighting ? "Per-pixel" : "Per-vertex (original)");
-            } else if (i == 13) {
-                const char* names[4] = { "Off (original)", "Soft", "Normal", "Strong" };
-                snprintf(value, sizeof(value), "%s", names[(sPending.shadows >= 0 && sPending.shadows <= 3) ? sPending.shadows : 0]);
-            } else if (!gradingOn) {
-                // The three sliders do nothing while grading is off. Saying so
-                // beats letting someone move them and conclude it is broken.
-                snprintf(value, sizeof(value), "--");
-            } else if (i == 7) {
-                snprintf(value, sizeof(value), sPending.gamma == 1.0f ? "%.2f  (neutral)" : "%.2f", sPending.gamma);
-            } else if (i == 8) {
-                snprintf(value, sizeof(value), sPending.brightness == 0.0f ? "%+.2f  (neutral)" : "%+.2f", sPending.brightness);
-            } else {
-                snprintf(value, sizeof(value), sPending.saturation == 1.0f ? "%.2f  (neutral)" : "%.2f", sPending.saturation);
-            }
-
-            drawSubmenuRow(gfx, subX + 20, itemY, subW - 40, labels[i], value, selected);
-        }
-
-        return; // Don't draw footer when submenu is open.
-    }
-
-    // Mods submenu overlay.
-    if (sInModsSubmenu) {
+    // Grupo abierto: lista genérica (pc_settings_rows) con la explicación de
+    // la fila seleccionada abajo. Las filas que dependen de otra apagada se
+    // pintan atenuadas y la ayuda dice qué hay que activar.
+    if (sOpenGroup >= 0) {
         const int subX = px1 + 18, subY = py1 + 44;
         const int subW = panelW - 36, subH = panelH - 58;
-        drawSubmenuSurface(gfx, subX, subY, subW, subH, "Mods",
-                           "Left/Right: change   These change how the game plays",
-                           "Up/Down: select   Esc/B: back");
+        const int n = pc_settings_rows_count(sOpenGroup);
+        if (sGroupSel >= n) sGroupSel = n > 0 ? n - 1 : 0;
+        char help1[200], help2[200];
+        wrapHelpText(pc_settings_row_help(sOpenGroup, sGroupSel), subW - 40, help1, help2, sizeof(help1));
+        drawSubmenuSurface(gfx, subX, subY, subW, subH, pc_settings_group_name(sOpenGroup), help1, help2);
 
-        const char* modsLabels[kModsRowCount] = {
-            "Control Scheme",
-            "Chain Pikmin Actions",
-            "Hold to Pluck",
-            "Mouse Wheel",
-            "Pikmin Limit",
-            "Day Length",
-            "Co-op Split Screen",
-            "Co-op Merged Camera",
-#if PIKI_DEBUG_KEYS
-            "Debug Keys (F5/F6)",
-#endif
-        };
+        const char* nav = pc_settings_row_is_action(sOpenGroup, sGroupSel)
+                              ? "A: select   Up/Down: move   Esc/B: back"
+                              : "Left/Right: change   Up/Down: move   Esc/B: back";
+        drawTextOutline(subX + subW / 2 - menuTextWidth(nav) / 2, subY + 38, "%s",
+                        Colour(150, 165, 195, 255), Colour(10, 16, 36, 255), nav);
 
-        const int listStartY = subY + 62;
-        const int itemH = 28;
+        const int listStartY = subY + 64;
+        const int itemH = 24;
+        const int listRoom = (subY + subH - 48) - listStartY;
+        int visibleRows = listRoom / itemH;
+        if (visibleRows < 1) visibleRows = 1;
+        if (visibleRows > n) visibleRows = n;
+        int firstRow = sGroupSel - visibleRows / 2;
+        if (firstRow > n - visibleRows) firstRow = n - visibleRows;
+        if (firstRow < 0) firstRow = 0;
 
-        for (int i = 0; i < kModsRowCount; i++) {
-            int itemY = listStartY + i * itemH;
-            bool selected = (i == sModsSelection);
-
-            char value[64];
-            if (i == 0) {
-                snprintf(value, sizeof(value), "%s",
-                         sPending.controlMode == PC_CONTROL_CLASSIC ? "Classic (original)"
-                                                                    : "Mouse Cursor");
-            } else if (i == 1) {
-                snprintf(value, sizeof(value), "%s",
-                         sPending.chainActions ? "On" : "Off (original)");
-            } else if (i == 2) {
-                snprintf(value, sizeof(value), "%s",
-                         sPending.holdToPluck ? "On" : "Off (original)");
-            } else if (i == 3) {
-                snprintf(value, sizeof(value), "%s",
-                         sPending.mouseWheelAction ? "Camera Zoom" : "Pikmin Colour");
-            } else if (i == 6) {
-                snprintf(value, sizeof(value), "%s",
-                         sPending.coopSplit ? "Horizontal (top/bottom)" : "Vertical (left/right)");
-            } else if (i == 7) {
-                snprintf(value, sizeof(value), "%s",
-                         sPending.coopMergeCamera ? "On (dynamic)" : "Off (static split)");
-            } else if (i == 8) {
-                snprintf(value, sizeof(value), "%s",
-                         sPending.debugKeys ? "On" : "Off");
-            } else if (i == 5) {
-                if (pc_hardmode_active()) {
-                    snprintf(value, sizeof(value), "%d min (Hard)", PC_HARDMODE_DAY_MINUTES);
-                } else if (sPending.dayMinutes == 10) {
-                    snprintf(value, sizeof(value), "10 min (original)");
-                } else {
-                    snprintf(value, sizeof(value), "%d min", sPending.dayMinutes);
-                }
-            } else {
-                if (pc_hardmode_active()) {
-                    snprintf(value, sizeof(value), "%d (Hard)", PC_HARDMODE_PIKI_LIMIT);
-                } else if (sPending.pikiLimit == 100) {
-                    snprintf(value, sizeof(value), "100 (original)");
-                } else if (sPending.pikiLimit > 200) {
-                    snprintf(value, sizeof(value), "%d  (may cost performance)",
-                             sPending.pikiLimit);
-                } else {
-                    snprintf(value, sizeof(value), "%d", sPending.pikiLimit);
-                }
-            }
-            drawSubmenuRow(gfx, subX + 20, itemY, subW - 40,
-                           modsLabels[i], value, selected);
+        for (int i = firstRow; i < firstRow + visibleRows; i++) {
+            char value[128];
+            pc_settings_row_value(sOpenGroup, i, value, sizeof(value));
+            drawSubmenuRow(gfx, subX + 20, listStartY + (i - firstRow) * itemH, subW - 40,
+                           pc_settings_row_label(sOpenGroup, i), value, i == sGroupSel,
+                           pc_settings_row_enabled(sOpenGroup, i));
         }
-
-        return; // Don't draw footer when mods submenu is open.
-    }
-
-    // Save Data submenu overlay (issue #36). Android picks a .zip through the
-    // SAF; desktop has no picker, so the rows point at the plain files.
-    if (sInSaveDataSubmenu) {
-        const int subX = px1 + 18, subY = py1 + 44;
-        const int subW = panelW - 36, subH = panelH - 58;
-        drawSubmenuSurface(gfx, subX, subY, subW, subH, "Save Data",
-                           "A: choose a file",
-                           "Up/Down: select   Esc/B: back");
-
-        const char* saveLabels[2] = { "Export save to ZIP", "Import save from ZIP" };
-        const int listStartY = subY + 62;
-        const int itemH = 28;
-
-        for (int i = 0; i < 2; i++) {
-            const int itemY = listStartY + i * itemH;
-            const bool selected = (i == sSaveDataSelection);
-            char value[96];
-#ifdef __ANDROID__
-            if (sSaveTransferActive && selected)
-                snprintf(value, sizeof(value), "Opening picker...");
-            else
-                snprintf(value, sizeof(value), "System picker");
-#else
-            snprintf(value, sizeof(value), "card0 / card1");
-#endif
-            drawSubmenuRow(gfx, subX + 20, itemY, subW - 40,
-                           saveLabels[i], value, selected);
+        if (n > visibleRows) {
+            char hint[32];
+            snprintf(hint, sizeof(hint), "%d / %d", sGroupSel + 1, n);
+            drawTextOutline(subX + subW - 12 - menuTextWidth(hint), subY + 12, "%s",
+                            Colour(180, 180, 200, 255), Colour(10, 16, 36, 255), hint);
         }
-
-        // Aviso de la última exportación/importación, con su color.
         drawTimedNotice(subX + subW / 2, subY + subH - 8);
-
-        return; // Don't draw footer when save data submenu is open.
+        return;
     }
 
     // Footer / help.
-    drawTextOutline(px1 + panelW / 2 - menuTextWidth("Left/Right: change   Up/Down: move   Esc: close") / 2, y + 14,
-                    "Left/Right: change   Up/Down: move   Esc: close",
+    drawTextOutline(px1 + panelW / 2 - menuTextWidth("A: open   Up/Down: move   Esc: save and close") / 2, y + 14,
+                    "A: open   Up/Down: move   Esc: save and close",
                     Colour(200, 210, 235, 255), Colour(10, 16, 36, 255));
     if (pc_window_get_last_error()[0]) {
         char errBuf[128];
@@ -4167,6 +4121,119 @@ int pc_settings_get_fps_mode(void) {
 
 int pc_settings_get_chain_actions(void) {
     return sConfig.chainActions;
+}
+
+int pc_settings_get_better_pathfinding(void) {
+    return sConfig.betterPathfinding;
+}
+
+int pc_settings_get_blues_only_water(void) {
+    return sConfig.bluesOnlyWater;
+}
+
+int pc_settings_get_idle_counter(void) {
+    return sConfig.idleCounter;
+}
+
+int pc_settings_get_navi_health_pct(void) {
+    return pc_hardmode_active() ? 100 : sConfig.naviHealthPct;
+}
+
+int pc_settings_get_teki_health_pct(void) {
+    return pc_hardmode_active() ? 100 : sConfig.tekiHealthPct;
+}
+
+int pc_settings_get_infinite_day(void) {
+    return pc_hardmode_active() ? 0 : sConfig.infiniteDay;
+}
+
+int pc_settings_get_free_camera(void) {
+    return sConfig.freeCamera;
+}
+
+int pc_settings_get_whistle_radius_pct(void) {
+    return sConfig.whistleRadiusPct;
+}
+
+float pc_settings_get_throw_speed_scale(void) {
+    return sConfig.throwSpeedPct / 100.0f;
+}
+
+int pc_settings_get_throw_cancel_b(void) {
+    return sConfig.throwCancelB;
+}
+
+int pc_settings_get_no_trip(void) {
+    return sConfig.noTrip;
+}
+
+int pc_settings_get_onion_step10(void) {
+    return sConfig.onionStep10;
+}
+
+int pc_settings_get_instant_whistle(void) {
+    return sConfig.instantWhistle;
+}
+
+int pc_settings_get_gyro_enabled(void) {
+    return sConfig.gyroEnabled;
+}
+
+float pc_settings_get_gyro_sensitivity(void) {
+    return sConfig.gyroSensitivity;
+}
+
+int pc_settings_get_gyro_invert(void) {
+    return sConfig.gyroInvert;
+}
+
+void pc_settings_get_gyro_bias(float out[3]) {
+    for (int i = 0; i < 3; i++) out[i] = sConfig.gyroBias[i];
+}
+
+void pc_settings_set_gyro_bias(const float bias[3]) {
+    // Both copies: calibration runs from the menu, which saves the pending one.
+    for (int i = 0; i < 3; i++) {
+        sConfig.gyroBias[i]  = bias[i];
+        sPending.gyroBias[i] = bias[i];
+    }
+}
+
+int pc_settings_get_lock_on(void) {
+    return sConfig.lockOn;
+}
+
+int pc_settings_get_throw_while_moving(void) {
+    return sConfig.throwWhileMoving;
+}
+
+int pc_settings_get_first_person(void) {
+    return sConfig.firstPerson;
+}
+
+// La fila de Mods habilita el modo; la tecla entra y sale de él en marcha. Se
+// apaga sola al desactivar el mod, para no dejar la cámara dentro de Olimar.
+static int sFirstPersonActive = 0;
+
+int pc_first_person_active(void) {
+    if (!sConfig.firstPerson) sFirstPersonActive = 0;
+    return sFirstPersonActive;
+}
+
+void pc_first_person_toggle(void) {
+    if (!sConfig.firstPerson) return;
+    sFirstPersonActive = !sFirstPersonActive;
+}
+
+int pc_settings_get_charge(void) {
+    // El charge no significa nada sin un objetivo fijado.
+    return sConfig.lockOn ? sConfig.charge : 0;
+}
+
+float pc_mods_teki_damage(float damage) {
+    const int pct = pc_settings_get_teki_health_pct();
+    if (pct == 100 || pct <= 0) return damage;
+    return damage * 100.0f / (float)pct;
 }
 
 int pc_settings_get_hold_to_pluck(void) {
@@ -4204,38 +4271,34 @@ int pc_settings_get_debug_keys(void) {
 const char* pc_settings_group_name(int group) {
     switch (group) {
     case PC_SET_GROUP_DISPLAY: return "Display";
-    case PC_SET_GROUP_CONTROLS: return "Controls";
     case PC_SET_GROUP_GRAPHICS: return "Graphics";
-    case PC_SET_GROUP_MODS: return "Mods";
-    case PC_SET_GROUP_SAVEDATA: return "Save Data";
+    case PC_SET_GROUP_CONTROLS: return "Controls";
+    case PC_SET_GROUP_CAMERA: return "Camera";
+    case PC_SET_GROUP_GAMEPLAY: return "Gameplay";
+    case PC_SET_GROUP_DATA: return "Data";
+    case PC_SET_PICKER_RESOLUTION: return "Resolution";
     case PC_SET_PICKER_TEXPACKS: return "Texture Packs";
     case PC_SET_PICKER_HDMODELS: return "HD Models";
+    case PC_SET_PICKER_KEYBOARD: return "Keyboard";
+    case PC_SET_PICKER_GAMEPAD: return "Gamepad";
+    default: return "";
+    }
+}
+
+const char* pc_settings_group_summary(int group) {
+    switch (group) {
+    case PC_SET_GROUP_DISPLAY: return "Window, resolution, frame rate";
+    case PC_SET_GROUP_GRAPHICS: return "Effects, colour, texture packs";
+    case PC_SET_GROUP_CONTROLS: return "Mouse, sticks, gyro, bindings";
+    case PC_SET_GROUP_CAMERA: return "Free camera, first person, lock-on";
+    case PC_SET_GROUP_GAMEPLAY: return "Pikmin, day, health, co-op";
+    case PC_SET_GROUP_DATA: return "Save transfer, reset settings";
     default: return "";
     }
 }
 
 namespace {
-// Controls: 4 filas de Advanced, luego teclado y mando (PC_KEY_ACT_COUNT cada uno).
-constexpr int kCtlAdvanced = kAdvancedRowCount;
-constexpr int kCtlKeyboard = kCtlAdvanced;
-constexpr int kCtlGamepad  = kCtlKeyboard + PC_KEY_ACT_COUNT;
-constexpr int kCtlCount    = kCtlGamepad + PC_KEY_ACT_COUNT;
 constexpr int kSaveDataRows = 3; // export, import, reset defaults
-
-const char* kGraphicsLabels[kGraphicsRowCount] = {
-    "Antialiasing", "Fog", "Bloom", "Ambient Occlusion", "Depth of Field", "Texture Filtering",
-    "Colour Grading", "Gamma", "Brightness", "Saturation", "Texture Packs", "HD Models", "Lighting", "Shadows",
-};
-const char* kModsLabels[kModsRowCount] = {
-    "Control Scheme", "Chain Pikmin Actions", "Hold to Pluck", "Mouse Wheel", "Pikmin Limit", "Day Length",
-    "Co-op Split Screen", "Co-op Merged Camera",
-#if PIKI_DEBUG_KEYS
-    "Debug Keys (F5/F6)",
-#endif
-};
-const char* kAdvancedLabels[kAdvancedRowCount] = {
-    "Mouse Sensitivity", "Stick Dead Zone", "Stick Invert (X/Y)", "C-Stick Invert (X/Y)",
-};
 const char* kHdModelLabels[6] = { "Olimar HD", "Louie (Pikmin 2 zip)", "Louie HD (Pikmin 3 zip)", "Pikmin HD (red/yellow/blue)", "Bulborb HD", "Dwarf Bulborb HD" };
 
 void graphicsRowValue(int i, char* value, size_t n) {
@@ -4300,7 +4363,30 @@ void modsRowValue(int i, char* value, size_t n) {
         break;
     case 6: snprintf(value, n, "%s", sPending.coopSplit ? "Horizontal (top/bottom)" : "Vertical (left/right)"); break;
     case 7: snprintf(value, n, "%s", sPending.coopMergeCamera ? "On (dynamic)" : "Off (static split)"); break;
-    case 8: snprintf(value, n, "%s", sPending.debugKeys ? "On" : "Off"); break;
+    case 8: snprintf(value, n, "%s", sPending.betterPathfinding ? "On" : "Off (original)"); break;
+    case 9: snprintf(value, n, "%s", sPending.bluesOnlyWater ? "On" : "Off (original)"); break;
+    case 10: snprintf(value, n, "%s", sPending.idleCounter ? "On" : "Off (original)"); break;
+    case 11: healthPctLabel(sPending.naviHealthPct, value, n); break;
+    case 12: healthPctLabel(sPending.tekiHealthPct, value, n); break;
+    case 13:
+        if (pc_hardmode_active()) snprintf(value, n, "Off (Hard)");
+        else snprintf(value, n, "%s", sPending.infiniteDay ? "On" : "Off (original)");
+        break;
+    case 14: snprintf(value, n, "%s", sPending.freeCamera ? "On" : "Off (original)"); break;
+    case 15: snprintf(value, n, "%s", sPending.lockOn ? "On" : "Off (original)"); break;
+    case 16:
+        if (!sPending.lockOn) snprintf(value, n, "Needs Lock-On");
+        else snprintf(value, n, "%s", sPending.charge ? "On" : "Off (original)");
+        break;
+    case 17: snprintf(value, n, "%s", sPending.throwWhileMoving ? "On" : "Off (original)"); break;
+    case 18: snprintf(value, n, "%s", sPending.firstPerson ? "On" : "Off (original)"); break;
+    case 19: snprintf(value, n, "%s", sPending.debugKeys ? "On" : "Off"); break;
+    case 20: snprintf(value, n, sPending.whistleRadiusPct == 100 ? "%d%%  (original)" : "%d%%", sPending.whistleRadiusPct); break;
+    case 21: snprintf(value, n, sPending.throwSpeedPct == 100 ? "%d%%  (original)" : "%d%%", sPending.throwSpeedPct); break;
+    case 22: snprintf(value, n, "%s", sPending.throwCancelB ? "On" : "Off (original)"); break;
+    case 23: snprintf(value, n, "%s", sPending.noTrip ? "On" : "Off (original)"); break;
+    case 24: snprintf(value, n, "%s", sPending.onionStep10 ? "On" : "Off (original)"); break;
+    case 25: snprintf(value, n, "%s", sPending.instantWhistle ? "On" : "Off (original)"); break;
     default: value[0] = '\0';
     }
 }
@@ -4311,6 +4397,16 @@ void advancedRowValue(int i, char* value, size_t n) {
     case 1: snprintf(value, n, "%d", sPending.stickDeadZone); break;
     case 2: snprintf(value, n, "%s / %s", (sPending.stickInvert & 1) ? "InvX" : "NorX", (sPending.stickInvert & 2) ? "InvY" : "NorY"); break;
     case 3: snprintf(value, n, "%s / %s", (sPending.cStickInvert & 1) ? "InvX" : "NorX", (sPending.cStickInvert & 2) ? "InvY" : "NorY"); break;
+    case 4: snprintf(value, n, "%s", !sPending.gyroEnabled ? "Off" : (pc_gyro_available() ? "On" : "On (no sensor)")); break;
+    case 5: snprintf(value, n, "%.2f", sPending.gyroSensitivity); break;
+    case 6: snprintf(value, n, "%s / %s", (sPending.gyroInvert & 1) ? "InvX" : "NorX", (sPending.gyroInvert & 2) ? "InvY" : "NorY"); break;
+    case 7: {
+        const float left = pc_gyro_calibration_seconds_left();
+        if (left > 0.0f) snprintf(value, n, "Hold still... %.1f", left);
+        else if (!pc_gyro_available()) snprintf(value, n, "No sensor");
+        else snprintf(value, n, "Press A (keep still)");
+        break;
+    }
     default: value[0] = '\0';
     }
 }
@@ -4341,26 +4437,242 @@ std::vector<int> pickerResolutionChoices() {
 }
 }
 
-int pc_settings_rows_count(int group) {
+namespace {
+// ---------------------------------------------------------------------------
+// Grupos del menú. Cada fila apunta a la lógica que ya existía (fila de la
+// página de vídeo, de Advanced, de Graphics, de Mods...), así que reordenar
+// aquí no toca qué hace cada ajuste ni cómo se guarda: el .conf va por nombre.
+// ---------------------------------------------------------------------------
+enum RowSrc { SRC_MAIN, SRC_ADV, SRC_GFX, SRC_MODS, SRC_DATA, SRC_KEYS, SRC_PADS, SRC_RECENTER };
+struct GroupRow {
+    RowSrc src;
+    int idx;
+    const char* label;
+    const char* help;
+};
+
+const GroupRow kDisplayRows[] = {
+    { SRC_MAIN, ROW_DISPLAY_MODE, "Display Mode", "Windowed, exclusive fullscreen, or a borderless window at desktop size." },
+    { SRC_MAIN, ROW_RESOLUTION, "Resolution", "Window or fullscreen size. A opens the full list; Left/Right steps through it." },
+    { SRC_MAIN, ROW_ASPECT_RATIO, "Aspect Ratio", "Auto fills the window. The others keep that shape and add bars." },
+    { SRC_MAIN, ROW_RENDER_SCALE, "3D Resolution", "Detail of the 3D scene. Higher is sharper, lower is faster." },
+    { SRC_MAIN, ROW_REFRESH_RATE, "Refresh Rate", "Fullscreen refresh rate. Auto keeps the monitor's current rate." },
+    { SRC_MAIN, ROW_VSYNC, "Frame Sync (VSync)", "Waits for the monitor between frames. Stops tearing, adds a little lag." },
+    { SRC_MAIN, ROW_FPS_MODE, "FPS Mode", "30 is the original and the most stable. 60 and 120 are smoother but experimental." },
+#if defined(VERSION_GPIP01)
+    { SRC_MAIN, ROW_LANGUAGE, "Language", "Language of the game's text. Takes effect after a restart." },
+#endif
+};
+
+const GroupRow kGraphicsRows[] = {
+    { SRC_GFX, 0, "Antialiasing", "Smooths jagged edges (FXAA). Small performance cost." },
+    { SRC_GFX, 5, "Texture Filtering", "Keeps textures sharp at steep angles. Anisotropic costs a little GPU." },
+    { SRC_GFX, 12, "Lighting", "Per-pixel gives smoother light on models than the original per-vertex." },
+    { SRC_GFX, 13, "Shadows", "Real-time shadows cast by characters and objects." },
+    { SRC_GFX, 1, "Fog", "The game's own distance fog. On is how the original looks." },
+    { SRC_GFX, 2, "Bloom", "Soft glow around bright areas." },
+    { SRC_GFX, 3, "Ambient Occlusion", "Contact shadows in corners and under objects." },
+    { SRC_GFX, 4, "Depth of Field", "Blurs the far distance so the action stands out." },
+    { SRC_GFX, 6, "Colour Grading", "Turns on the Gamma, Brightness and Saturation controls below." },
+    { SRC_GFX, 7, "Gamma", "Brightness of the mid-tones. 1.00 is neutral." },
+    { SRC_GFX, 8, "Brightness", "Lifts or darkens the whole image. 0.00 is neutral." },
+    { SRC_GFX, 9, "Saturation", "Colour intensity. 1.00 is neutral, 0.00 is black and white." },
+    { SRC_GFX, 10, "Texture Packs", "Install or switch replacement texture packs. Needs a restart." },
+    { SRC_GFX, 11, "HD Models", "Install HD character models from their zips. Needs a restart." },
+};
+
+const GroupRow kControlsRows[] = {
+    { SRC_MODS, 0, "Control Scheme", "Classic: the stick moves the cursor, as on GameCube. Mouse Cursor: aim with the mouse." },
+    { SRC_ADV, 0, "Mouse Sensitivity", "How far the cursor moves for each movement of the mouse." },
+    { SRC_MODS, 3, "Mouse Wheel", "What the wheel does: change the Pikmin colour to throw, or zoom the camera." },
+    { SRC_MODS, 2, "Hold to Pluck", "Keep the button held to pluck sprouts one after another." },
+    { SRC_MODS, 17, "Throw While Moving", "Throw Pikmin while running, instead of Olimar stopping first." },
+    { SRC_MODS, 22, "Cancel Throw With B", "While holding a Pikmin with A, press B to put it back in the squad." },
+    { SRC_MODS, 24, "Onion: Y for Steps of 10", "In the Onion menu, hold Y while moving up or down to move 10 Pikmin at a time." },
+    { SRC_ADV, 1, "Stick Dead Zone", "Ignores small stick movements. Raise it if a worn stick drifts." },
+    { SRC_ADV, 2, "Stick Invert (X/Y)", "Inverts the movement stick." },
+    { SRC_ADV, 3, "C-Stick Invert (X/Y)", "Inverts the right stick (C-Stick)." },
+    { SRC_ADV, 4, "Gyro Aiming", "Aim the cursor by turning a gyro pad or the phone. In first person it looks around." },
+    { SRC_ADV, 5, "Gyro Sensitivity", "How far the cursor moves when you turn the pad." },
+    { SRC_ADV, 6, "Gyro Invert (X/Y)", "Inverts gyro aiming: none, horizontal, vertical or both." },
+    { SRC_ADV, 7, "Gyro Calibrate", "Put the pad or phone down, keep it still and press A. Fixes a drifting cursor." },
+    { SRC_RECENTER, 0, "Gyro Recenter Button", "Button that brings the cursor back in front of Olimar. A: assign it." },
+    { SRC_KEYS, 0, "Keyboard Bindings", "Choose the key or mouse button for each action." },
+    { SRC_PADS, 0, "Gamepad Bindings", "Choose the pad button for each action." },
+};
+
+const GroupRow kCameraRows[] = {
+    { SRC_MODS, 14, "Free Camera", "Turn the camera with the mouse or right stick, as in Pikmin 3. Swarm gets its own button." },
+    { SRC_MODS, 18, "First Person", "Allows a view from Olimar's helmet. Switch in game with its button (V / L3)." },
+    { SRC_MODS, 15, "Lock-On", "Target the nearest enemy or object with the Lock-On button (R / R3)." },
+    { SRC_MODS, 16, "Charge", "With a target locked, send the whole squad at it." },
+};
+
+const GroupRow kGameplayRows[] = {
+    { SRC_MODS, 4, "Pikmin Limit", "Most Pikmin on the field at once. 100 is the original; more costs performance." },
+    { SRC_MODS, 5, "Day Length", "Minutes of daylight per day. 10 is the original." },
+    { SRC_MODS, 13, "Infinite Day", "The day timer stops, so the sun never sets." },
+    { SRC_MODS, 20, "Whistle Radius", "Size of the whistle circle at full charge. 100% is the original." },
+    { SRC_MODS, 25, "Instant Whistle Response", "Whistled Pikmin join the squad at once, without stopping to turn and look first." },
+    { SRC_MODS, 21, "Throw Speed", "Speed of Olimar's grab and throw, so how fast you can throw. 100% is the original." },
+    { SRC_MODS, 11, "Olimar Health", "Olimar's toughness, as a share of the original." },
+    { SRC_MODS, 12, "Enemy Health", "Enemy toughness, as a share of the original." },
+    { SRC_MODS, 1, "Chain Pikmin Actions", "Pikmin that finish a task go on to the next one nearby." },
+    { SRC_MODS, 8, "Better Pathfinding", "Gets Pikmin moving again when they stall on their route." },
+    { SRC_MODS, 9, "Blues Only In Water", "Only blue Pikmin walk into water on their own." },
+    { SRC_MODS, 10, "Idle Pikmin Counter", "Shows how many Pikmin are standing idle." },
+    { SRC_MODS, 23, "No Tripping", "Pikmin running in the squad never trip and fall behind." },
+    { SRC_MODS, 6, "Co-op Split Screen", "How the screen divides in two-player co-op." },
+    { SRC_MODS, 7, "Co-op Merged Camera", "Joins both halves into one view while the captains are close." },
+#if PIKI_DEBUG_KEYS
+    { SRC_MODS, 19, "Debug Keys (F5/F6)", "Developer shortcuts on F5 and F6." },
+#endif
+};
+
+const GroupRow kDataRows[] = {
+#ifdef __ANDROID__
+    { SRC_DATA, 0, "Export save to ZIP", "Copies your memory card to a ZIP file you choose." },
+    { SRC_DATA, 1, "Import save from ZIP", "Replaces your memory card with one from a ZIP file." },
+#else
+    { SRC_DATA, 0, "Export save to ZIP", "Desktop saves are plain files in the 'save' folder. Copy it to back up." },
+    { SRC_DATA, 1, "Import save from ZIP", "Desktop saves are plain files in the 'save' folder. Replace it to restore." },
+#endif
+    { SRC_DATA, 2, "Reset all settings to defaults", "Puts every setting back to its default. Saves are not touched." },
+};
+
+template <size_t N> constexpr int countOf(const GroupRow (&)[N]) { return (int)N; }
+
+const GroupRow* groupRows(int group, int* count) {
     switch (group) {
-    case PC_SET_GROUP_DISPLAY: return (int)ROW_CONTROLS; // Display Mode .. FPS Mode [.. Language]
-    case PC_SET_GROUP_CONTROLS: return kCtlCount;
-    case PC_SET_GROUP_GRAPHICS: return kGraphicsRowCount;
-    case PC_SET_GROUP_MODS: return kModsRowCount;
-    case PC_SET_GROUP_SAVEDATA: return kSaveDataRows;
+    case PC_SET_GROUP_DISPLAY: *count = countOf(kDisplayRows); return kDisplayRows;
+    case PC_SET_GROUP_GRAPHICS: *count = countOf(kGraphicsRows); return kGraphicsRows;
+    case PC_SET_GROUP_CONTROLS: *count = countOf(kControlsRows); return kControlsRows;
+    case PC_SET_GROUP_CAMERA: *count = countOf(kCameraRows); return kCameraRows;
+    case PC_SET_GROUP_GAMEPLAY: *count = countOf(kGameplayRows); return kGameplayRows;
+    case PC_SET_GROUP_DATA: *count = countOf(kDataRows); return kDataRows;
+    default: *count = 0; return nullptr;
+    }
+}
+
+const GroupRow* groupRow(int group, int row) {
+    int n = 0;
+    const GroupRow* rows = groupRows(group, &n);
+    return (rows && row >= 0 && row < n) ? &rows[row] : nullptr;
+}
+
+bool hardLocked(const GroupRow& r) {
+    return r.src == SRC_MODS && pc_hardmode_active()
+        && (r.idx == 4 || r.idx == 5 || r.idx == 11 || r.idx == 12 || r.idx == 13);
+}
+
+// Motivo por el que una fila no se puede cambiar ahora, o nullptr si se puede.
+const char* disabledReason(const GroupRow& r) {
+    if (hardLocked(r)) return "Locked by Hard mode for this save file.";
+    switch (r.src) {
+    case SRC_MAIN:
+        if (r.idx == ROW_RESOLUTION && sPending.displayMode == PC_WINDOW_FULLSCREEN_BORDERLESS)
+            return "Borderless always uses the desktop resolution.";
+        break;
+    case SRC_ADV:
+        if (r.idx == 0 && sPending.controlMode == PC_CONTROL_CLASSIC)
+            return "Only used with the Mouse Cursor control scheme.";
+        if ((r.idx == 5 || r.idx == 6) && !sPending.gyroEnabled) return "Turn on Gyro Aiming first.";
+        if (r.idx == 7 && !pc_gyro_available()) return "No gyro found. Connect a pad with a gyro.";
+        break;
+    case SRC_RECENTER:
+        if (!sPending.gyroEnabled) return "Turn on Gyro Aiming first.";
+        break;
+    case SRC_GFX:
+        if (r.idx >= 7 && r.idx <= 9 && !sPending.colourGrading) return "Turn on Colour Grading first.";
+        break;
+    case SRC_MODS:
+        if (r.idx == 16 && !sPending.lockOn) return "Turn on Lock-On first.";
+        break;
+    default:
+        break;
+    }
+    return nullptr;
+}
+
+int sPickerFocusRow = 0; // fila en la que abre el selector de teclas/botones
+
+void startKeyCapture(int action) {
+    sControlSelection = action;
+    sWaitingForKey = true;
+    sCapturePrevMouse = SDL_GetMouseState(NULL, NULL);
+    pc_window_take_mouse_pressed(); // descartar clics de antes de la captura
+    sCaptureWaitRelease = true;
+}
+
+void startButtonCapture(int action) {
+    sGamepadSelection = action;
+    sWaitingForButton = true;
+    sCaptureWaitRelease = true;
+}
+
+void gamepadBindingName(int action, char* out, size_t n) {
+    int bound = sPending.gamepadBindings[action];
+    if (bound < 0) bound = kDefaultGamepadBindings[action];
+    const char* name = bound >= 0 ? pc_window_get_gamepad_button_name(bound) : nullptr;
+    snprintf(out, n, "%s", name ? name : "None");
+}
+} // namespace
+
+int pc_settings_rows_count(int group) {
+    int n = 0;
+    if (groupRows(group, &n)) return n;
+    switch (group) {
     case PC_SET_PICKER_RESOLUTION: return (int)pickerResolutionChoices().size();
     case PC_SET_PICKER_TEXPACKS: return 1 + (int)pc_texpack_list_packs().size();
     case PC_SET_PICKER_HDMODELS: return 6;
+    case PC_SET_PICKER_KEYBOARD:
+    case PC_SET_PICKER_GAMEPAD: return PC_KEY_ACT_COUNT;
     default: return 0;
     }
 }
 
+bool pc_settings_row_enabled(int group, int row) {
+    const GroupRow* r = groupRow(group, row);
+    return !r || !disabledReason(*r);
+}
+
+bool pc_settings_row_is_action(int group, int row) {
+    if (group == PC_SET_PICKER_TEXPACKS || group == PC_SET_PICKER_HDMODELS) return true;
+    const GroupRow* r = groupRow(group, row);
+    return r && (r->src == SRC_DATA || (r->src == SRC_ADV && r->idx == 7));
+}
+
+const char* pc_settings_row_help(int group, int row) {
+    if (const GroupRow* r = groupRow(group, row)) {
+        const char* reason = disabledReason(*r);
+        return reason ? reason : r->help;
+    }
+    switch (group) {
+    case PC_SET_PICKER_RESOLUTION: return "A: use this size. You then get a few seconds to keep or revert it.";
+    case PC_SET_PICKER_TEXPACKS: return "A: install, activate or deactivate. Changes need a restart.";
+    case PC_SET_PICKER_HDMODELS: return "A: pick the model's zip to install it. Needs a restart.";
+    case PC_SET_PICKER_KEYBOARD: return "A: press the new key or mouse button. Left/Right: back to default.";
+    case PC_SET_PICKER_GAMEPAD: return "A: press the new button. Left/Right: back to default.";
+    default: return "";
+    }
+}
+
 int pc_settings_row_opens_picker(int group, int row) {
-    if (group == PC_SET_GROUP_DISPLAY && row == ROW_RESOLUTION && sPending.displayMode != PC_WINDOW_FULLSCREEN_BORDERLESS)
-        return PC_SET_PICKER_RESOLUTION;
-    if (group == PC_SET_GROUP_GRAPHICS && row == 10) return PC_SET_PICKER_TEXPACKS;
-    if (group == PC_SET_GROUP_GRAPHICS && row == 11) return PC_SET_PICKER_HDMODELS;
-    return 0;
+    const GroupRow* r = groupRow(group, row);
+    if (!r || disabledReason(*r)) return 0;
+    switch (r->src) {
+    case SRC_MAIN: return r->idx == ROW_RESOLUTION ? PC_SET_PICKER_RESOLUTION : 0;
+    case SRC_GFX:
+        if (r->idx == 10) return PC_SET_PICKER_TEXPACKS;
+        if (r->idx == 11) return PC_SET_PICKER_HDMODELS;
+        return 0;
+    // Consultar la fila fija también dónde abrirá el selector: la del botón
+    // de recentrado abre la lista del mando ya encima de esa acción.
+    case SRC_KEYS: sPickerFocusRow = 0; return PC_SET_PICKER_KEYBOARD;
+    case SRC_PADS: sPickerFocusRow = 0; return PC_SET_PICKER_GAMEPAD;
+    case SRC_RECENTER: sPickerFocusRow = PC_KEY_ACT_GYRO_RECENTER; return PC_SET_PICKER_GAMEPAD;
+    default: return 0;
+    }
 }
 
 int pc_settings_picker_current(int picker) {
@@ -4369,24 +4681,15 @@ int pc_settings_picker_current(int picker) {
         for (size_t k = 0; k < c.size(); k++)
             if (sResolutions[c[k]].w == sPending.windowWidth && sResolutions[c[k]].h == sPending.windowHeight) return (int)k;
     }
+    if (picker == PC_SET_PICKER_KEYBOARD || picker == PC_SET_PICKER_GAMEPAD) return sPickerFocusRow;
     return 0;
 }
 
 const char* pc_settings_row_label(int group, int row) {
     static char label[96];
-    if (group == PC_SET_GROUP_DISPLAY) return mainRowLabel(row);
-    if (group == PC_SET_GROUP_CONTROLS) {
-        if (row < kCtlKeyboard) return kAdvancedLabels[row];
-        if (row < kCtlGamepad) { snprintf(label, sizeof(label), "Key: %s", pc_window_get_key_action_name(row - kCtlKeyboard)); return label; }
-        if (row < kCtlCount) { snprintf(label, sizeof(label), "Pad: %s", pc_window_get_key_action_name(row - kCtlGamepad)); return label; }
-        return "";
-    }
-    if (group == PC_SET_GROUP_GRAPHICS) return (row >= 0 && row < kGraphicsRowCount) ? kGraphicsLabels[row] : "";
-    if (group == PC_SET_GROUP_MODS) return (row >= 0 && row < kModsRowCount) ? kModsLabels[row] : "";
-    if (group == PC_SET_GROUP_SAVEDATA) {
-        static const char* k[kSaveDataRows] = { "Export save to ZIP", "Import save from ZIP", "Reset all settings to defaults" };
-        return (row >= 0 && row < kSaveDataRows) ? k[row] : "";
-    }
+    if (const GroupRow* r = groupRow(group, row)) return r->label;
+    if (group == PC_SET_PICKER_KEYBOARD || group == PC_SET_PICKER_GAMEPAD)
+        return (row >= 0 && row < PC_KEY_ACT_COUNT) ? pc_window_get_key_action_name(row) : "";
     if (group == PC_SET_PICKER_TEXPACKS) {
         if (row == 0) return "Install pack...";
         std::vector<std::string> packs = pc_texpack_list_packs();
@@ -4396,7 +4699,6 @@ const char* pc_settings_row_label(int group, int row) {
     }
     if (group == PC_SET_PICKER_HDMODELS) return (row >= 0 && row < 6) ? kHdModelLabels[row] : "";
     if (group == PC_SET_PICKER_RESOLUTION) {
-        static char label[32];
         std::vector<int> c = pickerResolutionChoices();
         if (row < 0 || row >= (int)c.size()) return "";
         snprintf(label, sizeof(label), "%dx%d", sResolutions[c[row]].w, sResolutions[c[row]].h);
@@ -4408,35 +4710,41 @@ const char* pc_settings_row_label(int group, int row) {
 void pc_settings_row_value(int group, int row, char* out, unsigned long n) {
     if (!out || !n) return;
     out[0] = '\0';
-    if (group == PC_SET_GROUP_DISPLAY) mainRowValue(row, out, (size_t)n);
-    if (group == PC_SET_GROUP_CONTROLS) {
-        if (row < kCtlKeyboard) { advancedRowValue(row, out, (size_t)n); return; }
-        if (row < kCtlGamepad) {
-            const int i = row - kCtlKeyboard;
-            if (sWaitingForKey && sControlSelection == i) { snprintf(out, n, "[Press a key or mouse button...]"); return; }
-            const char* name = pc_window_binding_name(sPending.keyboardBindings[i]);
-            snprintf(out, n, "%s", name ? name : "None");
-            return;
-        }
-        if (row < kCtlCount) {
-            const int i = row - kCtlGamepad;
-            if (sWaitingForButton && sGamepadSelection == i) { snprintf(out, n, "[Press a button...]"); return; }
-            int bound = sPending.gamepadBindings[i];
-            if (bound < 0) bound = kDefaultGamepadBindings[i];
-            const char* name = pc_window_get_gamepad_button_name(bound);
-            snprintf(out, n, "%s", name ? name : "None");
-            return;
-        }
-    }
-    if (group == PC_SET_GROUP_GRAPHICS) graphicsRowValue(row, out, (size_t)n);
-    if (group == PC_SET_GROUP_MODS) modsRowValue(row, out, (size_t)n);
-    if (group == PC_SET_GROUP_SAVEDATA) {
+    if (const GroupRow* r = groupRow(group, row)) {
+        switch (r->src) {
+        case SRC_MAIN: mainRowValue(r->idx, out, (size_t)n); break;
+        case SRC_ADV: advancedRowValue(r->idx, out, (size_t)n); break;
+        case SRC_GFX: graphicsRowValue(r->idx, out, (size_t)n); break;
+        case SRC_MODS: modsRowValue(r->idx, out, (size_t)n); break;
+        case SRC_DATA:
 #ifdef __ANDROID__
-        if (row < 2) snprintf(out, n, "%s", sSaveTransferActive ? "Opening picker..." : "System picker");
+            if (r->idx < 2) snprintf(out, n, "%s", sSaveTransferActive ? "Opening picker..." : "A: choose file");
 #else
-        if (row < 2) snprintf(out, n, "card0 / card1");
+            if (r->idx < 2) snprintf(out, n, "save / card0, card1");
 #endif
-        else snprintf(out, n, "A: reset");
+            else snprintf(out, n, "A: reset");
+            break;
+        case SRC_KEYS:
+        case SRC_PADS: snprintf(out, n, "Open  >"); break;
+        case SRC_RECENTER: {
+            char name[64];
+            gamepadBindingName(PC_KEY_ACT_GYRO_RECENTER, name, sizeof(name));
+            snprintf(out, n, "%s  >", name);
+            break;
+        }
+        }
+        return;
+    }
+    if (group == PC_SET_PICKER_KEYBOARD && row >= 0 && row < PC_KEY_ACT_COUNT) {
+        if (sWaitingForKey && sControlSelection == row) { snprintf(out, n, "[Press a key or mouse button...]"); return; }
+        const char* name = pc_window_binding_name(sPending.keyboardBindings[row]);
+        snprintf(out, n, "%s", name ? name : "None");
+        return;
+    }
+    if (group == PC_SET_PICKER_GAMEPAD && row >= 0 && row < PC_KEY_ACT_COUNT) {
+        if (sWaitingForButton && sGamepadSelection == row) { snprintf(out, n, "[Press a button...]"); return; }
+        gamepadBindingName(row, out, (size_t)n);
+        return;
     }
     if (group == PC_SET_PICKER_TEXPACKS) {
         if (row == 0) snprintf(out, n, "%s", sTexturePackPickerActive ? "Installing..." : "A: choose zip");
@@ -4465,12 +4773,31 @@ void pc_settings_row_value(int group, int row, char* out, unsigned long n) {
 }
 
 void pc_settings_row_change(int group, int row, int dir, bool ok) {
-    if (group == PC_SET_GROUP_DISPLAY) {
-        // Filas de valor: A/Enter equivale a "siguiente" (la resolución abre
-        // su selector: pc_settings_row_opens_picker).
-        const bool right = dir > 0 || ok;
-        mainRowChange(row, dir < 0, right, false);
-    } else if (group == PC_SET_PICKER_RESOLUTION && ok) {
+    if (const GroupRow* r = groupRow(group, row)) {
+        if (disabledReason(*r)) return;
+        // Filas de valor: A/Enter equivale a "siguiente".
+        const bool left = dir < 0, right = dir > 0 || ok;
+        switch (r->src) {
+        case SRC_MAIN: mainRowChange(r->idx, left, right, false); break;
+        case SRC_ADV:
+            if (r->idx == 7) { if (ok) advancedRowChange(r->idx, false, true); }
+            else advancedRowChange(r->idx, left, right);
+            break;
+        case SRC_GFX:
+            if (r->idx == 10 || r->idx == 11) return; // selectores: pc_settings_row_opens_picker
+            graphicsRowChange(r->idx, left, right, false);
+            break;
+        case SRC_MODS: modsRowChange(r->idx, left, right); break;
+        case SRC_DATA:
+            if (!ok) return;
+            if (r->idx < 2) saveDataRowAction(r->idx);
+            else resetToDefaults();
+            break;
+        default: break; // selectores
+        }
+        return;
+    }
+    if (group == PC_SET_PICKER_RESOLUTION && ok) {
         std::vector<int> c = pickerResolutionChoices();
         if (row < 0 || row >= (int)c.size()) return;
         sResolutionIdx = c[row];
@@ -4478,39 +4805,12 @@ void pc_settings_row_change(int group, int row, int dir, bool ok) {
         sPending.windowHeight = sResolutions[c[row]].h;
         applyVideo();
         startVideoConfirm();
-    } else if (group == PC_SET_GROUP_CONTROLS) {
-        if (row < kCtlKeyboard) {
-            advancedRowChange(row, dir < 0, dir > 0 || ok);
-        } else if (row < kCtlGamepad) {
-            const int i = row - kCtlKeyboard;
-            if (ok) {
-                sControlSelection = i;
-                sWaitingForKey = true;
-                sCapturePrevMouse = SDL_GetMouseState(NULL, NULL);
-                pc_window_take_mouse_pressed();
-                sCaptureWaitRelease = true;
-            } else if (dir) {
-                sPending.keyboardBindings[i] = kDefaultKeyBindings[i];
-            }
-        } else if (row < kCtlCount) {
-            const int i = row - kCtlGamepad;
-            if (ok) {
-                sGamepadSelection = i;
-                sWaitingForButton = true;
-                sCaptureWaitRelease = true;
-            } else if (dir) {
-                sPending.gamepadBindings[i] = -1;
-            }
-        }
-    } else if (group == PC_SET_GROUP_GRAPHICS) {
-        if (row == 10 || row == 11) return; // selectores: pc_settings_row_opens_picker
-        graphicsRowChange(row, dir < 0, dir > 0 || ok, false);
-    } else if (group == PC_SET_GROUP_MODS) {
-        modsRowChange(row, dir < 0, dir > 0 || ok);
-    } else if (group == PC_SET_GROUP_SAVEDATA) {
-        if (!ok) return;
-        if (row < 2) saveDataRowAction(row);
-        else resetToDefaults();
+    } else if (group == PC_SET_PICKER_KEYBOARD && row >= 0 && row < PC_KEY_ACT_COUNT) {
+        if (ok) startKeyCapture(row);
+        else if (dir) sPending.keyboardBindings[row] = kDefaultKeyBindings[row];
+    } else if (group == PC_SET_PICKER_GAMEPAD && row >= 0 && row < PC_KEY_ACT_COUNT) {
+        if (ok) startButtonCapture(row);
+        else if (dir) sPending.gamepadBindings[row] = -1;
     } else if (group == PC_SET_PICKER_TEXPACKS && ok) {
         texturePacksRowAction(row, pc_texpack_list_packs());
     } else if (group == PC_SET_PICKER_HDMODELS && ok) {
@@ -4561,12 +4861,8 @@ void pc_settings_rows_begin(void) {
 }
 
 void pc_settings_rows_end(bool save) {
-    if (save && !sVideoConfirmActive) {
-        sConfig = sPending;
-        applyVideo();
-        applyControls(sConfig);
-        applyGraphics(sConfig);
-        saveConfig();
+    if (save) {
+        commitPendingOnExit();
         return;
     }
     if (sVideoConfirmActive) {

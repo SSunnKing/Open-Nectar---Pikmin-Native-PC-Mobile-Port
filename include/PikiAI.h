@@ -2034,6 +2034,12 @@ protected:
 	Suckable* mGoal;               // _B0, either GoalItem* or UfoItem*
 	bool mCanCarry;                // _B4
 	                               // _B8-_C0 = PaniAnimKeyListener
+#if defined(PIKI_PC_PORT)
+	// Mod "Better Pathfinding": stall watchdog for the carry route.
+	Vector3f mPcStallCheckPos;
+	f32 mPcStallTimer = 0.0f;
+	bool mPcStallArmed = false;
+#endif
 };
 
 /**

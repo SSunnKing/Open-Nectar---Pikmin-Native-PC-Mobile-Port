@@ -33,6 +33,15 @@ struct PikiHeadItem;
 #define NAVI_PARM(parm)         C_NAVI_PARM(this, parm)
 #define C_NAVI_PARM(navi, parm) (static_cast<NaviProp*>((navi)->mProps)->mNaviProps.parm())
 
+#if defined(PIKI_PC_PORT)
+extern "C" int pc_settings_get_whistle_radius_pct(void);
+// Mod "Whistle Radius": el radio máximo escalado; el mínimo no cambia.
+#define NAVI_WHISTLE_MAX_RADIUS(navi) \
+	(C_NAVI_PARM(navi, mWhistleMaxRadius) * (f32)pc_settings_get_whistle_radius_pct() / 100.0f)
+#else
+#define NAVI_WHISTLE_MAX_RADIUS(navi) C_NAVI_PARM(navi, mWhistleMaxRadius)
+#endif
+
 /**
  * @brief TODO
  */
@@ -201,6 +210,12 @@ public:
 	f32 mCursorNaviDist;                  // _6E0, how far is the cursor from us?
 	Vector3f mCursorTargetPosition;       // _6E4, where we want cursor to be
 	Vector3f mCursorWorldPos;             // _6F0, also cursor related?
+#if defined(PIKI_PC_PORT)
+	void pcUpdateLockOn();
+	void pcPinCursorToLock();
+	void pcPinCursorFirstPerson();
+	Creature* mPcLockTarget = nullptr; ///< Mod "Lock-On": enemigo fijado.
+#endif
 	int mPendingLowerMotionId;            // _6FC
 	int mLowerMotionCooldown;             // _700
 	f32 mFlickIntensity;                  // _704

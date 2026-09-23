@@ -39,6 +39,8 @@ enum ButtonId {
 	BTN_SETTINGS,
 	BTN_LAYOUT,
 	BTN_PHOTO,
+	BTN_LOCKON,
+	BTN_CHARGE,
 	BTN_BACK,
 	BTN_MENU_CONFIRM,
 	BTN_COUNT
@@ -63,6 +65,10 @@ const ButtonSpec kButtons[BTN_COUNT] = {
 	{ "settings", 0.25f, 0.09f, false, 0.045f, 0 },
 	{ "layout", 0.37f, 0.09f, false, 0.045f, 0 },
 	{ "photo_mode", 0.49f, 0.09f, false, 0.045f, 0 },
+	// Solo aparecen con su mod activo (ver button_modded_off): quedan bajo la
+	// columna de cámara, en el lado del pulgar derecho.
+	{ "lock_on", 0.08f, 0.71f, true, 0.05f, 0 },
+	{ "charge", 0.20f, 0.36f, true, 0.05f, 0 },
 	{ "back", 0.10f, 0.84f, false, 0.055f, PAD_BUTTON_B },
 	{ nullptr, 0.10f, 0.84f, true, 0.055f, PAD_BUTTON_A },
 };
@@ -105,6 +111,16 @@ struct ToolState { float cx = 0, cy = 0, r = 0; };
 ToolState sTools[TOOL_COUNT];
 
 bool button_editable(int i) { return i != BTN_BACK && i != BTN_MENU_CONFIRM; }
+
+// Botones de mods: no se dibujan ni responden si su mod está apagado, para no
+// ocupar sitio con algo que no hace nada. El editor de disposición sí los
+// muestra siempre, o no habría forma de colocarlos antes de activarlos.
+bool button_modded_off(int i)
+{
+	if (i == BTN_LOCKON) return pc_settings_get_lock_on() == 0;
+	if (i == BTN_CHARGE) return pc_settings_get_charge() == 0;
+	return false;
+}
 
 struct ButtonState {
 	long long finger = -1; // dedo que lo mantiene, o -1
@@ -542,6 +558,7 @@ int button_at(float x, float y)
 		} else if (i == BTN_BACK || i == BTN_MENU_CONFIRM) {
 			continue;
 		}
+		if (button_modded_off(i)) continue;
 		const float dx = x - sButtons[i].cx, dy = y - sButtons[i].cy;
 		const float reach = sButtons[i].r * 1.15f; // algo más que el dibujo: el pulgar no es preciso
 		if (dx * dx + dy * dy <= reach * reach) return i;
@@ -618,6 +635,8 @@ void pc_touch_on_finger(long long fingerId, PcTouchPhase phase, float x, float y
 				if (btn == BTN_LAYOUT && sGameMenuClaimFrames <= 0) sLayoutRequested = true;
 				// Modo foto: el mismo conmutador que F3 en escritorio.
 				if (btn == BTN_PHOTO && sGameMenuClaimFrames <= 0) pc_photo_mode_request_toggle();
+				if (btn == BTN_LOCKON && sGameMenuClaimFrames <= 0) pc_window_request_lockon_press();
+				if (btn == BTN_CHARGE && sGameMenuClaimFrames <= 0) pc_window_request_charge_press();
 				if (btn == BTN_DISBAND) {
 					sGroupDrag.ax = x;
 					sGroupDrag.ay = y;
@@ -672,7 +691,7 @@ void pc_touch_on_finger(long long fingerId, PcTouchPhase phase, float x, float y
 					pc_photo_mode_add_touch_look((x - previousX) / float(sLayoutH), (y - previousY) / float(sLayoutH));
 				} else {
 					// Un dedo en una zona libre funciona como un trackpad de cámara.
-					pc_window_add_touch_camera_drag((x - previousX) / float(sLayoutH));
+					pc_window_add_camera_drag((x - previousX) / float(sLayoutH));
 				}
 			}
 		}
@@ -1016,6 +1035,7 @@ void pc_touch_draw(void)
 		} else if (i == BTN_BACK || i == BTN_MENU_CONFIRM) {
 			continue;
 		}
+		if (!sEditMode && button_modded_off(i)) continue;
 		const ButtonState& b = sButtons[i];
 		const bool pressed = sEditMode ? i == sEditDragButton : b.finger >= 0;
 		const float d = b.r * 2.0f;
