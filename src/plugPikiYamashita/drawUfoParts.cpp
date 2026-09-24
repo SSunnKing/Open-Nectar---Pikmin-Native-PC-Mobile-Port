@@ -5,6 +5,9 @@
 #include "PlayerState.h"
 #include "SoundMgr.h"
 #include "sysNew.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_gfx.h"
+#endif
 
 /**
  * @todo: Documentation
@@ -106,7 +109,18 @@ void zen::DrawUfoParts::draw(Graphics& gfx)
 			gfx.setColour(COLOUR_BLACK, true);
 			gfx.setAuxColour(COLOUR_BLACK);
 			gfx.fillRectangle(AREA_FULL_SCREEN(gfx));
+#if defined(PIKI_PC_PORT)
+			// Issue #49: the fill above only covers 640 GX units, so on a wide
+			// screen the score screen showed through on the right. Black out the
+			// whole target, and keep the parts list to its 4:3 area: the original
+			// layout parks the Japanese name panes off-screen to the right.
+			pc_gfx_dim_full_target(255);
+			pc_gfx_set_menu_clip_43(1);
 			mScreen->draw();
+			pc_gfx_set_menu_clip_43(0);
+#else
+			mScreen->draw();
+#endif
 		}
 
 		mAlphaWipe.draw(gfx);

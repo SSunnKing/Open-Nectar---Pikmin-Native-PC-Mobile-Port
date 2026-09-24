@@ -227,7 +227,7 @@ struct PcConfig {
         firstPerson = 0;
         mouseWheelAction = 0;
         pikiLimit = 100;
-        dayMinutes = 10;
+        dayMinutes = 0;
         coopPlayers = 1;
 #if PIKI_PC_TOUCH
         coopSplit = 1;
@@ -429,8 +429,9 @@ constexpr int kPikiLimitCount = int(sizeof(kPikiLimits) / sizeof(kPikiLimits[0])
 
 // Day length, in real minutes of actual play. The clock's own figure covers a
 // full 24-hour cycle, but a day is played from 7am to 7pm -- half of it -- so
-// the menu shows the half the player experiences. 10 is the original.
-constexpr int kDayMinutes[]    = { 5, 7, 10, 15, 20, 30 };
+// the menu shows the half the player experiences. 0 is the original: 27 min
+// per 24h in the game's parameters, i.e. 13.5 min of play (issue #50).
+constexpr int kDayMinutes[]    = { 5, 7, 10, 0, 15, 20, 30 };
 constexpr int kDayMinutesCount = int(sizeof(kDayMinutes) / sizeof(kDayMinutes[0]));
 
 // Health stops, as a percentage of the original. Shared by Olimar and the
@@ -918,7 +919,7 @@ void saveConfig() {
     out << "firstPerson = " << sConfig.firstPerson << "\n";
     out << "mouseWheelAction = " << sConfig.mouseWheelAction << "\n";
     out << "pikiLimit = " << sConfig.pikiLimit << "\n";
-    out << "dayMinutes = " << sConfig.dayMinutes << "\n";
+    out << "dayLength = " << sConfig.dayMinutes << "\n";
     out << "coopPlayers = " << sConfig.coopPlayers << "\n";
     out << "coopSplit = " << sConfig.coopSplit << "\n";
     out << "coopMergeCamera = " << sConfig.coopMergeCamera << "\n";
@@ -1146,9 +1147,14 @@ void loadConfig() {
             sConfig.saturation = (float)atof(val.c_str());
             if (!(sConfig.saturation >= 0.0f && sConfig.saturation <= 2.0f)) sConfig.saturation = 1.0f;
         }
+        else if (key == "dayLength") {
+            sConfig.dayMinutes = atoi(val.c_str());
+            if (sConfig.dayMinutes < 0 || sConfig.dayMinutes > 120) sConfig.dayMinutes = 0;
+        }
+        // Clave antigua: 10 era el falso "original", asi que pasa al original real.
         else if (key == "dayMinutes") {
             sConfig.dayMinutes = atoi(val.c_str());
-            if (sConfig.dayMinutes < 1 || sConfig.dayMinutes > 120) sConfig.dayMinutes = 10;
+            if (sConfig.dayMinutes == 10 || sConfig.dayMinutes < 1 || sConfig.dayMinutes > 120) sConfig.dayMinutes = 0;
         }
         else if (key == "coopPlayers") {
             sConfig.coopPlayers = atoi(val.c_str()) == 2 ? 2 : 1;
@@ -4251,7 +4257,7 @@ int pc_settings_get_piki_limit(void) {
 }
 
 int pc_settings_get_day_minutes(void) {
-    if (pc_hardmode_active() && sConfig.dayMinutes > PC_HARDMODE_DAY_MINUTES)
+    if (pc_hardmode_active() && (sConfig.dayMinutes == 0 || sConfig.dayMinutes > PC_HARDMODE_DAY_MINUTES))
         return PC_HARDMODE_DAY_MINUTES;
     return sConfig.dayMinutes;
 }
@@ -4358,7 +4364,7 @@ void modsRowValue(int i, char* value, size_t n) {
         break;
     case 5:
         if (pc_hardmode_active()) snprintf(value, n, "%d min (Hard)", PC_HARDMODE_DAY_MINUTES);
-        else if (sPending.dayMinutes == 10) snprintf(value, n, "10 min (original)");
+        else if (sPending.dayMinutes == 0) snprintf(value, n, "13.5 min (original)");
         else snprintf(value, n, "%d min", sPending.dayMinutes);
         break;
     case 6: snprintf(value, n, "%s", sPending.coopSplit ? "Horizontal (top/bottom)" : "Vertical (left/right)"); break;
@@ -4510,7 +4516,7 @@ const GroupRow kCameraRows[] = {
 
 const GroupRow kGameplayRows[] = {
     { SRC_MODS, 4, "Pikmin Limit", "Most Pikmin on the field at once. 100 is the original; more costs performance." },
-    { SRC_MODS, 5, "Day Length", "Minutes of daylight per day. 10 is the original." },
+    { SRC_MODS, 5, "Day Length", "Minutes of daylight per day. 13.5 is the original." },
     { SRC_MODS, 13, "Infinite Day", "The day timer stops, so the sun never sets." },
     { SRC_MODS, 20, "Whistle Radius", "Size of the whistle circle at full charge. 100% is the original." },
     { SRC_MODS, 25, "Instant Whistle Response", "Whistled Pikmin join the squad at once, without stopping to turn and look first." },

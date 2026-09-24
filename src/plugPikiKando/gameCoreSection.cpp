@@ -1555,7 +1555,9 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 	// half the 24-hour cycle this parameter describes -- so double it. The
 	// clock recomputes its speed from here every tick, and each stage's own
 	// day_multiply still applies on top, as designed.
-	gameflow.mParameters->mRealMinutesPerGameDay(f32(pc_settings_get_day_minutes()) * 2.0f);
+	// 0 means the original value: 27 min per 24h, 13.5 min of play.
+	const int dayMinutes = pc_settings_get_day_minutes();
+	gameflow.mParameters->mRealMinutesPerGameDay(dayMinutes ? f32(dayMinutes) * 2.0f : 27.0f);
 #endif
 	gameflow.addGenNode("AI定数", AIConstant::_instance); // 'AI Constants'
 
@@ -1765,7 +1767,7 @@ static void pcDebugKeys()
 		WorldClock& clock = gameflow.mWorldClock;
 		const f32 next    = clock.mTimeOfDay + 1.0f;
 		clock.setTime(next >= clock.mHoursInDay ? clock.mHoursInDay - 0.01f : next);
-		fprintf(stderr, "[DEBUG] clock -> %02d:00 (day is %d min of play)\n",
+		fprintf(stderr, "[DEBUG] clock -> %02d:00 (day is %d min of play, 0 = original)\n",
 		        clock.mCurrentGameHour, pc_settings_get_day_minutes());
 		fflush(stderr);
 	}

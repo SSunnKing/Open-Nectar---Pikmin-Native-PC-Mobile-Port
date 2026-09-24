@@ -6,6 +6,9 @@
 #include "sysNew.h"
 #include "zen/EffectMgr2D.h"
 #include "zen/ogSub.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_gfx.h"
+#endif
 
 /**
  * @todo: Documentation
@@ -266,6 +269,11 @@ void zen::DrawTotalScore::setEffect(P2DPane* pane, int effID)
 	x += width / 2;
 	y += height / 2;
 	y = 480 - y;
+#if defined(PIKI_PC_PORT)
+	// The screen is drawn shifted to the centre of the wide menu space; the
+	// glow has to follow it or it lands off the number frames (issue #49).
+	x += pc_gfx_menu_shift_center();
+#endif
 	Vector3f pos;
 	pos.set(x, y, 0.0f);
 	mEffectMgr2D->create(effID, pos, nullptr, nullptr);
