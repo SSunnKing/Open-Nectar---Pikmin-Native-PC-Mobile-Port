@@ -92,6 +92,32 @@ static PCGLINVALIDATEFRAMEBUFFERPROC glInvalidateFramebuffer_ptr = nullptr;
 #define GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT 0x84FF
 #endif
 
+// Not in Apple's <OpenGL/gl.h>: these are core since GL 3.0 (vertex array
+// object binding query, and the ARB_map_buffer_range access/flush bits),
+// but Apple's legacy-profile header only goes as far as the fixed-function
+// GL 2.1 spec plus the true extensions it separately declares.
+#ifndef GL_VERTEX_ARRAY_BINDING
+#define GL_VERTEX_ARRAY_BINDING 0x85B5
+#endif
+#ifndef GL_MAP_READ_BIT
+#define GL_MAP_READ_BIT 0x0001
+#endif
+#ifndef GL_MAP_WRITE_BIT
+#define GL_MAP_WRITE_BIT 0x0002
+#endif
+#ifndef GL_MAP_INVALIDATE_RANGE_BIT
+#define GL_MAP_INVALIDATE_RANGE_BIT 0x0004
+#endif
+#ifndef GL_MAP_INVALIDATE_BUFFER_BIT
+#define GL_MAP_INVALIDATE_BUFFER_BIT 0x0008
+#endif
+#ifndef GL_MAP_FLUSH_EXPLICIT_BIT
+#define GL_MAP_FLUSH_EXPLICIT_BIT 0x0010
+#endif
+#ifndef GL_MAP_UNSYNCHRONIZED_BIT
+#define GL_MAP_UNSYNCHRONIZED_BIT 0x0020
+#endif
+
 static int sAnisotropyRequested = 0;
 static float sAnisotropyMax = 1.0f;
 static bool sAnisotropySupported = false;
@@ -580,6 +606,16 @@ static_assert(decode_xf_light_mask((1u << 2) | (1u << 14)) == 0x81,
               "XF channel light-mask decoding must preserve lights 0 and 7");
 
 static GLuint sVBO = 0;
+// The streaming vertex path (setup_vertex_attribs() below) never had its
+// own VAO -- every glVertexAttribPointer/glEnableVertexAttribArray call
+// here recorded into whatever VAO happened to be object 0, the default.
+// Compatibility/Legacy profiles allow drawing with VAO 0 bound, which is
+// why this worked without one; a Core profile context (required on macOS
+// for the #version 140 shaders below -- see pc_window.cpp) does not allow
+// vertex specification or draw calls with VAO 0 bound at all. This is
+// that VAO: created once, bound for the whole life of the streaming path,
+// and what every glBindVertexArray_ptr(0) below now restores instead.
+static GLuint sMainVAO = 0;
 // En GLES el VBO es un anillo con fences (ver vbo_ring_*): necesita sitio
 // para los frames que la GPU aún no ha consumido. Antes de las mallas
 // residentes (fase 1) la pantalla de título movía ~21 MB de vértices por
@@ -1521,7 +1557,7 @@ static void dim_draw(unsigned char alpha)
     glUniform4f_ptr(sDimColorLoc, 0.0f, 0.0f, 0.0f, float(alpha) / 255.0f);
     glBindVertexArray_ptr(sDimVAO);
     glDrawArrays(GL_TRIANGLES, 0, 3);
-    glBindVertexArray_ptr(0);
+    glBindVertexArray_ptr(sMainVAO);
     glUseProgram_ptr(0);
     // Same trap as post_apply(): GX thinks the TEV program is still bound
     // and skips glUseProgram. P2D plates then draw with program 0 and show
@@ -1673,7 +1709,7 @@ void pc_gfx_overlay_end(void)
 {
     if (!sOverlayProgram) return;
     glBindTexture(GL_TEXTURE_2D, 0);
-    glBindVertexArray_ptr(0);
+    glBindVertexArray_ptr(sMainVAO);
     glUseProgram_ptr(0);
     for (int i = 0; i < 8; i++) sBoundTextures[i] = 0;
     gl_program_cache_invalidate();
@@ -2895,6 +2931,10 @@ void pc_gfx_init(void) {
     sSharedVertexShader = vs;
 
     gl_error_checkpoint("shader setup");
+    if (glGenVertexArrays_ptr && glBindVertexArray_ptr) {
+        glGenVertexArrays_ptr(1, &sMainVAO);
+        glBindVertexArray_ptr(sMainVAO);
+    }
     glGenBuffers_ptr(1, &sVBO);
     glBindBuffer_ptr(GL_ARRAY_BUFFER, sVBO);
     glBufferData_ptr(GL_ARRAY_BUFFER, sVboCapacity, nullptr, GL_STREAM_DRAW);
@@ -3820,7 +3860,7 @@ static bool dof_build()
         }
     }
 
-    glBindVertexArray_ptr(0);
+    glBindVertexArray_ptr(sMainVAO);
     return true;
 }
 
@@ -3863,7 +3903,7 @@ static bool bloom_build()
         glDrawArrays(GL_TRIANGLES, 0, 3);
     }
 
-    glBindVertexArray_ptr(0);
+    glBindVertexArray_ptr(sMainVAO);
     return true;
 }
 
@@ -3968,7 +4008,7 @@ static bool ao_build()
         glDrawArrays(GL_TRIANGLES, 0, 3);
     }
 
-    glBindVertexArray_ptr(0);
+    glBindVertexArray_ptr(sMainVAO);
     return true;
 }
 
@@ -4143,7 +4183,7 @@ static GLuint post_apply(bool allowDof)
     // the last draw was doing; the geometry comes from gl_VertexID.
     glBindVertexArray_ptr(sPostVAO);
     glDrawArrays(GL_TRIANGLES, 0, 3);
-    glBindVertexArray_ptr(0);
+    glBindVertexArray_ptr(sMainVAO);
 
     glUseProgram_ptr(0);
     glBindTexture(GL_TEXTURE_2D, 0);

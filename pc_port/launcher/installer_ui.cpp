@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <unordered_map>
 
@@ -328,17 +329,56 @@ void InstallerWindow::updateProgress(std::uint32_t percent, const std::string& c
     mImpl->pump();
 }
 
+namespace {
+// SDL's Cocoa message box passes this text straight into
+// -[NSAlert setInformativeText:], which wraps it in an NSAttributedString
+// built from -[NSString stringWithUTF8String:]. That conversion returns nil
+// for any byte sequence that isn't valid UTF-8, and SDL hands the nil
+// straight to AppKit without checking -- turning a message box that merely
+// couldn't be shown into a crash of the whole launcher. Everything routed
+// here is a literal or a filesystem/OS error string, expected to be plain
+// ASCII, but this guards the rare cases that might not be (a raw byte out
+// of a corrupted disc image's file table, an unusual locale's strerror()
+// text) so a bad message degrades to '?' characters instead of taking the
+// whole process down with it.
+std::string sanitizeForNativeDialog(const std::string& text)
+{
+    std::string out;
+    out.reserve(text.size());
+    std::size_t i = 0;
+    while (i < text.size()) {
+        const unsigned char c = static_cast<unsigned char>(text[i]);
+        std::size_t len = 0;
+        if (c < 0x80) len = 1;
+        else if ((c & 0xE0) == 0xC0) len = 2;
+        else if ((c & 0xF0) == 0xE0) len = 3;
+        else if ((c & 0xF8) == 0xF0) len = 4;
+        else { out += '?'; ++i; continue; }
+        if (i + len > text.size()) { out += '?'; ++i; continue; }
+        bool valid = true;
+        for (std::size_t k = 1; k < len; ++k) {
+            if ((static_cast<unsigned char>(text[i + k]) & 0xC0) != 0x80) { valid = false; break; }
+        }
+        if (!valid) { out += '?'; ++i; continue; }
+        out.append(text, i, len);
+        i += len;
+    }
+    return out;
+}
+} // namespace
+
 bool InstallerWindow::offerRetry(const std::string& message)
 {
     mImpl->installing = false;
     mImpl->status = "Installation did not finish";
     mImpl->render();
+    const std::string safeMessage = sanitizeForNativeDialog(message);
     const SDL_MessageBoxButtonData buttons[] = {
         { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Close" },
         { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Back to setup" }
     };
     const SDL_MessageBoxData data { SDL_MESSAGEBOX_ERROR, mImpl->window, "Open Nectar Installer",
-                                   message.c_str(), 2, buttons, nullptr };
+                                   safeMessage.c_str(), 2, buttons, nullptr };
     int selected = 0;
     return SDL_ShowMessageBox(&data, &selected) == 0 && selected == 1;
 }
@@ -348,7 +388,8 @@ void InstallerWindow::showError(const std::string& message)
     mImpl->installing = false;
     mImpl->status = "Installation did not finish";
     mImpl->render();
-    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Open Nectar Installer", message.c_str(), mImpl->window);
+    const std::string safeMessage = sanitizeForNativeDialog(message);
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Open Nectar Installer", safeMessage.c_str(), mImpl->window);
 }
 
 void InstallerWindow::showComplete(const std::string& installDirectory, bool willLaunch)
@@ -360,7 +401,8 @@ void InstallerWindow::showComplete(const std::string& installDirectory, bool wil
     message += "\n\nF1 opens graphics, controls and gameplay settings."
                "\nRun nectar-launcher from this folder to play again.";
     if (willLaunch) message += "\n\nThe game will start now.";
-    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Installation complete", message.c_str(), mImpl->window);
+    const std::string safeMessage = sanitizeForNativeDialog(message);
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Installation complete", safeMessage.c_str(), mImpl->window);
 }
 
 } // namespace launcher

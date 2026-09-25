@@ -15,6 +15,9 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include <unistd.h>
 #elif defined(__linux__)
 #include <unistd.h>
 #endif
@@ -62,6 +65,21 @@ fs::path installDir()
 	std::vector<char> path(4096);
 	const ssize_t count = readlink("/proc/self/exe", path.data(), path.size() - 1);
 	if (count > 0) { path[static_cast<std::size_t>(count)] = '\0'; return fs::path(path.data()).parent_path(); }
+#elif defined(__APPLE__)
+	// macOS has no /proc of any kind, so there is no symlink to read. The
+	// equivalent is this libSystem call, which reports the size it needs when
+	// the buffer is too small -- hence the retry. The path it returns may still
+	// carry symlinks or .. segments, and callers take parent_path() of it and
+	// compare that against real directories, so it is canonicalised first.
+	std::vector<char> path(4096);
+	uint32_t size = static_cast<uint32_t>(path.size());
+	if (_NSGetExecutablePath(path.data(), &size) != 0) {
+		path.resize(size);
+		if (_NSGetExecutablePath(path.data(), &size) != 0) return {};
+	}
+	std::error_code ec;
+	const fs::path resolved = fs::weakly_canonical(fs::path(path.data()), ec);
+	return (ec ? fs::path(path.data()) : resolved).parent_path();
 #endif
 	return {};
 }

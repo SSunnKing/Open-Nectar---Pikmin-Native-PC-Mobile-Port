@@ -3,10 +3,13 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <iconv.h>
 #endif
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <fstream>
 #include <limits>
 #include <vector>
@@ -25,12 +28,63 @@ namespace {
  * Linux those bytes become the filename unchanged, which is why extraction has
  * always worked there. On Windows fs::path converts a narrow string through the
  * active code page and throws filesystem_error on an illegal sequence, aborting
- * the install a few percent in.
+ * the install a few percent in. macOS/APFS requires filenames to be valid
+ * UTF-8 outright -- open()/ofstream just fails on an invalid byte sequence,
+ * no exception to catch -- so raw bytes can't pass through unchanged there
+ * the way they do on Linux either.
  *
  * Decode explicitly instead: UTF-8 first, then Shift-JIS, and finally a
- * byte-preserving widening that cannot fail. The last step keeps a file with an
- * unrecognisable name rather than losing the extraction.
+ * byte-preserving widening (Windows) or hex-escaping (macOS) that cannot
+ * fail. The last step keeps a file with an unrecognisable name rather than
+ * losing the extraction.
  */
+#if defined(__APPLE__)
+namespace {
+/// True if `text` is well-formed UTF-8 (the common case: most FST names are
+/// plain ASCII, which is valid UTF-8 unchanged).
+bool isValidUtf8(const std::string& text)
+{
+    std::size_t i = 0;
+    while (i < text.size()) {
+        const unsigned char c = static_cast<unsigned char>(text[i]);
+        std::size_t len;
+        if (c < 0x80) len = 1;
+        else if ((c & 0xE0) == 0xC0) len = 2;
+        else if ((c & 0xF0) == 0xE0) len = 3;
+        else if ((c & 0xF8) == 0xF0) len = 4;
+        else return false;
+        if (i + len > text.size()) return false;
+        for (std::size_t k = 1; k < len; ++k) {
+            if ((static_cast<unsigned char>(text[i + k]) & 0xC0) != 0x80) return false;
+        }
+        i += len;
+    }
+    return true;
+}
+
+/// Shift-JIS -> UTF-8 through the platform's own conversion tables, the same
+/// role CP_UTF8/932 via MultiByteToWideChar plays on Windows below. Returns
+/// false (rather than a partial result) on anything iconv can't decode.
+bool shiftJisToUtf8(const std::string& input, std::string& output)
+{
+    if (input.empty()) { output.clear(); return true; }
+    const iconv_t cd = iconv_open("UTF-8", "SHIFT_JIS");
+    if (cd == reinterpret_cast<iconv_t>(-1)) return false;
+    std::string result(input.size() * 4 + 16, '\0');
+    char* inPtr = const_cast<char*>(input.data());
+    std::size_t inBytesLeft = input.size();
+    char* outPtr = result.data();
+    std::size_t outBytesLeft = result.size();
+    const std::size_t rc = iconv(cd, &inPtr, &inBytesLeft, &outPtr, &outBytesLeft);
+    iconv_close(cd);
+    if (rc == static_cast<std::size_t>(-1) || inBytesLeft != 0) return false;
+    result.resize(result.size() - outBytesLeft);
+    output = std::move(result);
+    return true;
+}
+} // namespace
+#endif
+
 fs::path discNameToPath(const std::string& name)
 {
 #if defined(_WIN32)
@@ -57,6 +111,29 @@ fs::path discNameToPath(const std::string& name)
 		for (unsigned char byte : name) wide.push_back(static_cast<wchar_t>(byte));
 	}
 	return fs::path(wide);
+#elif defined(__APPLE__)
+	if (name.empty() || isValidUtf8(name)) return fs::path(name);
+
+	std::string converted;
+	if (shiftJisToUtf8(name, converted) && isValidUtf8(converted)) {
+		return fs::path(converted);
+	}
+
+	// Never fails: each invalid byte becomes a unique, filesystem-legal
+	// escape instead of a file that APFS refuses to create.
+	static const char kHexDigits[] = "0123456789ABCDEF";
+	std::string safe;
+	safe.reserve(name.size() * 3);
+	for (unsigned char byte : name) {
+		if (byte >= 0x20 && byte < 0x7F && byte != '/' && byte != '\\') {
+			safe += static_cast<char>(byte);
+		} else {
+			safe += '_';
+			safe += kHexDigits[(byte >> 4) & 0xF];
+			safe += kHexDigits[byte & 0xF];
+		}
+	}
+	return fs::path(safe);
 #else
 	return fs::path(name);
 #endif

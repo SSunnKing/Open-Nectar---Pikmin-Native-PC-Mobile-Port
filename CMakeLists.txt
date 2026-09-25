@@ -52,10 +52,15 @@ set(PC_PORT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/pc_port")
 # Clang (el compilador del NDK) convierte en error dos cosas que GCC deja
 # pasar con -fpermissive: el especificador `register` y tomar la dirección de
 # un temporal (stack_new). Ambas se relajan sólo en Clang.
+#
+# AppleClang is listed separately on purpose: CMake gives Xcode's toolchain
+# its own compiler ID, and $<CXX_COMPILER_ID:Clang> does an exact match, so
+# on macOS none of these ever applied and every `register` in the decompiled
+# Dolphin headers (OSFastCast.h and friends) was a hard error under C++17.
 set(CLANG_LEGACY_RELAXATIONS
-    $<$<CXX_COMPILER_ID:Clang>:-Wno-register>
-    $<$<CXX_COMPILER_ID:Clang>:-Wno-address-of-temporary>
-    $<$<CXX_COMPILER_ID:Clang>:-Wno-unknown-warning-option>
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-register>
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-address-of-temporary>
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-unknown-warning-option>
 )
 set(LEGACY_COMPILE_OPTIONS
     -include "${PC_PORT_DIR}/pc_types.h"
@@ -491,10 +496,10 @@ set(PIKMIN_OPTIMIZED_TARGETS ${NECTAR_GAME} ${NECTAR_LEGACY})
 
 foreach(target IN LISTS PIKMIN_OPTIMIZED_TARGETS)
     target_compile_options(${target} PRIVATE
-        $<$<AND:$<CONFIG:Release>,$<COMPILE_LANG_AND_ID:C,GNU,Clang>>:-O3>
-        $<$<AND:$<CONFIG:Release>,$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>>:-O3>
-        $<$<AND:$<CONFIG:RelWithDebInfo>,$<COMPILE_LANG_AND_ID:C,GNU,Clang>>:-O3>
-        $<$<AND:$<CONFIG:RelWithDebInfo>,$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>>:-O3>)
+        $<$<AND:$<CONFIG:Release>,$<COMPILE_LANG_AND_ID:C,GNU,Clang,AppleClang>>:-O3>
+        $<$<AND:$<CONFIG:Release>,$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>>:-O3>
+        $<$<AND:$<CONFIG:RelWithDebInfo>,$<COMPILE_LANG_AND_ID:C,GNU,Clang,AppleClang>>:-O3>
+        $<$<AND:$<CONFIG:RelWithDebInfo>,$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>>:-O3>)
 endforeach()
 
 option(PIKMIN_NATIVE_OPTIMIZE "Use this build machine's CPU instruction set" ON)
@@ -534,6 +539,10 @@ elseif (ANDROID)
     target_link_libraries(${NECTAR_GAME} PRIVATE m ${SDL2_LIBRARIES} GLESv3 EGL log android)
     # Android 15 exige bibliotecas alineadas a páginas de 16 KB en arm64.
     target_link_options(${NECTAR_GAME} PRIVATE "-Wl,-z,max-page-size=16384")
+elseif (APPLE)
+    # No X11 on macOS (SDL2 uses Cocoa natively), and PIKMIN_GLES is a
+    # desktop-Linux/Android concept -- macOS always gets desktop OpenGL.
+    target_link_libraries(${NECTAR_GAME} PRIVATE m ${SDL2_LIBRARIES} OpenGL::GL)
 else()
     if(PIKMIN_GLES)
         target_link_libraries(${NECTAR_GAME} PRIVATE m ${SDL2_LIBRARIES} OpenGL::GLES3 X11)
@@ -585,6 +594,16 @@ if((PIKMIN_BUILD_LAUNCHER OR ANDROID) AND NOT TARGET pikmin_disc_image)
         ${CMAKE_CURRENT_SOURCE_DIR}/pc_port/launcher)
     target_compile_options(pikmin_disc_image PRIVATE ${NATIVE_COMPILE_OPTIONS})
     set_property(TARGET pikmin_disc_image PROPERTY POSITION_INDEPENDENT_CODE ON)
+    if(APPLE)
+        # discNameToPath()'s Shift-JIS -> UTF-8 fallback for the disc's few
+        # leftover Shift-JIS file names (APFS requires valid UTF-8 filenames,
+        # unlike Linux) goes through iconv, which on macOS lives in its own
+        # library rather than libSystem.
+        find_library(ICONV_LIBRARY iconv)
+        if(ICONV_LIBRARY)
+            target_link_libraries(pikmin_disc_image PRIVATE ${ICONV_LIBRARY})
+        endif()
+    endif()
 endif()
 
 # Instalador Android: la misma biblioteca de extracción, con un puente JNI
