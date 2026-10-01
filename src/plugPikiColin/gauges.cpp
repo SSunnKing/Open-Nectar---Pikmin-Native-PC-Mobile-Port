@@ -11,6 +11,7 @@
 #include "system.h"
 #if defined(PIKI_PC_PORT)
 #include "timing/pc_render_phase.h"
+#include "GlobalGameOptions.h"
 #endif
 
 /// Life gauge border color for bar-style health gauges (grey by default, never used in-game).
@@ -188,6 +189,10 @@ void GaugeInfo::refresh(Graphics& gfx)
 	// bottom value first (red, changing value showing how many Pikmin are lifting/pushing/moving the object)
 	Colour colour;
 	colour.set(255, 32, 32, (int)mDisplayAlpha);
+#if defined(PIKI_PC_PORT)
+	if (mCarryColor == Blue) colour.set(32, 32, 255, (int)mDisplayAlpha);
+	else if (mCarryColor == Yellow) colour.set(255, 255, 32, (int)mDisplayAlpha);
+#endif
 
 	// makes a visually "dominant" value by scaling down the other digit to 75%
 	// - when we're below the minimum number to move the object, make top value (target number) dominant
@@ -209,6 +214,9 @@ void GaugeInfo::refresh(Graphics& gfx)
 
 	// draw center of top number (blue, static value showing target amount to move object) 10 units above line
 	pos.y += 10.0f;
+#if defined(PIKI_PC_PORT)
+	if (mCarryColor < 0)
+#endif
 	colour.set(32, 32, 255, (int)mDisplayAlpha);
 	showDigits(pos, colour, mMinCount, mDigitHalfWidth * topScale, mDigitHalfHeight * topScale);
 
@@ -527,7 +535,7 @@ void LifeGauge::refresh(Graphics& gfx)
  * @param stickCount Number to draw on the bottom - how many Pikmin are trying to move the object?
  * @param minCount Number to draw on the top - how many Pikmin are required to move the object?
  */
-void LifeGauge::countOn(immut Vector3f& position, int stickCount, int minCount)
+void LifeGauge::countOn(immut Vector3f& position, int stickCount, int minCount, int carryColor)
 {
 	if (!mActiveCarryNumber) {
 		// set up a carry number gauge info
@@ -562,6 +570,9 @@ void LifeGauge::countOn(immut Vector3f& position, int stickCount, int minCount)
 	}
 
 	// update the carry numbers position
+#if defined(PIKI_PC_PORT)
+	if (mActiveCarryNumber) mActiveCarryNumber->mCarryColor = carryColor;
+#endif
 	mPosition = position;
 	if (mActiveCarryNumber) {
 		// this is never used

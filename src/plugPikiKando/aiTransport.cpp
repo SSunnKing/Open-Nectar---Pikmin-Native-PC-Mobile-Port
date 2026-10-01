@@ -29,6 +29,35 @@
 #include "zen/ogTutorial.h"
 #include <stddef.h>
 
+// Match the chosen destination without rolling another tie-breaking random number.
+// Before routing starts, use the largest attached color group (enum order breaks ties).
+static int carryGaugeColor(Pellet* pellet)
+{
+#if defined(PIKI_PC_PORT)
+	if (pellet->mTargetGoal && itemMgr) {
+		for (int color = Blue; color <= Yellow; ++color) {
+			if (pellet->mTargetGoal == itemMgr->getContainer(color)) return color;
+		}
+	}
+	int counts[PikiColorCount] = {};
+	Stickers attached(pellet);
+	Iterator iter(&attached);
+	CI_LOOP(iter) {
+		if ((*iter)->isPiki()) {
+			int color = static_cast<Piki*>(*iter)->mColor;
+			if (color >= Blue && color <= Yellow) ++counts[color];
+		}
+	}
+	int best = -1;
+	for (int color = Blue; color <= Yellow; ++color) {
+		if (counts[color] > 0 && (best < 0 || counts[color] > counts[best])) best = color;
+	}
+	return best;
+#else
+	return -1;
+#endif
+}
+
 /**
  * @todo: Documentation
  * @note UNUSED Size: 00009C
@@ -398,7 +427,7 @@ int ActTransport::execJump()
 		Vector3f carryInfoPos(pel->mSRT.t);
 		carryInfoPos.y += 5.0f + pel->getCylinderHeight();
 
-		pel->mLifeGauge.countOn(carryInfoPos, numStickers, minWeight);
+		pel->mLifeGauge.countOn(carryInfoPos, numStickers, minWeight, carryGaugeColor(pel));
 		return ACTOUT_Continue;
 	}
 
@@ -503,7 +532,7 @@ bool ActTransport::gotoLiftPos()
 		int requiredCarriers = pellet->mConfig->mCarryMinPikis();
 		Vector3f carryInfoPos(pellet->mSRT.t);
 		carryInfoPos.y += 5.0f + pellet->getCylinderHeight();
-		pellet->mLifeGauge.countOn(carryInfoPos, currentCarriers, requiredCarriers);
+		pellet->mLifeGauge.countOn(carryInfoPos, currentCarriers, requiredCarriers, carryGaugeColor(pellet));
 		return true;
 	}
 
@@ -702,6 +731,11 @@ bool ActTransport::useWaterRoute()
 int ActTransport::exec()
 {
 	Pellet* pel = mPellet.getPtr();
+#if defined(PIKI_PC_PORT)
+	if (pel && pel->mLifeGauge.mActiveCarryNumber) {
+		pel->mLifeGauge.mActiveCarryNumber->mCarryColor = carryGaugeColor(pel);
+	}
+#endif
 	if (pel) {
 		if (!pel->isVisible()) {
 			if (pel->isUfoParts()) {
@@ -1102,7 +1136,7 @@ void ActTransport::cleanup()
 		if (numStickers > 0) {
 			Vector3f carryInfoPos(pel->mSRT.t);
 			carryInfoPos.y += pel->getCylinderHeight() + 5.0f;
-			pel->mLifeGauge.countOn(carryInfoPos, numStickers, minCarry);
+			pel->mLifeGauge.countOn(carryInfoPos, numStickers, minCarry, carryGaugeColor(pel));
 
 		} else {
 			pel->mLifeGauge.countOff();

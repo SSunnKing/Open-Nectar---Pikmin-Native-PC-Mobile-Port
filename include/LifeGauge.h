@@ -59,6 +59,9 @@ public:
 	f32 mDisplayAlpha;             ///< _3C, current alpha for the display (0-255 fade in).
 	f32 mDigitHalfWidth;           ///< _40, half-width of digits to display (0-8 fade in). Scaled down to 75% for non-dominant number.
 	f32 mDigitHalfHeight;          ///< _44, half-height of digits to display (0-8 fade in). Scaled down to 75% for non-dominant number.
+#if defined(PIKI_PC_PORT)
+	int mCarryColor = -1; // Pikmin color, or -1 for the original box/health gauge palette.
+#endif
 };
 
 /**
@@ -122,7 +125,7 @@ struct LifeGauge {
 	void updValue(f32 currHealth, f32 maxHealth);
 	void adjustValue();
 	void refresh(Graphics& gfx);
-	void countOn(immut Vector3f& position, int stickCount, int minCount);
+	void countOn(immut Vector3f& position, int stickCount, int minCount, int carryColor = -1);
 	void countOff();
 
 	Vector3f mPosition;             ///< _00, position of object gauge is for - sometimes includes offset. Gauge pos = mPosition + mOffset.
