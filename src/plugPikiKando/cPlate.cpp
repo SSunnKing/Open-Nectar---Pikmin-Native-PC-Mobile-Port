@@ -316,8 +316,12 @@ void CPlate::refresh(int slotCount, f32 interpT)
 #if defined(PIKI_PC_PORT)
 	// Con el límite de Pikmin por encima del original (100), el tope de largo
 	// solo deja crecer la formación a lo ancho y queda un óvalo aplastado. Se
-	// quita solo en ese caso; con 100 o menos se mantiene el original.
-	if (pc_settings_get_piki_limit() > 100) limit = mPlateLength;
+	// relaja solo en ese caso; con 100 o menos se mantiene el original.
+	// Sin tope ninguno, el enjambre a fondo (C-stick) estira la columna a
+	// ~8 por Pikmin y los huecos del fondo quedan más allá de
+	// mFormationBreakRange (1000): esos Pikmin se salían del grupo. 400 deja
+	// toda la columna dentro de mFormationSlipRange (600).
+	if (pc_settings_get_piki_limit() > 100) limit = 400.0f;
 #endif
 	if (mPlateLength > limit) {
 		mPlateLength = limit;

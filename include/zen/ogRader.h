@@ -119,7 +119,14 @@ private:
 	P2DPicture* mPartIconTemplate;          // _80
 	P2DPicture* mPartIcons[MAX_UFO_PARTS];  // _84
 	s16 mVisiblePikiCount;                  // _FC
+#if defined(PIKI_PC_PORT)
+	// Con el límite de Pikmin subido no caben en 100: se reserva según el
+	// límite (Pikmin + brotes) al crear el radar.
+	PikiRaderEntry* mPikiEntries;
+	int mPikiEntryCount;
+#else
 	PikiRaderEntry mPikiEntries[MAX_PIKI_ON_FIELD]; // _100
+#endif
 	P2DPicture* mMapPicture;                        // _420
 	P2DPane* mIconPane;                             // _424
 	f32 mCurrentScale;                              // _428
