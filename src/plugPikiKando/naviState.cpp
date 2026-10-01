@@ -132,7 +132,11 @@ void NaviPelletState::init(Navi* navi)
 	navi->becomePellet('navi', navi->mSRT.t, navi->mFaceDirection);
 	navi->mIsPellet = true;
 	mIsFinished     = false;
+#if defined(PIKI_PC_PORT)
+	seMgr->playNaviSound(navi->mNaviID, 0, 0);
+#else
 	seMgr->playNaviSound(0, 0);
+#endif
 }
 
 /**

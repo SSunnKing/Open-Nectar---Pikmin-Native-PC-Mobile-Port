@@ -329,7 +329,11 @@ NaviDemoSunsetState::NaviDemoSunsetState()
 void NaviDemoSunsetState::init(Navi* navi)
 {
 	seMgr->setPikiNum(0);
+#if defined(PIKI_PC_PORT)
+	seMgr->playNaviSound(navi->mNaviID, 0, 0);
+#else
 	seMgr->playNaviSound(0, 0);
+#endif
 	mNavi         = navi;
 	mCurrentState = nullptr;
 	mStateMachine->transit(this, DEMOSTATE_Go);

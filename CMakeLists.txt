@@ -762,6 +762,11 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_envelope_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_envelope_test COMMAND pc_envelope_test)
 
+    # Co-op formation (C-stick swarm) sound arbitration (header only, no audio engine)
+    add_executable(pc_formation_arbiter_test pc_port/audio/pc_formation_arbiter_test.cpp)
+    target_compile_options(pc_formation_arbiter_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_formation_arbiter_test COMMAND pc_formation_arbiter_test)
+
     # Host-backed ARAM test (not linked into main game)
     add_executable(pc_aram_test pc_port/audio/pc_aram_test.cpp pc_port/audio/pc_aram.cpp)
     target_compile_options(pc_aram_test PRIVATE ${NATIVE_COMPILE_OPTIONS})

@@ -138,7 +138,13 @@ public:
 	virtual void update(); // _10
 
 	/// Starts c-sticking "formation" sound based on c-stick magnitude/direction.
+#if defined(PIKI_PC_PORT)
+	/// `naviID` is the captain making the request: the sound is a single voice, so with more than one captain
+	/// (local co-op) the most deflected stick is what plays, instead of each captain's call undoing the other's.
+	void playNaviSound(int naviID, s32 stickX, s32 stickY);
+#else
 	void playNaviSound(s32 stickX, s32 stickY);
+#endif
 
 	/// Increments the battle tracker.
 	void joinBattle();
