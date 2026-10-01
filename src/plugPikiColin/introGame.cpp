@@ -13,6 +13,9 @@
 #include "sysNew.h"
 #include "system.h"
 #include "timers.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_speedrun.h"
+#endif
 
 //////////////////////////////////////////////////////
 //////////////// FORWARD DECLARATIONS ////////////////
@@ -131,7 +134,12 @@ struct IntroModeState : public ModeState {
 
 		// Finish through MoviePlayer's normal teardown path. The opening is two
 		// queued scenes, so clear the entire sequence rather than only part one.
-		if (gameflow.mMoviePlayer->mIsActive && mController->keyClick(KBBTN_START)) {
+		bool canSkip = true;
+#if defined(PIKI_PC_PORT)
+		// Speedrun: vanilla, y en GameCube la intro del cohete no se salta.
+		canSkip = !pc_speedrun_active();
+#endif
+		if (canSkip && gameflow.mMoviePlayer->mIsActive && mController->keyClick(KBBTN_START)) {
 			gameflow.mMoviePlayer->skipScene(SCENESKIP_SkipAll);
 		}
 

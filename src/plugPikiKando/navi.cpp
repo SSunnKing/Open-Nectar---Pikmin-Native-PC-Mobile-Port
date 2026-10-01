@@ -1016,6 +1016,78 @@ void Navi::postUpdate(int unused, f32 deltaTime)
  */
 #if defined(PIKI_PC_PORT)
 /**
+ * @brief Mod "Bomb Control": el botón Bomb da la orden a un amarillo con bomba.
+ *
+ * Va primero uno ya lanzado que espera con la bomba (el más cercano al
+ * cursor); si no hay, el del pelotón más cercano al capitán. Con el cursor a
+ * distancia de lanzamiento la lanza allí; demasiado cerca, la suelta a sus
+ * pies, encendida, como hace el juego al pitarle.
+ */
+void Navi::pcUpdateBombCommand()
+{
+	// Se consume siempre, como Lock-On, para que no salte sola al activarlo.
+	const bool pressed = pc_window_take_bomb_press(mNaviID == 1 ? 1 : 0);
+	if (!pressed || !pc_settings_get_bomb_control() || !pikiMgr) {
+		return;
+	}
+
+	Piki* waiting   = nullptr;
+	Piki* inSquad   = nullptr;
+	f32 waitingDist = 0.0f;
+	f32 squadDist   = 0.0f;
+	Iterator iter(pikiMgr);
+	CI_LOOP(iter)
+	{
+		Piki* piki = static_cast<Piki*>(*iter);
+		if (!piki->isAlive() || piki->mNavi != this || !piki->hasBomb() || !piki->isHolding()
+		    || piki->getState() != PIKISTATE_Normal) {
+			continue;
+		}
+		if (piki->mMode == PikiMode::PutbombMode) {
+			const f32 d = qdist2(piki->mSRT.t.x, piki->mSRT.t.z, mCursorWorldPos.x, mCursorWorldPos.z);
+			if (!waiting || d < waitingDist) {
+				waiting     = piki;
+				waitingDist = d;
+			}
+		} else if (piki->mMode == PikiMode::FormationMode) {
+			const f32 d = qdist2(piki, this);
+			if (!inSquad || d < squadDist) {
+				inSquad   = piki;
+				squadDist = d;
+			}
+		}
+	}
+
+	Piki* piki = waiting ? waiting : inSquad;
+	if (!piki) {
+		return;
+	}
+	if (piki->mMode != PikiMode::PutbombMode) {
+		piki->changeMode(PikiMode::PutbombMode, this);
+	}
+	if (piki->mActiveAction->mCurrActionIdx != PikiAction::PutBomb) {
+		return;
+	}
+
+	// Más lejos que la búsqueda de objetivos del original no se lanza: se
+	// apunta en esa dirección hasta ese alcance.
+	Vector3f target = mCursorWorldPos;
+	Vector3f dir    = target - piki->mSRT.t;
+	dir.y           = 0.0f;
+	const f32 dist  = dir.length();
+	const f32 reach = C_PIKI_PARM(piki, mBombTargetSearchRange);
+	if (dist > reach) {
+		dir.multiply(reach / dist);
+		target.set(piki->mSRT.t.x + dir.x, mapMgr->getMinY(piki->mSRT.t.x + dir.x, piki->mSRT.t.z + dir.z, true),
+		           piki->mSRT.t.z + dir.z);
+	}
+	const bool throwIt = dist >= C_PIKI_PARM(piki, mBombThrowMinDistance);
+
+	ActPutBomb* act = static_cast<ActPutBomb*>(piki->mActiveAction->mChildActions[PikiAction::PutBomb].mAction);
+	act->pcCommand(throwIt, target);
+}
+
+/**
  * @brief Mod "Lock-On": fija el enemigo más cercano al cursor.
  *
  * El objetivo se valida cada frame recorriendo tekiMgr, en vez de guardar un
@@ -1185,6 +1257,7 @@ void Navi::update()
 {
 #if defined(PIKI_PC_PORT)
 	pcUpdateLockOn();
+	pcUpdateBombCommand();
 #endif
 	if (!mGroundTriangle) {
 		f32 maxY = mapMgr->getMaxY(mSRT.t.x, mSRT.t.z, true);

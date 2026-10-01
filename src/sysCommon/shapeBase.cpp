@@ -630,6 +630,41 @@ void CamDataInfo::update(f32 currentFrame, immut Matrix4f& mtx)
 		mCamera.mFocus = mStaticLookAt;
 	}
 
+#if defined(PIKI_PC_PORT)
+	// Mirando casi en vertical (radar de la nave en Forest of Hope), el
+	// "arriba" por defecto saca la orientación de la mínima diferencia
+	// horizontal entre posición y foco. En GameCube la escena se evaluaba en
+	// fotogramas enteros; el port la evalúa en fracciones (para ir a su
+	// velocidad a 60/120) y esa diferencia oscila: la imagen daba vueltas sin
+	// parar. Ahí se mantiene el último rumbo fiable; fuera de ese caso el
+	// cálculo es el original.
+	{
+		const f32 dx = mCamera.mPosition.x - mCamera.mFocus.x;
+		const f32 dy = mCamera.mPosition.y - mCamera.mFocus.y;
+		const f32 dz = mCamera.mPosition.z - mCamera.mFocus.z;
+		const f32 horiz = sqrtf(dx * dx + dz * dz);
+		const f32 len   = sqrtf(horiz * horiz + dy * dy);
+		if (len > 0.0f && horiz > len * 0.05f) {
+			mPcStableYaw    = atan2f(dx, dz);
+			mPcHasStableYaw = true;
+		} else if (len > 0.0f && mPcHasStableYaw) {
+			// Mismo "derecha" que daría el rumbo guardado, perpendicular a la
+			// vista; el "arriba" que se pasa lo reproduce en makeLookat.
+			Vector3f fwd(dx / len, dy / len, dz / len);
+			Vector3f right(cosf(mPcStableYaw), 0.0f, -sinf(mPcStableYaw));
+			const f32 along = right.DP(fwd);
+			right.x -= fwd.x * along;
+			right.y -= fwd.y * along;
+			right.z -= fwd.z * along;
+			right.normalise();
+			Vector3f up = fwd;
+			up.CP(right);
+			up.normalise();
+			mCamera.calcLookAt(mCamera.mPosition, mCamera.mFocus, &up);
+			return;
+		}
+	}
+#endif
 	mCamera.calcLookAt(mCamera.mPosition, mCamera.mFocus, nullptr);
 }
 

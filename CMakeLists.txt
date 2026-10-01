@@ -265,6 +265,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_permadeath.cpp
     pc_port/pc_coop.cpp
     pc_port/pc_whistle_pluck.cpp
+    pc_port/pc_speedrun.cpp
     pc_port/pc_art.cpp
     pc_port/pc_icon.cpp
     pc_port/settings/pc_glass_menu.cpp

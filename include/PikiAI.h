@@ -1646,6 +1646,12 @@ public:
 	virtual int exec();                                        // _4C
 	virtual void cleanup();                                    // _50
 
+#if defined(PIKI_PC_PORT)
+	// Mod "Bomb Control": orden directa del jugador. Con throwToPoint la lanza
+	// a ese punto; si no, la suelta encendida a sus pies.
+	void pcCommand(bool throwToPoint, immut Vector3f& point);
+#endif
+
 protected:
 	virtual void procCollideMsg(Piki*, MsgCollide*); // _1C
 
@@ -1673,6 +1679,10 @@ protected:
 	f32 mPlaceTimer;         // _20
 	Creature* mTarget;       // _24
 	                         // _28-_30 = PaniAnimKeyListener
+#if defined(PIKI_PC_PORT)
+	bool mPcThrowToPoint = false;
+	Vector3f mPcThrowPoint;
+#endif
 };
 
 /**

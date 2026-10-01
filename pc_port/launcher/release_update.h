@@ -17,6 +17,7 @@ struct ReleaseInfo {
     std::string title;    // nombre del release
     std::string assetUrl; // descarga del paquete de este sistema
     std::string assetName;
+    std::string notes;    // texto del release (Markdown): lo que trae de nuevo
 };
 
 // Consulta la API de GitHub. Bloquea: llamarla desde un hilo aparte.

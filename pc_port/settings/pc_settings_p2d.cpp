@@ -6,14 +6,17 @@
 #include "P2D/Screen.h"
 #include "system.h"
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
 namespace {
-constexpr int kCapacity = 128;
+constexpr int kCapacity = 256; // teclado completo del visor de speedrun incluido
 P2DFont* font;
 P2DScreen* screen;
 Texture* plates[4];
+Texture* cursorTex;      // dot_32.bti: bola de cristal del cursor de los menús
+Texture* buttonTex[5];   // a/b/x/y/z_btn.bti: iconos de botón del juego
 bool active;
 int count, width, height;
 int contentLeft, contentRight;
@@ -28,6 +31,8 @@ public:
     int fontWidth = 12, fontHeight = 18;
     char text[512] = {};
     Colour color;
+    Colour color2;      // abajo del degradado (igual que color si no hay)
+    int bigCorners = 0; // placa con esquinas grandes (estilo burbuja)
 protected:
     void drawSelf(int x, int y, immut Matrix4f* view) override
     {
@@ -35,7 +40,7 @@ protected:
             Matrix4f matrix;
             view->multiplyTo(mWorldMtx, matrix);
             GXLoadPosMtxImm(matrix.mMtx, 0);
-            P2DPrint print(font, 0, 0, color, color);
+            P2DPrint print(font, 0, 0, color, color2);
             print.setFontSize(fontWidth, fontHeight);
             print.locate(x, y);
             print.printReturn(text, getWidth(), getHeight(), TBOXHBIND_Left, TBOXVBIND_Top, 0, 0);
@@ -51,8 +56,9 @@ protected:
         }
         // Nine slices preserve the original rounded corners instead of
         // magnifying a 160x88 window into stretched corners at panel size.
-        const int edgeX = std::min(16, getWidth() / 2);
-        const int edgeY = std::min(16, getHeight() / 2);
+        const int edge  = bigCorners ? bigCorners : 16;
+        const int edgeX = std::min(edge, getWidth() / 2);
+        const int edgeY = std::min(edge, getHeight() / 2);
         const int xs[] = {0, edgeX, getWidth() - edgeX, getWidth()};
         const int ys[] = {0, edgeY, getHeight() - edgeY, getHeight()};
         // The glass highlight extends beyond 16 source texels. Keep the
@@ -90,6 +96,13 @@ void pc_settings_p2d_init()
     plates[1] = gsys->loadTexture("screen/eng_tex/w08_160.bti", true);
     plates[2] = gsys->loadTexture("screen/eng_tex/ws08_yel.bti", true);
     plates[3] = gsys->loadTexture("screen/eng_tex/dot_24.bti", true);
+    cursorTex = gsys->loadTexture("screen/eng_tex/dot_32.bti", true);
+    static const char* const kButtons[5] = { "a", "b", "x", "y", "z" };
+    for (int i = 0; i < 5; ++i) {
+        char path[64];
+        snprintf(path, sizeof(path), "screen/eng_tex/%s_btn.bti", kButtons[i]);
+        buttonTex[i] = gsys->loadTexture(path, true);
+    }
     if (plates[0] && plates[1] && plates[2] && plates[3]) {
         font = new P2DFont("sumiw9_2.bfn");
         screen = new P2DScreen();
@@ -183,7 +196,22 @@ void pc_settings_p2d_text(int x, int y, const char* text, Colour color, int font
     pane->fontWidth = fontWidth;
     pane->fontHeight = fontHeight;
     pane->color = color;
+    pane->color2 = color;
     toFontText(text, pane->text, sizeof(pane->text));
+}
+
+void pc_settings_p2d_text_styled(int x, int y, const char* text, Colour top, Colour bottom, int fontWidth, int fontHeight,
+                                 bool shadow)
+{
+    if (!active) return;
+    // Sombra de los menús del juego: copia tenue del texto desplazada abajo.
+    if (shadow) {
+        Colour ghost = top;
+        ghost.a = u8(top.a * 0.35f);
+        pc_settings_p2d_text(x, y + fontHeight / 4 + 1, text, ghost, fontWidth, fontHeight);
+    }
+    pc_settings_p2d_text(x, y, text, top, fontWidth, fontHeight);
+    if (count > 0) panes[count - 1]->color2 = bottom;
 }
 
 void pc_settings_p2d_image(int x, int y, int w, int h, Texture* texture, float u1, float v1, Colour tint, float u0)
@@ -211,11 +239,46 @@ void pc_settings_p2d_plate(int x, int y, int w, int h, int style)
     pane->isIcon = false;
     pane->isImage = false;
     pane->initWhite();
-    pane->setTexture(plates[std::clamp(style, 0, 2)], 0);
+    // 3: el cristal de las ventanas del juego con las esquinas a tamaño de
+    // burbuja: borde plateado grueso y el brillo grande de la esquina.
+    pane->bigCorners = style == 3 ? std::min(34, std::min(w, h) / 2) : 0;
+    pane->setTexture(plates[style == 3 ? 1 : std::clamp(style, 0, 2)], 0);
     if (style == 0) {
         contentLeft = x + 16;
         contentRight = x + w - 16;
     }
+}
+void pc_settings_p2d_cursor(int cx, int cy, int size, float angle)
+{
+    if (!cursorTex) return;
+    // Como SpectrumCursorMgr: giro sobre el eje Y (el ancho sigue |cos|,
+    // espejado por detrás) y una estela de copias más tenues y retrasadas.
+    constexpr int kTrail = 3;
+    for (int i = kTrail - 1; i >= 0; --i) {
+        const float a = angle - float(i) * 0.35f;
+        const float c = std::cos(a);
+        const int w = std::max(2, int(std::fabs(c) * size + 0.5f));
+        const u8 alpha = i == 0 ? 255 : u8((1.0f - float(i) / kTrail) * 100.0f);
+        const bool back = c < 0.0f;
+        pc_settings_p2d_image(cx - w / 2, cy - size / 2, w, size, cursorTex, back ? 0.0f : 1.0f, 1.0f,
+                              Colour(255, 255, 255, alpha), back ? 1.0f : 0.0f);
+    }
+}
+bool pc_settings_p2d_button(int x, int y, int size, char button)
+{
+    static const char kNames[5] = { 'A', 'B', 'X', 'Y', 'Z' };
+    for (int i = 0; i < 5; ++i) {
+        if (kNames[i] != button) continue;
+        if (!buttonTex[i]) return false;
+        pc_settings_p2d_image(x, y, size, size, buttonTex[i], 1.0f, 1.0f, Colour(255, 255, 255, 255));
+        return true;
+    }
+    return false;
+}
+void pc_settings_p2d_set_content(int left, int right)
+{
+    contentLeft = left;
+    contentRight = right;
 }
 void pc_settings_p2d_clear()
 {

@@ -1,6 +1,7 @@
 /** Native filesystem implementation of the GameCube memory-card API. */
 #include "Dolphin/card.h"
 #include "Dolphin/dvd.h"
+#include "pc_speedrun.h"
 
 #include <algorithm>
 #include <atomic>
@@ -160,7 +161,13 @@ fs::path saveRoot()
 	return resolved;
 }
 
-fs::path root(s32 channel) { return saveRoot() / (channel == 0 ? "card0" : "card1"); }
+// El modo Speedrun tiene su propia tarjeta (save/speedrun/card0): sus
+// partidas vanilla no se mezclan con las normales ni al revés.
+fs::path root(s32 channel)
+{
+	const fs::path base = pc_speedrun_active() ? saveRoot() / "speedrun" : saveRoot();
+	return base / (channel == 0 ? "card0" : "card1");
+}
 fs::path dataPath(s32 channel, const std::string& name) { return root(channel) / name; }
 fs::path metaPath(s32 channel, const std::string& name) { return root(channel) / (".meta_" + name); }
 
@@ -304,6 +311,15 @@ bool resolve(const CARDFileInfo* info, std::string& name)
 	return true;
 }
 } // namespace
+
+// Carpeta de datos del modo Speedrun (tarjeta propia y registro de tiempos).
+std::string pc_card_speedrun_dir()
+{
+	std::error_code error;
+	const fs::path dir = saveRoot() / "speedrun";
+	fs::create_directories(dir, error);
+	return dir.string();
+}
 
 extern "C" {
 

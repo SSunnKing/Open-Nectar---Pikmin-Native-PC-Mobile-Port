@@ -113,6 +113,9 @@ public:
 	void draw(Graphics& gfx);
 #if defined(PIKI_PC_PORT)
 	void drawFxOnly(Graphics& gfx);
+	// Solo el fondo (estrellas): para los prompts del port antes del slot.
+	void pcStartBackdropFx();
+	void pcUpdateBackdropFx();
 #endif
 	void quit();
 

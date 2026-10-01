@@ -50,6 +50,7 @@ public:
 	void start(bool);
 #if defined(PIKI_PC_PORT)
 	void pcInsertCoopItem(DrawMenu* menu);
+	void pcInsertAdvancedItem(DrawMenu* menu);
 	DrawMenu* mAdvancedMenu = nullptr; ///< option.blo reetiquetado: Display / Save / Back
 	void pcSetupAdvancedMenu();
 #endif

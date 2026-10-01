@@ -29,6 +29,7 @@
 #include "settings/pc_settings.h"
 #include "pc_vs.h"
 #include "pc_achievements.h"
+#include "pc_speedrun.h"
 #include "gl/pc_gfx.h"
 #include "jaudio/piki_scene.h"
 #include "jaudio/pikidemo.h"
@@ -510,6 +511,12 @@ struct DayOverModeState : public ModeState {
 	    : ModeState(parent)
 	{
 		flowCont.mIsDayEndSeqStarted = TRUE;
+#if defined(PIKI_PC_PORT)
+		// Speedrun: un split por día, con la zona que se acaba de jugar.
+		if (flowCont.mCurrentStage) {
+			pc_speedrun_on_day_end(flowCont.mCurrentStage->mStageID, gameflow.mWorldClock.mCurrentDay);
+		}
+#endif
 
 		// this actually does nothing
 		gamecore->startContainerDemo();
@@ -806,6 +813,44 @@ static void handleTutorialWindow(u32& result, Controller* controller)
 	}
 }
 
+#if defined(PIKI_PC_PORT)
+// "Hide Olimar's Texts": segundos que queda pendiente saltar la escena de un
+// texto oculto. Algunas (la cámara girando alrededor de la nave al entregar
+// una pieza) empiezan después del aviso del texto y esperan a que se cierre:
+// sin esto girarían para siempre.
+static f32 sPcHiddenTextSkipTimer = 0.0f;
+
+static void pcUpdateHiddenTextSkip()
+{
+	if (sPcHiddenTextSkipTimer <= 0.0f) {
+		return;
+	}
+	if (gameflow.mMoviePlayer->mIsActive) {
+		gameflow.mMoviePlayer->skipScene(SCENESKIP_Skip);
+		sPcHiddenTextSkipTimer = 0.0f;
+		return;
+	}
+	sPcHiddenTextSkipTimer -= gsys->getFrameTime();
+}
+
+/**
+ * @brief Port: Start salta la cinemática en curso (llegada al nivel, cebollas,
+ * extinción...). Mientras hay un texto de Olimar, ese texto manda: al cerrarlo
+ * ya se salta la escena que lo acompaña. En Speedrun no: vanilla.
+ */
+static bool pcSkipCutsceneOnStart(Controller* controller)
+{
+	if (pc_speedrun_active() || tutorialWindow || !gameflow.mMoviePlayer->mIsActive) {
+		return false;
+	}
+	if (controller->keyClick(KBBTN_START)) {
+		gameflow.mMoviePlayer->skipScene(SCENESKIP_Skip);
+		return true;
+	}
+	return false;
+}
+#endif
+
 //////////////////////////////////////////////////////
 ///// BASE GAME SECTION AND MODE STATE FUNCTIONS /////
 //////////////////////////////////////////////////////
@@ -907,6 +952,10 @@ ModeState* IntroGameModeState::update(u32& result)
 
 	// for Day 1, deal with the "My name is Captain Olimar..." text windows while they're open.
 	handleTutorialWindow(result, mParentSection->mController);
+#if defined(PIKI_PC_PORT)
+	pcUpdateHiddenTextSkip();
+	pcSkipCutsceneOnStart(mParentSection->mController);
+#endif
 
 	if (!gameflow.mMoviePlayer->mIsActive) {
 		// intro cutscene is finished, get us into gameplay!
@@ -987,6 +1036,13 @@ ModeState* RunningModeState::update(u32& result)
 		}
 	}
 
+	bool pcSkipped = false;
+#if defined(PIKI_PC_PORT)
+	pcUpdateHiddenTextSkip();
+	// El Start que salta la escena no abre además la pausa en el mismo frame.
+	pcSkipped = pcSkipCutsceneOnStart(mController);
+#endif
+
 	// check our voicemail - do we have any simple movie-related commands pending?
 	bool mesgsPending = false;
 	if (static_cast<GameMovieInterface*>(gameflow.mGameInterface)->mSimpleMessageCount) {
@@ -995,7 +1051,8 @@ ModeState* RunningModeState::update(u32& result)
 
 	// handle pause and map/control menus
 	// can't open a pause menu if a) we're not allowed, b) a window is open, c) we're already paused, or d) if a cutscene is playing
-	if (gameflow.mIsPauseAllowed && !gameflow.mIsUIOverlayActive && !gameflow.mPauseAll && !gameflow.mMoviePlayer->mIsActive) {
+	if (!pcSkipped && gameflow.mIsPauseAllowed && !gameflow.mIsUIOverlayActive && !gameflow.mPauseAll
+	    && !gameflow.mMoviePlayer->mIsActive) {
 
 		// pause menu (Continue, Go To Sunset, Continue From Last Save)
 		if (mController->keyClick(KBBTN_START)) {
@@ -1357,6 +1414,7 @@ ModeState* MessageModeState::update(u32& result)
 			// heaps down the same way every other exit does.
 			if (pc_permadeath_active()) {
 				pcErasePermadeathSave();
+				pc_erased_notice_queue();
 				// Back to file select rather than the day-end results that
 				// would carry this file into tomorrow. It is the same exit the
 				// pause menu's "return to last save" takes out of live
@@ -2468,8 +2526,10 @@ public:
 #endif
 					// Mod "Infinite Day": only the playable clock is held. The
 					// title screen keeps its own clock running, so its sky
-					// still moves.
-					const bool pcClockHeld = pc_settings_get_infinite_day() != 0;
+					// still moves. Day 1 is left alone: the tutorial only ends
+					// when its clock reaches sunset after the engine.
+					const bool pcClockHeld
+					    = pc_settings_get_infinite_day() != 0 && gameflow.mWorldClock.mCurrentDay != 1;
 					if (!pcClockHeld && !gameflow.mMoviePlayer->mIsActive && (mUpdateFlags & UPDATE_WORLD_CLOCK)
 					    && !playerState->isTutorial()) {
 						f32 tod = gameflow.mWorldClock.mTimeOfDay;
@@ -2978,6 +3038,20 @@ void GameMovieInterface::parse(GameMovieInterface::SimpleMessage& msg)
 			}
 		}
 
+#if defined(PIKI_PC_PORT)
+		// Ajuste "Hide Olimar's Texts": como si el jugador cerrara el texto al
+		// instante, que es saltar la escena que lo acompaña. Los finales sí
+		// se muestran.
+		if (pc_settings_get_hide_olimar_text() && data != zen::ogScrTutorialMgr::TUT_FinishUFO
+		    && data != zen::ogScrTutorialMgr::TUT_BadEnding) {
+			if (gameflow.mMoviePlayer->mIsActive) {
+				gameflow.mMoviePlayer->skipScene(SCENESKIP_Skip);
+			} else {
+				sPcHiddenTextSkipTimer = 3.0f; // la escena aún no ha empezado
+			}
+			break;
+		}
+#endif
 		createTutorialWindow(data, ufoPartID, hasAudio);
 		gameflow.mIsUIOverlayActive = TRUE;
 		break;

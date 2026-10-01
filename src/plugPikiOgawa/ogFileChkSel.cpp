@@ -155,6 +155,16 @@ zen::ogScrFileChkSelMgr::returnStatusFlag zen::ogScrFileChkSelMgr::update(Contro
 }
 
 #if defined(PIKI_PC_PORT)
+void zen::ogScrFileChkSelMgr::pcStartBackdrop()
+{
+	mFileSelectMgr->pcStartBackdropFx();
+}
+
+void zen::ogScrFileChkSelMgr::pcUpdateBackdrop()
+{
+	mFileSelectMgr->pcUpdateBackdropFx();
+}
+
 void zen::ogScrFileChkSelMgr::drawBackdrop(Graphics& gfx)
 {
 	pc_gfx_begin_menu_2d();

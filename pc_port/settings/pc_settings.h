@@ -82,6 +82,8 @@ int pc_settings_get_quick_grab(void);
 int pc_settings_get_no_trip(void);
 // Whistling over sprouts plucks them, one every 0.08 s while held. Off by default.
 int pc_settings_get_whistle_pluck(void);
+int pc_settings_get_bomb_control(void);
+int pc_settings_get_hide_olimar_text(void);
 /// En el menú de la cebolla, Y + arriba/abajo mueve de 10 en 10.
 int pc_settings_get_onion_step10(void);
 /// Los Pikmin silbados se unen al grupo al instante, sin la reacción de LookAt.
@@ -164,6 +166,20 @@ int pc_settings_get_day_minutes(void);
    640x480 space the game's BLO screens use. */
 void pc_permadeath_draw_slot_badge(int vx, int vy, int vw);
 
+// Aviso de partida Permadeath borrada: se encola al borrarla y se muestra
+// (burbuja, A para seguir) al llegar a la selección de partida.
+// Menú del modo Speedrun al elegirlo en el título: Start Run / Best Times /
+// How It Works (la explicación se abre sola la primera vez). CONTINUE =
+// empezar la run, BACK = volver al título.
+enum { PC_SPEEDRUN_INTRO_PENDING = 0, PC_SPEEDRUN_INTRO_CONTINUE = 1, PC_SPEEDRUN_INTRO_BACK = 2 };
+bool pc_speedrun_intro_open_if_needed(void);
+bool pc_speedrun_intro_active(void);
+int  pc_speedrun_intro_result(void);
+void pc_speedrun_intro_draw(void);
+void pc_erased_notice_queue(void);
+bool pc_erased_notice_open_if_queued(void);
+bool pc_erased_notice_active(void);
+void pc_erased_notice_draw(void);
 void pc_newgame_prompt_open(void);
 bool pc_newgame_prompt_active(void);
 void pc_newgame_prompt_draw(void);

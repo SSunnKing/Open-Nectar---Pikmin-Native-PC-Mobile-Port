@@ -22,6 +22,7 @@
 #if defined(PIKI_PC_PORT)
 #include "settings/pc_settings.h"
 #include "pc_achievements.h"
+#include "pc_speedrun.h"
 #endif
 
 int PlayerState::totalUfoParts = MAX_UFO_PARTS;
@@ -1156,6 +1157,7 @@ void PlayerState::getUfoParts(u32 partID, bool isInvisiblePart)
 	}
 #if defined(PIKI_PC_PORT)
 	pc_achievements_on_ship_part(partID);
+	pc_speedrun_on_ship_part(partID);
 #endif
 	if (!parts && !isInvisiblePart) {
 		STACK_PAD_INLINE(1);

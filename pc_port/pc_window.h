@@ -60,6 +60,8 @@ enum {
     PC_KEY_ACT_LOCKON       = 21,
     PC_KEY_ACT_FIRSTPERSON  = 22,
     PC_KEY_ACT_GYRO_RECENTER = 23,
+    // Mod "Bomb Control": el amarillo con bomba la lanza al cursor o la suelta.
+    PC_KEY_ACT_BOMB          = 24,
     PC_KEY_ACT_COUNT
 };
 void pc_window_set_key_binding(int action, SDL_Scancode scancode);
@@ -78,6 +80,8 @@ bool pc_window_swarm_held(void);
 bool pc_window_swarm_held_p2(void);
 /// Flanco de subida: true una sola vez por pulsación, y se consume al leerlo.
 bool pc_window_take_lockon_press(void);
+// Mod "Bomb Control": pulsación del botón Bomb de ese jugador (0/1), consumida.
+bool pc_window_take_bomb_press(int player);
 /// Flanco del botón de swarm: con el Charge activo es el que lanza la carga.
 bool pc_window_take_swarm_press(void);
 /// Inyecta la pulsación desde la capa táctil, que no pasa por los bindings.

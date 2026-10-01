@@ -1513,6 +1513,25 @@ zen::ogScrFileSelectMgr::returnStatusFlag zen::ogScrFileSelectMgr::update(Contro
  * @todo: Documentation
  */
 #if defined(PIKI_PC_PORT)
+void zen::ogScrFileSelectMgr::pcStartBackdropFx()
+{
+	// Las mismas estrellas que start() lanza en la selección de slot.
+	Vector3f pos(320.0f + f32(pc_gfx_menu_shift_center()), 240.0f, 0.0f);
+	mFxMgr->create(EFF2D_Unk17, pos, nullptr, nullptr);
+	mFxMgr->create(EFF2D_Unk18, pos, nullptr, nullptr);
+	mFxMgr->create(EFF2D_Unk19, pos, nullptr, nullptr);
+	mFxMgr->create(EFF2D_Unk20, pos, nullptr, nullptr);
+	mFxMgr->create(EFF2D_Unk21, pos, nullptr, nullptr);
+	mFxMgr->create(EFF2D_Unk22, pos, nullptr, nullptr);
+	mFxMgr->create(EFF2D_Unk23, pos, nullptr, nullptr);
+	mFxMgr->create(EFF2D_Unk24, pos, nullptr, nullptr);
+}
+
+void zen::ogScrFileSelectMgr::pcUpdateBackdropFx()
+{
+	mFxMgr->update();
+}
+
 void zen::ogScrFileSelectMgr::drawFxOnly(Graphics& gfx)
 {
 	pc_gfx_begin_menu_2d();

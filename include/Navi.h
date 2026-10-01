@@ -218,6 +218,7 @@ public:
 	Vector3f mCursorWorldPos;             // _6F0, also cursor related?
 #if defined(PIKI_PC_PORT)
 	void pcUpdateLockOn();
+	void pcUpdateBombCommand();
 	void pcPinCursorToLock();
 	void pcPinCursorFirstPerson();
 	Creature* mPcLockTarget = nullptr; ///< Mod "Lock-On": enemigo fijado.

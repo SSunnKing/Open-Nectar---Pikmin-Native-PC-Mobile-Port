@@ -120,6 +120,9 @@ void ActPutBomb::findTeki()
  */
 void ActPutBomb::init(Creature* target)
 {
+#if defined(PIKI_PC_PORT)
+	mPcThrowToPoint = false;
+#endif
 	mTouchedPlayer      = false;
 	mState              = STATE_Unk5;
 	mPiki->mActionState = 0;
@@ -161,6 +164,35 @@ void ActPutBomb::init(Creature* target)
 	mPiki->mPikiAnimMgr.getLowerAnimator().mAnimationCounter = 18.0f;
 	initPut();
 }
+
+#if defined(PIKI_PC_PORT)
+/**
+ * @brief Mod "Bomb Control": el jugador decide en vez de findTeki.
+ */
+void ActPutBomb::pcCommand(bool throwToPoint, immut Vector3f& point)
+{
+	if (!mPiki->isHolding()) {
+		return;
+	}
+
+	mTarget = nullptr;
+	if (throwToPoint) {
+		mPcThrowToPoint       = true;
+		mPcThrowPoint         = point;
+		Vector3f dir          = point - mPiki->mSRT.t;
+		mPiki->mFaceDirection = roundAng(atan2f(dir.x, dir.z));
+		initThrow();
+		return;
+	}
+
+	if (mPiki->mPikiAnimMgr.getUpperAnimator().getCurrentMotionIndex() != PIKIANIM_Pick) {
+		mPiki->startMotion(PaniMotionInfo(PIKIANIM_Pick, this), PaniMotionInfo(PIKIANIM_Pick));
+		mPiki->mPikiAnimMgr.getUpperAnimator().mAnimationCounter = 18.0f;
+		mPiki->mPikiAnimMgr.getLowerAnimator().mAnimationCounter = 18.0f;
+	}
+	initPut();
+}
+#endif
 
 /**
  * @todo: Documentation
@@ -346,6 +378,24 @@ int ActPutBomb::exeThrow()
 	mPiki->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
 
 	if (mAnimationFinished) {
+#if defined(PIKI_PC_PORT)
+		if (mPcThrowToPoint) {
+			if (!mPiki->isHolding()) return ACTOUT_Fail;
+			Vector3f noVel(0.0f, 0.0f, 0.0f);
+			Vector3f catchPos = mPiki->getCatchPos(mPiki->getHoldCreature());
+			Vector3f throwVel = getThrowVelocity(catchPos, C_PIKI_PARM(mPiki, mBombThrowSpeed), mPcThrowPoint, noVel);
+			InteractRelease release(mPiki, 1.0f);
+			Creature* held = mPiki->getHoldCreature();
+			held->stimulate(release);
+			held->mVelocity           = throwVel;
+			held->mTargetVelocity     = throwVel;
+			BombItem* bomb            = static_cast<BombItem*>(held);
+			bomb->mSAICtx.mCurrAnimId = 0;
+			C_SAI(bomb)->start(bomb, BombAI::BOMB_Unk1);
+			bomb->disableFixPos();
+			return ACTOUT_Success;
+		}
+#endif
 		if (mPiki->isHolding()) {
 			Vector3f centre = mTarget->getCentre();
 			Vector3f vel(mTarget->mVelocity);

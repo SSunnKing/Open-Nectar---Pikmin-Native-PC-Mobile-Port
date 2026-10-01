@@ -14,6 +14,9 @@
 #include "SoundMgr.h"
 #include "Stickers.h"
 #include "sysNew.h"
+#if defined(PIKI_PC_PORT)
+#include "settings/pc_settings.h"
+#endif
 
 /**
  * @todo: Documentation
@@ -205,7 +208,12 @@ void Boss::stopMovement()
  */
 void Boss::calcBossDamage()
 {
+#if defined(PIKI_PC_PORT)
+	// "Enemy Health" (incluido Insta Kill) también para los jefes.
+	mCurrentLife -= pc_mods_teki_damage(mDamage);
+#else
 	mCurrentLife -= mDamage;
+#endif
 	mLifeGauge.updValue(mCurrentLife, mMaxLife);
 	mDamage = 0.0f;
 }

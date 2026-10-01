@@ -113,6 +113,7 @@ bool fetchLatestRelease(ReleaseInfo& release, std::string& error)
     release = ReleaseInfo();
     release.version = root.str("tag_name");
     release.title = root.str("name");
+    release.notes = root.str("body");
     if (const Json* assets = root.get("assets"); assets && assets->type == Json::Type::Array) {
         for (const char* wanted : kAssetNames) {
             for (const Json& asset : assets->items) {

@@ -45,6 +45,7 @@
 #include "pc_coop.h"
 #include "pc_vs.h"
 #include "pc_achievements.h"
+#include "pc_speedrun.h"
 #include "gameflow.h"
 #include "SoundMgr.h"
 #include "pc_art.h"
@@ -143,6 +144,9 @@ struct PcConfig {
     int noTrip = 0;             // los Pikmin no tropiezan al correr
     // Whistling over sprouts plucks them one at a time (0=off/faithful, 1=on).
     int whistlePluck = 0;
+    int bombControl = 0;
+    int hideOlimarText = 0;     // sin los textos de Olimar (primer Pikmin, piezas, avisos)
+    int speedrunIntroHidden = 0; // explicación del modo Speedrun ya vista (se abre sola solo la primera vez)        // botón Bomb: el amarillo con bomba la lanza al cursor o la suelta
     int onionStep10 = 0;        // Y + arriba/abajo en la cebolla mueve de 10 en 10
     int instantWhistle = 0;     // los Pikmin silbados se unen sin la reacción de girarse
     // Cheats.
@@ -176,7 +180,7 @@ struct PcConfig {
     // rather than forced. 100 is the original.
     int pikiLimit = 100;
     // Minutes of play per in-game day, as shown in the menu. 10 is the original.
-    int dayMinutes = 10;
+    int dayMinutes = 0; // 0 = original (13.5 min de luz)
     // Última elección del selector 1P/2P, solo para preseleccionarla. La
     // partida en sí no la guarda (PLAN_COOP).
     int coopPlayers = 1;
@@ -251,6 +255,8 @@ struct PcConfig {
         quickGrab = 0;
         noTrip = 0;
         whistlePluck = 0;
+        bombControl = 0;
+        hideOlimarText = 0;
         onionStep10 = 0;
         instantWhistle = 0;
         pikiInvincible = 0;
@@ -1057,6 +1063,9 @@ void saveConfig() {
     out << "quickGrab = " << sConfig.quickGrab << "\n";
     out << "noTrip = " << sConfig.noTrip << "\n";
     out << "whistlePluck = " << sConfig.whistlePluck << "\n";
+    out << "bombControl = " << sConfig.bombControl << "\n";
+    out << "hideOlimarText = " << sConfig.hideOlimarText << "\n";
+    out << "speedrunIntroHidden = " << sConfig.speedrunIntroHidden << "\n";
     out << "onionStep10 = " << sConfig.onionStep10 << "\n";
     out << "instantWhistle = " << sConfig.instantWhistle << "\n";
     out << "pikiInvincible = " << sConfig.pikiInvincible << "\n";
@@ -1242,6 +1251,15 @@ void loadConfig() {
         }
         else if (key == "noTrip") {
             sConfig.noTrip = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "speedrunIntroHidden") {
+            sConfig.speedrunIntroHidden = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "hideOlimarText") {
+            sConfig.hideOlimarText = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "bombControl") {
+            sConfig.bombControl = atoi(val.c_str()) ? 1 : 0;
         }
         else if (key == "whistlePluck") {
             sConfig.whistlePluck = atoi(val.c_str()) ? 1 : 0;
@@ -1493,6 +1511,8 @@ void latchKeys() {
 // prompt has to read input from inside this function: keys are latched right
 // after it returns, so anything polling later in the frame sees no edges.
 void pcNewGamePromptInput();
+void pcErasedNoticeInput();
+void pcSpeedrunIntroInput();
 void pcPlayerCountPromptInput();
 void pcDevAssignPromptInput();
 
@@ -1695,6 +1715,20 @@ void pollMenuInput() {
     // when that modal exits while the button is still held.
     sPrevMenuToggleHeld = menuToggleHeld;
 
+    if (pc_erased_notice_active()) {
+#if PIKI_PC_TOUCH
+        pc_touch_claim_game_menu();
+#endif
+        pcErasedNoticeInput();
+        return;
+    }
+    if (pc_speedrun_intro_active()) {
+#if PIKI_PC_TOUCH
+        pc_touch_claim_game_menu();
+#endif
+        pcSpeedrunIntroInput();
+        return;
+    }
     if (pc_newgame_prompt_active()) {
 #if PIKI_PC_TOUCH
         pc_touch_claim_game_menu();
@@ -2564,6 +2598,12 @@ void modsRowChange(int row, bool left, bool right) {
     else if (row == 34) {
         if (left || right) sPending.whistlePluck = sPending.whistlePluck ? 0 : 1;
     }
+    else if (row == 35) {
+        if (left || right) sPending.bombControl = sPending.bombControl ? 0 : 1;
+    }
+    else if (row == 36) {
+        if (left || right) sPending.hideOlimarText = sPending.hideOlimarText ? 0 : 1;
+    }
     // Cheats (26-32). Hard los anula, como la vida y el día.
     else if (row >= 26 && row <= 32) {
         if (pc_hardmode_active() || !(left || right))
@@ -2856,8 +2896,19 @@ void ensureFont() {
     }
 }
 
+// Menús con estilo burbuja (prompts de inicio de partida): el texto P2D va
+// más grande, como la letra del juego, y con la sombra fantasma de sus
+// menús. Solo mientras dura el ámbito, para no cambiar el F1 ni los HUD.
+bool sGlassText = false;
+struct GlassTextScope {
+    GlassTextScope() { sGlassText = true; }
+    ~GlassTextScope() { sGlassText = false; }
+};
+constexpr int kGlassFontW = 18, kGlassFontH = 26;
+
 int menuTextWidth(const char* text) {
-    return pc_settings_p2d_active() ? pc_settings_p2d_text_width(text) : sFont->stringWidth(text);
+    if (!pc_settings_p2d_active()) return sFont->stringWidth(text);
+    return pc_settings_p2d_text_width(text, sGlassText ? kGlassFontW : 12);
 }
 
 void drawText(const char* fmt, ...) {
@@ -2878,6 +2929,9 @@ Colour lerpColour(Colour a, Colour b, float t) {
 
 // Filled rounded rectangle (all 4 corners radius r) built from 2px horizontal
 // strips. Each strip's colour is lerped top->bottom to fake a vertical gradient.
+void fillRoundRectGradAlways(DGXGraphics* gfx, int x, int y, int w, int h, int r,
+                             Colour top, Colour bottom);
+
 void fillRoundRectGrad(DGXGraphics* gfx, int x, int y, int w, int h, int r,
                        Colour top, Colour bottom) {
     if (w <= 0 || h <= 0) return;
@@ -2885,6 +2939,13 @@ void fillRoundRectGrad(DGXGraphics* gfx, int x, int y, int w, int h, int r,
         // Native selection is a game cursor plus yellow text.
         return;
     }
+    fillRoundRectGradAlways(gfx, x, y, w, h, r, top, bottom);
+}
+
+// Igual, pero también con el marco P2D activo (velo de los menús burbuja).
+void fillRoundRectGradAlways(DGXGraphics* gfx, int x, int y, int w, int h, int r,
+                             Colour top, Colour bottom) {
+    if (w <= 0 || h <= 0) return;
     if (r > w / 2) r = w / 2;
     if (r > h / 2) r = h / 2;
     const int step = 2;
@@ -2916,7 +2977,8 @@ void drawTextOutline(int x, int y, const char* fmt, Colour main, Colour shadow, 
     va_end(vl);
 
     if (pc_settings_p2d_active()) {
-        pc_settings_p2d_text(x, y, buf, main);
+        if (sGlassText) pc_settings_p2d_text_styled(x, y, buf, main, main, kGlassFontW, kGlassFontH);
+        else pc_settings_p2d_text(x, y, buf, main);
         return;
     }
     DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
@@ -2936,8 +2998,15 @@ void drawTextOutline(int x, int y, const char* fmt, Colour main, Colour shadow, 
 
 void drawPikminPanel(DGXGraphics* gfx, int x, int y, int w, int h, int radius) {
     if (pc_settings_p2d_active()) {
-        pc_settings_p2d_plate(x, y, w, h, 0);
-        pc_settings_p2d_plate(x, y, w, h, 1);
+        // Burbuja de los menús del juego: el cristal (w08_160) con un velo
+        // negro muy ligero dentro, para que el texto se lea sobre las
+        // estrellas sin apagar el fondo fuera del recuadro. El velo va con
+        // gfx y las placas P2D se pintan al final, así que queda debajo.
+        const Colour veil(0, 0, 0, 120);
+        fillRoundRectGradAlways(gfx, x + 8, y + 8, w - 16, h - 16, 26, veil, veil);
+        pc_settings_p2d_plate(x, y, w, h, 3);
+        // El texto más ancho que el recuadro se reduce para caber dentro.
+        pc_settings_p2d_set_content(x + 22, x + w - 22);
         return;
     }
     // Soft offset shadow, then the broad silver/black bezel used throughout
@@ -2960,9 +3029,18 @@ void drawPikminHeader(DGXGraphics* gfx, int panelX, int panelY, int panelW,
                       const char* title) {
     int titleW = menuTextWidth(title);
     if (pc_settings_p2d_active()) {
-        pc_settings_p2d_plate(panelX + (panelW - 250) / 2, panelY - 18, 250, 52, 1);
-        const int nativeTitleW = pc_settings_p2d_text_width(title, 16);
-        pc_settings_p2d_text(panelX + (panelW - nativeTitleW) / 2, panelY - 2, title, Colour(218,255,255,255), 16, 24);
+        // Cápsula de cristal propia, separada encima de la burbuja cuando hay
+        // sitio (como "Choose a Game Mode"); si no, montada sobre el borde.
+        const int nativeTitleW = pc_settings_p2d_text_width(title, 22);
+        const int capW = std::min(panelW, std::max(270, nativeTitleW + 120));
+        const int capH = 68;
+        const int capX = panelX + (panelW - capW) / 2;
+        const int capY = panelY - capH - 14 >= 8 ? panelY - capH - 14 : panelY - 18;
+        const Colour veil(0, 0, 0, 120);
+        fillRoundRectGradAlways(gfx, capX + 8, capY + 8, capW - 16, capH - 16, 20, veil, veil);
+        pc_settings_p2d_plate(capX, capY, capW, capH, 3);
+        pc_settings_p2d_text_styled(capX + (capW - nativeTitleW) / 2, capY + 16, title, Colour(225, 255, 255, 255),
+                                    Colour(170, 225, 235, 255), 22, 32);
         return;
     }
     int w = titleW + 92;
@@ -2982,6 +3060,104 @@ void drawPikminHeader(DGXGraphics* gfx, int panelX, int panelY, int panelW,
 
     drawTextOutline(panelX + panelW / 2 - titleW / 2, y + 20, "%s",
                     Colour(218, 255, 255, 255), Colour(0, 8, 12, 255), title);
+}
+
+// Opción de un selector con el estilo burbuja: la elegida en naranja entre
+// dos bolitas de cristal, las demás apagadas. Sin placa: solo texto.
+// Devuelve false si el marco P2D no está activo (el llamador dibuja lo suyo).
+bool drawGlassOption(int boxX, int boxY, int boxW, int boxH, const char* label, bool sel, int fw = 14, int fh = 21) {
+    if (!pc_settings_p2d_active()) return false;
+    const int tw = pc_settings_p2d_text_width(label, fw);
+    const int tx = boxX + (boxW - tw) / 2;
+    const int ty = boxY + (boxH - fh) / 2 - 2;
+    if (sel) {
+        // Cursor del juego a cada lado: gira como el de los menús originales
+        // y se desliza hasta la nueva opción. Si hace un rato que no se dibuja
+        // (otro menú), aparece directamente en su sitio.
+        const int orb = 24;
+        const float targetL = float(tx - orb / 2 - 8), targetR = float(tx + tw + orb / 2 + 8);
+        const float targetY = float(ty + fh / 2 + 1);
+        static float sL = 0.0f, sR = 0.0f, sY = 0.0f;
+        static Uint32 sLast = 0;
+        const Uint32 now = SDL_GetTicks();
+        const float dt = (now - sLast) / 1000.0f;
+        if (sLast == 0 || now - sLast > 250) {
+            sL = targetL; sR = targetR; sY = targetY;
+        } else {
+            const float k = std::min(1.0f, dt * 14.0f);
+            sL += (targetL - sL) * k; sR += (targetR - sR) * k; sY += (targetY - sY) * k;
+        }
+        sLast = now;
+        const float angle = std::fmod(now / 1000.0f * 10.0f, 6.2831853f);
+        pc_settings_p2d_cursor(int(sL), int(sY), orb, angle);
+        pc_settings_p2d_cursor(int(sR), int(sY), orb, angle);
+    }
+    if (sel) pc_settings_p2d_text_styled(tx, ty, label, Colour(255, 225, 70, 255), Colour(255, 135, 0, 255), fw, fh);
+    else pc_settings_p2d_text_styled(tx, ty, label, Colour(150, 170, 195, 255), Colour(150, 170, 195, 255), fw, fh);
+    return true;
+}
+
+// Línea de ayuda centrada en cx. Con el marco P2D, cada letra de botón suelta
+// (A, B, X, Y, Z seguida de espacio, "/" o ":") se dibuja con el icono del
+// botón del juego; el resto del texto no cambia.
+void drawHelpLine(int cx, int y, const char* text, Colour c, int maxWidth = 570) {
+    if (!pc_settings_p2d_active()) {
+        drawTextOutline(cx - menuTextWidth(text) / 2, y, "%s", c, Colour(8, 12, 28, 255), text);
+        return;
+    }
+    // Tan grande como quepa (14 → 10) en el ancho del recuadro.
+    int fw = 14, fh = 20, icon = 26;
+    auto isButton = [&](const char* p) {
+        const bool startOk = p == text || p[-1] == ' ';
+        const bool endOk   = p[1] == ' ' || p[1] == '/' || p[1] == ':';
+        return startOk && endOk && std::strchr("ABXYZ", *p) != nullptr;
+    };
+    // Medir: trozos de texto + iconos.
+    char chunk[256];
+    int n = 0;
+    auto measure = [&]() {
+        int total = 0;
+        n = 0;
+        for (const char* p = text;; ++p) {
+            if (*p == '\0' || isButton(p)) {
+                chunk[n] = '\0';
+                total += pc_settings_p2d_text_width(chunk, fw);
+                n = 0;
+                if (*p == '\0') break;
+                total += icon;
+                continue;
+            }
+            if (n < int(sizeof(chunk)) - 1) chunk[n++] = *p;
+        }
+        return total;
+    };
+    int total = measure();
+    while (total > maxWidth && fw > 10) {
+        --fw;
+        fh = fw * 20 / 14;
+        icon = fw * 26 / 14;
+        total = measure();
+    }
+    int x = cx - total / 2;
+    n = 0;
+    for (const char* p = text;; ++p) {
+        if (*p == '\0' || isButton(p)) {
+            chunk[n] = '\0';
+            if (n) {
+                pc_settings_p2d_text_styled(x, y, chunk, c, c, fw, fh, sGlassText);
+                x += pc_settings_p2d_text_width(chunk, fw);
+            }
+            n = 0;
+            if (*p == '\0') break;
+            if (!pc_settings_p2d_button(x, y + (fh - icon) / 2 - 1, icon, *p)) {
+                const char letter[2] = { *p, '\0' };
+                pc_settings_p2d_text(x + (icon - pc_settings_p2d_text_width(letter, fw)) / 2, y, letter, c, fw, fh);
+            }
+            x += icon;
+            continue;
+        }
+        if (n < int(sizeof(chunk)) - 1) chunk[n++] = *p;
+    }
 }
 
 void drawSubmenuSurface(DGXGraphics* gfx, int x, int y, int w, int h,
@@ -3335,7 +3511,7 @@ void pc_settings_init(void) {
 }
 
 bool pc_settings_consume_game_input(void) {
-    const bool promptWasOpen = pc_newgame_prompt_active() || pc_playercount_prompt_active() || pc_devassign_prompt_active()
+    const bool promptWasOpen = pc_erased_notice_active() || pc_speedrun_intro_active() || pc_newgame_prompt_active() || pc_playercount_prompt_active() || pc_devassign_prompt_active()
                             || pc_captain_prompt_active() || pc_glass_menu_active();
     pollMenuInput();   // edge-detect using the previous frame's snapshot
     latchKeys();       // snapshot AFTER polling so next frame sees this one
@@ -3445,12 +3621,272 @@ void pc_permadeath_draw_slot_badge(int vx, int vy, int vw)
 // in the port; the original message archives and save-file rules are unchanged.
 
 namespace {
+bool sSpeedrunIntroOpen   = false;
+int  sSpeedrunIntroResult = PC_SPEEDRUN_INTRO_PENDING;
+int  sSrPage = 0;      // SrPage
+int  sSrSel  = 0;      // opción marcada en el menú del modo
+bool sErasedNoticeQueued = false;
+bool sErasedNoticeOpen   = false;
 bool sNewGamePromptOpen = false;
 int  sNewGamePromptStep = 0;     // 0 = normal/permadeath, 1 = difficulty
 int  sNewGamePromptChoice = 0;   // current step: 0 = left option, 1 = right
 int  sNewGamePromptRules = 0;    // 0 = normal file, 1 = permadeath
 int  sNewGamePromptResult = PC_NEWGAME_PENDING;
 bool sNewGamePromptHard = false;
+}
+
+// Menú del modo Speedrun: Start Run / Best Times / How It Works. La
+// explicación se abre sola la primera vez (speedrunIntroHidden = ya vista).
+enum SrPage { SR_Menu, SR_How, SR_Times, SR_ConfirmReset };
+
+bool pc_speedrun_intro_open_if_needed(void) {
+    sSpeedrunIntroOpen   = true;
+    sSpeedrunIntroResult = PC_SPEEDRUN_INTRO_PENDING;
+    sSrSel  = 0;
+    sSrPage = sConfig.speedrunIntroHidden ? SR_Menu : SR_How;
+    if (!sConfig.speedrunIntroHidden) {
+        sConfig.speedrunIntroHidden  = 1;
+        sPending.speedrunIntroHidden = 1;
+        saveConfig();
+    }
+    pc_menu_edge_reset();
+    return true;
+}
+
+bool pc_speedrun_intro_active(void) { return sSpeedrunIntroOpen; }
+
+int pc_speedrun_intro_result(void) { return sSpeedrunIntroResult; }
+
+namespace {
+constexpr int kSrMenuItems = 3;
+const char* const kSrMenuLabels[kSrMenuItems] = { "Start Run", "Best Times", "How It Works" };
+
+void pcSpeedrunIntroInput() {
+    if (!sSpeedrunIntroOpen) return;
+    bool accept = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE)
+               || (sTouchFrameButtons & PAD_BUTTON_A) != 0;
+    bool back   = keyWentDown(SDL_SCANCODE_ESCAPE) || (sTouchFrameButtons & PAD_BUTTON_B) != 0;
+    bool up     = keyWentDown(SDL_SCANCODE_UP) || (sTouchFrameButtons & PAD_BUTTON_UP) != 0;
+    bool down   = keyWentDown(SDL_SCANCODE_DOWN) || (sTouchFrameButtons & PAD_BUTTON_DOWN) != 0;
+    bool xPress = keyWentDown(SDL_SCANCODE_X) || (sTouchFrameButtons & PAD_BUTTON_X) != 0;
+    if (sTouchTapPending) {
+        sTouchTapPending = false;
+        // En el menú, un toque sobre una opción la elige; en las páginas, vuelve.
+        if (sSrPage == SR_Menu) {
+            const float y = sTouchTapY * 480.0f;
+            const int row = int((y - (240.0f - 70.0f)) / 44.0f);
+            if (row >= 0 && row < kSrMenuItems) { sSrSel = row; accept = true; }
+        } else {
+            accept = true;
+        }
+    }
+    SDL_GameController* ctl = pc_window_get_controller();
+    if (ctl) {
+        if (promptPadA(ctl)) accept = true;
+        if (promptPadB(ctl)) back = true;
+        if (padNavUp(ctl)) up = true;
+        if (padNavDown(ctl)) down = true;
+        static bool sPadXWas = false;
+        const bool padX = pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_X));
+        if (padX && !sPadXWas) xPress = true;
+        sPadXWas = padX;
+    }
+
+    switch (sSrPage) {
+    case SR_Menu:
+        if (up)   sSrSel = (sSrSel + kSrMenuItems - 1) % kSrMenuItems;
+        if (down) sSrSel = (sSrSel + 1) % kSrMenuItems;
+        if (accept) {
+            if (sSrSel == 0) {
+                sSpeedrunIntroOpen   = false;
+                sSpeedrunIntroResult = PC_SPEEDRUN_INTRO_CONTINUE;
+            } else {
+                sSrPage = sSrSel == 1 ? SR_Times : SR_How;
+            }
+        } else if (back) {
+            sSpeedrunIntroOpen   = false;
+            sSpeedrunIntroResult = PC_SPEEDRUN_INTRO_BACK;
+        }
+        break;
+    case SR_How:
+        if (accept || back) sSrPage = SR_Menu;
+        break;
+    case SR_Times:
+        if (xPress && pc_speedrun_has_pb()) sSrPage = SR_ConfirmReset;
+        else if (accept || back) sSrPage = SR_Menu;
+        break;
+    case SR_ConfirmReset:
+        if (accept) { pc_speedrun_reset_records(); sSrPage = SR_Times; }
+        else if (back) sSrPage = SR_Times;
+        break;
+    }
+}
+
+// Texto P2D a tamaño de lista (más pequeño que el general de la burbuja).
+void srText(int x, int y, const char* t, Colour c, int fw = 12, int fh = 18) {
+    pc_settings_p2d_text_styled(x, y, t, c, c, fw, fh);
+}
+void srTextRight(int right, int y, const char* t, Colour c, int fw = 12, int fh = 18) {
+    srText(right - pc_settings_p2d_text_width(t, fw), y, t, c, fw, fh);
+}
+
+void drawSrHow(DGXGraphics* gfx, int screenW, int screenH) {
+    const int panelW = 600, panelH = 262;
+    const int panelX = screenW / 2 - panelW / 2, panelY = screenH / 2 - panelH / 2 + 10;
+    drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
+    drawPikminHeader(gfx, panelX, panelY, panelW, "How It Works");
+    const char* lines[6] = { "Pikmin exactly as it shipped on GameCube.",
+                             "No gameplay changes and no control upgrades:",
+                             "every mod, cheat and port option that alters play is off.",
+                             "Start Run begins a new game right away, with no file",
+                             "select. The timer starts then and stops when the",
+                             "Secret Safe is collected. One split per day." };
+    for (int i = 0; i < 6; i++) {
+        const Colour c = i < 3 ? Colour(214, 224, 245, 255) : Colour(170, 190, 215, 255);
+        drawTextOutline(panelX + panelW / 2 - menuTextWidth(lines[i]) / 2, panelY + 34 + i * 30 + (i >= 3 ? 8 : 0),
+                        "%s", c, Colour(8, 12, 28, 255), lines[i]);
+    }
+    drawHelpLine(panelX + panelW / 2, panelY + 226, "A / Enter: OK    B / Esc: back", Colour(150, 165, 195, 255));
+}
+
+void drawSrTimes(DGXGraphics* gfx, int screenW, int screenH, bool confirm) {
+    const int panelW = 600, panelH = 372;
+    const int panelX = screenW / 2 - panelW / 2, panelY = screenH / 2 - panelH / 2 + 30;
+    drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
+    drawPikminHeader(gfx, panelX, panelY, panelW, "Best Times");
+    const Colour kTitle(255, 205, 60, 255), kBody(214, 224, 245, 255), kDim(150, 165, 195, 255);
+    const int lx = panelX + 36, rx = panelX + panelW - 36;
+    char buf[64], t[32];
+
+    if (!pc_speedrun_has_pb()) {
+        const char* none = "No finished runs yet.";
+        srText(panelX + panelW / 2 - pc_settings_p2d_text_width(none, 15) / 2, panelY + 150, none, kBody, 15, 22);
+    } else {
+        // Mejor run y Sum of Best.
+        pc_speedrun_format_time(pc_speedrun_pb_ms(), t, sizeof(t));
+        srText(lx, panelY + 26, "Personal Best", kTitle, 14, 21);
+        srTextRight(rx, panelY + 26, t, kTitle, 14, 21);
+        snprintf(buf, sizeof(buf), "%d days   %s", pc_speedrun_pb_days(), pc_speedrun_pb_date());
+        srText(lx, panelY + 50, buf, kDim, 10, 15);
+        pc_speedrun_format_time(pc_speedrun_sum_of_best(), t, sizeof(t));
+        snprintf(buf, sizeof(buf), "Sum of Best  %s", t);
+        srTextRight(rx, panelY + 50, buf, kDim, 10, 15);
+
+        // Splits de la mejor run (dos columnas si no caben en una).
+        const int n = pc_speedrun_pb_split_count();
+        const int perCol = 9, colW = (rx - lx) / 2;
+        for (int i = 0; i < n && i < perCol * 2; i++) {
+            const int cx = lx + (i / perCol) * colW, y = panelY + 76 + (i % perCol) * 19;
+            srText(cx, y, pc_speedrun_pb_split_name(i), kBody, 9, 14);
+            pc_speedrun_format_time(pc_speedrun_pb_split_ms(i), t, sizeof(t));
+            srTextRight(cx + colW - 14, y, t, kBody, 9, 14);
+        }
+
+        // Últimas runs.
+        srText(lx, panelY + 252, "Recent Runs", kTitle, 11, 16);
+        for (int i = 0; i < pc_speedrun_recent_count(); i++) {
+            u64 ms = 0; int days = 0; const char* date = "";
+            pc_speedrun_recent(i, &ms, &days, &date);
+            pc_speedrun_format_time(ms, t, sizeof(t));
+            snprintf(buf, sizeof(buf), "%s   %dd   %s", t, days, date);
+            srText(lx + (i % 2) * colW, panelY + 274 + (i / 2) * 18, buf, kBody, 9, 14);
+        }
+    }
+
+    if (confirm) {
+        drawHelpLine(panelX + panelW / 2, panelY + panelH - 36, "Erase all records?    A: erase    B: keep",
+                     Colour(255, 160, 120, 255));
+    } else {
+        drawHelpLine(panelX + panelW / 2, panelY + panelH - 36,
+                     pc_speedrun_has_pb() ? "B / Esc: back    X: erase records" : "B / Esc: back",
+                     Colour(150, 165, 195, 255));
+    }
+}
+}
+
+void pc_speedrun_intro_draw(void) {
+    if (!sSpeedrunIntroOpen || !gsys || !gsys->mDGXGfx) return;
+    DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+    ensureFont();
+    if (!sFont) return;
+
+    const int screenW = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
+    const int screenH = gfx->mScreenHeight;
+    PcSettingsP2DFrame nativeFrame(screenW, screenH);
+    GlassTextScope glassText;
+    Matrix4f ortho;
+    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
+
+    if (sSrPage == SR_How) { drawSrHow(gfx, screenW, screenH); return; }
+    if (sSrPage == SR_Times || sSrPage == SR_ConfirmReset) {
+        drawSrTimes(gfx, screenW, screenH, sSrPage == SR_ConfirmReset);
+        return;
+    }
+
+    const int panelW = 420, panelH = 200;
+    const int panelX = screenW / 2 - panelW / 2, panelY = screenH / 2 - panelH / 2;
+    drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
+    drawPikminHeader(gfx, panelX, panelY, panelW, "Speedrun");
+    for (int i = 0; i < kSrMenuItems; i++) {
+        drawGlassOption(panelX + 40, panelY + 22 + i * 44, panelW - 80, 40, kSrMenuLabels[i], i == sSrSel, 18, 26);
+    }
+    drawHelpLine(panelX + panelW / 2, panelY + 160, "A / Enter: select    B / Esc: back", Colour(150, 165, 195, 255));
+}
+
+void pc_erased_notice_queue(void) { sErasedNoticeQueued = true; }
+
+bool pc_erased_notice_open_if_queued(void) {
+    if (!sErasedNoticeQueued) return false;
+    sErasedNoticeQueued = false;
+    sErasedNoticeOpen   = true;
+    pc_menu_edge_reset();
+    return true;
+}
+
+bool pc_erased_notice_active(void) { return sErasedNoticeOpen; }
+
+namespace {
+void pcErasedNoticeInput() {
+    if (!sErasedNoticeOpen) return;
+    bool accept = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE)
+               || (sTouchFrameButtons & PAD_BUTTON_A) != 0;
+    if (sTouchTapPending) {
+        sTouchTapPending = false;
+        accept = true; // un toque en cualquier sitio cierra el aviso
+    }
+    SDL_GameController* ctl = pc_window_get_controller();
+    if (ctl && promptPadA(ctl)) accept = true;
+    if (accept) sErasedNoticeOpen = false;
+}
+}
+
+void pc_erased_notice_draw(void) {
+    if (!sErasedNoticeOpen || !gsys || !gsys->mDGXGfx) return;
+    DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+    ensureFont();
+    if (!sFont) return;
+
+    const int screenW = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
+    const int screenH = gfx->mScreenHeight;
+    PcSettingsP2DFrame nativeFrame(screenW, screenH);
+    GlassTextScope glassText;
+    Matrix4f ortho;
+    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
+
+    const int panelW = 520, panelH = 190;
+    const int panelX = screenW / 2 - panelW / 2;
+    const int panelY = screenH / 2 - panelH / 2 + 20;
+    drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
+    drawPikminHeader(gfx, panelX, panelY, panelW, "Expedition Lost");
+
+    const char* lines[3] = { "Olimar fell during a Permadeath run.",
+                             "That expedition's log is gone from the", "memory card for good." };
+    for (int i = 0; i < 3; i++) {
+        drawTextOutline(panelX + panelW / 2 - menuTextWidth(lines[i]) / 2, panelY + 44 + i * 30, "%s",
+                        Colour(214, 224, 245, 255), Colour(8, 12, 28, 255), lines[i]);
+    }
+    const char* help = "A / Enter: continue";
+    drawHelpLine(panelX + panelW / 2, panelY + 148, help, Colour(150, 165, 195, 255));
 }
 
 void pc_newgame_prompt_open(void) {
@@ -3554,13 +3990,11 @@ void pc_newgame_prompt_draw(void) {
     const int screenW = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
     const int screenH = gfx->mScreenHeight;
     PcSettingsP2DFrame nativeFrame(screenW, screenH);
+    GlassTextScope glassText;
 
     Matrix4f ortho;
     gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
 
-    gfx->setColour(Colour(0, 0, 0, 170), true);
-    gfx->setAuxColour(Colour(0, 0, 0, 170));
-    gfx->fillRectangle(RectArea(0, 0, screenW, screenH));
 
     const int panelW = 620;
     const int panelH = 260;
@@ -3582,15 +4016,10 @@ void pc_newgame_prompt_draw(void) {
         const bool sel = (i == sNewGamePromptChoice);
         const int boxW = 230;
         const int boxX = panelX + 40 + i * (boxW + 40);
-        if (pc_settings_p2d_active()) {
-            if (sel) pc_settings_p2d_plate(boxX, optY, boxW, 44, 2);
-            pc_settings_p2d_plate(boxX, optY, boxW, 44, 1);
-            if (sel) pc_settings_p2d_text(boxX + 16, optY + 12, ">", Colour(255,229,120,255));
-        } else {
-            gfx->setColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220), true);
-            gfx->setAuxColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220));
-            gfx->fillRectangle(RectArea(boxX, optY, boxX + boxW, optY + 40));
-        }
+        if (drawGlassOption(boxX, optY, boxW, 44, options[i], sel, 20, 29)) continue;
+        gfx->setColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220), true);
+        gfx->setAuxColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220));
+        gfx->fillRectangle(RectArea(boxX, optY, boxX + boxW, optY + 40));
         const int tw = menuTextWidth(options[i]);
         drawTextOutline(boxX + boxW / 2 - tw / 2, optY + 12, "%s",
                         sel ? Colour(255, 229, 120, 255) : Colour(170, 180, 200, 255),
@@ -3618,8 +4047,7 @@ void pc_newgame_prompt_draw(void) {
     const char* help = difficultyStep
                            ? "Left/Right: choose    A / Enter: start    B / Esc: back"
                            : "Left/Right: choose    A / Enter: next    B / Esc: back";
-    drawTextOutline(panelX + panelW / 2 - menuTextWidth(help) / 2, panelY + 212,
-                    "%s", Colour(150, 165, 195, 255), Colour(8, 12, 28, 255), help);
+    drawHelpLine(panelX + panelW / 2, panelY + 212, help, Colour(150, 165, 195, 255));
 }
 
 
@@ -3768,8 +4196,7 @@ void pc_playercount_prompt_draw(void) {
 
     const char* help = es ? "Izq/Der: elegir    A / Intro: seguir    B / Esc: volver"
                           : "Left/Right: choose    A / Enter: next    B / Esc: back";
-    drawTextOutline(panelX + panelW / 2 - menuTextWidth(help) / 2, panelY + 212,
-                    "%s", Colour(150, 165, 195, 255), Colour(8, 12, 28, 255), help);
+    drawHelpLine(panelX + panelW / 2, panelY + 212, help, Colour(150, 165, 195, 255));
 }
 
 
@@ -3901,7 +4328,7 @@ void captainPickDraw(DGXGraphics* gfx, int panelX, int panelY, int panelW, int p
         const bool sel = captain == i;
         const int boxX = panelX + kCaptainBoxLeft + i * (boxW + kCaptainBoxGap);
         if (pc_settings_p2d_active()) {
-            if (sel) pc_settings_p2d_plate(boxX, boxY, boxW, boxH, 2);
+            // Cada capitán en su burbuja de cristal.
             pc_settings_p2d_plate(boxX, boxY, boxW, boxH, 1);
         } else {
             gfx->setColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220), true);
@@ -3938,6 +4365,7 @@ void captainPickDraw(DGXGraphics* gfx, int panelX, int panelY, int panelW, int p
                 gfx->useTexture(nullptr, GX_TEXMAP0);
             }
         }
+        if (drawGlassOption(boxX, boxY + boxH - 38, boxW, 30, kCaptainNames[i], sel)) continue;
         const int tw = menuTextWidth(kCaptainNames[i]);
         drawTextOutline(boxX + boxW / 2 - tw / 2, boxY + boxH - 30, "%s",
                         sel ? Colour(255, 229, 120, 255) : Colour(170, 180, 200, 255),
@@ -3947,9 +4375,7 @@ void captainPickDraw(DGXGraphics* gfx, int panelX, int panelY, int panelW, int p
     const bool noticing = louieMissing && SDL_GetTicks() < sDevAssignLouieNoticeUntil;
     const char* help = noticing ? "Louie model not installed: Advanced Options > HD Models (Louie zip)."
                      : (louieMissing ? "Louie: model not installed (Advanced Options > HD Models)." : helpDefault);
-    drawTextOutline(panelX + panelW / 2 - menuTextWidth(help) / 2, panelY + 220,
-                    "%s", noticing ? Colour(255, 160, 120, 255) : Colour(150, 165, 195, 255),
-                    Colour(8, 12, 28, 255), help);
+    drawHelpLine(panelX + panelW / 2, panelY + 220, help, noticing ? Colour(255, 160, 120, 255) : Colour(150, 165, 195, 255));
 }
 }
 
@@ -3994,11 +4420,9 @@ void pc_captain_prompt_draw(void) {
     const int screenW = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
     const int screenH = gfx->mScreenHeight;
     PcSettingsP2DFrame nativeFrame(screenW, screenH);
+    GlassTextScope glassText;
     Matrix4f ortho;
     gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
-    gfx->setColour(Colour(0, 0, 0, 170), true);
-    gfx->setAuxColour(Colour(0, 0, 0, 170));
-    gfx->fillRectangle(RectArea(0, 0, screenW, screenH));
     const int panelW = 620, panelH = 260;
     const int panelX = screenW / 2 - panelW / 2, panelY = screenH / 2 - panelH / 2;
     drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
@@ -4148,13 +4572,11 @@ void pc_devassign_prompt_draw(void) {
     const int screenW = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
     const int screenH = gfx->mScreenHeight;
     PcSettingsP2DFrame nativeFrame(screenW, screenH);
+    GlassTextScope glassText;
 
     Matrix4f ortho;
     gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
 
-    gfx->setColour(Colour(0, 0, 0, 170), true);
-    gfx->setAuxColour(Colour(0, 0, 0, 170));
-    gfx->fillRectangle(RectArea(0, 0, screenW, screenH));
 
     const int panelW = 620;
     const int panelH = 260;
@@ -4191,8 +4613,7 @@ void pc_devassign_prompt_draw(void) {
                             "%s", Colour(150, 165, 195, 255), Colour(8, 12, 28, 255), p1);
         }
         const char* help = "Esc: back";
-        drawTextOutline(panelX + panelW / 2 - menuTextWidth(help) / 2, panelY + 212,
-                        "%s", Colour(150, 165, 195, 255), Colour(8, 12, 28, 255), help);
+        drawHelpLine(panelX + panelW / 2, panelY + 212, help, Colour(150, 165, 195, 255));
         return;
     }
 
@@ -4209,15 +4630,10 @@ void pc_devassign_prompt_draw(void) {
         const bool sel = (i == sDevAssignChoice);
         const int boxW = 230;
         const int boxX = panelX + 40 + i * (boxW + 40);
-        if (pc_settings_p2d_active()) {
-            if (sel) pc_settings_p2d_plate(boxX, optY, boxW, 44, 2);
-            pc_settings_p2d_plate(boxX, optY, boxW, 44, 1);
-            if (sel) pc_settings_p2d_text(boxX + 16, optY + 12, ">", Colour(255,229,120,255));
-        } else {
-            gfx->setColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220), true);
-            gfx->setAuxColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220));
-            gfx->fillRectangle(RectArea(boxX, optY, boxX + boxW, optY + 40));
-        }
+        if (drawGlassOption(boxX, optY, boxW, 44, options[i], sel, 20, 29)) continue;
+        gfx->setColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220), true);
+        gfx->setAuxColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220));
+        gfx->fillRectangle(RectArea(boxX, optY, boxX + boxW, optY + 40));
         const int tw = menuTextWidth(options[i]);
         drawTextOutline(boxX + boxW / 2 - tw / 2, optY + 12, "%s",
                         sel ? Colour(255, 229, 120, 255) : Colour(170, 180, 200, 255),
@@ -4228,8 +4644,7 @@ void pc_devassign_prompt_draw(void) {
     drawTextOutline(panelX + panelW / 2 - menuTextWidth(detail) / 2, panelY + 186,
                     "%s", Colour(190, 200, 220, 255), Colour(8, 12, 28, 255), detail);
     const char* help = "Left/Right: choose    A / Enter: confirm    B / Esc: back";
-    drawTextOutline(panelX + panelW / 2 - menuTextWidth(help) / 2, panelY + 212,
-                    "%s", Colour(150, 165, 195, 255), Colour(8, 12, 28, 255), help);
+    drawHelpLine(panelX + panelW / 2, panelY + 212, help, Colour(150, 165, 195, 255));
 }
 
 // Contador de Pikmin ociosos. GameStat::freePikis ya es exactamente eso: lo
@@ -4296,6 +4711,17 @@ void pc_settings_draw_idle_counter(void) {
     snprintf(buf, sizeof(buf), "IDLE %d", idle);
     // Justo encima del total del HUD (la tercera cifra del contador), para
     // que se lea como una cifra más del bloque y no como un aviso suelto.
+    if (pc_settings_p2d_active()) {
+        // Misma fuente y proporción que el texto de los menús burbuja (14x21
+        // en el espacio de 480 de alto); aquí se dibuja en píxeles reales,
+        // así que se escala con la altura de la pantalla.
+        const int fw = std::max(8, 14 * screenH / 480);
+        const int fh = std::max(12, 21 * screenH / 480);
+        const int x  = (int)(screenW * 0.917f) - pc_settings_p2d_text_width(buf, fw) / 2;
+        const int y  = (int)(screenH * 0.790f);
+        pc_settings_p2d_text(x, y, buf, Colour(255, 170, 30, 255), fw, fh);
+        return;
+    }
     const int x = (int)(screenW * 0.917f) - menuTextWidth(buf) / 2;
     const int y = (int)(screenH * 0.790f);
     drawTextOutline(x, y, "%s", Colour(255, 190, 28, 255), Colour(24, 12, 0, 255), buf);
@@ -4475,7 +4901,7 @@ namespace {
 // Texto del menú VS con tamaño (el de la interfaz del juego si está activa).
 void vsText(int x, int y, const char* s, Colour c, int fw = 12, int fh = 18)
 {
-    if (pc_settings_p2d_active()) pc_settings_p2d_text(x, y, s, c, fw, fh);
+    if (pc_settings_p2d_active()) pc_settings_p2d_text_styled(x, y, s, c, c, fw, fh, sGlassText);
     else drawTextOutline(x, y, "%s", c, Colour(8, 12, 28, 255), s);
 }
 int vsTextW(const char* s, int fw = 12) { return pc_settings_p2d_active() ? pc_settings_p2d_text_width(s, fw) : menuTextWidth(s); }
@@ -4549,11 +4975,9 @@ void pc_vsrules_prompt_draw(void) {
     const int screenW = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
     const int screenH = gfx->mScreenHeight;
     PcSettingsP2DFrame nativeFrame(screenW, screenH);
+    GlassTextScope glassText;
     Matrix4f ortho;
     gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
-    gfx->setColour(Colour(0, 0, 0, 170), true);
-    gfx->setAuxColour(Colour(0, 0, 0, 170));
-    gfx->fillRectangle(RectArea(0, 0, screenW, screenH));
 
     const Colour title(255, 229, 120, 255), body(214, 224, 245, 255), dim(150, 165, 195, 255);
     const int panelW = std::min(800, screenW - 24), panelH = 452;
@@ -4604,12 +5028,15 @@ void pc_vsrules_prompt_draw(void) {
         vsRuleText(row, &label, value, sizeof(value));
         const bool sel = row == sVsRulesRow;
         const int ry   = rowsY + row * 38;
-        if (sel && pc_settings_p2d_active()) pc_settings_p2d_plate(rx - 4, ry - 6, colW + 8, 32, 2);
+        // Fila elegida: bolita de cristal delante y valor en naranja (estilo
+        // burbuja), en vez de la placa amarilla.
+        if (sel && pc_settings_p2d_active())
+            pc_settings_p2d_cursor(rx - 8, ry + 8, 18, std::fmod(SDL_GetTicks() / 1000.0f * 10.0f, 6.2831853f));
         const Colour c = sel ? Colour(255, 255, 255, 255) : Colour(190, 200, 220, 255);
         vsText(rx + 10, ry, label, c, 11, 17);
         char shown[64];
         snprintf(shown, sizeof(shown), sel ? "< %s >" : "%s", value);
-        vsText(rx + colW - 10 - vsTextW(shown, 11), ry, shown, sel ? title : c, 11, 17);
+        vsText(rx + colW - 10 - vsTextW(shown, 11), ry, shown, sel ? Colour(255, 170, 30, 255) : c, 11, 17);
     }
     const char* h1;
     const char* h2;
@@ -4621,7 +5048,7 @@ void pc_vsrules_prompt_draw(void) {
 
     const char* help = es ? "Arriba/Abajo: opción   Izq/Der: cambiar   A: jugar   B: salir"
                           : "Up/Down: option   Left/Right: change   A: play   B: back";
-    vsText(panelX + panelW / 2 - vsTextW(help, 10) / 2, panelY + panelH - 36, help, dim, 10, 15);
+    drawHelpLine(panelX + panelW / 2, panelY + panelH - 38, help, dim);
 }
 
 bool pc_vs_end_screen_active(void) { return vsEndScreenShown(); }
@@ -5113,8 +5540,7 @@ void pc_settings_draw(void) {
             drawTextOutline(boxX + boxW / 2 - menuTextWidth(line2) / 2, boxY + 68, "%s",
                             Colour(255, 240, 180, 255), Colour(18, 26, 56, 255), line2);
             const char* prompt = "A: Restart now   B: Not yet";
-            drawTextOutline(boxX + boxW / 2 - menuTextWidth(prompt) / 2, boxY + 106, "%s",
-                            Colour(255, 255, 255, 255), Colour(18, 26, 56, 255), prompt);
+            drawHelpLine(boxX + boxW / 2, boxY + 106, prompt, Colour(255, 255, 255, 255));
         }
         return;
     }
@@ -5232,8 +5658,7 @@ void pc_settings_draw(void) {
             drawTextOutline(boxX + boxW / 2 - menuTextWidth(line2) / 2, ty + 26, "%s",
                             Colour(255, 240, 180, 255), Colour(18, 26, 56, 255), line2);
             const char* prompt = "A: Restart now   B: Not yet";
-            drawTextOutline(boxX + boxW / 2 - menuTextWidth(prompt) / 2, ty + 64, "%s",
-                            Colour(255, 255, 255, 255), Colour(18, 26, 56, 255), prompt);
+            drawHelpLine(boxX + boxW / 2, ty + 64, prompt, Colour(255, 255, 255, 255));
         }
 
         return; // Don't draw footer when texture packs submenu is open.
@@ -5244,85 +5669,91 @@ void pc_settings_draw(void) {
     drawF1Page(gfx);
 }
 
-int pc_settings_get_fps_mode(void) {
+int pc_settings_get_fps_mode(void) { if (pc_speedrun_active()) return 0;
     return sConfig.fpsMode;
 }
 
-int pc_settings_get_chain_actions(void) {
+int pc_settings_get_chain_actions(void) { if (pc_speedrun_active()) return 0;
     return sConfig.chainActions;
 }
 
-int pc_settings_get_better_pathfinding(void) {
+int pc_settings_get_better_pathfinding(void) { if (pc_speedrun_active()) return 0;
     return sConfig.betterPathfinding;
 }
 
-int pc_settings_get_blues_only_water(void) {
+int pc_settings_get_blues_only_water(void) { if (pc_speedrun_active()) return 0;
     return sConfig.bluesOnlyWater;
 }
 
-int pc_settings_get_idle_counter(void) {
+int pc_settings_get_idle_counter(void) { if (pc_speedrun_active()) return 0;
     return sConfig.idleCounter;
 }
 
-int pc_settings_get_navi_health_pct(void) {
+int pc_settings_get_navi_health_pct(void) { if (pc_speedrun_active()) return 100;
     return pc_hardmode_active() ? 100 : sConfig.naviHealthPct;
 }
 
-int pc_settings_get_teki_health_pct(void) {
+int pc_settings_get_teki_health_pct(void) { if (pc_speedrun_active()) return 100;
     return pc_hardmode_active() ? 100 : sConfig.tekiHealthPct;
 }
 
-int pc_settings_get_infinite_day(void) {
+int pc_settings_get_infinite_day(void) { if (pc_speedrun_active()) return 0;
     // VS: el día no avanza; la partida la cierra su propio reloj.
     if (pc_vs_active()) return 1;
     return pc_hardmode_active() ? 0 : sConfig.infiniteDay;
 }
 
-int pc_settings_get_free_camera(void) {
+int pc_settings_get_free_camera(void) { if (pc_speedrun_active()) return 0;
     return sConfig.freeCamera;
 }
 
-int pc_settings_get_whistle_radius_pct(void) {
+int pc_settings_get_whistle_radius_pct(void) { if (pc_speedrun_active()) return 100;
     return sConfig.whistleRadiusPct;
 }
 
-float pc_settings_get_throw_speed_scale(void) {
+float pc_settings_get_throw_speed_scale(void) { if (pc_speedrun_active()) return 1.0f;
     return sConfig.throwSpeedPct / 100.0f;
 }
 
-int pc_settings_get_throw_cancel_b(void) {
+int pc_settings_get_throw_cancel_b(void) { if (pc_speedrun_active()) return 0;
     return sConfig.throwCancelB;
 }
 
-int pc_settings_get_quick_grab(void) {
+int pc_settings_get_quick_grab(void) { if (pc_speedrun_active()) return 0;
     return sConfig.quickGrab;
 }
 
-int pc_settings_get_no_trip(void) {
+int pc_settings_get_no_trip(void) { if (pc_speedrun_active()) return 0;
     return sConfig.noTrip;
 }
 
-int pc_settings_get_whistle_pluck(void) {
+int pc_settings_get_whistle_pluck(void) { if (pc_speedrun_active()) return 0;
     return sConfig.whistlePluck;
 }
 
-int pc_settings_get_onion_step10(void) {
+int pc_settings_get_hide_olimar_text(void) { if (pc_speedrun_active()) return 0; return sConfig.hideOlimarText; }
+
+int pc_settings_get_bomb_control(void) { if (pc_speedrun_active()) return 0;
+    return sConfig.bombControl;
+}
+
+int pc_settings_get_onion_step10(void) { if (pc_speedrun_active()) return 0;
     return sConfig.onionStep10;
 }
 
-int pc_settings_get_piki_invincible(void) { return pc_hardmode_active() ? 0 : sConfig.pikiInvincible; }
-int pc_settings_get_all_flowers(void) { return pc_hardmode_active() ? 0 : sConfig.allFlowers; }
-float pc_settings_get_carry_speed_scale(void) { return pc_hardmode_active() ? 1.0f : sConfig.carrySpeedPct / 100.0f; }
-float pc_settings_get_navi_speed_scale(void) { return pc_hardmode_active() ? 1.0f : sConfig.naviSpeedPct / 100.0f; }
-int pc_settings_get_unlock_zones(void) { return pc_hardmode_active() ? 0 : sConfig.unlockZones; }
-int pc_settings_get_no_day_advance(void) { return pc_hardmode_active() ? 0 : sConfig.noDayAdvance; }
-int pc_settings_get_all_onions(void) { return pc_hardmode_active() ? 0 : sConfig.allOnions; }
+int pc_settings_get_piki_invincible(void) { if (pc_speedrun_active()) return 0; return pc_hardmode_active() ? 0 : sConfig.pikiInvincible; }
+int pc_settings_get_all_flowers(void) { if (pc_speedrun_active()) return 0; return pc_hardmode_active() ? 0 : sConfig.allFlowers; }
+float pc_settings_get_carry_speed_scale(void) { if (pc_speedrun_active()) return 1.0f; return pc_hardmode_active() ? 1.0f : sConfig.carrySpeedPct / 100.0f; }
+float pc_settings_get_navi_speed_scale(void) { if (pc_speedrun_active()) return 1.0f; return pc_hardmode_active() ? 1.0f : sConfig.naviSpeedPct / 100.0f; }
+int pc_settings_get_unlock_zones(void) { if (pc_speedrun_active()) return 0; return pc_hardmode_active() ? 0 : sConfig.unlockZones; }
+int pc_settings_get_no_day_advance(void) { if (pc_speedrun_active()) return 0; return pc_hardmode_active() ? 0 : sConfig.noDayAdvance; }
+int pc_settings_get_all_onions(void) { if (pc_speedrun_active()) return 0; return pc_hardmode_active() ? 0 : sConfig.allOnions; }
 
-int pc_settings_get_instant_whistle(void) {
+int pc_settings_get_instant_whistle(void) { if (pc_speedrun_active()) return 0;
     return sConfig.instantWhistle;
 }
 
-int pc_settings_get_gyro_enabled(void) {
+int pc_settings_get_gyro_enabled(void) { if (pc_speedrun_active()) return 0;
     return sConfig.gyroEnabled;
 }
 
@@ -5346,15 +5777,15 @@ void pc_settings_set_gyro_bias(const float bias[3]) {
     }
 }
 
-int pc_settings_get_lock_on(void) {
+int pc_settings_get_lock_on(void) { if (pc_speedrun_active()) return 0;
     return sConfig.lockOn;
 }
 
-int pc_settings_get_throw_while_moving(void) {
+int pc_settings_get_throw_while_moving(void) { if (pc_speedrun_active()) return 0;
     return sConfig.throwWhileMoving;
 }
 
-int pc_settings_get_first_person(void) {
+int pc_settings_get_first_person(void) { if (pc_speedrun_active()) return 0;
     return sConfig.firstPerson;
 }
 
@@ -5377,7 +5808,7 @@ void pc_first_person_toggle_for(int player) {
 int pc_first_person_active(void) { return pc_first_person_active_for(0); }
 void pc_first_person_toggle(void) { pc_first_person_toggle_for(0); }
 
-int pc_settings_get_charge(void) {
+int pc_settings_get_charge(void) { if (pc_speedrun_active()) return 0;
     // El charge no significa nada sin un objetivo fijado.
     return sConfig.lockOn ? sConfig.charge : 0;
 }
@@ -5389,21 +5820,21 @@ float pc_mods_teki_damage(float damage) {
     return damage * 100.0f / (float)pct;
 }
 
-int pc_settings_get_hold_to_pluck(void) {
+int pc_settings_get_hold_to_pluck(void) { if (pc_speedrun_active()) return 0;
     return sConfig.holdToPluck;
 }
 
-int pc_settings_get_mouse_wheel_action(void) {
+int pc_settings_get_mouse_wheel_action(void) { if (pc_speedrun_active()) return 1;
     return sConfig.mouseWheelAction;
 }
 
-int pc_settings_get_piki_limit(void) {
+int pc_settings_get_piki_limit(void) { if (pc_speedrun_active()) return 100;
     if (pc_hardmode_active() && sConfig.pikiLimit > PC_HARDMODE_PIKI_LIMIT)
         return PC_HARDMODE_PIKI_LIMIT;
     return sConfig.pikiLimit;
 }
 
-int pc_settings_get_day_minutes(void) {
+int pc_settings_get_day_minutes(void) { if (pc_speedrun_active()) return 0;
     if (pc_hardmode_active() && (sConfig.dayMinutes == 0 || sConfig.dayMinutes > PC_HARDMODE_DAY_MINUTES))
         return PC_HARDMODE_DAY_MINUTES;
     return sConfig.dayMinutes;
@@ -5437,7 +5868,7 @@ int pc_settings_get_hd_model_enabled(int row) {
     return row < 0 || row >= 6 || !(sConfig.hdModelsDisabled & (1 << row));
 }
 
-int pc_settings_get_debug_keys(void) {
+int pc_settings_get_debug_keys(void) { if (pc_speedrun_active()) return 0;
     return sConfig.debugKeys;
 }
 
@@ -5571,6 +6002,8 @@ void modsRowValue(int i, char* value, size_t n) {
     case 24: snprintf(value, n, "%s", sPending.onionStep10 ? "On" : "Off (original)"); break;
     case 25: snprintf(value, n, "%s", sPending.instantWhistle ? "On" : "Off (original)"); break;
     case 34: snprintf(value, n, "%s", sPending.whistlePluck ? "On" : "Off (original)"); break;
+    case 35: snprintf(value, n, "%s", sPending.bombControl ? "On" : "Off (original)"); break;
+    case 36: snprintf(value, n, "%s", sPending.hideOlimarText ? "On" : "Off (original)"); break;
     case 28: speedPctLabel(sPending.carrySpeedPct, value, n); break;
     case 29: speedPctLabel(sPending.naviSpeedPct, value, n); break;
     case 26: case 27: case 30: case 31: case 32: {
@@ -5682,6 +6115,7 @@ const GroupRow kControlsRows[] = {
     { SRC_MODS, 34, "Whistle Pluck", "Hold the whistle over sprouts to pluck them one after another." },
     { SRC_MODS, 17, "Throw While Moving", "Throw Pikmin while running, instead of Olimar stopping first." },
     { SRC_MODS, 22, "Cancel Throw With B", "While holding a Pikmin with A, press B to put it back in the squad." },
+    { SRC_MODS, 35, "Bomb Control", "Bomb button (B / assign on a pad): a Yellow with a bomb rock throws it at the cursor, or drops it lit at its feet if the cursor is too close. Ones already thrown go first." },
     { SRC_MODS, 33, "Quick Grab", "The Pikmin to throw appears in Olimar's hand at once, so throwing is just as fast with the squad behind him." },
     { SRC_MODS, 24, "Onion: Y for Steps of 10", "In the Onion menu, hold Y while moving up or down to move 10 Pikmin at a time." },
     { SRC_ADV, 1, "Stick Dead Zone", "Ignores small stick movements. Raise it if a worn stick drifts." },
@@ -5709,6 +6143,7 @@ const GroupRow kGameplayRows[] = {
     { SRC_MODS, 8, "Better Pathfinding", "Gets Pikmin moving again when they stall on their route." },
     { SRC_MODS, 9, "Blues Only In Water", "Only blue Pikmin walk into water on their own." },
     { SRC_MODS, 10, "Idle Pikmin Counter", "Shows how many Pikmin are standing idle." },
+    { SRC_MODS, 36, "Hide Olimar's Texts", "Skip the text boxes Olimar shows while you play: first Pikmin, ship parts, tips. The ending texts stay." },
     { SRC_MODS, 23, "No Tripping", "Pikmin running in the squad never trip and fall behind." },
     { SRC_MODS, 6, "Co-op Split Screen", "How the screen divides in two-player co-op." },
     { SRC_MODS, 7, "Co-op Merged Camera", "Joins both halves into one view while the captains are close." },

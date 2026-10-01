@@ -598,6 +598,9 @@ struct Hub {
     // Ajustes de cada juego, cada uno contra su propio ejecutable; `settings`
     // apunta al del juego elegido arriba de la pestaña.
     std::shared_ptr<ReleaseCheck> releaseCheck;
+    // Panel "What's new": las notas del release nuevo, copiadas al abrirlo.
+    bool whatsNewOpen = false;
+    std::string whatsNewVersion, whatsNewNotes;
     std::shared_ptr<SettingsClient> settingsClients[kHubGameCount];
     std::shared_ptr<SettingsClient> settings;
     int settingsGame = 0;
@@ -1255,6 +1258,161 @@ struct Hub {
         dl->AddText(fonts.body, 19.0f, ImVec2(a.x + 20.0f, a.y + (b.y - a.y - 19.0f) * 0.5f), col(ImVec4(1.0f, 0.93f, 0.80f, 1.0f)),
                     text.c_str());
         if (clicked) choose(HubAction::Update, HubGame::Pikmin1);
+
+        // "What's new" a su izquierda, si el release trae notas.
+        std::string notes, version;
+        {
+            std::lock_guard<std::mutex> lock(releaseCheck->mutex);
+            notes = releaseCheck->latest.notes;
+            version = releaseCheck->latest.version;
+        }
+        if (notes.empty()) return;
+        const float w = fonts.body->CalcTextSizeA(19.0f, FLT_MAX, 0.0f, "What's new").x + 50.0f;
+        ImGui::SetCursorScreenPos(ImVec2(a.x - w - 12.0f, a.y));
+        if (glassButton("What's new", ImVec2(w, b.y - a.y))) {
+            whatsNewOpen = true;
+            whatsNewVersion = version;
+            whatsNewNotes = notes;
+        }
+    }
+
+    // Quita el marcado en línea de Markdown: **negrita**, `código` y
+    // [texto](enlace) se quedan en su texto.
+    static std::string plainInline(const std::string& in)
+    {
+        std::string out;
+        for (size_t i = 0; i < in.size(); ++i) {
+            if (in.compare(i, 2, "**") == 0) { ++i; continue; }
+            if (in[i] == '`') continue;
+            if (in[i] == '[') {
+                const size_t close = in.find("](", i);
+                const size_t end = close == std::string::npos ? close : in.find(')', close);
+                if (end != std::string::npos) {
+                    out += in.substr(i + 1, close - i - 1);
+                    i = end;
+                    continue;
+                }
+            }
+            out += in[i];
+        }
+        return out;
+    }
+
+    // Notas del release (Markdown de GitHub) con el estilo del launcher:
+    // títulos en naranja, viñetas con su sangría y párrafos.
+    void drawNotes(const std::string& markdown)
+    {
+        struct Block {
+            int kind = 0;   // 0 párrafo, 1 título, 2 subtítulo, 3 viñeta
+            int indent = 0; // nivel de viñeta
+            std::string text;
+        };
+        std::vector<Block> blocks;
+        size_t pos = 0;
+        while (pos <= markdown.size()) {
+            size_t nl = markdown.find('\n', pos);
+            if (nl == std::string::npos) nl = markdown.size();
+            std::string line = markdown.substr(pos, nl - pos);
+            pos = nl + 1;
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            size_t lead = line.find_first_not_of(' ');
+            if (lead == std::string::npos) { // línea en blanco: corta el bloque
+                blocks.push_back(Block());
+                continue;
+            }
+            const std::string body = line.substr(lead);
+            if (body.rfind("## ", 0) == 0) { blocks.push_back({ 2, 0, body.substr(3) }); continue; }
+            if (body.rfind("# ", 0) == 0) { blocks.push_back({ 1, 0, body.substr(2) }); continue; }
+            if (body.rfind("- ", 0) == 0 || body.rfind("* ", 0) == 0) {
+                blocks.push_back({ 3, int(lead / 2), body.substr(2) });
+                continue;
+            }
+            // Continuación de la viñeta o el párrafo anterior.
+            if (!blocks.empty() && (blocks.back().kind == 0 || blocks.back().kind == 3) && !blocks.back().text.empty()) {
+                blocks.back().text += " " + body;
+            } else {
+                blocks.push_back({ 0, 0, body });
+            }
+        }
+
+        const ImU32 text = col(ImVec4(1.0f, 0.93f, 0.80f, 1.0f));
+        for (const Block& block : blocks) {
+            if (block.text.empty()) continue;
+            const std::string shown = plainInline(block.text);
+            switch (block.kind) {
+            case 1:
+            case 2:
+                ImGui::Dummy(ImVec2(0, block.kind == 1 ? 4.0f : 10.0f));
+                ImGui::PushFont(block.kind == 1 ? fonts.title : fonts.body);
+                ImGui::PushStyleColor(ImGuiCol_Text, col(kOrange));
+                ImGui::TextWrapped("%s", shown.c_str());
+                ImGui::PopStyleColor();
+                ImGui::PopFont();
+                break;
+            case 3: {
+                const float indent = 8.0f + 22.0f * block.indent;
+                ImGui::Indent(indent);
+                ImGui::PushStyleColor(ImGuiCol_Text, text);
+                ImGui::Bullet();
+                ImGui::TextWrapped("%s", shown.c_str());
+                ImGui::PopStyleColor();
+                ImGui::Unindent(indent);
+                break;
+            }
+            default:
+                ImGui::Dummy(ImVec2(0, 4.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, text);
+                ImGui::TextWrapped("%s", shown.c_str());
+                ImGui::PopStyleColor();
+                break;
+            }
+        }
+    }
+
+    // Panel "What's new in X": encima de todo, con el estilo de los modales.
+    void drawWhatsNew(ImVec2 size)
+    {
+        ImGui::SetNextWindowPos(ImVec2(0, 0));
+        ImGui::SetNextWindowSize(size);
+        ImGui::Begin("##whatsnew", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings
+                         | ImGuiWindowFlags_NoBackground);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddRectFilled(ImVec2(0, 0), size, IM_COL32(2, 12, 4, 170));
+        const ImVec2 panel(std::min(size.x - 80.0f, 860.0f), size.y - 110.0f);
+        const ImVec2 a((size.x - panel.x) * 0.5f, (size.y - panel.y) * 0.5f);
+        const ImVec2 b(a.x + panel.x, a.y + panel.y);
+        dl->AddRectFilled(ImVec2(a.x + 8, a.y + 12), ImVec2(b.x + 8, b.y + 12), IM_COL32(0, 0, 0, 110), 22.0f);
+        dl->AddRectFilled(a, b, IM_COL32(10, 40, 15, 250), 22.0f);
+        dl->AddRect(a, b, col(kOrange), 22.0f, 0, 3.0f);
+        dl->AddRectFilled(ImVec2(a.x + 24, a.y + 8), ImVec2(b.x - 24, a.y + 22), IM_COL32(255, 255, 255, 22), 8.0f);
+
+        const std::string heading = "What's new in " + whatsNewVersion;
+        dl->AddText(fonts.title, 32.0f, ImVec2(a.x + 34.0f, a.y + 28.0f), col(kOrange), heading.c_str());
+
+        // Notas con scroll (rueda o arrastrando la barra).
+        const float buttonsH = 50.0f;
+        ImGui::SetCursorScreenPos(ImVec2(a.x + 34.0f, a.y + 80.0f));
+        ImGui::BeginChild("##notes", ImVec2(panel.x - 68.0f, panel.y - 80.0f - buttonsH - 44.0f), ImGuiChildFlags_None,
+                          ImGuiWindowFlags_NoBackground);
+        ImGui::PushTextWrapPos(0.0f);
+        drawNotes(whatsNewNotes);
+        ImGui::PopTextWrapPos();
+        ImGui::EndChild();
+
+        const std::string updateLabel = "Update to " + whatsNewVersion;
+        const float updateW = fonts.body->CalcTextSizeA(21.0f, FLT_MAX, 0.0f, updateLabel.c_str()).x + 50.0f;
+        const float closeW = 130.0f, y = b.y - buttonsH - 26.0f;
+        ImGui::SetCursorScreenPos(ImVec2(b.x - 34.0f - updateW, y));
+        if (glassButton(updateLabel.c_str(), ImVec2(updateW, buttonsH), true)) {
+            whatsNewOpen = false;
+            choose(HubAction::Update, HubGame::Pikmin1);
+        }
+        ImGui::SetCursorScreenPos(ImVec2(b.x - 34.0f - updateW - 14.0f - closeW, y));
+        if (glassButton("Close", ImVec2(closeW, buttonsH)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            whatsNewOpen = false;
+        }
+        ImGui::End();
     }
 
     void drawFooter(ImVec2 size)
@@ -1291,7 +1449,7 @@ struct Hub {
         ImGui::Begin("##hub", nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings
                          | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoBackground);
-        ImGui::BeginDisabled(!interactive);
+        ImGui::BeginDisabled(!interactive || whatsNewOpen);
 
         const float logoW = std::min(size.x * 0.56f, 700.0f);
         const float logoH = logoW / logo.aspect();
@@ -1325,6 +1483,7 @@ struct Hub {
         ImGui::End();
         toastTime = std::max(0.0f, toastTime - dt);
         drawFooter(size);
+        if (whatsNewOpen && interactive) drawWhatsNew(size);
     }
 
     void release()
