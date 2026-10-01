@@ -19,6 +19,7 @@
 #include "pc_file_dialog.h"
 #include "settings/pc_settings_p2d.h"
 #include "pc_menu_repeat.h"
+#include "pc_pad_bindings.h"
 #ifdef __ANDROID__
 #include "android/pc_texpack_android.h"
 #include "android/pc_save_android.h"
@@ -443,6 +444,44 @@ bool sPrevMenuToggleHeldP2 = false;
 // mando lo maneja y qué bindings de mando edita.
 int sMenuPlayer = 0;
 int* pendingPadBinds() { return sMenuPlayer == 1 ? sPending.gamepadBindingsP2 : sPending.gamepadBindings; }
+
+// Leaves an action unbound. A key is cleared to scancode 0 (no key reports it)
+// and a pad action to PC_GP_UNBOUND, which is not the same as "default": the
+// stock mapping stays off, including the analog triggers and sticks that feed
+// the action when it has no binding of its own.
+void clearKeyboardBinding(int action) { sPending.keyboardBindings[action] = PC_BIND_UNBOUND; }
+void clearPadBinding(int action) { pendingPadBinds()[action] = PC_GP_UNBOUND; }
+
+// What drives a pad action that has no button of its own. A default binding
+// of -1 used to read "None" even though the right trigger feeds R and the
+// sticks feed their directions.
+const char* padDefaultLabel(int action) {
+    switch (action) {
+    case PC_KEY_ACT_L: return "L Shoulder / Trigger";
+    case PC_KEY_ACT_R: return "R Trigger";
+    case PC_KEY_ACT_STICK_UP: return "L Stick Up";
+    case PC_KEY_ACT_STICK_DOWN: return "L Stick Down";
+    case PC_KEY_ACT_STICK_LEFT: return "L Stick Left";
+    case PC_KEY_ACT_STICK_RIGHT: return "L Stick Right";
+    case PC_KEY_ACT_CSTICK_UP: return "R Stick Up";
+    case PC_KEY_ACT_CSTICK_DOWN: return "R Stick Down";
+    case PC_KEY_ACT_CSTICK_LEFT: return "R Stick Left";
+    case PC_KEY_ACT_CSTICK_RIGHT: return "R Stick Right";
+    default: return nullptr;
+    }
+}
+
+void gamepadBindingName(int action, char* out, size_t n) {
+    const int bound = pendingPadBinds()[action];
+    if (bound == PC_GP_DEFAULT && padDefaultLabel(action)) {
+        snprintf(out, n, "%s", padDefaultLabel(action));
+        return;
+    }
+    int shown = bound;
+    if (shown == PC_GP_DEFAULT) shown = kDefaultGamepadBindings[action];
+    const char* name = shown >= 0 || shown == PC_GP_UNBOUND ? pc_window_get_gamepad_button_name(shown) : nullptr;
+    snprintf(out, n, "%s", name ? name : "None");
+}
 // Mando que maneja el menú: el de J2 si lo abrió él (y sigue conectado).
 SDL_GameController* menuController() {
     SDL_GameController* p2 = sMenuPlayer == 1 ? pc_window_get_controller_p2() : nullptr;
@@ -1107,17 +1146,9 @@ void saveConfig() {
     out << "stickDeadZone = " << sConfig.stickDeadZone << "\n";
     out << "stickInvert = " << sConfig.stickInvert << "\n";
     out << "cStickInvert = " << sConfig.cStickInvert << "\n";
-    // Keyboard bindings
-    for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
-        out << "key_" << i << " = " << sConfig.keyboardBindings[i] << "\n";
-    }
-    // Gamepad bindings
-    for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
-        out << "gp_" << i << " = " << sConfig.gamepadBindings[i] << "\n";
-    }
-    for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
-        out << "gp2_" << i << " = " << sConfig.gamepadBindingsP2[i] << "\n";
-    }
+    // Keyboard and gamepad bindings (key_N, gp_N, gp2_N). A cleared pad
+    // binding is stored as PC_GP_UNBOUND (-2), a cleared key as scancode 0.
+    pc_pad_bindings_write(out, sConfig.keyboardBindings, sConfig.gamepadBindings, sConfig.gamepadBindingsP2);
     out.close();
     printf("[PC Settings] Saved %s\n", path.c_str());
 }
@@ -1365,27 +1396,9 @@ void loadConfig() {
         }
         else if (key == "stickInvert") sConfig.stickInvert = atoi(val.c_str()) & 3;
         else if (key == "cStickInvert") sConfig.cStickInvert = atoi(val.c_str()) & 3;
-        else if (key.rfind("key_", 0) == 0) {
-            int idx = atoi(key.substr(4).c_str());
-            if (idx >= 0 && idx < PC_KEY_ACT_COUNT) {
-                const int scancode = atoi(val.c_str());
-                if (pc_bind_is_valid(scancode)) {
-                    sConfig.keyboardBindings[idx] = scancode;
-                }
-            }
-        }
-        else if (key.rfind("gp_", 0) == 0 || key.rfind("gp2_", 0) == 0) {
-            const bool p2 = key[2] == '2';
-            int idx = atoi(key.substr(p2 ? 4 : 3).c_str());
-            if (idx >= 0 && idx < PC_KEY_ACT_COUNT) {
-                const int button = atoi(val.c_str());
-                const bool isButton = button >= -1 && button < SDL_CONTROLLER_BUTTON_MAX;
-                const int axis = (button - PC_GP_AXIS_BIND) / 2;
-                const bool isAxis = button >= PC_GP_AXIS_BIND && axis >= 0 && axis < SDL_CONTROLLER_AXIS_MAX;
-                if (isButton || isAxis) {
-                    (p2 ? sConfig.gamepadBindingsP2 : sConfig.gamepadBindings)[idx] = button;
-                }
-            }
+        else if (pc_pad_bindings_parse(key, val, sConfig.keyboardBindings, sConfig.gamepadBindings,
+                                       sConfig.gamepadBindingsP2)) {
+            // key_N / gp_N / gp2_N: see pc_pad_bindings.cpp
         }
     }
     in.close();
@@ -1435,15 +1448,26 @@ bool padNavRight(SDL_GameController* c)
 }
 bool padNavA(SDL_GameController* c) { return padEdge((c && SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_A)) || (sTouchFrameButtons & PAD_BUTTON_A), 4); }
 bool padNavB(SDL_GameController* c) { return padEdge((c && SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_B)) || (sTouchFrameButtons & PAD_BUTTON_B), 5); }
+// X clears the selected binding in the Keyboard and Gamepad lists.
+bool padNavClear(SDL_GameController* c) { return padEdge((c && SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_X)) || (sTouchFrameButtons & PAD_BUTTON_X), 12); }
 
 // The new-game prompt is a game-facing dialog rather than the F1 settings
 // menu. Its accept/cancel actions follow the configured A/B bindings, which
 // may be either SDL buttons or the axis encodings used by the remapping page.
 // Keep these separate from padNavA/B: F1 navigation deliberately retains its
 // physical A/B convention.
+//
+// A cleared A or B falls back to the stock button here: the prompt is the one
+// way to answer, and a pad-only player who had cleared it would be stuck.
+int promptBinding(int action)
+{
+	const int bind = pc_window_get_gamepad_binding(action);
+	return bind == PC_GP_UNBOUND ? kDefaultGamepadBindings[action] : bind;
+}
+
 bool promptPadBinding(SDL_GameController* c, int action, int edgeSlot)
 {
-	return c && padEdge(pc_window_gamepad_bind_held(c, pc_window_get_gamepad_binding(action)), edgeSlot);
+	return c && padEdge(pc_window_gamepad_bind_held(c, promptBinding(action)), edgeSlot);
 }
 
 bool promptPadA(SDL_GameController* c)
@@ -1500,6 +1524,54 @@ static bool sToggleRequested = false;
 static bool sTouchTapPending = false;
 static float sTouchTapX = 0.0f, sTouchTapY = 0.0f;
 static float sTouchDragY = 0.0f; // acumulado entre lecturas, normalizado
+
+// Keyboard and Gamepad binding lists: one geometry for drawing and for mouse /
+// touch hit-testing. Rows are 24 px apart, nine visible, scrolled to keep the
+// selection in view, with a "Clear binding" button under the list.
+namespace {
+struct BindListGeom {
+    int subX, subY, subW, subH, listY, itemH, visible;
+    int clearX, clearY, clearW, clearH;
+};
+
+BindListGeom bindListGeom() {
+    BindListGeom g;
+    g.subX = kF1PanelX + 18;
+    g.subY = kF1PanelY + 44;
+    g.subW = kF1PanelW - 36;
+    g.subH = kF1PanelH - 58;
+    g.listY = g.subY + 48;
+    g.itemH = 24;
+    g.visible = 9;
+    g.clearW = 140;
+    g.clearH = 20;
+    g.clearX = g.subX + g.subW / 2 - g.clearW / 2;
+    g.clearY = g.subY + g.subH - 39 - 24;
+    return g;
+}
+
+enum BindTap { BIND_TAP_NONE, BIND_TAP_SELECT, BIND_TAP_CAPTURE, BIND_TAP_CLEAR };
+
+// A tap selects a row; a tap on the selected row starts capture (the same
+// convention as the F1 pages); a tap on the Clear button clears the selected
+// row. Consumes the pending tap.
+BindTap bindListTap(int* selection) {
+    if (!sTouchTapPending) return BIND_TAP_NONE;
+    sTouchTapPending = false;
+    int tx = 0, ty = 0;
+    f1TapToCanvas(sTouchTapX, sTouchTapY, &tx, &ty);
+    const BindListGeom g = bindListGeom();
+    if (tx >= g.clearX && tx < g.clearX + g.clearW && ty >= g.clearY && ty < g.clearY + g.clearH)
+        return BIND_TAP_CLEAR;
+    if (tx < g.subX + 20 || tx >= g.subX + g.subW - 20 || ty < g.listY - 3) return BIND_TAP_NONE;
+    const int start = *selection >= g.visible ? *selection - g.visible + 1 : 0;
+    const int row = start + (ty - (g.listY - 3)) / g.itemH;
+    if (row >= PC_KEY_ACT_COUNT || row >= start + g.visible) return BIND_TAP_NONE;
+    if (row == *selection) return BIND_TAP_CAPTURE;
+    *selection = row;
+    return BIND_TAP_SELECT;
+}
+} // namespace
 
 // Entradas de la columna izquierda de F1: cabecera de sección (-1 - fila a la
 // que precede) o fila (>= 0).
@@ -1826,6 +1898,8 @@ void pollMenuInput() {
     // Controls submenu (key capture mode).
     if (sInControlsSubmenu) {
         if (sWaitingForKey) {
+            // A click bound as the key must not also arrive as a tap afterwards.
+            sTouchTapPending = false;
             pollKeyCapture(ctl);
             return;
         }
@@ -1836,6 +1910,13 @@ void pollMenuInput() {
         bool left = keyWentDown(SDL_SCANCODE_LEFT) || keyWentDown(SDL_SCANCODE_A);
         bool right = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
         bool ok = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
+        // Clear: Delete / Backspace, pad X, or the Clear button (mouse and touch).
+        bool clear = keyWentDown(SDL_SCANCODE_DELETE) || keyWentDown(SDL_SCANCODE_BACKSPACE);
+        switch (bindListTap(&sControlSelection)) {
+        case BIND_TAP_CAPTURE: ok = true; break;
+        case BIND_TAP_CLEAR: clear = true; break;
+        default: break;
+        }
 
         if (ctl || sTouchFrameButtons) {
             if (padNavUp(ctl))
@@ -1848,6 +1929,8 @@ void pollMenuInput() {
                 right = true;
             if (padNavA(ctl))
                 ok = true;
+            if (padNavClear(ctl))
+                clear = true;
         }
 
         if (up) {
@@ -1856,6 +1939,10 @@ void pollMenuInput() {
         }
         if (down) {
             sControlSelection = (sControlSelection + 1) % PC_KEY_ACT_COUNT;
+            return;
+        }
+        if (clear) {
+            clearKeyboardBinding(sControlSelection);
             return;
         }
         if (ok) {
@@ -1882,6 +1969,7 @@ void pollMenuInput() {
 
     // Gamepad submenu (button capture mode).
     if (sInGamepadSubmenu) {
+        if (sWaitingForButton || sCaptureWaitRelease) sTouchTapPending = false;
         if (pollButtonCapture(ctl)) return;
 
         // Navigation in gamepad list.
@@ -1890,6 +1978,13 @@ void pollMenuInput() {
         bool left = keyWentDown(SDL_SCANCODE_LEFT) || keyWentDown(SDL_SCANCODE_A);
         bool right = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
         bool ok = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
+        // Clear: Delete / Backspace, pad X, or the Clear button (mouse and touch).
+        bool clear = keyWentDown(SDL_SCANCODE_DELETE) || keyWentDown(SDL_SCANCODE_BACKSPACE);
+        switch (bindListTap(&sGamepadSelection)) {
+        case BIND_TAP_CAPTURE: ok = true; break;
+        case BIND_TAP_CLEAR: clear = true; break;
+        default: break;
+        }
 
         if (ctl || sTouchFrameButtons) {
             if (padNavUp(ctl))
@@ -1902,6 +1997,8 @@ void pollMenuInput() {
                 right = true;
             if (padNavA(ctl))
                 ok = true;
+            if (padNavClear(ctl))
+                clear = true;
         }
 
         if (up) {
@@ -1910,6 +2007,10 @@ void pollMenuInput() {
         }
         if (down) {
             sGamepadSelection = (sGamepadSelection + 1) % PC_KEY_ACT_COUNT;
+            return;
+        }
+        if (clear) {
+            clearPadBinding(sGamepadSelection);
             return;
         }
         if (ok) {
@@ -2249,8 +2350,10 @@ void pollKeyCapture(SDL_GameController* ctl) {
         break;
     }
     // Mouse buttons are bindable too (issue #42). Capture starts from
-    // Enter/Space/pad A, never from a click, so every button is fair
-    // game; buttons already held when capture opened are ignored.
+    // Enter/Space/pad A or a tap on the selected row; the press mask is
+    // dropped and sCapturePrevMouse latched when it starts, so the click that
+    // started it is never bound, and any other button is fair game. Buttons
+    // already held when capture opened are ignored.
     // Use the event edge mask so a click shorter than a frame counts.
     if (sWaitingForKey) {
         const Uint32 mouseWent = pc_window_take_mouse_pressed() & ~sCapturePrevMouse;
@@ -3030,6 +3133,23 @@ void drawSubmenuRow(DGXGraphics* gfx, int x, int y, int w,
     drawTextOutline(split - 14 - menuTextWidth(label), y, "%s",
                     main, shadow, label);
     drawTextOutline(split + 14, y, "%s", main, shadow, value);
+}
+
+// "Clear binding" under a Keyboard / Gamepad list: the mouse and touch way to
+// leave the selected action unbound (see bindListTap).
+void drawBindClearButton(DGXGraphics* gfx, bool enabled) {
+    const BindListGeom g = bindListGeom();
+    // fillRoundRectGrad draws nothing under the native (P2D) layer, so give the
+    // button its glass plate there or it would read as a bare label.
+    if (pc_settings_p2d_active())
+        pc_settings_p2d_plate(g.clearX, g.clearY, g.clearW, g.clearH, 1);
+    else
+        fillRoundRectGrad(gfx, g.clearX, g.clearY, g.clearW, g.clearH, 8,
+                          Colour(58, 51, 31, 235), Colour(7, 7, 8, 245));
+    const char* label = "Clear binding";
+    drawTextOutline(g.clearX + g.clearW / 2 - menuTextWidth(label) / 2, g.clearY + 2, "%s",
+                    enabled ? Colour(255, 190, 28, 255) : Colour(170, 140, 90, 255),
+                    Colour(62, 25, 0, 255), label);
 }
 
 // Aviso temporal de la última acción (instalación de packs, transferencia de
@@ -3869,8 +3989,8 @@ int captainPickInput(int player, bool keyboardOk, SDL_GameController* ctl, int* 
     if (ctl) {
         const bool hLeft  = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || menuStickHorizontal(ctl, -1);
         const bool hRight = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || menuStickHorizontal(ctl, 1);
-        const bool hA     = pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_A));
-        const bool hB     = pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_B));
+        const bool hA     = pc_window_gamepad_bind_held(ctl, promptBinding(PC_KEY_ACT_A));
+        const bool hB     = pc_window_gamepad_bind_held(ctl, promptBinding(PC_KEY_ACT_B));
         if (padEdge(hLeft, 2))  left   = true;
         if (padEdge(hRight, 3)) right  = true;
         if (padEdge(hA, 4))     accept = true;
@@ -4114,8 +4234,8 @@ void pcDevAssignPromptInput() {
         if (!ctl) continue;
         hLeft  |= SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || menuStickHorizontal(ctl, -1);
         hRight |= SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || menuStickHorizontal(ctl, 1);
-        hA     |= pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_A));
-        hB     |= pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_B));
+        hA     |= pc_window_gamepad_bind_held(ctl, promptBinding(PC_KEY_ACT_A));
+        hB     |= pc_window_gamepad_bind_held(ctl, promptBinding(PC_KEY_ACT_B));
     }
     if (padEdge(hLeft, 2))  left   = true;
     if (padEdge(hRight, 3)) right  = true;
@@ -4918,7 +5038,7 @@ void pc_settings_draw(void) {
         const int subX = px1 + 18, subY = py1 + 44;
         const int subW = panelW - 36, subH = panelH - 58;
         drawSubmenuSurface(gfx, subX, subY, subW, subH, "Keyboard Controls",
-                           "Enter: capture   Left/Right: default",
+                           "Enter: capture   Del: clear   Left/Right: default",
                            "Up/Down: select   Esc/B: back");
 
         // List of actions.
@@ -4949,6 +5069,7 @@ void pc_settings_draw(void) {
             drawSubmenuRow(gfx, subX + 20, itemY, subW - 40,
                            actionName, value, selected);
         }
+        drawBindClearButton(gfx, !sWaitingForKey);
 
         // Scroll hint if more items exist.
         if (PC_KEY_ACT_COUNT > visibleItems) {
@@ -4968,7 +5089,7 @@ void pc_settings_draw(void) {
         const int subW = panelW - 36, subH = panelH - 58;
         drawSubmenuSurface(gfx, subX, subY, subW, subH, "Gamepad Controls",
                            sWaitingForButton ? "Press a button, trigger or stick   Esc: cancel"
-                                            : "Enter: capture   Left/Right: default",
+                                            : "A: capture   X: clear   Left/Right: default",
                            sWaitingForButton ? "" : "Up/Down: select   Esc/B: back");
 
         const int listStartY = subY + 48;
@@ -4987,19 +5108,17 @@ void pc_settings_draw(void) {
             bool waiting = sWaitingForButton && selected;
 
             const char* actionName = pc_window_get_key_action_name(i);
-            int boundBtn = pendingPadBinds()[i];
-            if (boundBtn < 0) boundBtn = kDefaultGamepadBindings[i];
-            const char* btnName = pc_window_get_gamepad_button_name(boundBtn);
 
             char value[96];
             if (waiting) {
                 snprintf(value, sizeof(value), "[Press a button...]");
             } else {
-                snprintf(value, sizeof(value), "%s", btnName ? btnName : "None");
+                gamepadBindingName(i, value, sizeof(value));
             }
             drawSubmenuRow(gfx, subX + 20, itemY, subW - 40,
                            actionName, value, selected);
         }
+        drawBindClearButton(gfx, !sWaitingForButton);
 
         if (PC_KEY_ACT_COUNT > visibleItems) {
             char hint[64];
@@ -5922,13 +6041,6 @@ void startButtonCapture(int action) {
     sWaitingForButton = true;
     sCaptureWaitRelease = true;
 }
-
-void gamepadBindingName(int action, char* out, size_t n) {
-    int bound = pendingPadBinds()[action];
-    if (bound < 0) bound = kDefaultGamepadBindings[action];
-    const char* name = bound >= 0 ? pc_window_get_gamepad_button_name(bound) : nullptr;
-    snprintf(out, n, "%s", name ? name : "None");
-}
 } // namespace
 
 const char* pc_settings_row_section(int group, int row) { return rowSection(group, row); }
@@ -5990,8 +6102,8 @@ const char* pc_settings_row_help(int group, int row) {
     case PC_SET_PICKER_RESOLUTION: return "A: use this size. You then get a few seconds to keep or revert it.";
     case PC_SET_PICKER_TEXPACKS: return "A: install, activate or deactivate. Changes need a restart.";
     case PC_SET_PICKER_HDMODELS: return "A: pick the model's zip to install it. Needs a restart.";
-    case PC_SET_PICKER_KEYBOARD: return "A: press the new key or mouse button. Left/Right: back to default.";
-    case PC_SET_PICKER_GAMEPAD: return "A: press the new button. Left/Right: back to default.";
+    case PC_SET_PICKER_KEYBOARD: return "A: press the new key or mouse button. Left/Right: back to default. Del or the Clear button: leave it unbound.";
+    case PC_SET_PICKER_GAMEPAD: return "A: press the new button. Left/Right: back to default. X or the Clear button: leave it unbound.";
     default: return "";
     }
 }
@@ -6159,6 +6271,16 @@ void pc_settings_row_change(int group, int row, int dir, bool ok) {
     }
 }
 
+bool pc_settings_row_can_clear(int group, int row) {
+    return (group == PC_SET_PICKER_KEYBOARD || group == PC_SET_PICKER_GAMEPAD) && row >= 0 && row < PC_KEY_ACT_COUNT;
+}
+
+void pc_settings_row_clear(int group, int row) {
+    if (!pc_settings_row_can_clear(group, row)) return;
+    if (group == PC_SET_PICKER_KEYBOARD) clearKeyboardBinding(row);
+    else clearPadBinding(row);
+}
+
 bool pc_settings_capture_active(void) { return sWaitingForKey || sWaitingForButton || sCaptureWaitRelease; }
 
 void pc_settings_capture_poll(void) {
@@ -6244,6 +6366,7 @@ PcNavEdges pc_settings_read_nav_edges(void) {
     e.cancel = keyWentDown(SDL_SCANCODE_ESCAPE);
     e.tabPrev = keyWentDown(SDL_SCANCODE_Q) || keyWentDown(SDL_SCANCODE_PAGEUP);
     e.tabNext = keyWentDown(SDL_SCANCODE_E) || keyWentDown(SDL_SCANCODE_PAGEDOWN) || keyWentDown(SDL_SCANCODE_TAB);
+    e.clear  = keyWentDown(SDL_SCANCODE_DELETE) || keyWentDown(SDL_SCANCODE_BACKSPACE);
     SDL_GameController* ctl = pc_window_get_controller();
     if (ctl || sTouchFrameButtons) {
         if (padEdge((ctl && SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_LEFTSHOULDER))
@@ -6256,6 +6379,7 @@ PcNavEdges pc_settings_read_nav_edges(void) {
         if (padNavRight(ctl)) e.right = true;
         if (padNavA(ctl)) e.ok = true;
         if (padNavB(ctl)) e.cancel = true;
+        if (padNavClear(ctl)) e.clear = true;
     }
     if (sTouchTapPending) {
         sTouchTapPending = false;

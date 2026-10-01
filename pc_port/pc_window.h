@@ -73,6 +73,9 @@ SDL_Scancode pc_window_get_key_binding(int action);
 #define PC_BIND_MOUSE_LAST  (PC_BIND_MOUSE_BASE + 8)
 static inline bool pc_bind_is_mouse(int binding) { return binding >= PC_BIND_MOUSE_BASE && binding <= PC_BIND_MOUSE_LAST; }
 static inline bool pc_bind_is_valid(int binding) { return binding >= 0 && binding <= PC_BIND_MOUSE_LAST; }
+// A keyboard/mouse binding of SDL_SCANCODE_UNKNOWN is "unbound": no key ever
+// reports it, so the action simply never fires. Clearing a binding stores it.
+#define PC_BIND_UNBOUND SDL_SCANCODE_UNKNOWN
 // Whether the swarm binding (keyboard, mouse or gamepad) is held right now.
 bool pc_window_swarm_held(void);
 bool pc_window_swarm_held_p2(void);
@@ -102,8 +105,11 @@ extern const SDL_Scancode kDefaultKeyBindings[PC_KEY_ACT_COUNT];
 extern const int kDefaultGamepadBindings[PC_KEY_ACT_COUNT];
 
 // Gamepad remapping. Values are SDL_GameControllerButton, -1 for default,
-// or PC_GP_AXIS_BIND + axis*2 + (positive?1:0) for analog axes / triggers.
+// PC_GP_UNBOUND for "cleared on purpose", or PC_GP_AXIS_BIND + axis*2 +
+// (positive?1:0) for analog axes / triggers.
 #define PC_GP_AXIS_BIND 1000
+#define PC_GP_DEFAULT   (-1)
+#define PC_GP_UNBOUND   (-2)
 void pc_window_set_gamepad_binding(int action, int button);
 int pc_window_get_gamepad_binding(int action);
 // Coop: bindings del mando de J2 (mismo formato; -1 = por defecto).

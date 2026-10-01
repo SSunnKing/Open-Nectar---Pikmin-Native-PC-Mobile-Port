@@ -19,7 +19,7 @@ enum PcSettingsGroup {
 	PC_SET_PICKER_RESOLUTION = 100,
 	PC_SET_PICKER_TEXPACKS,
 	PC_SET_PICKER_HDMODELS,
-	PC_SET_PICKER_KEYBOARD, ///< una fila por acción: A captura, izquierda/derecha restaura
+	PC_SET_PICKER_KEYBOARD, ///< una fila por acción: A captura, izquierda/derecha restaura, borrar la deja sin asignar
 	PC_SET_PICKER_GAMEPAD,
 };
 
@@ -61,6 +61,10 @@ const char* pc_settings_row_option(int index);
 void pc_settings_row_pick_option(int group, int row, int index);
 /// Filas de acción (solo A): exportar, importar, calibrar...
 bool pc_settings_row_is_action(int group, int row);
+/// Filas de teclas/botones: se pueden dejar sin asignar (distinto de restaurar
+/// el valor por defecto: la acción deja de dispararse).
+bool pc_settings_row_can_clear(int group, int row);
+void pc_settings_row_clear(int group, int row);
 /// dir: -1 izquierda, +1 derecha; ok: A/Enter. Las filas de valor tratan ok como +1.
 void pc_settings_row_change(int group, int row, int dir, bool ok);
 
@@ -79,6 +83,7 @@ void pc_settings_video_confirm(bool keep);
 /// para que otras interfaces no dupliquen la lectura de entrada.
 struct PcNavEdges {
 	bool up, down, left, right, ok, cancel;
+	bool clear;    ///< Supr/Retroceso o X del mando: deja sin asignar la fila de teclas/botones
 	bool tabPrev, tabNext; ///< pestaña anterior/siguiente (L/R, Q/E)
 	bool tap;      ///< toque táctil pendiente en este frame
 	float tapX, tapY; ///< normalizado 0..1 (origen arriba-izquierda)

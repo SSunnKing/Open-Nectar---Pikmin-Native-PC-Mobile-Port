@@ -489,7 +489,11 @@ disc. It takes effect the next time you start the game.
 The port supports any SDL2-compatible controller:
 - Xbox, PlayStation, Nintendo Switch Pro
 - Generic controllers with automatic mapping
-- Customizable configuration from the F1 menu
+- Customizable configuration from the F1 menu (Controls > Gamepad Bindings). To
+  leave an action unbound, select it and press Delete (keyboard), X (gamepad) or
+  the "Clear binding" button (mouse and touch); Left/Right restores the default.
+  A remapped or cleared L/R no longer gets input from its analog trigger.
+- Pikmin colour to throw: D-pad left / right
 - Vibration supported where available
 
 ### Port value-added features

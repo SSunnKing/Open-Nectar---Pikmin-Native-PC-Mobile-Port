@@ -239,6 +239,11 @@ void inputList(const PcNavEdges& e)
 			}
 		// Filas sin lista: la placa de su valor hace de botón.
 		if (w.count == 0 && inRect(optRow(0), x, y)) ok = true;
+		// Teclas y botones: la placa de debajo las deja sin asignar.
+		if (w.count == 0 && pc_settings_row_can_clear(sGroup, sRowSel) && inRect(optRow(1), x, y)) {
+			pc_settings_row_clear(sGroup, sRowSel);
+			return;
+		}
 		Rect track = scrollTrack();
 		if (count > kVisible && inRect({ track.x - 6, track.y, track.w + 12, track.h }, x, y)) {
 			// Página arriba/abajo según el lado del pulgar tocado.
@@ -252,6 +257,10 @@ void inputList(const PcNavEdges& e)
 				if (it[sScroll + v] >= 0) { sRowSel = it[sScroll + v]; break; }
 			return;
 		}
+	}
+	if (e.clear && pc_settings_row_can_clear(sGroup, sRowSel)) {
+		pc_settings_row_clear(sGroup, sRowSel);
+		return;
 	}
 	const int n = listCount();
 	if (n > 0) {
@@ -446,6 +455,13 @@ void drawOptions()
 		textCentered(r.x + r.w / 2, r.y + 3, value[0] ? value : pc_settings_row_label(sGroup, sRowSel),
 		             on ? kSelDark : kOff, 10, 15);
 		y += kOptH;
+		if (pc_settings_row_can_clear(sGroup, sRowSel)) {
+			// Dejar la acción sin asignar (también Supr / X).
+			const Rect c = optRow(1);
+			pc_settings_p2d_plate(c.x - 4, c.y, c.w + 8, c.h - 2, 1);
+			textCentered(c.x + c.w / 2, c.y + 3, "Clear binding", kText, 10, 15);
+			y += kOptH;
+		}
 	}
 	// Explicación de la fila; si está desactivada dice qué activar antes.
 	const bool on = pc_settings_row_enabled(sGroup, sRowSel);
@@ -465,7 +481,7 @@ void drawFooter()
 	}
 	const bool bindings = sGroup == PC_SET_PICKER_KEYBOARD || sGroup == PC_SET_PICKER_GAMEPAD;
 	const char* help = sOptFocus ? "Up/Down: choose    A: apply    Left/B: back"
-	                 : bindings ? "A: rebind    Left/Right: default    B/Esc: back"
+	                 : bindings ? "A: rebind    Del/X: clear    Left/Right: default    B/Esc: back"
 	                 : inPicker() ? "L/R: tab    A: select    Up/Down: move    B/Esc: back"
 	                 : pc_settings_row_is_action(sGroup, sRowSel)
 	                     ? "L/R: tab    A: select    Up/Down: move    B/Esc: back"
