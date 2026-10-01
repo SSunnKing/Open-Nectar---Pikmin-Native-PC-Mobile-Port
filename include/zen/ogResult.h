@@ -9,6 +9,7 @@ class P2DPicture;
 class Graphics;
 class P2DScreen;
 class P2DTextBox;
+class P2DPerspGraph;
 
 namespace zen {
 
@@ -131,6 +132,7 @@ private:
 	void check1000(int, P2DPane*, P2DPane*, int);
 	void setEnumResultTable(EnumResult*);
 	void StartRESULT();
+	void drawSaveMgr(Graphics&, P2DPerspGraph&);
 
 	int _00;                         // _00
 	returnStatusFlag mStatus;        // _04

@@ -670,6 +670,23 @@ zen::ogScrResultMgr::returnStatusFlag zen::ogScrResultMgr::update(Controller* in
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+// ogSaveMgr se maqueta en 640 fijo: se dibuja sin el lienzo ancho del informe
+// (como antes del arreglo del #62) y luego se recupera para el fundido negro.
+void zen::ogScrResultMgr::drawSaveMgr(Graphics& gfx, P2DPerspGraph& graf)
+{
+	pc_gfx_set_hud_wide(0);
+	mSaveMgr->draw(gfx);
+	pc_gfx_begin_menu_2d();
+	graf.setPort();
+}
+#else
+void zen::ogScrResultMgr::drawSaveMgr(Graphics& gfx, P2DPerspGraph&) { mSaveMgr->draw(gfx); }
+#endif
+
+/**
+ * @todo: Documentation
+ */
 void zen::ogScrResultMgr::draw(Graphics& gfx)
 {
 	if (mStatus != Status_NULL && mStatus != RESULT_StartDelay) {
@@ -678,23 +695,33 @@ void zen::ogScrResultMgr::draw(Graphics& gfx)
 			return;
 		}
 
+#if defined(PIKI_PC_PORT)
+		// Issue #62: en ancho se estiraba. Mismo esquema que la pausa: lienzo
+		// virtW×480 y el 640 del informe (y su gráfica) centrado; el fundido
+		// negro se dibuja en 0 para cubrir todo el ancho.
+		pc_gfx_begin_menu_2d();
+		const int virtW = pc_gfx_menu_virt_width();
+		const int shiftX = pc_gfx_menu_shift_center();
+		P2DPerspGraph graf(0, 0, virtW, 480, 30.0f, 1.0f, 5000.0f);
+		graf.setPort();
+		pc_gfx_note_menu_tap_space(virtW, 480);
+#else
 		P2DPerspGraph graf(0, 0, 640, 480, 30.0f, 1.0f, 5000.0f);
 		graf.setPort();
-#if defined(PIKI_PC_PORT)
-		pc_gfx_note_menu_tap_space(640, 480);
+		const int shiftX = 0;
 #endif
 #if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01)
-		mMainScreen->draw(0, 0, &graf);
+		mMainScreen->draw(shiftX, 0, &graf);
 		mGraphMgr->draw(mGraphAlpha);
-		mSaveMgr->draw(gfx);
+		drawSaveMgr(gfx, graf);
 		mBlackScreen->draw(0, 0, &graf);
 #else
 		if (mSaveMgr->isFileMode()) {
 			mSaveMgr->draw(gfx);
 		} else {
-			mMainScreen->draw(0, 0, &graf);
+			mMainScreen->draw(shiftX, 0, &graf);
 			mGraphMgr->draw(mGraphAlpha);
-			mSaveMgr->draw(gfx);
+			drawSaveMgr(gfx, graf);
 			mBlackScreen->draw(0, 0, &graf);
 		}
 #endif

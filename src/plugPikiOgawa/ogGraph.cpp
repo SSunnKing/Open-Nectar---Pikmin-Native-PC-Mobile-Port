@@ -4,6 +4,9 @@
 #include "P2D/Graph.h"
 #include "P2D/Screen.h"
 #include "PlayerState.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_gfx.h"
+#endif
 
 /**
  * @todo: Documentation
@@ -231,6 +234,11 @@ void ogGraphMgr::MakeData()
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+// Issue #62: desplazamiento del 640 centrado en el lienzo ancho del informe.
+static int sPcShiftX;
+#endif
+
 static void setGraphGX(void* vertexData, int pikminColor, u8 alpha)
 {
 	u32 graphColor = reinterpret_cast<u32&>(og_piki_lines_color[pikminColor]);
@@ -285,6 +293,9 @@ static void setGraphGX(void* vertexData, int pikminColor, u8 alpha)
 		for (i = 0; i < hours; i++) {
 			s16 x = ((s16*)vertexData)[2 * i];
 			s16 y = ((s16*)vertexData)[2 * i + 1];
+#if defined(PIKI_PC_PORT)
+			x += sPcShiftX;
+#endif
 			GXPosition2s16(x, y);
 			GXColor1u32(graphColor);
 		}
@@ -298,7 +309,13 @@ void ogGraphMgr::draw(u8 a)
 {
 	//! TODO: Refactor all instances of 640 and 480 to use the screen width and height
 	//!       Values should be defined in a header, to be more portable.
+#if defined(PIKI_PC_PORT)
+	// Mismo lienzo que ogScrResultMgr::draw (pc_gfx_begin_menu_2d ya activo).
+	P2DPerspGraph graf(0, 0, pc_gfx_menu_virt_width(), 480, 30.0f, 1.0f, 5000.0f);
+	sPcShiftX = pc_gfx_menu_shift_center();
+#else
 	P2DPerspGraph graf(0, 0, 640, 480, 30.0f, 1.0f, 5000.0f);
+#endif
 	graf.setPort();
 
 	if (mHasColor[Blue]) {
