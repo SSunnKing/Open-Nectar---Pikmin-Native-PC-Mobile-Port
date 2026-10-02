@@ -1,0 +1,198 @@
+#include "SeedItem.h"
+#include "AIConstant.h"
+#include "DebugLog.h"
+#include "Graphics.h"
+#include "Interactions.h"
+#include "ItemMgr.h"
+#include "NaviMgr.h"
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(__LINE__) // Never used in the DLL
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F4
+ */
+DEFINE_PRINT("seedItem")
+
+/**
+ * @todo: Documentation
+ */
+SeedItem::SeedItem(CreatureProp* props, Shape** shapes)
+    : Creature(props)
+{
+	mSeedShape    = shapes[0];
+	mPlantedShape = shapes[1];
+	mCurrentShape = mSeedShape;
+
+	f32 scale = 0.2f;
+	mSRT.s.set(scale, scale, scale);
+
+	_68 = 4;
+	resetCreatureFlag(CF_DisableAutoFaceDir);
+	setCreatureFlag(CF_Unk1 | CF_EnableAirDrag);
+	mSearchBuffer.init(mSearch, 3);
+	mObjType = OBJTYPE_Seed;
+	mStateId = 3;
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 SeedItem::getSize()
+{
+	return 10.0f;
+}
+
+/**
+ * @todo: Documentation
+ */
+void SeedItem::init(immut Vector3f& pos)
+{
+	Creature::init(pos);
+	mSearchBuffer.init(mSearch, 3);
+	mStateId = 3;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000034
+ */
+void SeedItem::startBirth()
+{
+	mStateId      = 0;
+	mCurrentShape = mSeedShape;
+	resetCreatureFlag(CF_Unk2);
+	setCreatureFlag(CF_EnableAirDrag);
+	mVelocity.y = 10.0f;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000034
+ */
+void SeedItem::startSown()
+{
+	mStateId      = 1;
+	mGrowthTimer  = 200.0f;
+	mCurrentShape = mPlantedShape;
+	setCreatureFlag(CF_Unk2);
+	resetCreatureFlag(CF_EnableAirDrag);
+}
+
+/**
+ * @todo: Documentation
+ */
+bool SeedItem::isVisible()
+{
+	return mStateId != 2;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool SeedItem::isAtari()
+{
+	return false;
+}
+
+/**
+ * @todo: Documentation
+ */
+void SeedItem::doKill()
+{
+	PRINT("seed is killed ?\n");
+	mStateId = 2;
+	itemMgr->kill(this);
+}
+
+/**
+ * @todo: Documentation
+ */
+void SeedItem::update()
+{
+	if (mStateId == 0) {
+		Navi* player = naviMgr->getNavi();
+
+		Vector3f toPlayer    = player->mSRT.t - mSRT.t;
+		toPlayer.y           = 0.0f;
+		f32 distanceToPlayer = toPlayer.length();
+		f32 rotationSpeed, moveSpeed, targetHeight;
+
+		// Adjust movement speed and height based on distance to player
+		if (distanceToPlayer < 20.0f) {
+			// If the seed is close to the player, it will move towards the player at a fixed height and speed
+			targetHeight  = 30.0f;
+			moveSpeed     = 200.0f;
+			rotationSpeed = 1.0f;
+		} else if (distanceToPlayer < 200.0f) {
+			// If the seed is within 200 units of the player, it will move towards the player at a height and speed that scales with
+			// distance
+			targetHeight  = ((distanceToPlayer - 20.0f) / 180.0f) * 70.0f + 30.0f;
+			moveSpeed     = ((distanceToPlayer - 20.0f) / 180.0f) * 150.0f + 200.0f;
+			rotationSpeed = ((distanceToPlayer - 20.0f) / 180.0f) * 5.0f + 1.0f;
+		} else {
+			// If the seed is more than 200 units away from the player, it will move towards the player at a fixed height and speed
+			targetHeight  = 100.0f;
+			moveSpeed     = 350.0f;
+			rotationSpeed = 6.0f;
+		}
+
+		// Update rotation
+		mFaceDirection += gsys->getFrameTime() * PI * rotationSpeed;
+		mFaceDirection = roundAng(mFaceDirection);
+		mSRT.r.set(0.0f, mFaceDirection, 0.0f);
+
+		// Update velocity towards the player
+		toPlayer    = toPlayer * (1.0f / distanceToPlayer);
+		mVelocity.x = moveSpeed * toPlayer.x;
+		mVelocity.z = moveSpeed * toPlayer.z;
+
+		// Apply upward force if below target
+		if (mSRT.t.y < targetHeight && mVelocity.y < 100.0f) {
+			mVelocity.y += AICONST.mGravity() * gsys->getFrameTime() * 2.5f;
+		}
+
+		// Check if the seed is close enough to the player to be picked up
+		if (distanceToPlayer < 8.0f) {
+			player->mSeedCollectionCount++;
+			kill(false);
+		}
+	}
+
+	updateAI();
+}
+
+/**
+ * @todo: Documentation
+ */
+void SeedItem::doAI()
+{
+	if (mStateId != 2 && !(mStateId == 2)) {
+		(mGrowthTimer); // idek man
+		return;
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void SeedItem::refresh(Graphics& gfx)
+{
+	if (mStateId != 2) {
+		Matrix4f unused;
+		mWorldMtx.makeSRT(mSRT.s, mSRT.r, mSRT.t);
+
+		Matrix4f mtx;
+		gfx.calcViewMatrix(mWorldMtx, mtx);
+		gfx.useMatrix(mtx, 0);
+		gfx.mCamera->setBoundOffset(&mSRT.t);
+		mapMgr->getLight(mSRT.t.x, mSRT.t.z);
+		bool l = gfx.setLighting(true, nullptr);
+		mCurrentShape->drawshape(gfx, *gfx.mCamera, nullptr);
+		gfx.mCamera->setBoundOffset(nullptr);
+	}
+}

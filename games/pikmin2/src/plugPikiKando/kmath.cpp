@@ -1,0 +1,182 @@
+#include "KMath.h"
+#include "AIConstant.h"
+#include "DebugLog.h"
+#include "Dolphin/float.h"
+#include "MapMgr.h"
+#include "zen/Math.h"
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(__LINE__) // Never used in the DLL
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F0
+ */
+DEFINE_PRINT("kmath")
+
+/**
+ * @todo: Documentation
+ */
+bool isNan(f32 value)
+{
+	// El original hacía `(u32)value == (u32)NAN`: convertir NaN a entero es
+	// comportamiento indefinido. Clang lo toma por inalcanzable y no emite el
+	// retorno, así que la ejecución caía en la función siguiente
+	// (makePostureMatrix) y reventaba al recargar piezas de nave guardadas
+	// (Android). En x86 con GCC daba `(u32)NAN == 0`, es decir, isNan(0.0f)
+	// era true. NaN es el único valor distinto de sí mismo.
+	return value != value;
+}
+
+/**
+ * @todo: Documentation
+ */
+void makePostureMatrix(immut Vector3f& col0, immut Vector3f& col1, immut Vector3f& col2, Matrix4f& mtx)
+{
+	mtx.makeIdentity();
+
+	mtx.mMtx[0][0] = col0.x;
+	mtx.mMtx[1][0] = col0.y;
+	mtx.mMtx[2][0] = col0.z;
+	mtx.mMtx[0][1] = col1.x;
+	mtx.mMtx[1][1] = col1.y;
+	mtx.mMtx[2][1] = col1.z;
+	mtx.mMtx[0][2] = col2.x;
+	mtx.mMtx[1][2] = col2.y;
+	mtx.mMtx[2][2] = col2.z;
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 calcImpulse(immut Vector3f& relativePos, f32 mass, immut Vector3f& collisionNormal, immut Matrix4f& inertiaTensor,
+                immut Vector3f& relativeVel, immut Vector3f& separationVel)
+{
+	f32 normalSpeed    = collisionNormal.DP(relativeVel);
+	f32 normalSepSpeed = collisionNormal.DP(separationVel);
+	f32 restitution    = -(normalSepSpeed / normalSpeed);
+
+	Vector3f angularComponent;
+	Vector3f unused;
+
+	angularComponent = relativePos;
+	angularComponent.CP(collisionNormal);
+	angularComponent.multMatrix(inertiaTensor);
+	angularComponent.CP(relativePos);
+	f32 tmp = (-1.0f - restitution) * normalSpeed;
+	return tmp / (angularComponent.DP(collisionNormal) + 1.0f / mass);
+}
+
+/**
+ * @todo: Documentation
+ */
+Vector3f CRSpline(f32 t, immut Vector3f* const ctrlPts)
+{
+	f32 tSqr = t * t;
+	f32 tCub = tSqr * t;
+	f32 a    = -0.5f * tCub + tSqr - 0.5f * t;
+	f32 b    = 1.5f * tCub - 2.5f * tSqr + 1.0f;
+	f32 c    = -1.5f * tCub + 2.0f * tSqr + 0.5f * t;
+	f32 d    = 0.5f * tCub - 0.5f * tSqr;
+	Vector3f outVec;
+	outVec = a * ctrlPts[0] + b * ctrlPts[1] + c * ctrlPts[2] + d * ctrlPts[3];
+	return outVec;
+}
+
+/**
+ * @todo: Documentation
+ */
+Vector3f CRSplineTangent(f32 t, immut Vector3f* const ctrlPts)
+{
+	f32 tSqr = t * t;
+	f32 tCub = tSqr * t; // unused but necessary?? CLEARLY copied from above and edited lol
+	f32 a    = -1.5f * tSqr + 2.0f * t - 0.5f;
+	f32 b    = 4.5f * tSqr - 5.0f * t;
+	f32 c    = -4.5f * tSqr + 4.0f * t + 0.5f;
+	f32 d    = 1.5f * tSqr - 1.0f * t;
+	Vector3f outVec;
+	outVec = a * ctrlPts[0] + b * ctrlPts[1] + c * ctrlPts[2] + d * ctrlPts[3];
+	return outVec;
+}
+
+/**
+ * @todo: Documentation
+ */
+Vector3f getThrowVelocity(immut Vector3f& startPos, f32 horizSpeed, immut Vector3f& targetPos, Vector3f NRef targetDir)
+{
+	Vector3f displacement = startPos - targetPos;
+
+	// approx time to reach target position at given speed
+	f32 timeToTarget = displacement.length() / absF(horizSpeed);
+
+	// flatten target direction
+	targetDir.y = 0.0f;
+
+	// modify target position to "follow"/"lead" the direction of the target
+	// devs have this turned off - thrown objects don't home in on targets (but could if the 0.0f was modified)
+	Vector3f predTargetPos = targetPos + targetDir * timeToTarget * 0.0f;
+
+	// calculate y speed using projectile motion
+	f32 vertDisplacement = -(predTargetPos.y - startPos.y);
+	f32 initialYVel      = (vertDisplacement / timeToTarget) - AICONST.mGravity() * 0.5f * timeToTarget;
+
+	// calculate throw velocity
+	Vector3f throwVel;
+	throwVel   = predTargetPos - startPos;
+	throwVel.y = 0.0f;
+	throwVel.normalise();
+	throwVel.multiply(horizSpeed);
+	throwVel.y = -initialYVel;
+
+	return throwVel;
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 getCameraSafeAngle(immut Vector3f& cameraPos, f32 checkDistance, f32 heightWeighting)
+{
+	immut f32 angleInc = TAU / 8; // const meme
+	int visibilityScores[8];
+	int scoreIdx, pointCount;
+	immut int numPointsToCheck = 20; // const meme
+	const f32 distanceToCheck  = checkDistance;
+
+	for (scoreIdx = 0; scoreIdx < 8; scoreIdx++) {
+		visibilityScores[scoreIdx] = 0;
+	}
+
+	for (scoreIdx = 0; scoreIdx < 8; scoreIdx++) {
+		f32 theta = angleInc * scoreIdx;
+		Vector3f dir(sinf(theta), 0.0f, cosf(theta));
+		f32 distanceInc = distanceToCheck / numPointsToCheck;
+
+		// check `numPointsToCheck` points along direction vector
+		for (pointCount = 0; pointCount < numPointsToCheck; pointCount++) {
+			f32 heightThreshold = heightWeighting * pointCount * distanceInc / distanceToCheck;
+			Vector3f checkPos;
+			checkPos        = cameraPos + dir * (distanceInc * pointCount);
+			f32 checkHeight = mapMgr->getMinY(checkPos.x, checkPos.z, true);
+			if (checkHeight >= heightThreshold) {
+				visibilityScores[scoreIdx] += int(checkHeight - heightThreshold);
+			}
+		}
+		PRINT("score[%d] = %d\n", scoreIdx, visibilityScores[scoreIdx]);
+	}
+
+	// find angle with lowest score (best visibility):
+	int minScore = 128000;
+	int minIndex = -1;
+	for (scoreIdx = 0; scoreIdx < 8; scoreIdx++) {
+		if (visibilityScores[scoreIdx] < minScore) {
+			minIndex = scoreIdx;
+			minScore = visibilityScores[scoreIdx];
+		}
+	}
+
+	PRINT("minIndex = %d ang = %.1f\n", minIndex, minIndex * angleInc / PI * 180.0f);
+	return minIndex * angleInc;
+}

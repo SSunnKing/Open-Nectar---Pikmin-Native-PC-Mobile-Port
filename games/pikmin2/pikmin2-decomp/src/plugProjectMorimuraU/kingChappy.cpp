@@ -1,0 +1,1363 @@
+#include "Game/Entities/KingChappy.h"
+#include "Game/Entities/Bomb.h"
+#include "Game/SingleGameSection.h"
+#include "Game/MapMgr.h"
+#include "Game/seaMgr.h"
+#include "Game/EnemyAnimKeyEvent.h"
+#include "Game/EnemyFunc.h"
+#include "Game/generalEnemyMgr.h"
+#include "Game/Stickers.h"
+#include "Game/Navi.h"
+#include "Game/PikiMgr.h"
+#include "Game/CameraMgr.h"
+#include "Game/rumble.h"
+#include "JSystem/J3D/J3DMtxBuffer.h"
+#include "PSSystem/PSMainSide_ObjSound.h"
+#include "Dolphin/rand.h"
+#include "nans.h"
+
+namespace Game {
+namespace KingChappy {
+Obj* curK;
+
+static const u32 padding[]    = { 0, 0, 0 };
+static const char className[] = "kingChappy";
+
+/**
+ * @note Address: 0x8035CCE8
+ * @note Size: 0x38
+ */
+static bool lFootCallBack(J3DJoint* joint, int footIdx)
+{
+	if (footIdx == 0) {
+		if (curK) {
+			curK->leftFootMtxCalc();
+		}
+	}
+
+	return true;
+}
+
+/**
+ * @note Address: 0x8035CD20
+ * @note Size: 0x38
+ */
+static bool rFootCallBack(J3DJoint* joint, int footIdx)
+{
+	if (footIdx == 0) {
+		if (curK) {
+			curK->rightFootMtxCalc();
+		}
+	}
+
+	return true;
+}
+
+/**
+ * @note Address: 0x8035CD58
+ * @note Size: 0xA4
+ */
+void Obj::setParameters()
+{
+	EnemyBase::setParameters();
+	if (mIsBig || C_PARMS->mDoForceBig) {
+		mIsBig         = true;
+		f32 scale      = C_PROPERPARMS.mBigScale.mValue;
+		mScaleModifier = scale;
+		mScale         = Vector3f(scale);
+		mCollTree->mPart->setScale(scale);
+		mCurLodSphere.mRadius                        = scale * C_GENERALPARMS.mOffCameraRadius.mValue;
+		C_GENERALPARMS.mHeightOffsetFromFloor.mValue = 60.0f;
+	}
+}
+
+/**
+ * @note Address: 0x8035CDFC
+ * @note Size: 0x20
+ */
+void Obj::birth(Vector3f& position, f32 faceDir)
+{
+	EnemyBase::birth(position, faceDir);
+}
+
+/**
+ * @note Address: 0x8035CE1C
+ * @note Size: 0x448
+ */
+void Obj::onInit(CreatureInitArg* initArg)
+{
+	EnemyBase::onInit(initArg);
+	fadeEfxHamon();
+	mMouthJoint1 = mModel->getJoint("kuti");
+	P2ASSERTLINE(90, mMouthJoint1);
+
+	mBodyJoint = mModel->getJoint("kosijnt");
+	P2ASSERTLINE(93, mBodyJoint);
+
+	mTongueJoint1 = mModel->getJoint("bero6");
+	P2ASSERTLINE(96, mTongueJoint1);
+
+	mTongueJoint2 = mModel->getJoint("bero5");
+	P2ASSERTLINE(99, mTongueJoint2);
+
+	mMouthJoint2 = mModel->getJoint("kuti");
+	P2ASSERTLINE(102, mMouthJoint2);
+
+	mFsm->start(this, KINGCHAPPY_HideWait, nullptr);
+
+	mHomePosition             = mPosition;
+	mGoalPosition             = mHomePosition;
+	mHomePosition.y           = 0.0f;
+	mDoCheckAppear            = true;
+	mSearchDelayTimer         = 0;
+	mPrevWalkingCheckPosition = mHomePosition;
+	mWalkingTimer             = 0;
+	mCanEatBombs              = false;
+
+	P2ASSERTLINE(121, mModel);
+	J3DJoint* joint;
+	J3DModelData* modelData = mModel->mJ3dModel->mModelData;
+
+	mLFootJointIndex = mModel->getJointIndex("asiL");
+	joint            = modelData->mJointTree.mJoints[mLFootJointIndex];
+	P2ASSERTLINE(127, joint);
+	joint->mFunction = &lFootCallBack;
+
+	mRFootJointIndex = mModel->getJointIndex("asiR");
+	J3DJoint* joint2 = modelData->mJointTree.mJoints[mRFootJointIndex];
+	P2ASSERTLINE(132, joint2);
+	joint2->mFunction = &rFootCallBack;
+
+	mLFootHeightRatio = 0.0f;
+	mRFootHeightRatio = 0.0f;
+
+	mEfxYodare->mMtx     = mMouthJoint2->getWorldMatrix();
+	mEfxCryInd->mMtx     = mMouthJoint2->getWorldMatrix();
+	mEfxSmoke->mMtx      = mModel->getJoint("hana")->getWorldMatrix();
+	mEfxAttack->mMtx     = mModel->getJoint("bero5")->getWorldMatrix();
+	mEfxDeadYodare->mMtx = mModel->getJoint("kuti")->getWorldMatrix();
+	mEfxDeadHana->setMtxptr(mModel->getJoint("hana")->getWorldMatrix()->mMatrix.mtxView);
+
+	PSM::EnemyBoss* soundObj = static_cast<PSM::EnemyBoss*>(mSoundObj);
+	PSM::assertIsBoss(soundObj);
+	soundObj->setAppearFlag(false);
+
+	mIsBig = false;
+
+	// Use big emperor if mDoForceBig is set, or if we're in Bulblax Kingdom
+	SingleGameSection* section = static_cast<SingleGameSection*>(gameSystem->mSection);
+	if (C_PARMS->mDoForceBig || (section && section->getCaveID() == 'f_03')) {
+		mIsBig         = true;
+		mHealth        = C_PROPERPARMS.mBigLife.mValue;
+		f32 scale      = C_PROPERPARMS.mBigScale.mValue;
+		mScaleModifier = scale;
+		mScale         = Vector3f(scale);
+		mCollTree->mPart->setScale(scale);
+		mCurLodSphere.mRadius = scale * C_GENERALPARMS.mOffCameraRadius.mValue;
+	}
+}
+
+/**
+ * @note Address: 0x8035D264
+ * @note Size: 0x5AC
+ */
+Obj::Obj()
+    : mMouthJoint1(nullptr)
+    , mBodyJoint(nullptr)
+    , mTongueJoint1(nullptr)
+    , mTongueJoint2(nullptr)
+    , mAllowAnimBlending(false)
+    , mDoCheckAppear(true)
+    , mSearchDelayTimer(0)
+    , mWalkingTimer(0)
+    , mLFootJointIndex(0)
+    , mRFootJointIndex(0)
+    , mCurrentWaterBox(nullptr)
+    , mFsm(nullptr)
+    , mEfxYodare(nullptr)
+    , mEfxDiveSand(nullptr)
+    , mEfxDiveWater(nullptr)
+    , mEfxCryAB(nullptr)
+    , mEfxCryInd(nullptr)
+    , mEfxSmoke(nullptr)
+    , mEfxAttack(nullptr)
+    , mEfxDeadYodare(nullptr)
+    , mEfxDeadHana(nullptr)
+    , mLeftEyeRippleEfx(nullptr)
+    , mRightEyeRippleEfx(nullptr)
+    , mIsBig(false)
+{
+
+	mAnimator = new ProperAnimator;
+	setFSM(new FSM);
+	curK = nullptr;
+
+	mEfxYodare     = new efx::TKchYodare(nullptr);
+	mEfxDiveSand   = new efx::TKchDiveSand(&mPosition, &mFaceDir);
+	mEfxDiveWater  = new efx::TKchDiveWat(&mPosition, &mFaceDir);
+	mEfxCryAB      = new efx::TKchCryAB(&mPosition);
+	mEfxCryInd     = new efx::TKchCryInd;
+	mEfxSmoke      = new efx::TKchSmokeHana;
+	mEfxAttack     = new efx::TKchAttackYodare(nullptr);
+	mEfxDeadYodare = new efx::TKchDeadYodare(nullptr);
+	mEfxDeadHana   = new efx::TKchDeadHana;
+
+	mRightEyeRippleEfx = new efx::TEnemyHamonChasePos(&mRightEyePosition);
+	mLeftEyeRippleEfx  = new efx::TEnemyHamonChasePos(&mLeftEyePosition);
+}
+
+/**
+ * @note Address: 0x8035E0D4
+ * @note Size: 0x4C
+ */
+void Obj::setFSM(FSM* fsm)
+{
+	mFsm = fsm;
+	mFsm->init(this);
+	mCurrentLifecycleState = nullptr;
+}
+
+/**
+ * @note Address: 0x8035E120
+ * @note Size: 0x1A0
+ */
+void Obj::doUpdate()
+{
+	if (!mCurrentWaterBox) {
+		Sys::Sphere sphere(mPosition, 500.0f);
+		P2ASSERTLINE(235, mapMgr->mSeaMgr);
+		mCurrentWaterBox = mapMgr->mSeaMgr->findWater2d(sphere);
+	}
+
+	mFootPosition = mPosition;
+	mFootPosition.x -= 10.0f * sinf(mFaceDir);
+	mFootPosition.z -= 10.0f * cosf(mFaceDir);
+
+	mScale = Vector3f(mScaleModifier);
+	mCollTree->mPart->setScale(mScaleModifier);
+
+	mFsm->exec(this);
+}
+
+/**
+ * @note Address: 0x8035E2C0
+ * @note Size: 0x4
+ */
+void Obj::doDirectDraw(Graphics&)
+{
+}
+
+/**
+ * @note Address: 0x8035E2C4
+ * @note Size: 0x20
+ */
+void Obj::doDebugDraw(Graphics& gfx)
+{
+	EnemyBase::doDebugDraw(gfx);
+}
+
+/**
+ * @note Address: 0x8035E2E4
+ * @note Size: 0xB8
+ */
+void Obj::doAnimationUpdateAnimator()
+{
+	ProperAnimator* animator = static_cast<ProperAnimator*>(mAnimator);
+	if (animator->mAnimator.mIsBlendEnabled) {
+		f32 frameRate = sys->mDeltaTime;
+		frameRate     = EnemyAnimatorBase::defaultAnimSpeed * frameRate;
+		SysShape::BlendLinearFun linearBlend;
+		animator->animate(&linearBlend, 60.0f * sys->mDeltaTime, frameRate, frameRate);
+		static_cast<EnemyBlendAnimatorBase*>(animator)->mAnimator.setModelCalc(mModel, 0);
+	} else {
+		EnemyBase::doAnimationUpdateAnimator();
+	}
+}
+
+/**
+ * @note Address: 0x8035E39C
+ * @note Size: 0x34
+ */
+void Obj::onKill(CreatureKillArg* killArg)
+{
+	EnemyBase::onKill(killArg);
+	fadeAllEffect();
+}
+
+/**
+ * @note Address: 0x8035E3D0
+ * @note Size: 0x588
+ */
+void Obj::doAnimationCullingOff()
+{
+	if (C_PARMS->mDoUseFootCallback) {
+		if (getStateID() == KINGCHAPPY_Walk || mLFootHeightRatio != 0.0f || mRFootHeightRatio != 0.0f) {
+			curK = this;
+		}
+	}
+
+	if (C_PARMS->mDoForceHide) {
+		C_PARMS->mDoForceHide = 0;
+		mFsm->transit(this, KINGCHAPPY_Hide, nullptr);
+	}
+
+	mCurAnim->mIsPlaying = false;
+	doAnimationUpdateAnimator();
+
+	if (mPellet) {
+		viewMakeMatrix(mBaseTrMatrix);
+
+		Matrixf mtx;
+		PSMTXScale(mtx.mMatrix.mtxView, mScale.x, mScale.y, mScale.z);
+		PSMTXConcat(mBaseTrMatrix.mMatrix.mtxView, mtx.mMatrix.mtxView, mBaseTrMatrix.mMatrix.mtxView);
+
+		Vector3f pos;
+		mBaseTrMatrix.getTranslation(pos);
+		onSetPosition(pos);
+		onSetPositionPost(pos);
+	} else {
+		mBaseTrMatrix.makeSRT(mScale, mRotation, mPosition);
+	}
+
+	PSMTXCopy(mBaseTrMatrix.mMatrix.mtxView, mModel->mJ3dModel->mPosMtx);
+	mModel->mJ3dModel->calc();
+
+	// this is a really complicated way to adjust the world matrices when eating pikmin
+	for (int i = 0; i < mMouthSlots.mMax; i++) {
+		Creature* stuckCreature = mMouthSlots.getStuckCreature(i);
+		if (stuckCreature) {
+			Matrixf* mat    = mModel->mJ3dModel->mMtxBuffer->getWorldMatrix(mMouthJointIndices[i]);
+			Vector3f xBasis = mat->getColumn(0);
+			Vector3f yBasis = mat->getColumn(1);
+			Vector3f zBasis = mat->getColumn(2);
+
+			f32 length = yBasis.normalise();
+
+			f32 yLen = length;
+			if (yLen > 1.0f) {
+				yLen = 1.0f;
+			}
+
+			if (stuckCreature->isTeki()) {
+				if (mCanEatBombs && static_cast<EnemyBase*>(stuckCreature)->getEnemyTypeID() == EnemyTypeID::EnemyID_Bomb) {
+					static_cast<Bomb::Obj*>(stuckCreature)->mDoSkipRender = 1;
+				}
+			} else {
+				PSVECCrossProduct((Vec*)&yBasis, (Vec*)&zBasis, (Vec*)&xBasis);
+
+				xBasis.normalise();
+
+				PSVECCrossProduct((Vec*)&xBasis, (Vec*)&yBasis, (Vec*)&zBasis);
+				zBasis.normalise();
+
+				mat->mMatrix.structView.xx = xBasis.x * yLen;
+				mat->mMatrix.structView.xy = xBasis.y * yLen;
+				mat->mMatrix.structView.xz = xBasis.z * yLen;
+
+				mat->mMatrix.structView.yx = yBasis.x * yLen;
+				mat->mMatrix.structView.yy = yBasis.y * yLen;
+				mat->mMatrix.structView.yz = yBasis.z * yLen;
+
+				mat->mMatrix.structView.zx = zBasis.x * yLen;
+				mat->mMatrix.structView.zy = zBasis.y * yLen;
+				mat->mMatrix.structView.zz = zBasis.z * yLen;
+			}
+		}
+	}
+
+	mCollTree->update();
+
+	PSM::EnemyBoss* soundObj = static_cast<PSM::EnemyBoss*>(PSM::assertIsBoss(mSoundObj));
+	if (soundObj) {
+		if (mSticked) {
+			soundObj->postPikiAttack(true);
+		} else {
+			soundObj->postPikiAttack(true);
+		}
+	}
+
+	curK = nullptr;
+}
+
+/**
+ * @note Address: 0x8035E958
+ * @note Size: 0x40
+ */
+void Obj::doSimulation(f32 rate)
+{
+	if (PC_ORIG_TICK()) mSearchDelayTimer--;
+	if (mSearchDelayTimer < 0) {
+		mSearchDelayTimer = 0;
+	}
+
+	EnemyBase::doSimulation(rate);
+}
+
+/**
+ * @note Address: 0x8035E998
+ * @note Size: 0x98
+ */
+void Obj::getShadowParam(ShadowParam& param)
+{
+	mBodyJoint->getWorldMatrix()->getTranslation(param.mPosition);
+	param.mPosition.y -= 20.0f;
+	param.mBoundingSphere.mPosition = Vector3f(0.0f, 1.0f, 0.0f);
+	param.mBoundingSphere.mRadius   = 100.0f * mScaleModifier;
+	param.mSize                     = 45.0f * mScaleModifier;
+}
+
+/**
+ * @note Address: 0x8035EA30
+ * @note Size: 0x158
+ */
+bool Obj::damageCallBack(Creature* creature, f32 damage, CollPart* collpart)
+{
+	if (isEvent(0, EB_Bittered)) {
+		addDamage(damage * 0.1f, 1.0f);
+		return true;
+	}
+
+	if (collpart) {
+		if (creature->isAlive() && creature->isStickTo()) {
+			addDamage(damage, 1.0f);
+			return true;
+		}
+	} else if (creature->isAlive()) {
+		Vector3f creaturePos = creature->getPosition();
+		if (creaturePos.y < 5.0f + mPosition.y) {
+			if (creaturePos.sqrDistance2D(mPosition) < SQUARE(40.0f)) {
+				addDamage(damage * 0.2f, 1.0f);
+				return true;
+			}
+		} else {
+			return false;
+		}
+	}
+
+	return false;
+}
+
+/**
+ * @note Address: 0x8035EB88
+ * @note Size: 0x30
+ */
+void Obj::collisionCallback(CollEvent& event)
+{
+	event.mHitPart->mCurrentID == ('kuti');
+}
+
+/**
+ * @note Address: 0x8035EBB8
+ * @note Size: 0x30
+ */
+void Obj::wallCallback(MoveInfo const& moveInfo)
+{
+	mSearchDelayTimer = 120;
+	mTargetCreature   = nullptr;
+	setNextGoal();
+}
+
+/**
+ * @note Address: 0x8035EBE8
+ * @note Size: 0x28
+ */
+bool Obj::bombCallBack(Creature* creature, Vector3f& direction, f32 damage)
+{
+	return EnemyBase::bombCallBack(creature, direction, 0.25f * damage);
+}
+
+/**
+ * @note Address: 0x8035EC10
+ * @note Size: 0x4C
+ */
+void Obj::inWaterCallback(WaterBox* wbox)
+{
+	if (getStateID() != KINGCHAPPY_HideWait) {
+		EnemyBase::inWaterCallback(wbox);
+	}
+}
+
+/**
+ * @note Address: 0x8035EC5C
+ * @note Size: 0x28
+ */
+void Obj::startCarcassMotion()
+{
+	startMotion(KINGANIM_Carry, nullptr);
+}
+
+/**
+ * @note Address: 0x8035EC84
+ * @note Size: 0x64
+ */
+void Obj::initWalkSmokeEffect()
+{
+	mWalkSmokeMgr.alloc(2);
+	mWalkSmokeMgr.setup(0, mModel, "asiR", 2.0f);
+	mWalkSmokeMgr.setup(1, mModel, "asiL", 2.0f);
+}
+
+/**
+ * @note Address: 0x8035ECE8
+ * @note Size: 0x8
+ */
+WalkSmokeEffect::Mgr* Obj::getWalkSmokeEffectMgr()
+{
+	return &mWalkSmokeMgr;
+}
+
+/**
+ * @note Address: 0x8035ECF0
+ * @note Size: 0x74
+ */
+void Obj::doStartStoneState()
+{
+	EnemyBase::doStartStoneState();
+	CollPart* backPart   = mCollTree->getCollPart('back');
+	backPart->mSpecialID = 'st__';
+	CollPart* buttPart   = mCollTree->getCollPart('ketu');
+	buttPart->mSpecialID = 'st__';
+	fadeAllEffect();
+}
+
+/**
+ * @note Address: 0x8035ED64
+ * @note Size: 0xA0
+ */
+void Obj::doFinishStoneState()
+{
+	EnemyBase::doFinishStoneState();
+	CollPart* backPart   = mCollTree->getCollPart('back');
+	backPart->mSpecialID = '_t__';
+	CollPart* buttPart   = mCollTree->getCollPart('ketu');
+	buttPart->mSpecialID = '_t__';
+	EnemyFunc::flickStickPikmin(this, C_GENERALPARMS.mShakeChance.mValue, C_GENERALPARMS.mShakeKnockback.mValue,
+	                            C_GENERALPARMS.mShakeDamage.mValue, FLICK_BACKWARD_ANGLE, nullptr);
+	mFlickTimer = 0.0f;
+	createEffect(KingEfx_Drool);
+}
+
+/**
+ * @note Address: 0x8035EE04
+ * @note Size: 0x13C
+ */
+void Obj::doStartMovie()
+{
+	mEfxYodare->startDemoDrawOff();
+	mEfxDiveSand->startDemoDrawOff();
+	mEfxDiveWater->startDemoDrawOff();
+	mEfxCryAB->startDemoDrawOff();
+	mEfxCryInd->startDemoDrawOff();
+	mEfxSmoke->startDemoDrawOff();
+	mEfxAttack->startDemoDrawOff();
+	mEfxDeadYodare->startDemoDrawOff();
+	mEfxDeadHana->startDemoDrawOff();
+	mRightEyeRippleEfx->startDemoDrawOff();
+	mLeftEyeRippleEfx->startDemoDrawOff();
+}
+
+/**
+ * @note Address: 0x8035EF9C
+ * @note Size: 0x13C
+ */
+void Obj::doEndMovie()
+{
+	mEfxYodare->endDemoDrawOn();
+	mEfxDiveSand->endDemoDrawOn();
+	mEfxDiveWater->endDemoDrawOn();
+	mEfxCryAB->endDemoDrawOn();
+	mEfxCryInd->endDemoDrawOn();
+	mEfxSmoke->endDemoDrawOn();
+	mEfxAttack->endDemoDrawOn();
+	mEfxDeadYodare->endDemoDrawOn();
+	mEfxDeadHana->endDemoDrawOn();
+	mRightEyeRippleEfx->endDemoDrawOn();
+	mLeftEyeRippleEfx->endDemoDrawOn();
+}
+
+/**
+ * @note Address: 0x8035F134
+ * @note Size: 0x134
+ */
+void Obj::initMouthSlots()
+{
+	char* slotNames[] = { "kamu1", "kamu2", "kamu3", "kamu4", "kamu5", "kamu6", "kamu7", "kamu8", "kamu9" };
+	mMouthSlots.alloc(9);
+	mMouthJointIndices = new u16[9];
+	for (int i = 0; i < mMouthSlots.mMax; i++) {
+		mMouthSlots.setup(i, mModel, slotNames[i]);
+		mMouthSlots.getSlot(i)->mRadius = 25.0f * mScaleModifier;
+		mMouthJointIndices[i]           = mModel->getJointIndex(slotNames[i]);
+	}
+}
+
+/**
+ * @note Address: 0x8035F268
+ * @note Size: 0x1A4
+ */
+int Obj::eatBomb()
+{
+	Bomb::Obj* bomb;
+	int count          = 0;
+	MouthSlots* slots  = getMouthSlots();
+	Bomb::Mgr* bombMgr = static_cast<Bomb::Mgr*>(generalEnemyMgr->getEnemyMgr(EnemyTypeID::EnemyID_Bomb));
+	if (bombMgr) {
+		for (int i = 0; i < bombMgr->getMaxObjects(); i++) {
+			bomb = static_cast<Bomb::Obj*>(bombMgr->getEnemy(i));
+			if (bomb->canEat() && !bomb->isStickToMouth()) {
+				for (int j = 0; j < slots->mMax; j++) {
+					MouthCollPart* slot = slots->getSlot(j);
+					if (!slot->mStuckCreature) {
+						Vector3f slotPos;
+						slot->getPosition(slotPos);
+						Vector3f bombPos = bomb->getPosition();
+
+						f32 dist = slotPos.distance(bombPos);
+						if (dist < slot->mRadius) {
+							bomb->startStickMouth(this, slot);
+							bomb->mEfxLight->fade();
+							bomb->stopMotion();
+							count++;
+							break;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return count;
+}
+
+/**
+ * @note Address: 0x8035F40C
+ * @note Size: 0x8
+ */
+MouthSlots* Obj::getMouthSlots()
+{
+	return &mMouthSlots;
+}
+
+/**
+ * @note Address: 0x8035F414
+ * @note Size: 0x2C8
+ */
+int Obj::getPikminInMouth(bool doKill)
+{
+	int count = 0;
+	Stickers stickers(this);
+	Iterator<Creature> iter(&stickers);
+
+	CI_LOOP(iter)
+	{
+		Creature* creature = (*iter);
+		if (creature->isStickToMouth()) {
+			if (doKill) {
+				if (creature->isPiki()) {
+					InteractKill interactKill(this, nullptr);
+					creature->stimulate(interactKill);
+
+				} else if (creature->isAlive()) {
+					creature->kill(nullptr);
+					count++;
+				}
+
+			} else {
+				count++;
+			}
+		}
+	}
+
+	return count;
+}
+
+/**
+ * @note Address: 0x8035F6DC
+ * @note Size: 0x11C
+ */
+void Obj::getTonguePosVel(Vector3f& pos, Vector3f& vel)
+{
+	mTongueJoint1->getWorldMatrix()->getTranslation(pos);
+	Vector3f pos2;
+	mTongueJoint2->getWorldMatrix()->getTranslation(pos2);
+	vel = pos - pos2;
+
+	vel.normalise();
+}
+
+/**
+ * @note Address: 0x8035F7F8
+ * @note Size: 0x1F0
+ */
+void Obj::setNextGoal()
+{
+	f32 rad = C_GENERALPARMS.mTerritoryRadius();
+	if (mPosition.sqrDistance2D(mHomePosition) > SQUARE(rad)) {
+		mGoalPosition = mHomePosition;
+		checkTurn(true);
+		return;
+	}
+
+	if (mTargetCreature) {
+		mGoalPosition = mTargetCreature->getPosition();
+		return;
+	}
+
+	rad *= 0.3f + randFloat();
+
+	mGoalPosition = mHomePosition;
+
+	f32 randAngle = TAU * randFloat();
+
+	mGoalPosition.x += rad * sinf(randAngle);
+	mGoalPosition.z += rad * cosf(randAngle);
+}
+
+/**
+ * @note Address: 0x8035F9E8
+ * @note Size: 0x500
+ */
+void Obj::searchTarget()
+{
+	mTargetCreature = nullptr;
+
+	if (mSearchDelayTimer > 0 || C_PARMS->mDontSearchTarget
+	    || (mHomePosition.x == mGoalPosition.x && mHomePosition.z == mGoalPosition.z && isOutOfTerritory(0.8f))) {
+		return;
+	}
+
+	f32 searchAngle = TORADIANS(C_GENERALPARMS.mSearchAngle()); // f31
+	f32 searchDist  = C_GENERALPARMS.mSearchDistance();
+	searchDist *= searchDist;
+
+	mTargetCreature
+	    = EnemyFunc::getNearestNavi(this, C_GENERALPARMS.mSearchAngle(), C_GENERALPARMS.mSearchDistance(), &searchDist, nullptr);
+
+	f32 range = C_PROPERPARMS.mInvisibleRange();
+	range *= range;
+	f32 maxY, minY;
+	minY = mPosition.y - 50.0f;
+	maxY = 50.0f + mPosition.y;
+
+	Iterator<Piki> iter(pikiMgr);
+	CI_LOOP(iter)
+	{
+		Piki* piki = *iter;
+		if (piki->isSearchable()) {
+			Vector3f pikiPos = piki->getPosition();
+			if (pikiPos.y < minY || pikiPos.y > maxY) {
+				continue;
+			}
+			f32 angle = getAngDist(piki);
+			if (absF(angle) <= searchAngle) {
+				Vector3f pos;
+				getPosition2D(pos);
+				Vector3f pikiPos2 = Vector3f(piki->getPosition().x, 0.0f, piki->getPosition().z);
+				f32 dist          = pikiPos2.sqrDistance2D(pos);
+				if (dist < searchDist && dist > range) {
+					mTargetCreature = piki;
+					searchDist      = dist;
+				}
+			}
+		}
+	}
+
+	if (mTargetCreature) {
+		mGoalPosition = mTargetCreature->getPosition();
+	}
+}
+
+/**
+ * @note Address: 0x8035FEE8
+ * @note Size: 0x40
+ */
+bool Obj::isOutOfTerritory(f32 rangeScale)
+{
+	f32 radius = rangeScale * C_GENERALPARMS.mTerritoryRadius();
+	f32 dist   = mHomePosition.sqrDistance2D(mPosition);
+	return (dist > SQUARE(radius));
+}
+
+/**
+ * @note Address: 0x8035FF28
+ * @note Size: 0xDC
+ */
+bool Obj::forceTransit(int stateID)
+{
+	int currStateID = getStateID();
+	switch (stateID) {
+	case KINGCHAPPY_Appear:
+		if (currStateID == KINGCHAPPY_HideWait) {
+			mFsm->transit(this, stateID, nullptr);
+			break;
+		}
+		return false;
+	case KINGCHAPPY_WarCry:
+		if (currStateID == KINGCHAPPY_Walk && mFlickTimer > 0.0f) {
+			mAllowAnimBlending = true;
+			mFsm->transit(this, stateID, nullptr);
+			break;
+		}
+		return false;
+	default:
+		return false;
+	}
+
+	return true;
+}
+
+/**
+ * @note Address: 0x80360004
+ * @note Size: 0x30
+ */
+void Obj::requestTransit(int stateID)
+{
+	C_MGR->requestState(this, stateID);
+}
+
+/**
+ * @note Address: 0x80360034
+ * @note Size: 0x12C
+ */
+void Obj::walkFunc()
+{
+	f32 speed        = C_GENERALPARMS.mMoveSpeed();
+	f32 maxTurnAngle = C_GENERALPARMS.mMaxTurnAngle();
+	f32 turnSpeed    = C_GENERALPARMS.mTurnSpeed();
+	if (mIsBig) {
+		speed        = C_PROPERPARMS.mBigSpeed();
+		maxTurnAngle = C_PROPERPARMS.mBigRotationMaxSpeed();
+		turnSpeed    = C_PROPERPARMS.mBigRotationSpeedRate();
+	}
+
+	searchTarget();
+	EnemyFunc::walkToTarget(this, mGoalPosition, speed, turnSpeed, maxTurnAngle);
+
+	// every 120 frames of walking, check if emperor moved less than sqrt(900) units
+	// since the last check, if it has, remove the active search target.
+	// this certainly explains why its so bad at chasing stuff
+	if (PC_ORIG_TICK()) mWalkingTimer++;
+	if (mWalkingTimer > 120) {
+		if (mPosition.sqrDistance2D(mPrevWalkingCheckPosition) < 900.0f) {
+			mSearchDelayTimer = 120;
+			mTargetCreature   = nullptr;
+			mGoalPosition     = mHomePosition;
+		}
+
+		mPrevWalkingCheckPosition = mPosition;
+		mWalkingTimer             = 0;
+	}
+}
+
+/**
+ * @note Address: 0x80360160
+ * @note Size: 0x1AC
+ */
+f32 Obj::turnFunc(f32 scale)
+{
+	Vector3f targetPos = mGoalPosition;
+	if (mTargetCreature) {
+		targetPos = mTargetCreature->getPosition();
+	}
+
+	f32 maxAngle  = C_GENERALPARMS.mMaxTurnAngle();
+	f32 turnSpeed = C_GENERALPARMS.mTurnSpeed();
+
+	if (mIsBig) {
+		maxAngle  = C_PROPERPARMS.mBigRotationMaxSpeed();
+		turnSpeed = C_PROPERPARMS.mBigRotationSpeedRate();
+	}
+
+	return turnToTargetScaled(targetPos, turnSpeed, maxAngle, scale);
+}
+
+/**
+ * @note Address: 0x8036030C
+ * @note Size: 0x34
+ */
+bool Obj::isReachToGoal(f32 radius)
+{
+	f32 rad  = SQUARE(radius);
+	f32 dist = mPosition.sqrDistance2D(mGoalPosition);
+	return (u8)(dist < rad);
+}
+
+// /**
+//  * @note Address: N/A
+//  * @note Size: 0xD8
+//  */
+// void Obj::isUseTurn()
+// {
+// 	// UNUSED FUNCTION
+// }
+
+/**
+ * @note Address: 0x80360340
+ * @note Size: 0x844
+ */
+void Obj::checkAttack(bool check)
+{
+	if (getStateID() == KINGCHAPPY_Dead) {
+		return;
+	}
+
+	if (check) {
+		ProperAnimator* animator = static_cast<ProperAnimator*>(mAnimator);
+		P2ASSERTLINE(1098, animator);
+		if (animator->mAnimator.mIsBlendEnabled) {
+			return;
+		}
+	}
+
+	f32 attackRange, attackAngle; // f27, f26
+	Bomb::Obj* bomb;
+	if (mIsBig) {
+		attackRange = C_PROPERPARMS.mBigAttackHitRange();
+		attackAngle = C_PROPERPARMS.mBigAttackAngle();
+	} else {
+		attackRange = C_GENERALPARMS.mMaxAttackRange();
+		attackAngle = C_GENERALPARMS.mMaxAttackAngle();
+	}
+
+	if (mTargetCreature && mTargetCreature->isAlive()) {
+		if (isTargetOutOfRange(mTargetCreature, C_GENERALPARMS.mPrivateRadius(), C_GENERALPARMS.mSightRadius(), C_GENERALPARMS.mFov(),
+		                       C_GENERALPARMS.mViewAngle())) {
+			mTargetCreature = nullptr;
+
+		} else {
+			if (isTargetAttackable(mTargetCreature, attackRange, attackAngle)) {
+				f32 range          = C_PROPERPARMS.mInvisibleRange();
+				Vector3f targetPos = mTargetCreature->getPosition();
+
+				if (mPosition.sqrDistance2D(targetPos) > SQUARE(range)) {
+					mAllowAnimBlending = check;
+					mFsm->transit(this, KINGCHAPPY_Attack, nullptr);
+					mTargetCreature = nullptr;
+				} else {
+					mTargetCreature = nullptr;
+				}
+			}
+		}
+	}
+
+	if (!C_PARMS->mCanAttackBombs || !mLod.isFlag(AILOD_IsVisible)) {
+		return;
+	}
+
+	Bomb::Mgr* bombMgr = static_cast<Bomb::Mgr*>(generalEnemyMgr->getEnemyMgr(EnemyTypeID::EnemyID_Bomb));
+
+	if (!bombMgr) {
+		return;
+	}
+
+	for (int i = 0; i < bombMgr->getMaxObjects(); i++) {
+		bomb = static_cast<Bomb::Obj*>(bombMgr->getEnemy(i));
+		if (!bomb) {
+			continue;
+		}
+
+		if (!bomb->canEat()) {
+			continue;
+		}
+
+		if (isBombAttackable(bomb, attackRange, attackAngle)) {
+			f32 range          = C_PROPERPARMS.mInvisibleRange();
+			Vector3f targetPos = bomb->getPosition();
+
+			if (mPosition.sqrDistance2D(targetPos) > SQUARE(range)) {
+				mAllowAnimBlending = check;
+				mFsm->transit(this, KINGCHAPPY_Attack, nullptr);
+				mTargetCreature = nullptr;
+			}
+		}
+	}
+}
+
+/**
+ * @note Address: 0x80360B84
+ * @note Size: 0x42C
+ */
+void Obj::checkFlick(bool check)
+{
+	if (getStateID() == KINGCHAPPY_Dead) {
+		return;
+	}
+
+	if (check) {
+		if (static_cast<ProperAnimator*>(mAnimator)->mAnimator.mIsBlendEnabled) {
+			return;
+		}
+	}
+
+	Iterator<Navi> iter(naviMgr);
+	CI_LOOP(iter)
+	{
+		Navi* navi = *iter;
+		if (navi->isAlive()) {
+			f32 range    = C_PROPERPARMS.mInvisibleRange();
+			Vector3f sep = navi->getTargetSeparation(this);
+			if (sep.sqrLength() < SQUARE(range)) {
+				mFlickTimer += 0.1f;
+			}
+		}
+	}
+
+	if (!EnemyFunc::isStartFlick(this, false)) {
+		return;
+	}
+
+	mAllowAnimBlending = check;
+
+	if (mHealth < 0.5f * C_GENERALPARMS.mHealth()) {
+		if (randFloat() < C_PROPERPARMS.mFlickShoutRate()) {
+			mFsm->transit(this, KINGCHAPPY_WarCry, nullptr);
+			return;
+		}
+
+		mFsm->transit(this, KINGCHAPPY_Flick, nullptr);
+		return;
+	}
+
+	mFsm->transit(this, KINGCHAPPY_Flick, nullptr);
+}
+
+/**
+ * @note Address: 0x80360FB0
+ * @note Size: 0xEC
+ */
+void Obj::checkDead(bool check)
+{
+	if (getStateID() == KINGCHAPPY_Dead) {
+		return;
+	}
+
+	if (check) {
+		if (static_cast<ProperAnimator*>(mAnimator)->mAnimator.mIsBlendEnabled) {
+			return;
+		}
+	}
+
+	if (mHealth <= 0.0f) {
+		mAllowAnimBlending = check;
+
+		if (randFloat() < C_PROPERPARMS.mDeathRate()) {
+			mFsm->transit(this, KINGCHAPPY_WarCry, nullptr);
+			return;
+		}
+
+		mFsm->transit(this, KINGCHAPPY_Dead, nullptr);
+	}
+}
+
+/**
+ * @note Address: 0x8036109C
+ * @note Size: 0x128
+ */
+void Obj::checkTurn(bool check)
+{
+	if (getStateID() == KINGCHAPPY_Dead) {
+		return;
+	}
+
+	if (check) {
+		if (static_cast<ProperAnimator*>(mAnimator)->mAnimator.mIsBlendEnabled) {
+			return;
+		}
+	}
+
+	f32 angle = getAngDist(mGoalPosition);
+	if (absF(angle) > TORADIANS(C_PROPERPARMS.mRequiredTurningAngleDeg())) {
+		mAllowAnimBlending = check;
+		mFsm->transit(this, KINGCHAPPY_Turn, nullptr);
+	}
+}
+
+/**
+ * @note Address: 0x803611C4
+ * @note Size: 0x13C
+ */
+void Obj::startMotionSelf(int animIdx, SysShape::MotionListener* listener)
+{
+	if (!listener) {
+		listener = this;
+	}
+
+	bool isBlendAnimating    = false;
+	ProperAnimator* animator = static_cast<ProperAnimator*>(mAnimator);
+	if (mAllowAnimBlending && !animator->mAnimator.mIsBlendEnabled) {
+		SysShape::Animator& sysAnim = animator->getAnimator(0);
+		f32 frame;
+		if (sysAnim.mAnimInfo) {
+			frame = sysAnim.mAnimInfo->mAnm->mTotalFrameCount;
+		} else {
+			frame = 0.0f;
+		}
+
+		f32 timer = sysAnim.mTimer;
+		if (frame - 1.0f > timer) {
+			int currAnim = sysAnim.getAnimIndex();
+
+			if (animIdx != currAnim) {
+				startBlend(currAnim, animIdx, &EnemyBlendAnimatorBase::sBlendLinearFun, 30.0f, nullptr);
+				sysAnim.setCurrFrame(timer);
+				isBlendAnimating = true;
+			}
+		}
+	}
+
+	if (!isBlendAnimating) {
+		startMotion(animIdx, listener);
+	}
+	mAllowAnimBlending = false;
+}
+
+/**
+ * @note Address: 0x80361300
+ * @note Size: 0x98
+ */
+void Obj::endBlendAnimation()
+{
+	SysShape::Animator& animator = mAnimator->getAnimator(1);
+
+	int animIdx = animator.getAnimIndex();
+
+	f32 timer = animator.mTimer;
+
+	endBlend();
+	startMotion(animIdx, nullptr);
+	setMotionFrame(timer);
+}
+
+/**
+ * @note Address: 0x80361398
+ * @note Size: 0x44
+ */
+void Obj::leftFootMtxCalc()
+{
+	footMtxCalc(mModel->mJ3dModel->mMtxBuffer->mWorldMatrices[mLFootJointIndex], &mLFootPosition, &mLFootHeightRatio);
+}
+
+/**
+ * @note Address: 0x803613DC
+ * @note Size: 0x44
+ */
+void Obj::rightFootMtxCalc()
+{
+	footMtxCalc(mModel->mJ3dModel->mMtxBuffer->mWorldMatrices[mRFootJointIndex], &mRFootPosition, &mRFootHeightRatio);
+}
+
+/**
+ * @note Address: 0x80361420
+ * @note Size: 0x190
+ */
+void Obj::footMtxCalc(Mtx mtx, Vector3f* pos, f32* p1)
+{
+	if (mtx[1][3] > mPosition.y + C_PARMS->mFootCalcHeightThreshold) {
+		*p1 += 0.25f;
+
+		f32 invP1 = 1.0f - *p1;
+
+		if (*p1 < 1.0f) {
+			mtx[0][3] = *p1 * mtx[0][3] + pos->x * invP1;
+			mtx[1][3] = *p1 * mtx[1][3] + pos->y * invP1;
+			mtx[2][3] = *p1 * mtx[2][3] + pos->z * invP1;
+			return;
+		}
+
+		*pos = Vector3f(mtx[0][3], mtx[1][3], mtx[2][3]);
+		*p1  = 1.0f;
+		return;
+	}
+
+	*p1 *= 0.7f;
+	if (*p1 < 0.1f) {
+		if (*p1 != 0.0f) {
+			cameraMgr->startVibration(VIBTYPE_LightFastShort, *pos, CAMNAVI_Both);
+			rumbleMgr->startRumble(RUMBLETYPE_Fixed11, *pos, RUMBLEID_Both);
+		}
+
+		*p1 = 0.0f;
+	}
+
+	f32 invP1 = 1.0f - *p1;
+	mtx[0][3] = *p1 * pos->x + mtx[0][3] * invP1;
+	mtx[1][3] = pos->y = mPosition.y;
+	mtx[2][3]          = *p1 * pos->z + mtx[2][3] * invP1;
+}
+
+/**
+ * @note Address: 0x803615B0
+ * @note Size: 0x78
+ */
+void Obj::resetFootPos()
+{
+	mLFootPosition    = mModel->mJ3dModel->mMtxBuffer->getWorldMatrix(mLFootJointIndex)->getTranslation();
+	mLFootHeightRatio = 0.0f;
+	mRFootPosition    = mModel->mJ3dModel->mMtxBuffer->getWorldMatrix(mRFootJointIndex)->getTranslation();
+	mRFootHeightRatio = 0.0f;
+}
+
+/**
+ * @note Address: 0x80361628
+ * @note Size: 0xDC
+ */
+void Obj::fadeAllEffect()
+{
+	mEfxYodare->fade();
+	mEfxDiveWater->fade();
+	mEfxDiveSand->fade();
+	mEfxCryAB->fade();
+	mEfxCryInd->fade();
+	mEfxSmoke->fade();
+	mEfxAttack->fade();
+	mEfxDeadYodare->fade();
+	mEfxDeadHana->fade();
+}
+
+/**
+ * @note Address: 0x80361758
+ * @note Size: 0x474
+ */
+void Obj::createEffect(int effectID)
+{
+	efx::Arg fxArg(mPosition);
+	efx::ArgKchYodare fxArgYodare(mPosition, -1000.0f);
+
+	switch (effectID) {
+	case KingEfx_Drool: { // drool effect
+		if (mCurrentWaterBox) {
+			fxArgYodare.mGroundYPos = *mCurrentWaterBox->getSeaHeightPtr();
+		}
+
+		mEfxYodare->create(&fxArgYodare);
+		mEfxYodare->setGlobalScale(mScaleModifier);
+		break;
+
+			}	case 1: { // diving dust/water splash
+		if (mWaterBox) {
+			mEfxDiveWater->create(&fxArg);
+			mEfxDiveWater->setGlobalScale(mScaleModifier);
+		} else {
+			mEfxDiveSand->create(&fxArg);
+			mEfxDiveSand->setGlobalScale(mScaleModifier);
+		}
+		break;
+
+			}	case 2: { // roaring falling rocks/shockwave
+		mEfxCryAB->create(&fxArg);
+		mEfxCryAB->setGlobalScale(mScaleModifier);
+		break;
+
+			}	case 3: { // roaring distortion effect
+		mEfxCryInd->create(&fxArg);
+		mEfxCryInd->setGlobalScale(mScaleModifier);
+		break;
+
+			}	case 4: { // explosion after eating a bomb
+		efx::ArgScale fxArgScale(mPosition, mScaleModifier);
+
+		efx::TKchDamage damageFX(mMouthJoint2->getWorldMatrix());
+		damageFX.create(&fxArgScale);
+		damageFX.mMtx = mMouthJoint2->getWorldMatrix();
+		break;
+
+			}	case 5: { // nostril smoke
+		mEfxSmoke->create(&fxArg);
+		mEfxSmoke->setGlobalScale(mScaleModifier);
+		break;
+
+			}	case 6: { // attacking drool
+		if (mCurrentWaterBox) {
+			fxArgYodare.mGroundYPos = *mCurrentWaterBox->getSeaHeightPtr();
+		}
+
+		mEfxAttack->create(&fxArgYodare);
+		mEfxAttack->setGlobalScale(mScaleModifier);
+		break;
+
+			}	case 7: { // death drool effects
+		if (mCurrentWaterBox) {
+			fxArgYodare.mGroundYPos = *mCurrentWaterBox->getSeaHeightPtr();
+		}
+
+		mEfxDeadYodare->create(&fxArgYodare);
+		mEfxDeadYodare->setGlobalScale(mScaleModifier);
+
+		mEfxDeadHana->create(&fxArg);
+		mEfxDeadHana->setGlobalScale(mScaleModifier);
+		break;
+
+			}	case 8: { // hiding underwater eye ripples
+		if (mWaterBox) {
+			mRightEyePosition   = mModel->getJoint("eye3R")->getWorldMatrix()->getTranslation();
+			mRightEyePosition.y = *mWaterBox->getSeaHeightPtr();
+
+			// Use the water ripples made by wogpoles for emperors eyes, I mean sure, it works I guess
+			efx::ArgEnemyType fxArgEnemy(mRightEyePosition, EnemyTypeID::EnemyID_Tadpole, 1.0f);
+			mRightEyeRippleEfx->create(&fxArgEnemy);
+
+			mLeftEyePosition   = mModel->getJoint("eye3L")->getWorldMatrix()->getTranslation();
+			mLeftEyePosition.y = *mWaterBox->getSeaHeightPtr();
+
+			mLeftEyeRippleEfx->create(&fxArgEnemy);
+		}
+		break;
+			}	}
+}
+
+/**
+ * @note Address: 0x80361BCC
+ * @note Size: 0x140
+ */
+void Obj::fadeEffect(int effectID)
+{
+	switch (effectID) {
+	case 0:
+		mEfxYodare->fade();
+		break;
+	case 1:
+		mEfxDiveWater->fade();
+		mEfxDiveSand->fade();
+		break;
+	case 2:
+		mEfxCryAB->fade();
+		break;
+	case 3:
+		mEfxCryInd->fade();
+		break;
+	case 5:
+		mEfxSmoke->fade();
+		break;
+	case 6:
+		mEfxAttack->fade();
+		break;
+	case 7:
+		mEfxDeadYodare->fade();
+		mEfxDeadHana->fade();
+		break;
+	case 8:
+		mRightEyeRippleEfx->fade();
+		mLeftEyeRippleEfx->fade();
+		break;
+	}
+}
+
+/**
+ * @note Address: 0x80361D0C
+ * @note Size: 0xC8
+ */
+void Obj::createBounceEffect()
+{
+	if (mWaterBox) {
+		createSplashDownEffect(mPosition, 1.6f);
+		return;
+	}
+
+	efx::ArgScale fxArg(mPosition, mScaleModifier);
+	efx::TKchDownsmoke smokeFX;
+
+	smokeFX.create(&fxArg);
+}
+
+} // namespace KingChappy
+} // namespace Game

@@ -1,0 +1,79 @@
+#ifndef _P2D_FONT_H
+#define _P2D_FONT_H
+
+#include "types.h"
+
+#if !PIKI_USE_DGX
+#include <gl/gl.h>
+#endif
+
+#include "Colour.h"
+#include "Dolphin/gx.h"
+#include "GfxObject.h"
+#include "Texture.h"
+#include <Font.h>
+
+/**
+ * @brief TODO
+ */
+class SYSCORE_API FntobjInfo : public GfxobjInfo {
+public:
+	FntobjInfo() { mFont = nullptr; }
+
+	// _1C     = VTBL
+	// _00-_20 = GfxobjInfo
+	Font* mFont; // _20
+};
+
+/**
+ * @brief TODO
+ */
+class P2DFont {
+public:
+	P2DFont(immut char*);
+
+	Font* loadFont(immut char* fileName, int&, int&);
+	void setGX();
+	void setGradColor(const Colour& topColour, const Colour& bottomColour);
+	f32 getWidth(int charCode, int drawWidth);
+	f32 drawChar(f32 xPos, f32 yPos, int charCode, int drawWidth, int drawHeight);
+
+	// unused/inlined:
+	int charToIndex(int c);
+
+	int getHeight() { return mFont->mCharHeight; }
+	int getNormalWidth() { return mWidth; }
+	u16 getWidth() { return mWidth; }
+	u16 getLeading() { return mLeading; }
+	u16 getFontType() { return mFontType; }
+
+	int getAscent() { return mAscent; }
+	int getDescent() { return mDescent; }
+
+	u8 getAlpha() { return mTLColour.a; }
+
+	void makeResident() { mFont->mTexture->makeResident(); }
+	void loadFontTexture()
+	{
+		mFont->mTexture->makeResident();
+#if PIKI_USE_DGX
+		GXLoadTexObj(mFont->mTexture->mTexObj, GX_TEXMAP0);
+#else
+		glEnable(GL_TEXTURE_2D);
+		glBindTexture(GL_TEXTURE_2D, mFont->mTexture->mAttachName);
+#endif
+	}
+
+	Font* mFont;      // _00
+	u16 mFontType;    // _04
+	u16 mWidth;       // _06
+	u16 mLeading;     // _08
+	u16 mAscent;      // _0A
+	u16 mDescent;     // _0C
+	Colour mTLColour; // _0E, top left corner colour
+	Colour mTRColour; // _12, top right corner colour
+	Colour mBLColour; // _16, bottom left corner colour
+	Colour mBRColour; // _1A, bottom right corner colour
+};
+
+#endif

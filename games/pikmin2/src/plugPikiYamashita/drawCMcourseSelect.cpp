@@ -1,0 +1,366 @@
+#include "DebugLog.h"
+#include "gameflow.h"
+#include "zen/DrawCM.h"
+#include "zen/EffectMgr2D.h"
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(__LINE__) // Never used in the DLL
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F4
+ */
+DEFINE_PRINT("drawCMcourseSelect")
+
+namespace zen {
+/**
+ * @brief TODO
+ *
+ * @note Size: 0x19C.
+ */
+struct DrawCMCSmenu : public DrawMenuBase {
+public:
+	enum ModeCMCS {
+		MODE_Appear = 2,
+	};
+
+	/**
+	 * @brief TODO
+	 *
+	 * @note Size: 0x34.
+	 */
+	struct MenuExpansion {
+	public:
+		enum modeFlag {
+			MODE_Idle   = 0,
+			MODE_Moving = 1,
+		};
+
+		MenuExpansion()
+		{
+			mRootPane = nullptr;
+			mDefaultPosition.set(0.0f, 0.0f, 0.0f);
+			mMoveStartPosition.set(0.0f, 0.0f, 0.0f);
+			mMoveTargetPosition.set(0.0f, 0.0f, 0.0f);
+			mMoveElapsedTime = mMoveDuration = 0.0f;
+			mMode                            = MODE_Idle;
+		}
+
+		void setRootPane(P2DPane* pane)
+		{
+			mRootPane = pane;
+			mDefaultPosition.set(mRootPane->getPosH(), mRootPane->getPosV(), 0.0f);
+		}
+		modeFlag update()
+		{
+			switch (mMode) {
+			case MODE_Moving:
+			{
+				mMoveElapsedTime += gsys->getFrameTime();
+				f32 t, tComp;
+				if (mMoveElapsedTime > mMoveDuration) {
+					mMoveElapsedTime = mMoveDuration;
+					t     = 1.0f;
+					tComp = 0.0f;
+					mMode            = MODE_Idle;
+				} else {
+					t     = NMathF::sin(mMoveElapsedTime / mMoveDuration * HALF_PI);
+					tComp = 1.0f - t;
+				}
+				mRootPane->move(RoundOff(mMoveStartPosition.x * tComp + mMoveTargetPosition.x * t),
+				                RoundOff(mMoveStartPosition.y * tComp + mMoveTargetPosition.y * t));
+				break;
+			}
+			}
+			return mMode;
+		}
+
+		void show() { mRootPane->show(); }
+		void hide() { mRootPane->hide(); }
+		void setPosition(int x, int y) { mRootPane->move(x, y); }
+		void move(f32 x, f32 y, f32 p3)
+		{
+			mMode            = MODE_Moving;
+			mMoveElapsedTime = 0.0f;
+			mMoveDuration    = p3;
+			mMoveStartPosition.set(mRootPane->getPosH(), mRootPane->getPosV(), 0.0f);
+			mMoveTargetPosition.set(x, y, 0.0f);
+		}
+		Vector3f& getDefaultPos() { return mDefaultPosition; }
+
+	protected:
+		modeFlag mMode;               // _00
+		f32 mMoveElapsedTime;         // _04
+		f32 mMoveDuration;            // _08
+		P2DPane* mRootPane;           // _0C
+		Vector3f mDefaultPosition;    // _10
+		Vector3f mMoveStartPosition;  // _1C
+		Vector3f mMoveTargetPosition; // _28
+	};
+
+	DrawCMCSmenu(immut char* bloFileName)
+	    : DrawMenuBase(bloFileName, true, true)
+	{
+		mMenuExpansions = new MenuExpansion[mOptionCount];
+
+		char buf[8];
+		P2DPane* pane;
+		for (int i = 0; i < mOptionCount; i++) {
+			sprintf(buf, "p_m%d", i);
+			pane = mScreen.search(P2DPaneLibrary::makeTag(buf), true);
+			mMenuExpansions[i].setRootPane(pane);
+		}
+
+		setKeyAssignDecide(KBBTN_START | KBBTN_A);
+	}
+
+	virtual bool update(Controller* controller) // _14
+	{
+		for (int i = 0; i < 5; i++) {
+			mMenuExpansions[i].update();
+		}
+
+		return DrawMenuBase::update(controller);
+	}
+	virtual void start() // _18
+	{
+		DrawMenuBase::start();
+		setModeFunc(MODE_Appear);
+	}
+
+	void hide()
+	{
+		for (int i = 0; i < 5; i++) {
+			mMenuExpansions[i].hide();
+		}
+		mLeftCursorMgr.initScale(0.0f);
+		mRightCursorMgr.initScale(0.0f);
+	}
+
+protected:
+	virtual void setModeFunc(int mode) // _28
+	{
+		DrawMenuBase::setModeFunc(mode);
+		switch (mMode) {
+		case MODE_Appear:
+		{
+			mModeFunction = static_cast<ModeFunc>(&DrawCMCSmenu::modeAppear);
+			for (int i = 0; i < mOptionCount; i++) {
+				Vector3f pos(mMenuExpansions[i].getDefaultPos());
+				bool check = false;
+				if (i < 3) {
+					check = true;
+				} else if (gameflow.mGamePrefs.isStageOpen(i)) {
+					check = true;
+				}
+				if (check != 0) {
+					mMenuItems[i].setActiveSw(true);
+					mMenuExpansions[i].show();
+					mMenuExpansions[i].setPosition(RoundOff(pos.x - 640.0f), RoundOff(pos.y));
+					mMenuExpansions[i].move(pos.x, pos.y, f32(i) * 0.5f + 1.0f);
+				} else {
+					mMenuItems[i].setActiveSw(false);
+					mMenuExpansions[i].hide();
+				}
+			}
+			mLeftCursorMgr.initScale(0.0f);
+			mRightCursorMgr.initScale(0.0f);
+			break;
+		}
+		}
+	}
+
+	bool modeAppear(Controller*)
+	{
+		int i;
+		int numWaiting = 0;
+		for (i = 0; i < mOptionCount; i++) {
+			if (mMenuExpansions[i].update() == MenuExpansion::MODE_Idle) {
+				numWaiting++;
+			}
+		}
+
+		if (numWaiting == mOptionCount) {
+			mLeftCursorMgr.scale(1.0f, 1.0f);
+			mRightCursorMgr.scale(1.0f, 1.0f);
+			setModeFunc(MODE_Operation);
+		}
+
+		return false;
+	}
+
+	// _00      = VTBL
+	// _00-_198 = DrawMenuBase
+	MenuExpansion* mMenuExpansions; // _198
+};
+
+} // namespace zen
+
+/**
+ * @todo: Documentation
+ */
+zen::DrawCMcourseSelect::DrawCMcourseSelect()
+{
+	mEffectMgr2D  = new EffectMgr2D(0x10, 0x400, 1);
+	mSelectScreen = new DrawScreen("screen/blo/cha_sel.blo", nullptr, true, true);
+	mScoreScreen  = new DrawScreen("screen/blo/cha_rank.blo", nullptr, true, true);
+	mBestScreen   = new DrawScreen("screen/blo/cha_best.blo", nullptr, true, true);
+
+	P2DScreen* selScreen   = mSelectScreen->getScreenPtr();
+	P2DScreen* scoreScreen = mScoreScreen->getScreenPtr();
+	P2DScreen* bestScreen  = mBestScreen->getScreenPtr();
+
+	P2DPane* pane = scoreScreen->search('rank', true);
+	pane->move(355, 234);
+	pane = bestScreen->search('best', true);
+	pane->move(405, 164);
+
+	mABtnPane      = selScreen->search('abtn', true);
+	mABtnPaneAlpha = 0;
+	P2DPaneLibrary::setFamilyAlpha(mABtnPane, mABtnPaneAlpha);
+	mMode        = MODE_Inactive;
+	mReturnState = Inactive;
+
+	mMenu = new DrawCMCSmenu("screen/blo/cha_map.blo");
+
+	mTitleObj.init(selScreen);
+	mScoreMgr.init(scoreScreen);
+	mBest.init(bestScreen);
+}
+
+/**
+ * @todo: Documentation
+ */
+void zen::DrawCMcourseSelect::start()
+{
+	mMode = MODE_TitleAppear;
+	mEffectMgr2D->killAll(true);
+	mReturnState = Continue;
+	mTitleObj.appear(2.5f);
+	mMenu->hide();
+	mScoreMgr.hide();
+	mBest.hide();
+	setBestScore();
+	mEffectMgr2D->create(EFF2D_Unk25, Vector3f(320.0f, 240.0f, 0.0), nullptr, nullptr);
+	mEffectMgr2D->create(EFF2D_Unk26, Vector3f(320.0f, 240.0f, 0.0), nullptr, nullptr);
+	mEffectMgr2D->create(EFF2D_Unk27, Vector3f(320.0f, 240.0f, 0.0), nullptr, nullptr);
+	mEffectMgr2D->create(EFF2D_Unk28, Vector3f(320.0f, 240.0f, 0.0), nullptr, nullptr);
+	mEffectMgr2D->create(EFF2D_Unk29, Vector3f(320.0f, 240.0f, 0.0), nullptr, nullptr);
+	mEffectMgr2D->create(EFF2D_Unk30, Vector3f(320.0f, 240.0f, 0.0), nullptr, nullptr);
+	mEffectMgr2D->create(EFF2D_Unk31, Vector3f(320.0f, 240.0f, 0.0), nullptr, nullptr);
+	mEffectMgr2D->create(EFF2D_Unk32, Vector3f(320.0f, 240.0f, 0.0), nullptr, nullptr);
+	mABtnPaneAlpha = 0;
+	P2DPaneLibrary::setFamilyAlpha(mABtnPane, mABtnPaneAlpha);
+	PRINT("start! \n");
+}
+
+/**
+ * @todo: Documentation
+ */
+void zen::DrawCMcourseSelect::setBestScore()
+{
+	GameChalQuickInfo info;
+	info.mStageID = mMenu->getSelectNo();
+	gameflow.mGamePrefs.getChallengeScores(info);
+	PRINT("stage : %d \n", info.mStageID);
+	for (int i = 0; i < 5; i++) {
+		PRINT("score:%d\n", info.mCourseScores[i]);
+		mScoreMgr.setScore(i, info.mCourseScores[i]);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+bool zen::DrawCMcourseSelect::update(Controller* controller)
+{
+	bool res = false;
+	switch (mMode) {
+	case MODE_TitleAppear:
+	{
+		if (mTitleObj.getEvent() & 0x1) {
+			mMode = MODE_Operation;
+			mMenu->start();
+			mScoreMgr.appear(0.5f);
+			mBest.appear();
+		}
+		break;
+	}
+	case MODE_Operation:
+	{
+		if (modeOperation(controller)) {
+			mMode = MODE_Finished;
+		}
+		break;
+	}
+	case MODE_Finished:
+	{
+		res = true;
+		break;
+	}
+	}
+
+	mTitleObj.update();
+	mScoreMgr.update();
+	mBest.update();
+	mSelectScreen->update();
+	mScoreScreen->update();
+	mBestScreen->update();
+	mEffectMgr2D->update();
+
+	return res;
+}
+
+/**
+ * @todo: Documentation
+ */
+void zen::DrawCMcourseSelect::draw(Graphics& gfx)
+{
+	mEffectMgr2D->draw(gfx);
+	mMenu->draw(gfx);
+	mScoreScreen->draw();
+	mBestScreen->draw();
+	mSelectScreen->draw();
+}
+
+/**
+ * @todo: Documentation
+ */
+zen::DrawCMcourseSelect::returnStatusFlag zen::DrawCMcourseSelect::getReturnStatusFlag()
+{
+	return mReturnState;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool zen::DrawCMcourseSelect::modeOperation(Controller* controller)
+{
+	bool res = mMenu->update(controller);
+	if (mMenu->getEventFlag() & 0x1) {
+		PRINT("change score! \n");
+		setBestScore();
+	}
+	if (res) {
+		int sel = mMenu->getSelectNo();
+		if (sel == DrawMenuBase::SELECT_CANCEL) {
+			// signal to exit back out of this selection screen
+			mReturnState = Exit;
+		} else {
+			// we selected a course, return the stage ID
+			mReturnState = (returnStatusFlag)sel;
+		}
+		res = true; // this is... already true if we're here.
+	}
+
+	if (mABtnPaneAlpha < 255) {
+		mABtnPaneAlpha++;
+		P2DPaneLibrary::setFamilyAlpha(mABtnPane, mABtnPaneAlpha);
+	}
+
+	STACK_PAD_VAR(1);
+	return res;
+}

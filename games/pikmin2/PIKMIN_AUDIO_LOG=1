@@ -1,0 +1,280 @@
+[PC Port] GPU preference: Wayland; requesting NVIDIA EGL for the first context
+[PC Port] GPU preference: NVIDIA present; requesting PRIME offload for GLX (EGL left to the compositor)
+╔══════════════════════════════════════════╗
+║   Pikmin 2 - Native PC Port              ║
+╚══════════════════════════════════════════╝
+
+[PC Port] Initializing SDL2 window and GL context...
+[PC Port] Target refresh rate: 60.00 Hz
+[PC Port] SDL2 window and GL context initialized successfully (1280x720)
+[PC Settings] Loaded pikmin_settings.conf: 1280x720 mode=2 vsync=1 refresh=60
+[PC Port] Internal render scale set to 1.00
+[PC Port] Control mode set to 1
+[PC Settings] Init complete.
+[PC Port] System::initialize() (JFW heaps, render mode)...
+[PC Port] OSInit() arena=0x7714119ff020 size=503316480
+[PC Port] DVDInit()
+[PC Port] JFWSystem::firstInit createRoot...
+[PC Port] JFWSystem::firstInit create systemHeap size=8388608...
+[PC Port] JFWSystem::firstInit done root=0x7714119ff020 sys=0x7714119ff140
+[PC Port] JFWSystem::init JKRAram::create...
+[PC Port] JFWSystem::init JKRThread / JUTVideo / fifo...
+[PC Port] VIInit()
+[PC Port] present skipped #0: fbReady=0 bind=(nil) blit=(nil)
+[PC Port] present skipped #1: fbReady=0 bind=(nil) blit=(nil)
+[PC TexPack] off
+[PC Port] OpenGL context: 4.6.0 NVIDIA 580.178.04; GLSL: 4.60 NVIDIA
+[PC Port] GPU: NVIDIA Corporation -- NVIDIA GeForce GTX 1050/PCIe/SSE2
+[PC Port] TEV specialisation: on, up to 16 stage(s); the rest use the ubershader.
+[PC Port] Shader binary cache: shader_cache (NVIDIA GeForce GTX 1050/PCIe/SSE2|4.6.0 NVIDIA 580.178.04|4.60 NVIDIA)
+[PC Port] Ubershader loaded from binary cache
+[PC Port] TEV evaluator shaders compiled and linked OK
+[PC Port] Scalable render target: active (scale 1.00), depth: texture (readable)
+[PC Port] Resident mesh arena: ready (48 MB)
+[PC Port] OpenGL backend and GLSL shaders initialized successfully
+[PC Port] GXInit() - OpenGL 3.3 backend initialized
+[PC Port] JFWSystem::init after GX fifo
+[PC Port] PADInit() - SDL keyboard/gamepad input ready
+[PC Port] JFWSystem::init complete
+[PC Port] Constructing System / GameFlow...
+[PC Port] CARDInit() - persistent filesystem card: /home/sunking/Documentos/antigravity/pikmin2-port/build-nat/save/card0
+[PC Port] GameFlow::run() — section loop (boot → title → ...)
+[PC Port] OSInitFont() — stub ANSI metrics (no IPL ROM)
+[PC Port] Internal render resolution: 1920x1080 (aspect 1.778)
+[PC Port] First GX draw: 4 vertices, GL status 0x0000
+[PC Port] Active uniforms: 72
+[PC Port] Uniform 0: uAlphaComp0 (type 0x1404)
+[PC Port] Uniform 1: uAlphaComp1 (type 0x1404)
+[PC Port] Uniform 2: uAlphaOp (type 0x1404)
+[PC Port] Uniform 3: uAlphaRef0 (type 0x1406)
+[PC Port] Uniform 4: uAlphaRef1 (type 0x1406)
+[PC Port] Uniform 5: uAmbAlpha0 (type 0x1406)
+[PC Port] Uniform 6: uAmbColor (type 0x8b52)
+[PC Port] Uniform 7: uAmbColor1 (type 0x8b52)
+[PC Port] Uniform 8: uChan0En (type 0x1404)
+[PC Port] Uniform 9: uChan1AttnFn (type 0x1404)
+[PC Port] Uniform 10: uChan1En (type 0x1404)
+[PC Port] Uniform 11: uChanA0AttnFn (type 0x1404)
+[PC Port] Uniform 12: uChanA0En (type 0x1404)
+[PC Port] Uniform 13: uFastPath (type 0x1404)
+[PC Port] Uniform 14: uLightA[0] (type 0x8b52)
+[PC Port] Uniform 15: uLightA1[0] (type 0x8b52)
+[PC Port] Uniform 16: uLightAA[0] (type 0x8b52)
+[PC Port] Uniform 17: uLightAlphaA (type 0x8b52)
+[PC Port] Uniform 18: uLightColor[0] (type 0x8b52)
+[PC Port] Uniform 19: uLightColor1[0] (type 0x8b52)
+[PC Port] Uniform 20: uLightDir[0] (type 0x8b52)
+[PC Port] Uniform 21: uLightDir1[0] (type 0x8b52)
+[PC Port] Uniform 22: uLightDirA[0] (type 0x8b52)
+[PC Port] Uniform 23: uLightK[0] (type 0x8b52)
+[PC Port] Uniform 24: uLightK1[0] (type 0x8b52)
+[PC Port] Uniform 25: uLightKA[0] (type 0x8b52)
+[PC Port] Uniform 26: uLightPos[0] (type 0x8b52)
+[PC Port] Uniform 27: uLightPos1[0] (type 0x8b52)
+[PC Port] Uniform 28: uLightPosA[0] (type 0x8b52)
+[PC Port] Uniform 29: uMaterialColor (type 0x8b52)
+[PC Port] Uniform 30: uMaterialColor1 (type 0x8b52)
+[PC Port] Uniform 31: uNrmMtx (type 0x8b5b)
+[PC Port] Uniform 32: uNrmPalette[0] (type 0x8b52)
+[PC Port] Uniform 33: uNumLights (type 0x1404)
+[PC Port] Uniform 34: uNumLights1 (type 0x1404)
+[PC Port] Uniform 35: uNumLightsA (type 0x1404)
+[PC Port] Uniform 36: uNumStages (type 0x1404)
+[PC Port] Uniform 37: uOutTint (type 0x8b51)
+[PC Port] Uniform 38: uPerPixel (type 0x1404)
+[PC Port] Uniform 39: uPosMtx (type 0x8b5c)
+[PC Port] Uniform 40: uPosPalette[0] (type 0x8b52)
+[PC Port] Uniform 41: uProjMtx (type 0x8b5c)
+[PC Port] Uniform 42: uSpecAttn1 (type 0x8b52)
+[PC Port] Uniform 43: uSpecHalf1 (type 0x8b52)
+[PC Port] Uniform 44: uTcMode[0] (type 0x1404)
+[PC Port] Uniform 45: uTcMtx[0] (type 0x8b5c)
+[PC Port] Uniform 46: uTcProj (type 0x1404)
+[PC Port] Uniform 47: uTevAOps[0] (type 0x8b55)
+[PC Port] Uniform 48: uTevASel[0] (type 0x8b55)
+[PC Port] Uniform 49: uTevCOps[0] (type 0x8b55)
+[PC Port] Uniform 50: uTevCSel[0] (type 0x8b55)
+[PC Port] Uniform 51: uTevChan[0] (type 0x8b55)
+[PC Port] Uniform 52: uTevKonst[0] (type 0x8b52)
+[PC Port] Uniform 53: uTevPrev (type 0x8b52)
+[PC Port] Uniform 54: uTevReg0 (type 0x8b52)
+[PC Port] Uniform 55: uTevReg1 (type 0x8b52)
+[PC Port] Uniform 56: uTevReg2 (type 0x8b52)
+[PC Port] Uniform 57: uTevSwapSel[0] (type 0x8b53)
+[PC Port] Uniform 58: uTevSwapTable[0] (type 0x8b55)
+[PC Port] Uniform 59: uTevTexInfo[0] (type 0x8b55)
+[PC Port] Uniform 60: uTex0 (type 0x8b5e)
+[PC Port] Uniform 61: uTex1 (type 0x8b5e)
+[PC Port] Uniform 62: uTex2 (type 0x8b5e)
+[PC Port] Uniform 63: uTex3 (type 0x8b5e)
+[PC Port] Uniform 64: uTex4 (type 0x8b5e)
+[PC Port] Uniform 65: uTex5 (type 0x8b5e)
+[PC Port] Uniform 66: uTex6 (type 0x8b5e)
+[PC Port] Uniform 67: uTex7 (type 0x8b5e)
+[PC Port] Uniform 68: uUseMaterialAlpha (type 0x8b56)
+[PC Port] Uniform 69: uUseMaterialRgb (type 0x8b56)
+[PC Port] Uniform 70: uUseMaterialRgb1 (type 0x8b56)
+[PC Port] Uniform 71: uUsePalette (type 0x1404)
+[PC Port] First vertex: (0.00, 0.00, 0.00); projection scale=(0.0033, -0.0045), offset=(-1.0000, 1.0000); view offset=(0.00, 0.00, 0.00)
+[PC Port] AIInit() — JAS software audio interface
+[PC Port] Audio: DSP FX lines skipped
+[PC Port] Audio: PSM/JAI sound system created
+[jaudio] NextOS DSP, SDL2 S16 stereo 32000 Hz
+[PC Port] JAS software DSP output enabled
+[PC GX Warning] Formato de textura no decodificado 0x16 (4x4): formato Z, su origen (GXCopyTex) es un stub; se deja neutro
+[PC Port] First mipmapped texture built
+[PC Port] Texture filtering: anisotropy available (max 16x), mipmaps available
+[PC Port] Boot: memory-card ready — continuing past stream gate
+[PC Port] ARAM: resident preload deferred (enemy/2D/demo/item)
+[PC Port] GameFlow::createSection flag=22 (SingleGame=2 Challenge=3 Vs=30)
+[PC Port] Title heap before titleMgr: free=462858408 totalFree=462858408 (heap=0x7714132a6810)
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=1
+[PC Port] ARAM: resident preload deferred (enemy/2D/demo/item)
+[PC Port] Fog active: 0..8000 (view 1..128000) colour 0,0,0
+[PC Port] Title menu selected id=0 (Story=0 Challenge=1)
+[PC Port] GameFlow::createSection flag=2 (SingleGame=2 Challenge=3 Vs=30)
+[PC Port] Post-process pass: SSAO depth-of-field
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=0
+[PC GX] XF post-tex matrix register 0x500 not modelled; ignored
+[PC GX] XF post-tex matrix register 0x50C not modelled; ignored
+[PC GX] XF post-tex matrix register 0x518 not modelled; ignored
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=1
+[PC Port] Mouse relative mode: OFF (Escape)
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] Control mode set to 0
+[PC Port] Control mode: Classic
+[PC Port] Control mode set to 1
+[PC Port] Control mode: Mouse Cursor
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=1
+[PC Port] J2D FNT1: count=0
+[PC Port] J2D FNT1: count=0
+[PC Port] PANIC: P2Assert in "/home/sunking/Documentos/antigravity/pikmin2-port/pikmin2-decomp/src/plugProjectHikinoU/PSGame.cpp" on line 175
+[PC Port] PANIC: P2Assert in "/home/sunking/Documentos/antigravity/pikmin2-port/pikmin2-decomp/src/plugProjectHikinoU/PSGame.cpp" on line 175
+
+=== [PC Port] CRASH: SIGABRT (abort/assert) ===
+faulting address = 0x3e800010c91
+module base = 0x5ecc3ac67000  (addr2line -Cfe pikmin2_pc <rel>)
+  #0  abs=0x00005ecc3b1e8493 rel=0x0000581493  pc_crash_handler
+  #1  abs=0x0000771446245cb0 rel=0x18480b5decb0  ?
+  #2  abs=0x00007714462a61ac rel=0x18480b63f1ac  pthread_kill
+  #3  abs=0x0000771446245b7e rel=0x18480b5deb7e  gsignal
+  #4  abs=0x00007714462288ec rel=0x18480b5c18ec  abort
+  #5  abs=0x00005ecc3b3be6ff rel=0x00007576ff  ?
+  #6  abs=0x00005ecc3b3be7a5 rel=0x00007577a5  _ZN12JUTException7panic_fEPKciS1_z
+  #7  abs=0x00005ecc3b308a4b rel=0x00006a1a4b  _ZN6PSGame13ConductorList14getAutoBgmInfoEhh
+  #8  abs=0x00005ecc3b309f82 rel=0x00006a2f82  _ZN6PSGame11PikSceneMgr11initMainBgmERNS_9SceneInfoEPh
+  #9  abs=0x00005ecc3b30a823 rel=0x00006a3823  _ZN6PSGame11PikSceneMgr21newAndSetCurrentSceneERNS_9SceneInfoE
+  #10 abs=0x00005ecc3b5b7582 rel=0x0000950582  _ZN4Game17SingleGameSection15onSetSoundSceneEv
+  #11 abs=0x00005ecc3b3fd745 rel=0x0000796745  _ZN4Game15BaseGameSection16setupFloatMemoryEv
+  #12 abs=0x00005ecc3b347fab rel=0x00006e0fab  _ZN9DvdThread3runEv
+  #13 abs=0x00005ecc3b228f20 rel=0x00005c1f20  ?
+  #14 abs=0x00007714462a3dfa rel=0x18480b63cdfa  ?
+  #15 abs=0x00007714463375cc rel=0x18480b6d05cc  ?
+=== end backtrace ===

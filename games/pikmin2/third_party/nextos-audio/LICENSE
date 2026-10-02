@@ -1,0 +1,54 @@
+SCOPE OF THIS LICENSE
+=====================
+
+This license covers the NextOS Elite contributions to this repository, and
+nothing else. Those contributions are the port layer that makes the Pikmin
+decompilation run on Linux/AArch64 (the Dolphin OS thread scheduler, the
+frame pump, input, packaging), the OpenGL ES 2.0 work for Mali-450 (Utgard),
+the software JAudio renderer that replaces the GameCube DSP, the anamorphic
+widescreen path, and the Mali-450 performance and correctness fixes — that is,
+the commits authored by the NextOS Elite contributors, and nothing beneath
+them.
+
+It does NOT cover, and cannot cover:
+
+  * The Pikmin decompilation itself, by the projectPiki team. That work is
+    released under CC0 1.0 Universal by its authors — see
+    https://github.com/projectPiki/pikmin. Their dedication to the public
+    domain is theirs to make, not ours to restate.
+  * The reconstructed Pikmin game code, and any Nintendo material it
+    describes. No game data is distributed here.
+  * Aurora, and the GLES/GLES3 backend for Aurora written by Brian Degenhardt
+    (bmdhacks) for the Dusklight project. Our ES 2.0 work sits on top of that
+    backend; the backend itself is theirs, under Aurora's MIT license.
+  * The bundled third-party components (Aurora, nod, SDL), which keep their
+    own licenses in their own source directories.
+
+See NOTICE.md for a component-by-component breakdown of who owns what.
+
+You are free to take the NextOS Elite work under the terms below. That freedom
+does not extend to the parts above, which are not ours to grant.
+
+
+MIT License
+===========
+
+Copyright (c) 2026 NextOS Elite contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

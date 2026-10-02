@@ -1,0 +1,412 @@
+#include "DebugLog.h"
+#include "NaviMgr.h"
+#include "RumbleMgr.h"
+#include "sysNew.h"
+
+RumbleMgr* rumbleMgr;
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(12)
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F4
+ */
+DEFINE_PRINT(nullptr);
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00000C
+ */
+ChannelDataMgr::ChannelDataMgr()
+{
+	mDataTbl = nullptr;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000010
+ */
+void ChannelDataMgr::init()
+{
+	mDataTbl = channelDataTbl;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000014
+ */
+ChannelData* ChannelDataMgr::getChannelDataTbl(int row)
+{
+	return &channelDataTbl[row];
+}
+
+/**
+ * @todo: Documentation
+ */
+ChannelMgr::ChannelMgr()
+{
+	mRumbleTimer     = 0.0f;
+	mRumbleIntensity = 0.0f;
+	mRumbleScale     = 1.0f;
+	mActiveType      = -1;
+	mData            = nullptr;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00002C
+ */
+void ChannelMgr::init(ChannelDataMgr* dataMgr)
+{
+	mRumbleTimer     = 0.0f;
+	mRumbleIntensity = 0.0f;
+	mRumbleScale     = 1.0f;
+	mActiveType      = -1;
+	mData            = nullptr;
+	mDataMgr         = dataMgr;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000028
+ */
+void ChannelMgr::reset()
+{
+	mRumbleTimer     = 0.0f;
+	mRumbleIntensity = 0.0f;
+	mRumbleScale     = 1.0f;
+	mActiveType      = -1;
+	mData            = nullptr;
+}
+
+/**
+ * @todo: Documentation
+ */
+void ChannelMgr::start(int idx, f32* valuePtr)
+{
+	mRumbleTimer = 0.0f;
+	mData        = mDataMgr->getChannelDataTbl(idx);
+	mActiveType  = idx;
+	if (valuePtr) {
+		if (*valuePtr < 0.0f) {
+#if defined(VERSION_GPIJ01) || defined(VERSION_DPIJ01_PIKIDEMO)
+#else
+			ERROR("変な値が入ってます"); // 'there is a weird value' (lol)
+#endif
+		}
+
+		if (*valuePtr < 1000.0f) {
+			mRumbleScale = 1.0f - (*valuePtr / 1000.0f);
+		} else {
+			mRumbleScale = 0.0f;
+		}
+	} else {
+		mRumbleScale = 1.0f;
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 ChannelMgr::update()
+{
+	mRumbleIntensity = 0.0f;
+
+	if (mData) {
+		mRumbleTimer += gsys->getFrameTime();
+		for (int i = 0; i < *mData->mRumblePoint - 1; i++) {
+			if (mRumbleTimer > mData->mRumbleFrame[i]) {
+				f32 ratio        = (mRumbleTimer - mData->mRumbleFrame[i]) / (mData->mRumbleFrame[i + 1] - mData->mRumbleFrame[i]);
+				mRumbleIntensity = (1.0f - ratio) * mData->mRumblePower[i] + ratio * mData->mRumblePower[i + 1];
+			}
+		}
+
+		if (mRumbleTimer > mData->mRumbleFrame[*mData->mRumblePoint - 1]) {
+			reset();
+		}
+	}
+
+	mRumbleIntensity *= mRumbleScale;
+	return mRumbleIntensity;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000058
+ */
+ControlerMgr::ControlerMgr()
+{
+	mRumbleIntensity = 0.0f;
+	mChannelMgrs     = new ChannelMgr[32];
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000188
+ */
+void ControlerMgr::init()
+{
+	mRumbleIntensity = 0.0f;
+	for (int i = 0; i < 32; i++) {
+		mChannelMgrs[i].init(mDataMgr);
+	}
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000140
+ */
+void ControlerMgr::reset()
+{
+	mRumbleIntensity = 0.0f;
+	for (int i = 0; i < 32; i++) {
+		mChannelMgrs[i].reset();
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void ControlerMgr::start(int idx, f32* valuePtr)
+{
+	for (int i = 0; i < 32; i++) {
+		if (mChannelMgrs[i].isFree()) {
+			mChannelMgrs[i].start(idx, valuePtr);
+			return;
+		}
+	}
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0001A4
+ */
+void ControlerMgr::stop()
+{
+	for (int i = 0; i < 32; i++) {
+		if (!mChannelMgrs[i].isFree()) {
+			mChannelMgrs[i].reset();
+		}
+	}
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000114
+ */
+void ControlerMgr::stop(int type)
+{
+	for (int i = 0; i < 32; i++) {
+		if (!mChannelMgrs[i].isFree() && mChannelMgrs[i].getActiveType() == type) {
+			mChannelMgrs[i].reset();
+		}
+	}
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000AC
+ */
+f32 ControlerMgr::update()
+{
+	f32 peakRumbleValue = 0.0f;
+	for (int i = 0; i < 32; i++) {
+		mRumbleIntensity = mChannelMgrs[i].update();
+		if (mRumbleIntensity > peakRumbleValue) {
+			peakRumbleValue = mRumbleIntensity;
+		}
+	}
+
+	mRumbleIntensity = peakRumbleValue;
+
+	if (mRumbleIntensity > 1.0f) {
+		mRumbleIntensity = 1.0f;
+	} else if (mRumbleIntensity < 0.0f) {
+		mRumbleIntensity = 0.0f;
+	}
+
+	return mRumbleIntensity;
+}
+
+/**
+ * @todo: Documentation
+ */
+RumbleMgr::RumbleMgr(bool enabled1, bool enabled2, bool enabled3, bool enabled4)
+{
+	mRumbleIntensity    = 0.0f;
+	mRumbleFadeOutTimer = 0.0f;
+	bool valArray[4];
+	valArray[0] = enabled1;
+	valArray[1] = enabled2;
+	valArray[2] = enabled3;
+	valArray[3] = enabled4;
+
+	for (int i = 0; i < 4; i++) {
+		mControlerMgrs[i] = nullptr;
+		mSamples[i]       = nullptr;
+		if (valArray[i]) {
+			mControlerMgrs[i] = new ControlerMgr();
+			mSamples[i]       = new RumbleSample(i);
+		}
+	}
+
+	mDataMgr    = nullptr;
+	mDataMgr    = new ChannelDataMgr();
+	mRumbleEnable = true;
+	mRumblePaused = false;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0001F8
+ */
+void RumbleMgr::init()
+{
+	mRumbleIntensity    = 0.0f;
+	mRumbleFadeOutTimer = 0.0f;
+	for (int i = 0; i < 4; i++) {
+		if (mControlerMgrs[i]) {
+			mControlerMgrs[i]->init();
+		}
+		if (mSamples[i]) {
+			mSamples[i]->init();
+		}
+	}
+
+	mDataMgr->init();
+	mRumbleEnable = true;
+	mRumblePaused = false;
+}
+
+/**
+ * @todo: Documentation
+ */
+void RumbleMgr::reset()
+{
+	mRumbleIntensity    = 0.0f;
+	mRumbleFadeOutTimer = 0.0f;
+	for (int i = 0; i < 4; i++) {
+		if (mControlerMgrs[i]) {
+			mControlerMgrs[i]->reset();
+		}
+		if (mSamples[i]) {
+			mSamples[i]->simpleStop();
+		}
+	}
+	mRumblePaused = false;
+}
+
+/**
+ * @todo: Documentation
+ */
+void RumbleMgr::start(int type, int ctrlNum, f32* valuePtr)
+{
+	if (!mRumblePaused && mRumbleEnable) {
+		if (mControlerMgrs[ctrlNum]) {
+			mControlerMgrs[ctrlNum]->start(type, valuePtr);
+		}
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void RumbleMgr::start(int type, int ctrlNum, immut Vector3f& sourcePos)
+{
+	if (!mRumblePaused && mRumbleEnable) {
+		if (mControlerMgrs[ctrlNum]) {
+			Navi* navi = naviMgr->getNavi(ctrlNum);
+			f32 dist   = navi->getPosition().distance(sourcePos);
+			start(type, ctrlNum, &dist);
+		}
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void RumbleMgr::stop()
+{
+	for (int i = 0; i < 4; i++) {
+		if (mControlerMgrs[i]) {
+			mControlerMgrs[i]->stop();
+		}
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void RumbleMgr::stop(int rumbleType, int controllerIndex)
+{
+	if (!mRumblePaused && mRumbleEnable) {
+		if (mControlerMgrs[controllerIndex]) {
+			mControlerMgrs[controllerIndex]->stop(rumbleType);
+		}
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void RumbleMgr::update()
+{
+	if (!mRumblePaused && mRumbleEnable) {
+		for (int i = 0; i < 4; i++) {
+			if (mControlerMgrs[i]) {
+				mRumbleIntensity = mControlerMgrs[i]->update();
+				if (mRumbleFadeOutTimer > 0.0f) {
+					mRumbleIntensity *= (1.0f - mRumbleIntensity) * (mRumbleFadeOutTimer / 0.5f) + 1.0f;
+				}
+
+				if (mRumbleIntensity > 1.0f) {
+					mRumbleIntensity = 1.0f;
+				} else if (mRumbleIntensity < 0.0f) {
+					mRumbleIntensity = 0.0f;
+				}
+
+				mSamples[i]->simpleStart(mRumbleIntensity);
+			}
+		}
+
+		if (mRumbleFadeOutTimer > 0.0f) {
+			mRumbleFadeOutTimer -= gsys->getFrameTime();
+		}
+	}
+}
+
+/**
+ * @brief Set whether rumble is enabled or disabled
+ */
+void RumbleMgr::rumbleOption(bool enabled)
+{
+	mRumbleEnable = enabled;
+
+	if (!mRumbleEnable) {
+		reset();
+	} else {
+		reset();
+	}
+}
+
+/**
+ * @brief Sets whether rumble is temporarily paused
+ * @note UNUSED Size: 000070 (Matching by size)
+ */
+void RumbleMgr::rumblePause(bool paused)
+{
+	mRumblePaused = paused;
+	if (mRumblePaused) {
+		for (int i = 0; i < 4; ++i) {
+			if (mSamples[i]) {
+				mSamples[i]->simpleStop();
+			}
+		}
+	} else {
+		mRumbleFadeOutTimer = 0.5f;
+	}
+}

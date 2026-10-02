@@ -1,0 +1,2534 @@
+#include "kh/khDayEndResult.h"
+#include "Game/gamePlayData.h"
+#include "Game/Piki.h"
+#include "Game/DeathMgr.h"
+#include "Game/GameSystem.h"
+#include "PSSystem/PSSystemIF.h"
+#include "og/Screen/ogScreen.h"
+#include "og/Screen/StickAnimMgr.h"
+#include "Controller.h"
+#include "JSystem/J2D/J2DAnmLoader.h"
+#include "og/newScreen/ogUtil.h"
+#include "Dolphin/rand.h"
+#include "LoadResource.h"
+#include "Screen/Game2DMgr.h"
+
+namespace kh {
+namespace Screen {
+
+static u64 arrow[6] = { MC8("Nyaji01"), MC8("Nyaji02"), MC8("Nyaji03"), MC8("Nyaji04"), MC8("Nyaji05"), MC8("Nyaji06") };
+
+static void _Printf(char* format)
+{
+	OSReport(format, __FILE__);
+}
+
+/**
+ * @note Address: 0x8040284C
+ * @note Size: 0x8C
+ */
+DispDayEndResultItem::DispDayEndResultItem(Game::Result::TNode* resultNode, int treasures, int pokos, bool payDebt)
+{
+	mResultNode           = resultNode;
+	mTodaysPokoAmount     = 0;
+	mTodaysTreasureAmount = 0;
+	mNodeCount            = 0;
+
+	FOREACH_NODE(Game::Result::TNode, mResultNode->mChild, node)
+	{
+		mNodeCount++;
+		mTodaysTreasureAmount += node->mQuantity;
+		mTodaysPokoAmount += node->mTotalPokos;
+	}
+
+	mTotalTreasureNum = treasures;
+	mTotalPokos       = pokos;
+	mPayedDebt        = payDebt;
+	mHasNothing       = false;
+}
+
+/**
+ * @note Address: 0x804028D8
+ * @note Size: 0x294
+ */
+IncP::IncP()
+{
+	for (int i = 0; i < 6; i++) {
+		mYesterdayPikiCounts[i] = 0;
+	}
+
+	for (int i = 0; i < 6; i++) {
+		mTodayPikiCounts[i] = 0;
+	}
+
+	for (int i = 0; i < 8; i++) {
+		mTodayPikiDeaths[i] = 0;
+	}
+
+	for (int i = 0; i < 8; i++) {
+		mTotalPikiDeaths[i] = 0;
+	}
+
+	mYesterdayPikiCounts[0] = Game::playData->getPikminCount_Yesterday(Game::Red);
+	mYesterdayPikiCounts[1] = Game::playData->getPikminCount_Yesterday(Game::Yellow);
+	mYesterdayPikiCounts[2] = Game::playData->getPikminCount_Yesterday(Game::Blue);
+	mYesterdayPikiCounts[3] = Game::playData->getPikminCount_Yesterday(Game::White);
+	mYesterdayPikiCounts[4] = Game::playData->getPikminCount_Yesterday(Game::Purple);
+	mYesterdayPikiCounts[5] = Game::playData->getPikminCount_Yesterday(Game::AllPikmin);
+
+	mTodayPikiCounts[0] = Game::playData->getPikminCount_Today(Game::Red);
+	mTodayPikiCounts[1] = Game::playData->getPikminCount_Today(Game::Yellow);
+	mTodayPikiCounts[2] = Game::playData->getPikminCount_Today(Game::Blue);
+	mTodayPikiCounts[3] = Game::playData->getPikminCount_Today(Game::White);
+	mTodayPikiCounts[4] = Game::playData->getPikminCount_Today(Game::Purple);
+	mTodayPikiCounts[5] = Game::playData->getPikminCount_Today(Game::AllPikmin);
+
+	mTodayPikiDeaths[0] = Game::deathMgr->get_today(Game::DeathCounter::COD_Battle);
+	mTodayPikiDeaths[1] = Game::deathMgr->get_today(Game::DeathCounter::COD_Sunset);
+	mTodayPikiDeaths[2] = Game::deathMgr->get_today(Game::DeathCounter::COD_Fire);
+	mTodayPikiDeaths[3] = Game::deathMgr->get_today(Game::DeathCounter::COD_Water);
+	mTodayPikiDeaths[4] = Game::deathMgr->get_today(Game::DeathCounter::COD_Electricity);
+	mTodayPikiDeaths[5] = Game::deathMgr->get_today(Game::DeathCounter::COD_Explosion);
+	mTodayPikiDeaths[6] = Game::deathMgr->get_today(Game::DeathCounter::COD_Poison);
+	mTodayPikiDeaths[7] = Game::deathMgr->get_today(Game::DeathCounter::COD_All);
+	Game::deathMgr->account_today();
+
+	mTotalPikiDeaths[0] = Game::deathMgr->get_total(Game::DeathCounter::COD_Battle);
+	mTotalPikiDeaths[1] = Game::deathMgr->get_total(Game::DeathCounter::COD_Sunset);
+	mTotalPikiDeaths[2] = Game::deathMgr->get_total(Game::DeathCounter::COD_Fire);
+	mTotalPikiDeaths[3] = Game::deathMgr->get_total(Game::DeathCounter::COD_Water);
+	mTotalPikiDeaths[4] = Game::deathMgr->get_total(Game::DeathCounter::COD_Electricity);
+	mTotalPikiDeaths[5] = Game::deathMgr->get_total(Game::DeathCounter::COD_Explosion);
+	mTotalPikiDeaths[6] = Game::deathMgr->get_total(Game::DeathCounter::COD_Poison);
+	mTotalPikiDeaths[7] = Game::deathMgr->get_total(Game::DeathCounter::COD_All);
+
+	mPikminUnlockedFlag = (Game::playData->hasContainer(Game::Red)) | (Game::playData->hasContainer(Game::Yellow) << 1)
+	                    | (Game::playData->hasContainer(Game::Blue) << 2) | (Game::playData->hasContainer(Game::White) << 3)
+	                    | (Game::playData->hasContainer(Game::Purple) << 4);
+
+	Game::playData->setPikminCounts_Yesterday();
+}
+
+/**
+ * @note Address: 0x80402B6C
+ * @note Size: 0x30
+ */
+DispDayEndResultIncP::DispDayEndResultIncP(const IncP* incP)
+{
+	mPikminInfo = const_cast<IncP*>(incP);
+	_0D         = 0;
+	_0C         = 0;
+}
+
+/**
+ * @note Address: 0x80402B9C
+ * @note Size: 0x50
+ */
+DispDayEndResultMail::DispDayEndResultMail(JKRHeap* heap, MailCategory category)
+{
+	mHeap         = heap;
+	mBackupHeap   = nullptr;
+	mMailCategory = category;
+	mExitStatus   = ::Screen::Game2DMgr::CHECK2D_DayResult_MenuOpen;
+	mHasOpened    = false;
+	mTodayMailID  = -1;
+	mDayCount     = Game::gameSystem->mTimeMgr->mDayCount;
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0xb4
+ */
+ObjDayEndResultBase::ObjDayEndResultBase()
+{
+	mScreenTitle             = nullptr;
+	mTitleAnmTransform       = nullptr;
+	mTitleAnmColor           = nullptr;
+	mScreenMain              = nullptr;
+	mMainAnimTrans1          = nullptr;
+	mMainAnimTrans2          = nullptr;
+	mMainAnimSRT             = nullptr;
+	mMainAnimTev             = nullptr;
+	mScreenStars             = nullptr;
+	mStarsAnimColor          = nullptr;
+	mStarsAnimTimer1         = 0.0f;
+	mMainAnimTimer4          = 0.0f;
+	mMainAnimTimer3          = 0.0f;
+	mMainAnimTimer2          = 0.0f;
+	mMainAnimTimer1          = 0.0f;
+	mTitleAnimColorTimer     = 0.0f;
+	mTitleAnimTransformTimer = 0.0f;
+	mFadeoutMaxFrame         = 0.0f;
+	mFadeoutMinFrame         = 0.0f;
+	mFadeinMaxFrame          = 0.0f;
+	mFadeinMinFrame          = 0.0f;
+	mNextBtnFadePane         = nullptr;
+	_95                      = 255;
+	_94                      = 255;
+	mFlags                   = 0;
+}
+
+/**
+ * @note Address: 0x80402BEC
+ * @note Size: 0xFC
+ */
+void ObjDayEndResultBase::doCreate(JKRArchive* archive)
+{
+	mScreenTitle = new P2DScreen::Mgr_tuning;
+	mScreenTitle->set("result_title.blo", 0x01040000, archive);
+	mTitleAnmTransform
+	    = static_cast<J2DAnmTransform*>(J2DAnmLoaderDataBase::load(JKRFileLoader::getGlbResource("result_title.bck", archive)));
+	mTitleAnmColor = static_cast<J2DAnmColor*>(J2DAnmLoaderDataBase::load(JKRFileLoader::getGlbResource("result_title.bpk", archive)));
+
+	mScreenTitle->setAnimation(mTitleAnmTransform);
+	mScreenTitle->setAnimation(mTitleAnmColor);
+	mNextBtnFadePane = khUtilFadePane::create(mScreenTitle, MC8("Nbtn2"), 8);
+	mNextBtnFadePane->fadeout();
+	mNextBtnFadePane->set_init_alpha(0);
+}
+
+/**
+ * @note Address: 0x80402CE8
+ * @note Size: 0x98
+ */
+bool ObjDayEndResultBase::doStart(const ::Screen::StartSceneArg* sceneArg)
+{
+	const StartSceneArg* sarg = static_cast<const StartSceneArg*>(sceneArg);
+
+	if (sceneArg && sarg->_00) {
+		mFlags &= ~0x8;
+	} else {
+		mFlags |= 0x8;
+	}
+
+	setFadeinFrm();
+	setInfAlpha(mScreenStars->search('Nall'));
+
+	PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+	return true;
+}
+
+/**
+ * @note Address: 0x80402D80
+ * @note Size: 0x44
+ */
+void ObjDayEndResultBase::doUpdateFinish()
+{
+	setFadeoutFrm();
+	mNextBtnFadePane->fadeout();
+	PSSystem::spSysIF->playSystemSe(PSSE_SY_REGI_RECEIPT, 0);
+}
+
+/**
+ * @note Address: 0x80402DC4
+ * @note Size: 0xF4
+ */
+bool ObjDayEndResultBase::doUpdateFadein()
+{
+	updateCommon();
+	mMainAnimTrans1->setFrame(mMainAnimTimer1);
+	mScreenMain->search(MC8("NitemW"))->animationTransform();
+
+	mMainAnimTimer1 += msVal.mAnimRate;
+
+	mScreenStars->search('Nall')->setAlpha((mMainAnimTimer1 - mFadeinMinFrame) / (mFadeinMaxFrame - mFadeinMinFrame) * 255.0f);
+
+	return (u8)(mMainAnimTimer1 >= mFadeinMaxFrame);
+}
+
+/**
+ * @note Address: 0x80402EB8
+ * @note Size: 0x10
+ */
+void ObjDayEndResultBase::doUpdateFadeinFinish()
+{
+	_94 = 0;
+	_95 = 0;
+}
+
+/**
+ * @note Address: 0x80402EC8
+ * @note Size: 0xFC
+ */
+bool ObjDayEndResultBase::doUpdateFadeout()
+{
+	updateCommon();
+	mMainAnimTrans1->setFrame(mMainAnimTimer1);
+	mScreenMain->search(MC8("NitemW"))->animationTransform();
+
+	mMainAnimTimer1 += msVal.mAnimRate;
+
+	mScreenStars->search('Nall')->setAlpha((1.0f - (mMainAnimTimer1 - mFadeoutMinFrame) / (mFadeoutMaxFrame - mFadeoutMinFrame)) * 255.0f);
+
+	return (u8)(mMainAnimTimer1 >= mFadeoutMaxFrame);
+}
+
+/**
+ * @note Address: 0x80402FC4
+ * @note Size: 0x118
+ */
+void ObjDayEndResultBase::doDraw(Graphics& gfx)
+{
+	gfx.mOrthoGraph.setPort();
+
+	mScreenTitle->setXY(msVal.mTitleScreenPosX, 0.0f);
+	mScreenTitle->draw(gfx, gfx.mOrthoGraph);
+
+	gfx.mOrthoGraph.setPort();
+	mScreenStars->setXY(msVal.mStarsScreenPosX, 0.0f);
+	mScreenStars->draw(gfx, gfx.mOrthoGraph);
+
+	mScreenMain->setXY(msVal.mMainScreenPosX, 0.0f);
+}
+
+/**
+ * @note Address: 0x804030DC
+ * @note Size: 0x280
+ */
+void ObjDayEndResultBase::updateCommon()
+{
+	mTitleAnmTransform->setFrame(mTitleAnimTransformTimer);
+	mTitleAnmColor->setFrame(mTitleAnimColorTimer);
+	mScreenTitle->animation();
+
+	mTitleAnimTransformTimer += PC_ORIG_DT_SCALE(); // FPS Mode: avance continuo
+	mTitleAnimColorTimer += PC_ORIG_DT_SCALE(); // FPS Mode: avance continuo
+
+	if (mTitleAnimTransformTimer >= mTitleAnmTransform->getFrameMax()) {
+		mTitleAnimTransformTimer = 0.0f;
+	}
+
+	if (mTitleAnimColorTimer >= mTitleAnmColor->getFrameMax()) {
+		mTitleAnimColorTimer = 0.0f;
+	}
+
+	mMainAnimSRT->setFrame(mMainAnimTimer3);
+	mMainAnimTev->setFrame(mMainAnimTimer4);
+	mScreenMain->animation();
+
+	mMainAnimTimer3 += PC_ORIG_DT_SCALE(); // FPS Mode: avance continuo
+	mMainAnimTimer4 += PC_ORIG_DT_SCALE(); // FPS Mode: avance continuo
+
+	if (mMainAnimTimer3 >= mMainAnimSRT->getFrameMax()) {
+		mMainAnimTimer3 = 0.0f;
+	}
+
+	if (mMainAnimTimer4 >= mMainAnimTev->getFrameMax()) {
+		mMainAnimTimer4 = 0.0f;
+	}
+
+	mMainAnimTrans2->setFrame(mMainAnimTimer2);
+	mScreenMain->search(MC8("Ntitle"))->animationTransform();
+
+	mMainAnimTimer2 += PC_ORIG_DT_SCALE(); // FPS Mode: avance continuo
+
+	if (mMainAnimTimer2 >= mMainAnimTrans2->getFrameMax()) {
+		mMainAnimTimer2 = 0.0f;
+	}
+
+	mStarsAnimColor->setFrame(mStarsAnimTimer1);
+	mScreenStars->animation();
+
+	mStarsAnimTimer1 += PC_ORIG_DT_SCALE(); // FPS Mode: avance continuo
+
+	if (mStarsAnimTimer1 >= mStarsAnimColor->getFrameMax()) {
+		mStarsAnimTimer1 = 0.0f;
+	}
+
+	mScreenTitle->update();
+}
+
+/**
+ * @note Address: 0x8040335C
+ * @note Size: 0x98
+ */
+void ObjDayEndResultBase::setFadeinFrm()
+{
+	if (mFlags & 0x8) {
+		mFadeinMinFrame = getFadeinDownMinFrm();
+		mFadeinMaxFrame = getFadeinDownMaxFrm();
+	} else {
+		mFadeinMinFrame = getFadeinUpMinFrm();
+		mFadeinMaxFrame = getFadeinUpMaxFrm();
+	}
+
+	mMainAnimTimer1 = mFadeinMinFrame;
+}
+
+/**
+ * @note Address: 0x804033F4
+ * @note Size: 0x98
+ */
+void ObjDayEndResultBase::setFadeoutFrm()
+{
+	if (mFlags & 0x10) {
+		mFadeoutMinFrame = getFadeoutDownMinFrm();
+		mFadeoutMaxFrame = getFadeoutDownMaxFrm();
+	} else {
+		mFadeoutMinFrame = getFadeoutUpMinFrm();
+		mFadeoutMaxFrame = getFadeoutUpMaxFrm();
+	}
+
+	mMainAnimTimer1 = mFadeoutMinFrame;
+}
+
+/**
+ * @note Address: 0x8040348C
+ * @note Size: 0x144
+ */
+ObjDayEndResultItem::ObjDayEndResultItem()
+{
+	mStatus                 = ITEMSTATUS_ForceScroll;
+	mMainAnimTrans3         = nullptr;
+	mMainAnimTimer5         = 0.0f;
+	mTotalPokoCounter       = nullptr;
+	mTodayPokoCounter       = nullptr;
+	mTreasurePokoCounter[1] = nullptr;
+	mTreasurePokoCounter[0] = nullptr;
+	mTreasurePokoCount[1]   = 0;
+	mTreasurePokoCount[0]   = 0;
+	mTodaysPokoCount        = 0;
+	mTotalPokoCount         = 0;
+	mStickAnimMgr           = nullptr;
+	mFadePane3DStick        = nullptr;
+	mFadePaneDownArrow      = nullptr;
+	mFadePaneUpArrow        = nullptr;
+	mCurrentScrollYPos      = 0.0f;
+	mItemRowHeight          = 0.0f;
+	mCurrentSelectId        = -6;
+	mMaxScrollId            = 0;
+	mScollMoveTargetTime    = ObjDayEndResultBase::msVal._24;
+	mScrollMoveCounter      = 0;
+	mGXScissorBottomY       = 0;
+	mGXScissorTopY          = 0;
+	mTotalValueDelay        = 0;
+	mScrollDownDelay        = 0;
+	mScrollUpDelay          = 0;
+#if defined(VERSION_PAL)
+	mHasDrawn = false;
+#endif
+}
+
+/**
+ * @note Address: 0x8040367C
+ * @note Size: 0x7AC
+ */
+void ObjDayEndResultItem::doCreate(JKRArchive* archive)
+{
+	ObjDayEndResultBase::doCreate(archive);
+
+	mScreenMain = new P2DScreen::Mgr_tuning;
+	mScreenMain->set("result_item.blo", 0x00040000, archive);
+	void* resource  = JKRFileLoader::getGlbResource("result_item.bck", archive);
+	mMainAnimTrans1 = static_cast<J2DAnmTransform*>(J2DAnmLoaderDataBase::load(resource));
+	mMainAnimTrans2 = static_cast<J2DAnmTransform*>(J2DAnmLoaderDataBase::load(resource));
+	mMainAnimTrans3 = static_cast<J2DAnmTransform*>(J2DAnmLoaderDataBase::load(resource));
+
+	mMainAnimSRT = static_cast<J2DAnmTextureSRTKey*>(J2DAnmLoaderDataBase::load(JKRFileLoader::getGlbResource("result_item.btk", archive)));
+	mMainAnimTev = static_cast<J2DAnmTevRegKey*>(J2DAnmLoaderDataBase::load(JKRFileLoader::getGlbResource("result_item.brk", archive)));
+
+	mScreenMain->setAnimation(mMainAnimSRT);
+	mScreenMain->setAnimation(mMainAnimTev);
+
+	mScreenMain->search(MC8("NitemW"))->setAnimation(mMainAnimTrans1);
+	mScreenMain->search(MC8("Ntitle"))->setAnimation(mMainAnimTrans2);
+	mScreenMain->search('N_3d')->setAnimation(mMainAnimTrans3);
+
+	mScreenStars = new P2DScreen::Mgr_tuning;
+	mScreenStars->set("result_item_constellation.blo", 0x40000, archive);
+
+	mStarsAnimColor
+	    = static_cast<J2DAnmColor*>(J2DAnmLoaderDataBase::load(JKRFileLoader::getGlbResource("result_item_constellation.bpk", archive)));
+	mScreenStars->setAnimation(mStarsAnimColor);
+
+	og::Screen::setCallBackMessage(mScreenMain);
+
+	if (!getDispMember()->isID(OWNER_KH, MEMBER_DAY_END_RESULT)) {
+#if defined(VERSION_PAL)
+		JUT_PANICLINE(502, "disp member err");
+#else
+		JUT_PANICLINE(501, "disp member err");
+#endif
+	}
+
+	DispDayEndResult* dispResult = static_cast<DispDayEndResult*>(getDispMember());
+	if (dispResult->mItem.mNodeCount > 6) {
+		mFlags |= 0x1;
+		mMaxScrollId = dispResult->mItem.mNodeCount - 6;
+	}
+
+	f32 y1 = mScreenMain->search(MC8("Nsetp00"))->getBounds()->i.y;
+	f32 y2 = mScreenMain->search(MC8("Nsetp01"))->getBounds()->i.y;
+
+	mItemRowHeight     = y2 - y1;
+	mCurrentScrollYPos = mItemRowHeight * (1 - mCurrentSelectId);
+
+	u64 code;
+	if (dispResult->mItem.mPayedDebt) {
+		mScreenMain->search(MC8("Nfin_men"))->hide();
+		mScreenMain->search(MC8("Nco_menu"))->show();
+		code = MC8("Pcomp01");
+	} else {
+		mScreenMain->search(MC8("Nfin_men"))->show();
+		mScreenMain->search(MC8("Nco_menu"))->hide();
+		code = MC8("Pfin01");
+	}
+
+	mTodaysPokoCount = 0;
+	mTotalPokoCount  = dispResult->mItem.mTotalPokos - dispResult->mItem.mTodaysPokoAmount;
+
+	mTodayPokoCounter = og::Screen::setCallBack_CounterRV(mScreenMain, MC8("Ptokyop1"), &mTodaysPokoCount, 9, true, false, archive);
+
+	mTotalPokoCounter = og::Screen::setCallBack_CounterRV(mScreenMain, code, &mTotalPokoCount, 9, true, false, archive);
+
+	mTreasurePokoCounter[0] = og::Screen::setCallBack_CounterRV(mScreenMain, MC8("Pmad00_1"), &mTreasurePokoCount[0], 9, false, false, archive);
+
+	mTreasurePokoCounter[1] = og::Screen::setCallBack_CounterRV(mScreenMain, MC8("Pmad01_1"), &mTreasurePokoCount[1], 9, false, false, archive);
+
+	og::Screen::CallBack_Picture* callback = og::Screen::setCallBack_3DStick(archive, mScreenMain, 'P3d');
+	mStickAnimMgr                          = new og::Screen::StickAnimMgr(callback);
+	mStickAnimMgr->stickUpDown();
+
+	mFadePaneUpArrow = khUtilFadePane::create(mScreenMain, MC8("Nyame_u"), 16);
+	mFadePaneUpArrow->fadeout();
+
+	mFadePaneDownArrow = khUtilFadePane::create(mScreenMain, MC8("Nyame_l"), 16);
+	mFadePaneDownArrow->fadeout();
+
+	mFadePane3DStick = khUtilFadePane::create(mScreenMain, 'P3d', 16);
+	mFadePane3DStick->add(mScreenMain->search('N_3d'));
+	mFadePane3DStick->fadeout();
+
+	mScreenMain->search(MC8("Nsetp02"))->hide();
+	mScreenMain->search(MC8("Nsetp03"))->hide();
+	mScreenMain->search(MC8("Nsetp04"))->hide();
+	mScreenMain->search(MC8("Nsetp05"))->hide();
+	mScreenTitle->search(MC8("Nbtn1"))->hide();
+
+	if (dispResult->mItem.mHasNothing) {
+		mStatus          = ITEMSTATUS_Normal;
+		mTodaysPokoCount = dispResult->mItem.mTodaysPokoAmount;
+		mTotalPokoCount  = dispResult->mItem.mTotalPokos;
+		mTodayPokoCounter->show();
+		mTotalPokoCounter->show();
+		mNextBtnFadePane->fadein();
+		mCurrentSelectId   = 0;
+		mCurrentScrollYPos = 0.0f;
+		if (mFlags & 0x1) {
+			mFadePaneDownArrow->fadein();
+			mFadePane3DStick->fadein();
+		}
+		mFlags |= 0x40;
+	}
+
+	dispResult->mItem.mHasNothing = true;
+}
+
+/**
+ * @note Address: 0x80403E28
+ * @note Size: 0x108
+ */
+bool ObjDayEndResultItem::doStart(const ::Screen::StartSceneArg* sceneArg)
+{
+	const StartSceneArg* sarg = static_cast<const StartSceneArg*>(sceneArg);
+
+	if (sceneArg && sarg->_00) {
+		mFlags &= ~0x8;
+	} else {
+		mFlags |= 0x8;
+	}
+
+	if (mFlags & 0x8) {
+		mFadeinMinFrame = ((ObjDayEndResultBase*)this)->getFadeinDownMinFrm();
+		mFadeinMaxFrame = ((ObjDayEndResultBase*)this)->getFadeinDownMaxFrm();
+	} else {
+		mFadeinMinFrame = ((ObjDayEndResultBase*)this)->getFadeinUpMinFrm();
+		mFadeinMaxFrame = ((ObjDayEndResultBase*)this)->getFadeinUpMaxFrm();
+	}
+
+	mMainAnimTimer1 = mFadeinMinFrame;
+
+	setInfAlpha(mScreenStars->search('Nall'));
+	PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+	return true;
+}
+
+/**
+ * @note Address: 0x80403F30
+ * @note Size: 0x11C
+ */
+bool ObjDayEndResultItem::doUpdateFadein()
+{
+	updateCommon();
+	mMainAnimTrans1->setFrame(mMainAnimTimer1);
+	mScreenMain->search(MC8("NitemW"))->animationTransform();
+
+	mMainAnimTimer1 += ObjDayEndResultBase::msVal.mAnimRate;
+
+	mScreenStars->search('Nall')->setAlpha((mMainAnimTimer1 - mFadeinMinFrame) / (mFadeinMaxFrame - mFadeinMinFrame) * 255.0f);
+
+	bool result;
+	if (mMainAnimTimer1 >= mFadeinMaxFrame) {
+		result = true;
+	} else {
+		result = false;
+	}
+
+	mScreenMain->update();
+	return result;
+}
+
+/**
+ * @note Address: 0x8040404C
+ * @note Size: 0x2CC
+ */
+bool ObjDayEndResultItem::doUpdate()
+{
+	updateCommon();
+	mScreenMain->update();
+
+	switch (mStatus) {
+	case ITEMSTATUS_Normal:
+		statusNormal();
+		break;
+	case ITEMSTATUS_ScrollUp:
+		statusScrollUp();
+		break;
+	case ITEMSTATUS_ScrollDown:
+		statusScrollDown();
+		break;
+	case ITEMSTATUS_ForceScroll:
+		statusForceScroll();
+		break;
+	case ITEMSTATUS_DrumRoll:
+		statusDrumRoll();
+		break;
+	case ITEMSTATUS_TotalValue:
+		statusTotalValue();
+		break;
+	}
+
+	if (getGamePad()->getButtonDown() & Controller::PRESS_A) {
+		if (getGamePad()->getButtonDown() & Controller::PRESS_A && !isFlag(0x40)) {
+			mFlags |= 0x20;
+		}
+
+		if (mStatus == ITEMSTATUS_Normal) {
+			DispDayEndResultIncP* dispIncP = static_cast<DispDayEndResultIncP*>(getDispMember());
+			::Screen::SetSceneArg setArg(SCENE_DAY_END_RESULT_INC_P, dispIncP);
+
+			if (getOwner()->setScene(setArg)) {
+				SArgDayEndResultIncP argIncP(1);
+				getOwner()->startScene(&argIncP);
+				mFlags &= ~0x10;
+			}
+		}
+	}
+
+	if (mFlags & 0x20) {
+		mCurrentSelectId   = mMaxScrollId;
+		mCurrentScrollYPos = -mItemRowHeight * mCurrentSelectId;
+		mScrollMoveCounter = 0;
+		mStatus            = ITEMSTATUS_Normal;
+
+		if (!getDispMember()->isID(OWNER_KH, MEMBER_DAY_END_RESULT)) {
+#if defined(VERSION_PAL)
+			JUT_PANICLINE(665, "disp member err");
+#else
+			JUT_PANICLINE(664, "disp member err");
+#endif
+		}
+
+		DispDayEndResult* dispResult = static_cast<DispDayEndResult*>(getDispMember());
+		mTodaysPokoCount             = dispResult->mItem.mTodaysPokoAmount;
+		mTotalPokoCount              = dispResult->mItem.mTotalPokos;
+		mTodayPokoCounter->startPuyoUp(1.0f);
+		mTotalPokoCounter->startPuyoUp(1.0f);
+		mNextBtnFadePane->fadein();
+		PSSystem::spSysIF->playSystemSe(PSSE_SY_REGI_SUM_UP, 0);
+		mFlags &= ~0x20;
+		mFlags |= 0x40;
+	}
+	return false;
+}
+
+/**
+ * @note Address: 0x80404318
+ * @note Size: 0x124
+ */
+bool ObjDayEndResultItem::doUpdateFadeout()
+{
+	updateCommon();
+	mMainAnimTrans1->setFrame(mMainAnimTimer1);
+	mScreenMain->search(MC8("NitemW"))->animationTransform();
+
+	mMainAnimTimer1 += ObjDayEndResultBase::msVal.mAnimRate;
+
+	mScreenStars->search('Nall')->setAlpha((1.0f - (mMainAnimTimer1 - mFadeoutMinFrame) / (mFadeoutMaxFrame - mFadeoutMinFrame)) * 255.0f);
+
+	bool result;
+	if (mMainAnimTimer1 >= mFadeoutMaxFrame) {
+		result = true;
+	} else {
+		result = false;
+	}
+
+	mScreenMain->update();
+	return result;
+}
+
+/**
+ * @note Address: 0x8040443C
+ * @note Size: 0x6C4
+ */
+void ObjDayEndResultItem::doDraw(Graphics& gfx)
+{
+#if defined(VERSION_PAL)
+	mHasDrawn = true;
+#endif
+	ObjDayEndResultBase::doDraw(gfx);
+	gfx.mOrthoGraph.setPort();
+
+	if (!getDispMember()->isID(OWNER_KH, MEMBER_DAY_END_RESULT)) {
+#if defined(VERSION_PAL)
+		JUT_PANICLINE(723, "disp member err");
+#else
+		JUT_PANICLINE(720, "disp member err");
+#endif
+	}
+
+	DispDayEndResult* dispResult = static_cast<DispDayEndResult*>(getDispMember());
+	J2DPane* pane1               = mScreenMain->search(MC8("NALL2"));
+	J2DPane* pane2               = mScreenMain->search('N_3d');
+
+	J2DPane* panes[2] = { mScreenMain->search(MC8("Nsetp00")), mScreenMain->search(MC8("Nsetp01")) };
+
+	u64 icons[2] = { MC8("iPicon00"), MC8("iPicon01") };
+	u64 names[2] = { MC8("Piname00"), MC8("Piname01") };
+
+	pane1->show();
+	pane2->hide();
+
+	for (int i = 0; i < 2; i++) {
+		panes[i]->hide();
+	}
+
+	mScreenMain->draw(gfx, gfx.mOrthoGraph);
+	u32 left   = 0;
+	u32 top    = 0;
+	u32 width  = 0;
+	u32 height = 0;
+	GXGetScissor(&left, &top, &width, &height);
+	GXSetScissor(left, mGXScissorTopY, width, mGXScissorBottomY);
+	pane1->hide();
+	pane2->hide();
+	f32 offs = mItemRowHeight * 2.0f;
+
+	for (int i = 0; i < 2; i++) {
+		panes[i]->add(0.0f, mCurrentScrollYPos - offs);
+	}
+
+	for (int i = 0; i < 2; i++) {
+		mScreenMain->search(icons[i])->show();
+		mScreenMain->search(names[i])->show();
+		mTreasurePokoCounter[i]->show();
+	}
+
+	u32 i = 0;
+	FOREACH_NODE(Game::Result::TNode, dispResult->mItem.mResultNode->mChild, cNode)
+	{
+		f32 check = i * mItemRowHeight + mCurrentScrollYPos;
+		int pokos = cNode->mTotalPokos;
+		int isOdd = i % 2;
+		if (check < -mItemRowHeight || mGXScissorBottomY < check) {
+			panes[isOdd]->add(0.0f, offs);
+		} else {
+			panes[!isOdd]->hide();
+			panes[isOdd]->show();
+			panes[isOdd]->add(0.0f, offs);
+
+			setTex(mScreenMain, icons[isOdd], cNode->mTexture->mTexInfo);
+			u64 tag = cNode->getTag();
+			if (tag == 0) {
+				mScreenMain->search(names[isOdd])->hide();
+			} else {
+				mScreenMain->search(names[isOdd])->setMsgID(tag + 1);
+			}
+			mTreasurePokoCount[isOdd] = pokos;
+			mTreasurePokoCounter[isOdd]->update();
+#if defined(VERSION_PAL)
+			if (mGXScissorBottomY)
+#endif
+				mScreenMain->draw(gfx, gfx.mOrthoGraph);
+		}
+		i++;
+	}
+
+	for (i; i < 6; i++) {
+		int isOdd = i % 2;
+		panes[!isOdd]->hide();
+		panes[isOdd]->show();
+		panes[isOdd]->add(0.0f, offs);
+		mScreenMain->search(icons[isOdd])->hide();
+		mScreenMain->search(names[isOdd])->hide();
+		mTreasurePokoCounter[isOdd]->hide();
+		mScreenMain->draw(gfx, gfx.mOrthoGraph);
+	}
+
+	GXSetScissor(left, top, width, height);
+	if (mFlags & 1 && mStatus != ITEMSTATUS_ForceScroll && mStatus != ITEMSTATUS_DrumRoll && mStatus != ITEMSTATUS_TotalValue) {
+		pane1->hide();
+		pane2->show();
+		panes[0]->hide();
+		panes[1]->hide();
+		mScreenMain->draw(gfx, gfx.mOrthoGraph);
+	}
+}
+
+/**
+ * @note Address: 0x80404B00
+ * @note Size: 0x1D4
+ */
+void ObjDayEndResultItem::statusNormal()
+{
+	if (mFlags & 0x1) {
+		if (mCurrentSelectId == 0) {
+			mFadePaneUpArrow->fadeout();
+			mFadePaneDownArrow->fadein();
+			mStickAnimMgr->stickDown();
+		} else if (mCurrentSelectId == mMaxScrollId) {
+			mFadePaneUpArrow->fadein();
+			mFadePaneDownArrow->fadeout();
+			mStickAnimMgr->stickUp();
+		} else {
+			mFadePaneUpArrow->fadein();
+			mFadePaneDownArrow->fadein();
+			mStickAnimMgr->stickUpDown();
+		}
+		mFadePane3DStick->fadein();
+	} else {
+		mFadePaneUpArrow->fadeout();
+		mFadePaneDownArrow->fadeout();
+		mFadePane3DStick->fadeout();
+	}
+
+	if (mFlags & 0x1) {
+		if (getGamePad()->getButton() & Controller::PRESS_UP && mCurrentSelectId != 0) {
+			mCurrentSelectId--;
+			if (mScrollUpDelay >= 1) {
+				mScollMoveTargetTime = ObjDayEndResultBase::msVal._28;
+			} else {
+				if (PC_ORIG_TICK()) mScrollUpDelay++;
+			}
+
+			mScrollDownDelay = 0;
+			mStatus          = ITEMSTATUS_ScrollUp;
+			statusScrollUp();
+		} else if (getGamePad()->getButton() & Controller::PRESS_DOWN && mCurrentSelectId != mMaxScrollId) {
+			mCurrentSelectId++;
+			if (mScrollDownDelay >= 1) {
+				mScollMoveTargetTime = ObjDayEndResultBase::msVal._28;
+			} else {
+				if (PC_ORIG_TICK()) mScrollDownDelay++;
+			}
+
+			mScrollUpDelay = 0;
+			mStatus        = ITEMSTATUS_ScrollDown;
+			statusScrollDown();
+		} else {
+			mScrollDownDelay     = 0;
+			mScrollUpDelay       = 0;
+			mScollMoveTargetTime = ObjDayEndResultBase::msVal._24;
+		}
+	}
+}
+
+/**
+ * @note Address: 0x80404CD4
+ * @note Size: 0xF4
+ */
+void ObjDayEndResultItem::statusScrollUp()
+{
+	f32 p1             = mItemRowHeight * (mCurrentSelectId + 1) * (mScollMoveTargetTime - mScrollMoveCounter);
+	mCurrentScrollYPos = -((mScrollMoveCounter * (mItemRowHeight * mCurrentSelectId) + p1) / mScollMoveTargetTime);
+	if (PC_ORIG_TICK() && mScrollMoveCounter++ == mScollMoveTargetTime) {
+		mScrollMoveCounter = 1;
+		mStatus            = ITEMSTATUS_Normal;
+	}
+
+	PSSystem::spSysIF->playSystemSe(PSSE_SY_REGI_ROLL, 0);
+}
+
+/**
+ * @note Address: 0x80404DC8
+ * @note Size: 0xF4
+ */
+void ObjDayEndResultItem::statusScrollDown()
+{
+	f32 p1             = mItemRowHeight * (mCurrentSelectId - 1) * (mScollMoveTargetTime - mScrollMoveCounter);
+	mCurrentScrollYPos = -((mScrollMoveCounter * (mItemRowHeight * mCurrentSelectId) + p1) / mScollMoveTargetTime);
+	if (PC_ORIG_TICK() && mScrollMoveCounter++ == mScollMoveTargetTime) {
+		mScrollMoveCounter = 1;
+		mStatus            = ITEMSTATUS_Normal;
+	}
+
+	PSSystem::spSysIF->playSystemSe(PSSE_SY_REGI_ROLL, 0);
+}
+
+/**
+ * @note Address: 0x80404EBC
+ * @note Size: 0x1D4
+ */
+void ObjDayEndResultItem::statusForceScroll()
+{
+	f32 p1             = mItemRowHeight * (mCurrentSelectId - 1) * (mScollMoveTargetTime - mScrollMoveCounter);
+	mCurrentScrollYPos = -((mScrollMoveCounter * (mItemRowHeight * mCurrentSelectId) + p1) / mScollMoveTargetTime);
+	if (PC_ORIG_TICK() && mScrollMoveCounter++ == mScollMoveTargetTime) {
+		if (mCurrentSelectId == mMaxScrollId) {
+			mScrollMoveCounter = 1;
+			mStatus            = ITEMSTATUS_DrumRoll;
+		} else {
+			if (!getDispMember()->isID(OWNER_KH, MEMBER_DAY_END_RESULT)) {
+#if defined(VERSION_PAL)
+				JUT_PANICLINE(964, "disp member err");
+#else
+				JUT_PANICLINE(958, "disp member err");
+#endif
+			}
+
+			DispDayEndResult* dispResult = static_cast<DispDayEndResult*>(getDispMember());
+
+			int i                           = 0;
+			Game::Result::TNode* resultNode = static_cast<Game::Result::TNode*>(dispResult->mItem.mResultNode->mChild);
+			for (resultNode; resultNode && i != mCurrentSelectId + 6;
+			     resultNode = static_cast<Game::Result::TNode*>(resultNode->mNext), i++) { }
+
+			if (resultNode && resultNode->mLostNum == 0) {
+				mTodaysPokoCount += resultNode->mTotalPokos;
+				PSSystem::spSysIF->playSystemSe(PSSE_SY_COIN_COUNT, 0);
+			}
+			mScrollMoveCounter = 1;
+			mCurrentSelectId++;
+		}
+	}
+
+	PSSystem::spSysIF->playSystemSe(PSSE_SY_REGI_ROLL, 0);
+}
+
+/**
+ * @note Address: 0x80405090
+ * @note Size: 0x1C
+ */
+void ObjDayEndResultItem::statusDrumRoll()
+{
+	mTotalValueDelay = ObjDayEndResultBase::msVal._50;
+	mStatus          = ITEMSTATUS_TotalValue;
+}
+
+/**
+ * @note Address: 0x804050AC
+ * @note Size: 0xC8
+ */
+void ObjDayEndResultItem::statusTotalValue()
+{
+	if (mTotalValueDelay == 0) {
+		if (!getDispMember()->isID(OWNER_KH, MEMBER_DAY_END_RESULT)) {
+#if defined(VERSION_PAL)
+			JUT_PANICLINE(1017, "disp member err");
+#else
+			JUT_PANICLINE(1011, "disp member err");
+#endif
+		}
+
+		DispDayEndResult* dispResult = static_cast<DispDayEndResult*>(getDispMember());
+		mTotalPokoCount              = dispResult->mItem.mTotalPokos;
+		mTotalPokoCounter->startPuyoUp(1.0f);
+		mNextBtnFadePane->fadein();
+		PSSystem::spSysIF->playSystemSe(PSSE_SY_REGI_SUM_UP, 0);
+		mStatus = ITEMSTATUS_Normal;
+		mFlags |= 0x40;
+	} else {
+		if (PC_ORIG_TICK()) mTotalValueDelay--;
+	}
+}
+
+/**
+ * @note Address: 0x80405174
+ * @note Size: 0x3C8
+ */
+void ObjDayEndResultItem::updateCommon()
+{
+	ObjDayEndResultBase::updateCommon();
+
+	JGeometry::TVec3f topLeft    = mScreenMain->search(MC8("Nmask"))->getGlbVtx(GLBVTX_BtmLeft);
+	JGeometry::TVec3f centerLeft = mScreenMain->search(MC8("Nmask"))->getGlbVtx(GLBVTX_TopRight);
+
+#if defined(VERSION_PAL)
+	if (mHasDrawn) {
+#endif
+		// this is so dumb. SO DUMB.
+		f32 yTop;
+		mGXScissorTopY    = 0.5f + (yTop = topLeft.y);
+		mGXScissorBottomY = centerLeft.y - yTop;
+
+#if defined(VERSION_PAL)
+	} else {
+		mGXScissorTopY = mGXScissorBottomY = 0;
+	}
+#endif
+
+	mScreenMain->animation();
+
+	mMainAnimTrans3->setFrame(mMainAnimTimer5);
+	mScreenMain->search('N_3d')->animationTransform();
+
+	if (PC_ORIG_TICK()) mMainAnimTimer5++;
+	if (mMainAnimTimer5 >= mMainAnimTrans3->getFrameMax()) {
+		mMainAnimTimer5 = 0.0f;
+	}
+}
+
+/**
+ * @note Address: 0x8040553C
+ * @note Size: 0x19C
+ */
+ObjDayEndResultIncP::ObjDayEndResultIncP()
+{
+	for (int i = 0; i < 6; i++) {
+		mYesterdayPikis[i] = 0;
+	}
+
+	for (int i = 0; i < 6; i++) {
+		mTodayPikis[i] = 0;
+	}
+
+	for (int i = 0; i < 8; i++) {
+		mTodayDeaths[i] = 0;
+	}
+
+	for (int i = 0; i < 8; i++) {
+		mTotalDeaths[i] = 0;
+	}
+
+	mStatus               = INCPSTATUS_Slot;
+	mScreenMain           = nullptr;
+	mMainAnimTrans4       = nullptr;
+	mMainAnimTrans3       = nullptr;
+	mMainAnimTimer5       = 399.0f;
+	mMainAnimTimer6       = 404.0f;
+	mPikiCountersList     = nullptr;
+	mCounterNum           = 10;
+	mPikiCounterToday     = nullptr;
+	mPikiCounterYesterday = nullptr;
+	mScaleMgr             = nullptr;
+	mSlotChangeDelay      = ObjDayEndResultBase::msVal._50;
+	mArrowAngles[0]       = 0.0f;
+	mArrowAngles[1]       = 0.0f;
+	mArrowAngles[2]       = 0.0f;
+	mArrowAngles[3]       = 0.0f;
+	mArrowAngles[4]       = 0.0f;
+	mArrowAngles[5]       = 0.0f;
+}
+
+/**
+ * @note Address: 0x804056D8
+ * @note Size: 0x1374
+ */
+void ObjDayEndResultIncP::doCreate(JKRArchive* arc)
+{
+	ObjDayEndResultBase::doCreate(arc);
+	mScreenMain = new P2DScreen::Mgr_tuning;
+	mScreenMain->set("result_fuetaheta.blo", 0x40000, arc);
+
+	void* resource  = JKRFileLoader::getGlbResource("result_fuetaheta.bck", arc);
+	mMainAnimTrans1 = static_cast<J2DAnmTransform*>(J2DAnmLoaderDataBase::load(resource));
+	mMainAnimTrans2 = static_cast<J2DAnmTransform*>(J2DAnmLoaderDataBase::load(resource));
+	mMainAnimTrans3 = static_cast<J2DAnmTransform*>(J2DAnmLoaderDataBase::load(resource));
+	mMainAnimTrans4 = static_cast<J2DAnmTransform*>(J2DAnmLoaderDataBase::load(resource));
+	mMainAnimSRT
+	    = static_cast<J2DAnmTextureSRTKey*>(J2DAnmLoaderDataBase::load(JKRFileLoader::getGlbResource("result_fuetaheta.btk", arc)));
+	mMainAnimTev = static_cast<J2DAnmTevRegKey*>(J2DAnmLoaderDataBase::load(JKRFileLoader::getGlbResource("result_fuetaheta.brk", arc)));
+	mScreenMain->setAnimation(mMainAnimSRT);
+	mScreenMain->setAnimation(mMainAnimTev);
+
+	mScreenMain->search(MC8("NitemW1"))->setAnimation(mMainAnimTrans3);
+	mScreenMain->search(MC8("NitemW"))->setAnimation(mMainAnimTrans1);
+	mScreenMain->search(MC8("Nsetp00"))->setAnimation(mMainAnimTrans1);
+	mScreenMain->search(MC8("Nsetp01"))->setAnimation(mMainAnimTrans1);
+	mScreenMain->search(MC8("Nsetp02"))->setAnimation(mMainAnimTrans1);
+	mScreenMain->search(MC8("Nsetp03"))->setAnimation(mMainAnimTrans1);
+	mScreenMain->search(MC8("Nsetp04"))->setAnimation(mMainAnimTrans1);
+	mScreenMain->search(MC8("Nsetp05"))->setAnimation(mMainAnimTrans1);
+	mScreenMain->search(MC8("Ntitle"))->setAnimation(mMainAnimTrans2);
+	mScreenMain->search(MC8("Ndead"))->setAnimation(mMainAnimTrans4);
+
+	mScreenStars = new P2DScreen::Mgr_tuning;
+	mScreenStars->set("result_fueta_constellation.blo", 0x40000, arc);
+
+	mStarsAnimColor
+	    = static_cast<J2DAnmColor*>(J2DAnmLoaderDataBase::load(JKRFileLoader::getGlbResource("result_fueta_constellation.bpk", arc)));
+	mScreenStars->setAnimation(mStarsAnimColor);
+
+	og::Screen::setCallBackMessage(mScreenMain);
+
+	if (!getDispMember()->isID(OWNER_KH, MEMBER_DAY_END_RESULT)) {
+#if defined(VERSION_PAL)
+		JUT_PANICLINE(1168, "disp member err");
+#else
+		JUT_PANICLINE(1158, "disp member err");
+#endif
+	}
+
+	DispDayEndResult* dispResult = static_cast<DispDayEndResult*>(getDispMember());
+
+	kh::Screen::IncP* inca;
+
+	inca = dispResult->mIncP.mPikminInfo;
+	for (int i = 0; i < 6; i++) {
+		mYesterdayPikis[i] = inca->mYesterdayPikiCounts[i];
+	}
+
+	inca = dispResult->mIncP.mPikminInfo;
+	for (int i = 0; i < 6; i++) {
+		mTodayPikis[i] = inca->mTodayPikiCounts[i];
+	}
+
+	inca = dispResult->mIncP.mPikminInfo;
+	for (int i = 0; i < 8; i++) {
+		mTodayDeaths[i] = inca->mTodayPikiDeaths[i];
+	}
+
+	inca = dispResult->mIncP.mPikminInfo;
+	for (int i = 0; i < 8; i++) {
+		mTotalDeaths[i] = inca->mTotalPikiDeaths[i];
+	}
+
+	const u8 flag = dispResult->mIncP.mPikminInfo->mPikminUnlockedFlag;
+	if (!(flag & 1)) {
+		mScreenMain->search(MC8("Nfigre01"))->hide();
+		mScreenMain->search(MC8("Npiki01"))->hide();
+		mScreenMain->search(MC8("Ntopi01"))->hide();
+		mCounterNum -= 2;
+	}
+
+	if (!(flag & 2)) {
+		mScreenMain->search(MC8("Nfigre02"))->hide();
+		mScreenMain->search(MC8("Npiki02"))->hide();
+		mScreenMain->search(MC8("Ntopi02"))->hide();
+		mCounterNum -= 2;
+	}
+
+	if (!(flag & 4)) {
+		mScreenMain->search(MC8("Nfigre03"))->hide();
+		mScreenMain->search(MC8("Npiki03"))->hide();
+		mScreenMain->search(MC8("Ntopi03"))->hide();
+		mCounterNum -= 2;
+	}
+
+	if (!(flag & 8)) {
+		mScreenMain->search(MC8("Nfigre04"))->hide();
+		mScreenMain->search(MC8("Npiki04"))->hide();
+		mScreenMain->search(MC8("Ntopi04"))->hide();
+		mCounterNum -= 2;
+	}
+
+	if (!(flag & 0x10)) {
+		mScreenMain->search(MC8("Nfigre05"))->hide();
+		mScreenMain->search(MC8("Npiki05"))->hide();
+		mScreenMain->search(MC8("Ntopi05"))->hide();
+		mCounterNum -= 2;
+	}
+
+	int counters      = 0;
+	mPikiCountersList = new og::Screen::CallBack_CounterSlot*[mCounterNum];
+	if (flag & 1) {
+		mPikiCountersList[counters++]
+		    = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Prpkyo1"), &mYesterdayPikis[0], 5, true, false, arc);
+		mPikiCountersList[counters++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Prpmade1"), &mTodayPikis[0], 8, true, false, arc);
+		counters                      = 2;
+	}
+
+	if (flag & 2) {
+		mPikiCountersList[counters++]
+		    = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Pypkyo1"), &mYesterdayPikis[1], 5, true, false, arc);
+		mPikiCountersList[counters++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Pypmade1"), &mTodayPikis[1], 8, true, false, arc);
+	}
+
+	if (flag & 4) {
+		mPikiCountersList[counters++]
+		    = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Pbpkyo1"), &mYesterdayPikis[2], 5, true, false, arc);
+		mPikiCountersList[counters++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Pbpmade1"), &mTodayPikis[2], 8, true, false, arc);
+	}
+
+	if (flag & 8) {
+		mPikiCountersList[counters++]
+		    = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Pwpkyo1"), &mYesterdayPikis[3], 5, true, false, arc);
+		mPikiCountersList[counters++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Pwpmade1"), &mTodayPikis[3], 8, true, false, arc);
+	}
+
+	if (flag & 0x10) {
+		mPikiCountersList[counters++]
+		    = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Pblpkyo1"), &mYesterdayPikis[4], 5, true, false, arc);
+		mPikiCountersList[counters++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Pblpmad1"), &mTodayPikis[4], 8, true, false, arc);
+	}
+
+	mPikiCounterYesterday = og::Screen::setCallBack_CounterRV(mScreenMain, MC8("Ptokypo1"), &mYesterdayPikis[5], 5, false, false, arc);
+	mPikiCounterToday     = og::Screen::setCallBack_CounterRV(mScreenMain, MC8("Ptomdpo1"), &mTodayPikis[5], 8, false, false, arc);
+	mPikiCounterYesterday->hide();
+	mPikiCounterToday->hide();
+
+	for (int i = 0; i < mCounterNum; i++) {
+		mPikiCountersList[i]->setPuyoParam(2.5f, 35.0f, 0.3f);
+	}
+	// unrolled loop?
+	int counters2                   = 0;
+	mDeathCountersList              = new og::Screen::CallBack_CounterSlot*[14];
+	mDeathCountersList[counters2++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Ptakyo1"), &mTodayDeaths[0], 4, true, false, arc);
+	mDeathCountersList[counters2++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Ptamade1"), &mTotalDeaths[0], 8, true, false, arc);
+	mDeathCountersList[counters2++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Pnikyo1"), &mTodayDeaths[1], 4, true, false, arc);
+	mDeathCountersList[counters2++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Pnimade1"), &mTotalDeaths[1], 8, true, false, arc);
+	mDeathCountersList[counters2++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Phokyo1"), &mTodayDeaths[2], 4, true, false, arc);
+	mDeathCountersList[counters2++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Phomade1"), &mTotalDeaths[2], 8, true, false, arc);
+	mDeathCountersList[counters2++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Psukyo1"), &mTodayDeaths[3], 4, true, false, arc);
+	mDeathCountersList[counters2++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Psumade1"), &mTotalDeaths[3], 8, true, false, arc);
+	mDeathCountersList[counters2++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Pdepkyo1"), &mTodayDeaths[4], 4, true, false, arc);
+	mDeathCountersList[counters2++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Pdepmad1"), &mTotalDeaths[4], 8, true, false, arc);
+	mDeathCountersList[counters2++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Pbapkyo1"), &mTodayDeaths[5], 4, true, false, arc);
+	mDeathCountersList[counters2++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Pbapmad1"), &mTotalDeaths[5], 8, true, false, arc);
+	mDeathCountersList[counters2++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Pdopkyo1"), &mTodayDeaths[6], 4, true, false, arc);
+	mDeathCountersList[counters2++] = og::Screen::setCallBack_CounterSlot(mScreenMain, MC8("Pdopmad1"), &mTotalDeaths[6], 8, true, false, arc);
+	mDeathCounterToday              = og::Screen::setCallBack_CounterRV(mScreenMain, MC8("Pdtokyp1"), &mTodayDeaths[7], 4, false, false, arc);
+	mDeathCounterTotal              = og::Screen::setCallBack_CounterRV(mScreenMain, MC8("Pdtomdp1"), &mTotalDeaths[7], 8, false, false, arc);
+	mDeathCounterToday->hide();
+	mDeathCounterTotal->hide();
+
+	for (int i = 0; i < 14; i++) {
+		mDeathCountersList[i]->setPuyoParam(2.5f, 35.0f, 0.3f);
+	}
+
+	mScaleMgr = new og::Screen::ScaleMgr;
+
+	for (int i = 0; i < 6; i++) {
+		mScreenMain->search(arrow[i])->hide();
+	}
+
+	int counts[12] = { mYesterdayPikis[0], mTodayPikis[0], mYesterdayPikis[1], mTodayPikis[1], mYesterdayPikis[2], mTodayPikis[2],
+	                   mYesterdayPikis[3], mTodayPikis[3], mYesterdayPikis[4], mTodayPikis[4], mYesterdayPikis[5], mTodayPikis[5] };
+
+	f32 angle1 = 30.0f;
+	f32 angle2 = -angle1;
+	for (int i = 0; i < 6; i++) {
+		if ((u32)counts[2 * i] < counts[2 * i + 1]) {
+			mArrowAngles[i] = angle1;
+		} else if ((u32)counts[2 * i] > counts[2 * i + 1]) {
+			mArrowAngles[i] = angle2;
+		}
+	}
+
+	if (dispResult->mIncP._0C) {
+		mStatus = INCPSTATUS_Normal;
+		for (int i = 0; i < mCounterNum; i++) {
+			mPikiCountersList[i]->_AC = 1;
+			mPikiCountersList[i]->_A9 = 1;
+		}
+		mPikiCounterYesterday->show();
+		mPikiCounterToday->show();
+		mNextBtnFadePane->fadein();
+		for (int i = 0; i < 6; i++) {
+			if (i == 5 || dispResult->mIncP.mPikminInfo->mPikminUnlockedFlag & 1 << i) {
+				mScreenMain->search(arrow[i])->show();
+			}
+		}
+		mFlags |= 0x40;
+	}
+	dispResult->mIncP._0C = 1;
+
+	if (dispResult->mIncP._0D) {
+		for (int i = 0; i < 14; i++) {
+			mDeathCountersList[i]->_AC = 1;
+			mDeathCountersList[i]->_A9 = 1;
+		}
+		mDeathCounterToday->show();
+		mDeathCounterTotal->show();
+		mFlags |= 0x100;
+	}
+}
+
+/**
+ * @note Address: 0x80406A4C
+ * @note Size: 0x17C
+ */
+bool ObjDayEndResultIncP::doUpdateFadein()
+{
+	updateCommon();
+	mMainAnimTrans1->setFrame(mMainAnimTimer1);
+	mScreenMain->search(MC8("NitemW"))->animationTransform();
+
+	mMainAnimTimer1 += ObjDayEndResultBase::msVal.mAnimRate;
+
+	mScreenStars->search('Nall')->setAlpha((mMainAnimTimer1 - mFadeinMinFrame) / (mFadeinMaxFrame - mFadeinMinFrame) * 255.0f);
+
+	bool result = (mMainAnimTimer1 >= mFadeinMaxFrame) ? true : false;
+
+	mScreenMain->update();
+	for (int i = 0; i < 6; i++) {
+		mScreenMain->search(arrow[i])->setAngle(mArrowAngles[i]);
+	}
+
+	return result;
+}
+
+/**
+ * @note Address: 0x80406BC8
+ * @note Size: 0x47C
+ */
+bool ObjDayEndResultIncP::doUpdate()
+{
+	updateCommon();
+
+	switch (mStatus) {
+	case INCPSTATUS_Normal:
+		statusNormal();
+		break;
+	case INCPSTATUS_Fadeout:
+		statusFadeout();
+		break;
+	case INCPSTATUS_DecP:
+		statusDecP();
+		break;
+	case INCPSTATUS_Fadein:
+		statusFadein();
+		break;
+	case INCPSTATUS_Slot:
+		statusSlot();
+		break;
+	case INCPSTATUS_DecPSlot:
+		statusDecPSlot();
+		break;
+	}
+
+	if (getGamePad()->getButtonDown() & (Controller::PRESS_A | Controller::PRESS_B)) {
+		if (getGamePad()->getButtonDown() & Controller::PRESS_A && mStatus == INCPSTATUS_Slot && !isFlag(0x40)) {
+			mFlags |= 0x20;
+		}
+
+		if (getGamePad()->getButtonDown() & Controller::PRESS_A && mStatus == INCPSTATUS_DecPSlot && !isFlag(0x100)) {
+			mFlags |= 0x80;
+		}
+
+		if (mStatus == INCPSTATUS_Normal || mStatus == INCPSTATUS_DecP) {
+			if (getGamePad()->getButtonDown() & Controller::PRESS_A) {
+				::Screen::SetSceneArg setArg(SCENE_DAY_END_RESULT_MAIL, getDispMember());
+				if (getOwner()->setScene(setArg)) {
+					SArgDayEndResultMail argMail(1);
+					getOwner()->startScene(&argMail);
+					mFlags &= ~0x10;
+				}
+			} else if (getGamePad()->getButtonDown() & Controller::PRESS_B) {
+				::Screen::SetSceneArg setArg(SCENE_DAY_END_RESULT_ITEM, getDispMember());
+				if (getOwner()->setScene(setArg)) {
+					SArgDayEndResultItem argItem(0);
+					getOwner()->startScene(&argItem);
+					mFlags |= 0x10;
+				}
+			}
+		}
+	}
+
+	if (mFlags & 0x20) {
+		for (int i = 0; i < mCounterNum; i++) {
+			og::Screen::CallBack_CounterSlot* slot = mPikiCountersList[i];
+			if (!slot->_A9 || slot->mSlotStarted) {
+				slot->startSlot(0.0f);
+			}
+		}
+		effectCommon();
+		mNextBtnFadePane->fadein();
+		mFlags &= ~0x20;
+		mFlags |= 0x40;
+		mStatus = INCPSTATUS_Normal;
+	}
+
+	if (mFlags & 0x80) {
+		for (int i = 0; i < 14; i++) {
+			og::Screen::CallBack_CounterSlot* slot = mDeathCountersList[i];
+			if (!slot->_A9 || slot->mSlotStarted) {
+				slot->startSlot(0.0f);
+			}
+		}
+		mDeathCounterToday->show();
+		mDeathCounterTotal->show();
+		mDeathCounterToday->startPuyoUp(1.0f);
+		mDeathCounterTotal->startPuyoUp(1.0f);
+
+		if (mTodayDeaths[7] == 0) {
+			PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_PLUS_MINUS, 0);
+		} else {
+			PSSystem::spSysIF->playSystemSe(PSSE_SY_PIKI_DECRE_SUM, 0);
+			PSSystem::spSysIF->playSystemSe(PSSE_PK_RESULT_DECREMENT, 0);
+		}
+		mFlags &= ~0x80;
+		mFlags |= 0x100;
+		mStatus = INCPSTATUS_DecP;
+	}
+	return false;
+}
+
+/**
+ * @note Address: 0x80407044
+ * @note Size: 0x184
+ */
+bool ObjDayEndResultIncP::doUpdateFadeout()
+{
+	updateCommon();
+	mMainAnimTrans1->setFrame(mMainAnimTimer1);
+	mScreenMain->search(MC8("NitemW"))->animationTransform();
+
+	mMainAnimTimer1 += ObjDayEndResultBase::msVal.mAnimRate;
+
+	mScreenStars->search('Nall')->setAlpha((1.0f - (mMainAnimTimer1 - mFadeoutMinFrame) / (mFadeoutMaxFrame - mFadeoutMinFrame)) * 255.0f);
+
+	bool result = (mMainAnimTimer1 >= mFadeoutMaxFrame) ? true : false;
+
+	mScreenMain->update();
+	for (int i = 0; i < 6; i++) {
+		mScreenMain->search(arrow[i])->setAngle(mArrowAngles[i]);
+	}
+	return result;
+}
+
+/**
+ * @note Address: 0x804071C8
+ * @note Size: 0x148
+ */
+void ObjDayEndResultIncP::doDraw(Graphics& gfx)
+{
+	ObjDayEndResultBase::doDraw(gfx);
+
+	gfx.mOrthoGraph.setPort();
+	mScreenMain->draw(gfx, gfx.mOrthoGraph);
+}
+
+/**
+ * @note Address: 0x80407310
+ * @note Size: 0x50
+ */
+void ObjDayEndResultIncP::statusNormal()
+{
+	if (getGamePad()->getButtonDown() & 0x10) {
+		PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+		mStatus = INCPSTATUS_Fadeout;
+	}
+}
+
+/**
+ * @note Address: 0x80407360
+ * @note Size: 0x100
+ */
+void ObjDayEndResultIncP::statusFadeout()
+{
+	mMainAnimTrans3->setFrame(mMainAnimTimer5);
+	if (mMainAnimTimer5 < 404.0f) {
+		mMainAnimTimer5 += PC_ORIG_DT_SCALE(); // FPS Mode: avance continuo
+		return;
+	}
+
+	mMainAnimTrans4->setFrame(mMainAnimTimer6);
+	if (mMainAnimTimer6 < 409.0f) {
+		mMainAnimTimer6 += PC_ORIG_DT_SCALE(); // FPS Mode: avance continuo
+		return;
+	}
+
+	if (!getDispMember()->isID(OWNER_KH, MEMBER_DAY_END_RESULT)) {
+#if defined(VERSION_PAL)
+		JUT_PANICLINE(1551, "disp member err");
+#else
+		JUT_PANICLINE(1541, "disp member err");
+#endif
+	}
+	DispDayEndResult* dispResult = static_cast<DispDayEndResult*>(getDispMember());
+	if (!dispResult->mIncP._0D) {
+		dispResult->mIncP._0D = true;
+		mSlotChangeDelay      = msVal._50;
+		mStatus               = INCPSTATUS_DecPSlot;
+	} else {
+		mStatus = INCPSTATUS_DecP;
+	}
+}
+
+/**
+ * @note Address: 0x80407460
+ * @note Size: 0x50
+ */
+void ObjDayEndResultIncP::statusDecP()
+{
+	if (getGamePad()->getButtonDown() & 0x10) {
+		PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+		mStatus = INCPSTATUS_Fadein;
+	}
+}
+
+/**
+ * @note Address: 0x804074B0
+ * @note Size: 0x64
+ */
+void ObjDayEndResultIncP::statusFadein()
+{
+	mMainAnimTrans4->setFrame(mMainAnimTimer6);
+	if (mMainAnimTimer6 > 404.0f) {
+		if (PC_ORIG_TICK()) mMainAnimTimer6--;
+		return;
+	}
+
+	mMainAnimTrans3->setFrame(mMainAnimTimer5);
+	if (mMainAnimTimer5 > 399.0f) {
+		if (PC_ORIG_TICK()) mMainAnimTimer5--;
+		return;
+	}
+
+	mStatus = INCPSTATUS_Normal;
+}
+
+/**
+ * @note Address: 0x80407514
+ * @note Size: 0x140
+ */
+void ObjDayEndResultIncP::statusSlot()
+{
+	for (int i = 0; i < mCounterNum; i++) {
+		if (i == 0 && !mPikiCountersList[0]->_A9) {
+			mPikiCountersList[i]->startSlot(msVal._10);
+			callIncPSE(i);
+		}
+
+		if (mPikiCountersList[i - 1]->mSlotFinished && !mPikiCountersList[i]->_A9) {
+			mPikiCountersList[i]->startSlot(msVal._10);
+			callIncPSE(i);
+			break;
+		}
+	}
+
+	if (mPikiCountersList[mCounterNum - 1]->mSlotFinished) {
+		if (!mSlotChangeDelay) {
+			effectCommon();
+			mNextBtnFadePane->fadein();
+			mStatus = INCPSTATUS_Normal;
+			mFlags |= 0x40;
+		} else {
+			if (PC_ORIG_TICK()) mSlotChangeDelay--;
+		}
+	}
+}
+
+/**
+ * @note Address: 0x80407654
+ * @note Size: 0x19C
+ */
+void ObjDayEndResultIncP::statusDecPSlot()
+{
+	for (int i = 0; i < 14; i++) {
+		if (i == 0 && !mDeathCountersList[0]->_A9) {
+			mDeathCountersList[i]->startSlot(msVal._10);
+			callDecPSE(i);
+		}
+
+		if (mDeathCountersList[i - 1]->mSlotFinished && !mDeathCountersList[i]->_A9) {
+			mDeathCountersList[i]->startSlot(msVal._10);
+			callDecPSE(i);
+			break;
+		}
+	}
+
+	if (mDeathCountersList[13]->mSlotFinished) {
+		if (!mSlotChangeDelay) {
+			mDeathCounterToday->show();
+			mDeathCounterTotal->show();
+			mDeathCounterToday->startPuyoUp(1.0f);
+			mDeathCounterTotal->startPuyoUp(1.0f);
+			if (mTodayDeaths[7] == 0) {
+				PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_PLUS_MINUS, 0);
+			} else {
+				PSSystem::spSysIF->playSystemSe(PSSE_SY_PIKI_DECRE_SUM, 0);
+				PSSystem::spSysIF->playSystemSe(PSSE_PK_RESULT_DECREMENT, 0);
+			}
+			mFlags |= 0x100;
+			mStatus = INCPSTATUS_DecP;
+		} else {
+			if (PC_ORIG_TICK()) mSlotChangeDelay--;
+		}
+	}
+}
+
+/**
+ * @note Address: 0x804077F0
+ * @note Size: 0x88
+ */
+void ObjDayEndResultIncP::callIncPSE(int id)
+{
+	u32 soundID;
+	if (id % 2) {
+		u32 count2 = *mPikiCountersList[id - 1]->mCountPtr;
+		u32 count1 = *mPikiCountersList[id]->mCountPtr;
+		if (count2 < count1) {
+			soundID = PSSE_SY_PIKI_INCREMENT;
+		} else if (count2 > count1) {
+			soundID = PSSE_SY_PIKI_DECREMENT;
+		} else {
+			soundID = PSSE_SY_MENU_PLUS_MINUS;
+		}
+	} else {
+		soundID = PSSE_SY_MENU_PLUS_MINUS;
+	}
+
+	PSSystem::spSysIF->playSystemSe(soundID, 0);
+}
+
+/**
+ * @note Address: 0x80407878
+ * @note Size: 0x4C
+ */
+void ObjDayEndResultIncP::callDecPSE(int id)
+{
+	PSSystem::SysIF* sys = PSSystem::spSysIF;
+	u32 soundID          = PSSE_SY_PIKI_DECREMENT;
+	u32 count2           = *mDeathCountersList[id & ~1]->mCountPtr;
+	if (!count2) {
+		soundID = PSSE_SY_MENU_PLUS_MINUS;
+	}
+
+	sys->playSystemSe(soundID, 0);
+}
+
+/**
+ * @note Address: 0x804078C4
+ * @note Size: 0x188
+ */
+void ObjDayEndResultIncP::effectCommon()
+{
+	mPikiCounterYesterday->show();
+	mPikiCounterToday->show();
+	mPikiCounterYesterday->startPuyoUp(1.0f);
+	mPikiCounterToday->startPuyoUp(1.0f);
+
+	if (!getDispMember()->isID(OWNER_KH, MEMBER_DAY_END_RESULT)) {
+#if defined(VERSION_PAL)
+		JUT_PANICLINE(1740, "disp member err");
+#else
+		JUT_PANICLINE(1730, "disp member err");
+#endif
+	}
+	DispDayEndResult* dispResult = static_cast<DispDayEndResult*>(getDispMember());
+
+	for (int i = 0; i < 6; i++) {
+		if (i == 5 || dispResult->mIncP.mPikminInfo->mPikminUnlockedFlag & 1 << i) {
+			mScreenMain->search(arrow[i])->show();
+		}
+	}
+	mScaleMgr->up();
+
+	if (mYesterdayPikis[5] < mTodayPikis[5]) {
+		PSSystem::spSysIF->playSystemSe(PSSE_SY_PIKI_INCRE_SUM, 0);
+		PSSystem::spSysIF->playSystemSe(PSSE_PK_RESULT_INCREMENT, 0);
+	} else if (mYesterdayPikis[5] > mTodayPikis[5]) {
+		PSSystem::spSysIF->playSystemSe(PSSE_SY_PIKI_DECRE_SUM, 0);
+		PSSystem::spSysIF->playSystemSe(PSSE_PK_RESULT_DECREMENT, 0);
+	} else {
+		PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_PLUS_MINUS, 0);
+	}
+}
+
+/**
+ * @note Address: 0x80407A4C
+ * @note Size: 0x36C
+ */
+void ObjDayEndResultIncP::updateCommon()
+{
+	ObjDayEndResultBase::updateCommon();
+	mScreenMain->update();
+	f32 scale = mScaleMgr->calc();
+	for (int i = 0; i < 6; i++) {
+		mScreenMain->search(arrow[i])->updateScale(scale);
+	}
+
+	for (int i = 0; i < 6; i++) {
+		mScreenMain->search(arrow[i])->setAngle(mArrowAngles[i]);
+	}
+}
+
+/**
+ * @note Address: 0x80407DB8
+ * @note Size: 0x8B4
+ */
+void ObjDayEndResultMail::doCreate(JKRArchive* arc)
+{
+	ObjDayEndResultBase::doCreate(arc);
+	mScreenMain = new P2DScreen::Mgr_tuning;
+	mScreenMain->set("result_mail.blo", 0x1040000, arc);
+
+	void* resource  = JKRGetResource("result_mail.bck", arc);
+	mMainAnimTrans1 = static_cast<J2DAnmTransform*>(J2DAnmLoaderDataBase::load(resource));
+	mMainAnimTrans2 = static_cast<J2DAnmTransform*>(J2DAnmLoaderDataBase::load(resource));
+	mMainAnimTrans3 = static_cast<J2DAnmTransform*>(J2DAnmLoaderDataBase::load(resource));
+	mMainAnimTrans4 = static_cast<J2DAnmTransform*>(J2DAnmLoaderDataBase::load(resource));
+
+	mMainAnimSRT = static_cast<J2DAnmTextureSRTKey*>(J2DAnmLoaderDataBase::load(JKRGetResource("result_mail.btk", arc)));
+	mMainAnimTev = static_cast<J2DAnmTevRegKey*>(J2DAnmLoaderDataBase::load(JKRGetResource("result_mail.brk", arc)));
+	mScreenMain->setAnimation(mMainAnimSRT);
+	mScreenMain->setAnimation(mMainAnimTev);
+
+	mScreenMain->search(MC8("NitemW1"))->setAnimation(mMainAnimTrans3);
+	mScreenMain->search(MC8("NitemW"))->setAnimation(mMainAnimTrans1);
+	mScreenMain->search(MC8("Nsetp00"))->setAnimation(mMainAnimTrans1);
+	mScreenMain->search(MC8("Nsetp01"))->setAnimation(mMainAnimTrans1);
+	mScreenMain->search(MC8("Nsetp02"))->setAnimation(mMainAnimTrans1);
+	mScreenMain->search(MC8("Nsetp03"))->setAnimation(mMainAnimTrans1);
+	mScreenMain->search(MC8("Nsetp04"))->setAnimation(mMainAnimTrans1);
+	mScreenMain->search(MC8("Nsetp05"))->setAnimation(mMainAnimTrans1);
+	mScreenMain->search(MC8("Pset_p"))->setAnimation(mMainAnimTrans4);
+	mScreenMain->search(MC8("Ntitle"))->setAnimation(mMainAnimTrans2);
+	mScreenMain->search(MC8("Nicon"))->setAnimation(mMainAnimTrans3);
+
+	mScreenCharacter = new P2DScreen::Mgr_tuning;
+	mScreenCharacter->set("result_maile_big_icon.blo", 0x1040000, arc);
+	mCharacterAnimTrans = static_cast<J2DAnmTransform*>(J2DAnmLoaderDataBase::load(JKRGetResource("result_maile_big_icon.bck", arc)));
+	mScreenCharacter->search(MC8("NitemW"))->setAnimation(mCharacterAnimTrans);
+
+	mScreenStars = new P2DScreen::Mgr_tuning;
+	mScreenStars->set("result_mail_constellation.blo", 0x40000, arc);
+	mStarsAnimColor = static_cast<J2DAnmColor*>(J2DAnmLoaderDataBase::load(JKRGetResource("result_mail_constellation.bpk", arc)));
+	mScreenStars->setAnimation(mStarsAnimColor);
+
+	if (!getDispMember()->isID(OWNER_KH, MEMBER_DAY_END_RESULT)) {
+#if defined(VERSION_PAL)
+		JUT_PANICLINE(1912, "disp member err");
+#else
+		JUT_PANICLINE(1902, "disp member err");
+#endif
+	}
+	DispDayEndResult* dispResult = static_cast<DispDayEndResult*>(getDispMember());
+
+	mSaveMgr = ebi::Save::TMgr::createInstance();
+	mSaveMgr->doLoadMenuResource();
+	mSaveMgr->setControllers(getGamePad());
+
+	int day     = dispResult->mMail.mDayCount;
+	mCurrentDay = day;
+	mMaxDay     = day;
+	mDayCounter = og::Screen::setCallBack_CounterDay(mScreenMain, MC8("Pday2_1"), MC8("Pday2_2"), MC8("Pday1"), &mCurrentDay, 3, arc);
+	mDayCounter->setPuyoAnim(true);
+	setCallBackMessage(mScreenMain);
+
+	SceneDayEndResultMail* scene = static_cast<SceneDayEndResultMail*>(getOwner());
+	if (dispResult->mMail.mHeap) {
+		mIconArchive  = scene->mIconArchive;
+		mMailIconAnms = new MailIconAnm[20];
+		s8* data      = scene->mMailFlags.byteView;
+		for (int i = 0; i < 20; i++) {
+			s8 id = data[i];
+			if (id == -1)
+				break;
+			if (id == -2) {
+				mMailIconAnms[i].mIconCount = 0;
+				mMailIconAnms[i].mTIMG      = nullptr;
+			} else {
+				const char* path   = scene->mTableData[id]->getFileName();
+				char buf[PATH_MAX] = { 0 };
+				do {
+					sprintf(buf, "%s%003d.bti", path, mMailIconAnms[i].mIconCount++);
+				} while (JKRGetResource(buf, mIconArchive));
+
+				mMailIconAnms[i].mIconCount--;
+				if (mMailIconAnms[i].mIconCount) {
+					mMailIconAnms[i].mTIMG = new ResTIMG*[mMailIconAnms[i].mIconCount];
+				}
+
+				for (int j = 0; j < mMailIconAnms[i].mIconCount; j++) {
+					sprintf(buf, "%s%003d.bti", path, j);
+					mMailIconAnms[i].mTIMG[j] = JKRGetImageResource(buf, mIconArchive);
+				}
+			}
+		}
+		setTex(mScreenMain, MC8("Pset_p"), mMailIconAnms[0].mTIMG[0]);
+	}
+	MailTableData* data = scene->mTableData[scene->mMailFlags.byteView[0]];
+	mScreenMain->search(MC8("Ttext"))->setMsgID(data->mMessageID);
+	mFadePaneArrowL = khUtilFadePane::create(mScreenMain, MC8("Nyaji_l"), 32);
+	mFadePaneArrowR = khUtilFadePane::create(mScreenMain, MC8("Nyaji_r"), 32);
+
+	if (mMaxDay == 1) {
+		mFadePaneArrowL->fadeout();
+		mFadePaneArrowL->set_init_alpha(0);
+	}
+	mFadePaneArrowR->fadeout();
+	mFadePaneArrowR->set_init_alpha(0);
+	setInfAlpha(mScreenCharacter->search(MC8("NitemW")));
+	changeAlpha();
+	if (dispResult->mMail.mHasOpened) {
+		mStatus = MAILSTATUS_Normal;
+		mAlpha  = 255;
+		changeAlpha();
+		mNextBtnFadePane->fadein();
+		mCharacterIconScaleY = 1.0f;
+		mCharacterIconScaleX = 1.0f;
+	}
+}
+
+/**
+ * @note Address: 0x8040867C
+ * @note Size: 0x170
+ */
+bool ObjDayEndResultMail::doStart(const ::Screen::StartSceneArg* arg)
+{
+	const StartSceneArg* sarg = static_cast<const StartSceneArg*>(arg);
+
+	if (arg && sarg->_00) {
+		mFlags &= ~0x8;
+	} else {
+		mFlags |= 0x8;
+	}
+	setFadeinFrm();
+
+	setInfAlpha(mScreenStars->search('Nall'));
+	PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+
+	if (!getDispMember()->isID(OWNER_KH, MEMBER_DAY_END_RESULT)) {
+#if defined(VERSION_PAL)
+		JUT_PANICLINE(2032, "disp member err");
+#else
+		JUT_PANICLINE(2022, "disp member err");
+#endif
+	}
+	DispDayEndResult* dispResult = static_cast<DispDayEndResult*>(getDispMember());
+	if (!dispResult->mMail.mHasOpened) {
+		PSSystem::spSysIF->playSystemSe(PSSE_SY_MAIL_RECIEVE, 0);
+	}
+	return true;
+}
+
+/**
+ * @note Address: 0x804087EC
+ * @note Size: 0x1B8
+ */
+bool ObjDayEndResultMail::doUpdateFadein()
+{
+	mMainAnimTrans4->setFrame(mMainAnimTimer1);
+	updateCommon();
+	mMainAnimTrans1->setFrame(mMainAnimTimer1);
+	mScreenMain->search(MC8("NitemW"))->animationTransform();
+
+	mMainAnimTimer1 += msVal.mAnimRate;
+
+	mScreenStars->search('Nall')->setAlpha((mMainAnimTimer1 - mFadeinMinFrame) / (mFadeinMaxFrame - mFadeinMinFrame) * 255.0f);
+
+	bool result;
+	if (mMainAnimTimer1 >= mFadeinMaxFrame) {
+		result = true;
+	} else {
+		result = false;
+	}
+	mCharacterAnimTrans->setFrame(mMainAnimTimer1);
+	mScreenCharacter->search(MC8("NitemW"))->animationTransform();
+	mScreenMain->search(MC8("NitemW0"))->updateScale(mCharacterIconScaleX, mCharacterIconScaleY);
+	mScreenMain->update();
+	return result;
+}
+
+/**
+ * @note Address: 0x804089A4
+ * @note Size: 0x280
+ */
+bool ObjDayEndResultMail::doUpdate()
+{
+	if (!getDispMember()->isID(OWNER_KH, MEMBER_DAY_END_RESULT)) {
+#if defined(VERSION_PAL)
+		JUT_PANICLINE(2072, "disp member err");
+#else
+		JUT_PANICLINE(2062, "disp member err");
+#endif
+	}
+	DispDayEndResult* dispResult = static_cast<DispDayEndResult*>(getDispMember());
+
+	if (mFlags & 4) {
+		mSaveMgr->update();
+		if (mSaveMgr->isFinish()) {
+			switch (mSaveMgr->mEndState) {
+			case ebi::Save::TMgr::End_SelectNoSave:
+			case ebi::Save::TMgr::End_SaveDone:
+				dispResult->mMail.mExitStatus = ::Screen::Game2DMgr::CHECK2D_DayResult_SaveFinished;
+				break;
+
+			case ebi::Save::TMgr::End_Cancel:
+				mFlags &= ~4;
+				break;
+
+			case ebi::Save::TMgr::End_ReturnToFS:
+				dispResult->mMail.mExitStatus = ::Screen::Game2DMgr::CHECK2D_DayResult_ReturnToFileSelect;
+				break;
+			}
+		}
+	} else {
+		switch (mStatus) {
+		case MAILSTATUS_Normal:
+			statusNormal();
+			break;
+		case MAILSTATUS_FadeoutToLeft:
+			statusFadeoutToLeft();
+			break;
+		case MAILSTATUS_FadeinFromLeft:
+			statusFadeinFromLeft();
+			break;
+		case MAILSTATUS_FadeoutToRight:
+			statusFadeoutToRight();
+			break;
+		case MAILSTATUS_FadeinFromRight:
+			statusFadeinFromRight();
+			break;
+		case MAILSTATUS_WaitOpen:
+			statusWaitOpen();
+			break;
+		case MAILSTATUS_OpenW:
+			statusOpenW();
+			break;
+		case MAILSTATUS_OpenH:
+			statusOpenH();
+			break;
+		}
+		int texID = (PC_ORIG_TICK() ? ++mCharacterIconTimer : mCharacterIconTimer);
+		texID /= 4;
+		if (texID >= mMailIconAnms[mMaxDay - mCurrentDay].mIconCount) {
+			texID               = 0;
+			mCharacterIconTimer = 0;
+		}
+		setTex(mScreenMain, MC8("Pset_p"), mMailIconAnms[mMaxDay - mCurrentDay].mTIMG[texID]);
+		updateCommon();
+		mScreenMain->search(MC8("NitemW0"))->updateScale(mCharacterIconScaleX, mCharacterIconScaleY);
+	}
+
+	mScreenMain->update();
+	return false;
+}
+
+/**
+ * @note Address: 0x80408C24
+ * @note Size: 0x1B4
+ */
+bool ObjDayEndResultMail::doUpdateFadeout()
+{
+	updateCommon();
+	mMainAnimTrans1->setFrame(mMainAnimTimer1);
+	mScreenMain->search(MC8("NitemW"))->animationTransform();
+
+	mMainAnimTimer1 += msVal.mAnimRate;
+
+	mScreenStars->search('Nall')->setAlpha((1.0f - ((mMainAnimTimer1 - mFadeoutMinFrame) / (mFadeoutMaxFrame - mFadeoutMinFrame)))
+	                                       * 255.0f);
+
+	bool result;
+	if (mMainAnimTimer1 >= mFadeoutMaxFrame) {
+		result = true;
+	} else {
+		result = false;
+	}
+	mCharacterAnimTrans->setFrame(mMainAnimTimer1);
+	mScreenCharacter->search(MC8("NitemW"))->animationTransform();
+	mScreenMain->search(MC8("NitemW0"))->updateScale(mCharacterIconScaleX, mCharacterIconScaleY);
+	mScreenMain->update();
+	return result;
+}
+
+/**
+ * @note Address: 0x80408DD8
+ * @note Size: 0x214
+ */
+void ObjDayEndResultMail::statusNormal()
+{
+	if (getGamePad()->getButtonDown() & Controller::PRESS_A) {
+		mFlags |= 4;
+		mSaveMgr->start();
+	} else if (getGamePad()->getButtonDown() & Controller::PRESS_B) {
+		DispDayEndResultIncP* dispIncP = static_cast<DispDayEndResultIncP*>(getDispMember());
+		::Screen::SetSceneArg setArg(SCENE_DAY_END_RESULT_INC_P, dispIncP);
+		if (getOwner()->setScene(setArg)) {
+			SArgDayEndResultIncP argIncP(0);
+			getOwner()->startScene(&argIncP);
+			mFlags |= 0x10;
+		}
+	} else if (getGamePad()->getButton() & Controller::PRESS_L) {
+		if (mCurrentDay > 1 && (mMaxDay - (mCurrentDay - 1)) < 20) {
+			SceneDayEndResultMail* scene = static_cast<SceneDayEndResultMail*>(getOwner());
+			s8* flag                     = scene->mMailFlags.byteView;
+			if (mMaxDay - (mCurrentDay - 1) != 19 || (flag[mMaxDay - (mCurrentDay - 1)]) != -2) {
+				PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+				mFadePaneArrowR->fadein();
+				mStatus        = MAILSTATUS_FadeoutToRight;
+				mSideMoveTimer = 399.0f;
+			}
+		}
+	} else if (getGamePad()->getButton() & Controller::PRESS_R) {
+		if (mCurrentDay < mMaxDay) {
+			PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+			mFadePaneArrowL->fadein();
+			mStatus        = MAILSTATUS_FadeoutToLeft;
+			mSideMoveTimer = 349.0f;
+		}
+	}
+}
+
+/**
+ * @note Address: 0x80408FEC
+ * @note Size: 0xA8
+ */
+void ObjDayEndResultMail::statusFadeoutToLeft()
+{
+	mMainAnimTrans3->setFrame(mSideMoveTimer);
+	if (mSideMoveTimer > 344.0f) {
+		mSideMoveTimer -= PC_ORIG_DT_SCALE(); // FPS Mode: avance continuo
+	} else {
+		mCurrentDay++;
+		if (skipped()) {
+			mCurrentDay++;
+		}
+
+		if (mCurrentDay >= mMaxDay) {
+			mFadePaneArrowR->fadeout();
+		}
+		changeMail();
+		mStatus        = MAILSTATUS_FadeinFromLeft;
+		mSideMoveTimer = 404.0f;
+	}
+}
+
+/**
+ * @note Address: 0x80409094
+ * @note Size: 0x38
+ */
+void ObjDayEndResultMail::statusFadeinFromLeft()
+{
+	mMainAnimTrans3->setFrame(mSideMoveTimer);
+	if (mSideMoveTimer > 399.0f) {
+		mSideMoveTimer -= PC_ORIG_DT_SCALE(); // FPS Mode: avance continuo
+	} else {
+		mStatus = MAILSTATUS_Normal;
+	}
+}
+
+/**
+ * @note Address: 0x804090CC
+ * @note Size: 0xB8
+ */
+void ObjDayEndResultMail::statusFadeoutToRight()
+{
+	mMainAnimTrans3->setFrame(mSideMoveTimer);
+	if (mSideMoveTimer < 404.0f) {
+		mSideMoveTimer += PC_ORIG_DT_SCALE(); // FPS Mode: avance continuo
+	} else {
+		mCurrentDay--;
+		if (skipped()) {
+			mCurrentDay--;
+		}
+
+		if (mCurrentDay <= 1 || 20 <= (mMaxDay - (mCurrentDay - 1))) {
+			mFadePaneArrowL->fadeout();
+		}
+		changeMail();
+		mStatus        = MAILSTATUS_FadeinFromRight;
+		mSideMoveTimer = 344.0f;
+	}
+}
+
+/**
+ * @note Address: 0x80409184
+ * @note Size: 0x38
+ */
+void ObjDayEndResultMail::statusFadeinFromRight()
+{
+	mMainAnimTrans3->setFrame(mSideMoveTimer);
+	if (mSideMoveTimer < 349.0f) {
+		mSideMoveTimer += PC_ORIG_DT_SCALE(); // FPS Mode: avance continuo
+	} else {
+		mStatus = MAILSTATUS_Normal;
+	}
+}
+
+/**
+ * @note Address: 0x804091BC
+ * @note Size: 0x12C
+ */
+void ObjDayEndResultMail::statusWaitOpen()
+{
+	if (!getDispMember()->isID(OWNER_KH, MEMBER_DAY_END_RESULT)) {
+#if defined(VERSION_PAL)
+		JUT_PANICLINE(2299, "disp member err");
+#else
+		JUT_PANICLINE(2289, "disp member err");
+#endif
+	}
+	DispDayEndResult* dispResult = static_cast<DispDayEndResult*>(getDispMember());
+	dispResult->mMail.mHasOpened = true;
+
+	SceneDayEndResultMail* scene = static_cast<SceneDayEndResultMail*>(getOwner());
+
+	s8 soundType = scene->mTableData[dispResult->mMail.mTodayMailID]->mFlag[2];
+	int soundID;
+	switch (soundType) {
+	case 0:
+		soundID = PSSE_SY_MAIL_SHACHO;
+		break;
+	case 1:
+		soundID = PSSE_SY_MAIL_ORIMA_WIFE;
+		break;
+	case 2:
+		soundID = PSSE_SY_MAIL_ORIMA_SON;
+		break;
+	case 3:
+		soundID = PSSE_SY_MAIL_ORIMA_DAUGHTER;
+		break;
+	case 4:
+		soundID = PSSE_SY_MAIL_LOUIE_GRANMA;
+		break;
+	case 5:
+		soundID = PSSE_SY_MAIL_SHACHO_WIFE;
+		break;
+	default:
+		soundID = PSSE_SY_MAIL_SPAM;
+	}
+	PSSystem::spSysIF->playSystemSe(soundID, 0);
+	mStatus = MAILSTATUS_OpenW;
+}
+
+/**
+ * @note Address: 0x804092E8
+ * @note Size: 0xD4
+ */
+void ObjDayEndResultMail::statusOpenW()
+{
+	mOpenWTimer *= ObjDayEndResultBase::msVal._48;
+	mCharacterIconScaleY += (0.02f - mCharacterIconScaleY) * msVal._3C;
+	mOpenWTimer += (1.0f - mCharacterIconScaleX) * ObjDayEndResultBase::msVal._3C;
+	mCharacterIconScaleX += mOpenWTimer;
+
+	if (mOpenWTimer < 0.0f && (mCharacterIconScaleX - 1.0f) < 0.1f) {
+		mCharacterIconScaleX = 1.0f;
+		mOpenHTimer          = msVal._40;
+		mStatus              = MAILSTATUS_OpenH;
+	}
+
+	mAlpha += 32;
+	if (mAlpha > 255) {
+		mAlpha = 255;
+	}
+	changeAlpha();
+}
+
+/**
+ * @note Address: 0x804093BC
+ * @note Size: 0xCC
+ */
+void ObjDayEndResultMail::statusOpenH()
+{
+	mOpenHTimer *= ObjDayEndResultBase::msVal._48;
+	mOpenHTimer += (1.0f - mCharacterIconScaleY) * ObjDayEndResultBase::msVal._44;
+	mCharacterIconScaleY += mOpenHTimer;
+
+	if (mOpenHTimer < 0.0f && (mCharacterIconScaleY - 1.0f) < 0.1f) {
+		mCharacterIconScaleY = 1.0f;
+		mNextBtnFadePane->fadein();
+		mStatus = MAILSTATUS_Normal;
+	}
+
+	mAlpha += 32;
+	if (mAlpha > 255) {
+		mAlpha = 255;
+	}
+	changeAlpha();
+}
+
+/**
+ * @note Address: 0x80409488
+ * @note Size: 0x480
+ */
+void ObjDayEndResultMail::changeMail()
+{
+	SceneDayEndResultMail* scene = static_cast<SceneDayEndResultMail*>(getOwner());
+	mCharacterIconTimer          = 0;
+	setTex(mScreenMain, MC8("Pset_p"), mMailIconAnms[mMaxDay - mCurrentDay].mTIMG[0]);
+	u64 mesg = scene->mTableData[scene->mMailFlags.byteView[mMaxDay - mCurrentDay]]->mMessageID;
+	mScreenMain->search(MC8("Ttext"))->setMsgID(mesg);
+
+	if (mCurrentDay == mMaxDay) {
+		mMessage->setBounds(1.0f, 1.0f, 1.0f, 1.0f);
+		JUtility::TColor color(255, 255, 255, 255);
+		static_cast<J2DPicture*>(mScreenMain->search(MC8("Pset_p")))->setCornerColorRef(color);
+		static_cast<J2DPicture*>(mScreenMain->search(MC8("Picon_b")))->setCornerColorRef(color);
+	} else {
+		mMessage->setBounds(msVal._2C, msVal._30, msVal._34, msVal._38);
+		JUtility::TColor color(msVal._2C * 255.0f, msVal._30 * 255.0f, msVal._34 * 255.0f, msVal._38 * 255.0f);
+		static_cast<J2DPicture*>(mScreenMain->search(MC8("Pset_p")))->setCornerColorRef(color);
+		static_cast<J2DPicture*>(mScreenMain->search(MC8("Picon_b")))->setCornerColorRef(color);
+	}
+}
+
+/**
+ * @note Address: 0x80409908
+ * @note Size: 0x64
+ */
+void ObjDayEndResultMail::changeAlpha()
+{
+	mScreenCharacter->search(MC8("NitemW"))->setAlpha(255 - mAlpha);
+}
+
+/**
+ * @note Address: 0x8040996C
+ * @note Size: 0x1C4
+ */
+void ObjDayEndResultMail::doDraw(Graphics& gfx)
+{
+	ObjDayEndResultBase::doDraw(gfx);
+
+	gfx.mOrthoGraph.setPort();
+	mScreenMain->draw(gfx, gfx.mOrthoGraph);
+
+	gfx.mOrthoGraph.setPort();
+	mScreenCharacter->draw(gfx, gfx.mOrthoGraph);
+
+	if (mFlags & 4) {
+		gfx.mPerspGraph.setPort();
+		mScreenMain->search(MC8("Nsetpoin"));
+		mSaveMgr->draw();
+	}
+}
+
+/**
+ * @note Address: 0x80409B30
+ * @note Size: 0x288
+ */
+void ObjDayEndResultMail::updateCommon()
+{
+	ObjDayEndResultBase::updateCommon();
+	mScreenMain->animation();
+}
+
+inline u64 J2DPane::getTagName() const
+{
+	return mTag;
+}
+
+/**
+ * @note Address: 0x80409DB8
+ * @note Size: 0x3BC
+ */
+void ObjDayEndResultMail::setCallBackMessage(P2DScreen::Mgr* mgr, J2DPane* pane)
+{
+	if (pane->getTypeID() == 19 && pane->getUserInfo()) {
+		og::Screen::CallBack_Message* mesg = new og::Screen::CallBack_Message;
+		u64 tag                            = pane->getTagName();
+		mgr->addCallBack(tag, mesg);
+		static_cast<J2DTextBox*>(pane)->setString("");
+		if (tag == MC8("Ttext")) {
+			mMessage = mesg;
+		}
+	}
+
+	JSUTree<J2DPane>* tree = pane->getPaneTree();
+	JSUTreeIterator<J2DPane> iter(tree->getFirstChild());
+	while (iter != tree->getEndChild()) {
+		setCallBackMessage(mgr, iter.getObject());
+		++iter;
+	}
+}
+
+/**
+ * @note Address: 0x8040A174
+ * @note Size: 0x24
+ */
+void ObjDayEndResultMail::setCallBackMessage(P2DScreen::Mgr* mgr)
+{
+	setCallBackMessage(mgr, mgr);
+}
+
+/**
+ * @note Address: 0x8040A198
+ * @note Size: 0x5C
+ */
+bool ObjDayEndResultMail::skipped() const
+{
+	SceneDayEndResultMail* scene = static_cast<SceneDayEndResultMail*>(getOwner());
+	return scene->mMailFlags.byteView[mMaxDay - mCurrentDay] == -2;
+}
+
+/**
+ * @note Address: 0x8040A1F4
+ * @note Size: 0x68
+ */
+ObjDayEndResultTitl::ObjDayEndResultTitl()
+{
+	mScreenMain    = nullptr;
+	mMainAnimTrans = nullptr;
+	mMainAnimSRT   = nullptr;
+	mAnimTimer2    = 0.0f;
+	mAnimTimer1    = 0.0f;
+	mTimer         = 0;
+	mAlpha         = 0;
+}
+
+/**
+ * @note Address: 0x8040A25C
+ * @note Size: 0x1BC
+ */
+void ObjDayEndResultTitl::doCreate(JKRArchive* arc)
+{
+	mScreenMain = new P2DScreen::Mgr_tuning;
+	mScreenMain->set("result_title_new.blo", 0x1040000, arc);
+	mMainAnimTrans = static_cast<J2DAnmTransform*>(J2DAnmLoaderDataBase::load(JKRFileLoader::getGlbResource("result_title_new.bck", arc)));
+	mMainAnimSRT
+	    = static_cast<J2DAnmTextureSRTKey*>(J2DAnmLoaderDataBase::load(JKRFileLoader::getGlbResource("result_title_new.btk", arc)));
+
+	mScreenMain->setAnimation(mMainAnimTrans);
+	mScreenMain->setAnimation(mMainAnimSRT);
+	setInfAlpha(mScreenMain);
+
+	J2DBlend info(GX_BM_BLEND, GX_BL_INVDSTALPHA, GX_BL_DSTALPHA, GX_LO_CLEAR);
+	u64 tags[4] = { MC8("nuki_tex"), MC8("efect_00"), MC8("efect_01"), 0 };
+	mScreenMain->setBlendInfo(info, tags);
+}
+
+/**
+ * @note Address: 0x8040A418
+ * @note Size: 0x78
+ */
+bool ObjDayEndResultTitl::doUpdateFadein()
+{
+	updateCommon();
+	mScreenMain->setAlpha(mAlpha);
+
+	if (mAlpha > 255 - msVal.mAlphaChangeRate) {
+		mAlpha = 255;
+		return true;
+	} else {
+		mAlpha += msVal.mAlphaChangeRate;
+		return false;
+	}
+}
+
+/**
+ * @note Address: 0x8040A490
+ * @note Size: 0x64
+ */
+bool ObjDayEndResultTitl::doUpdate()
+{
+	updateCommon();
+	if ((PC_ORIG_TICK() ? ++mTimer : mTimer) >= msVal.mActiveMaxFrames || getGamePad()->getButtonDown() & Controller::PRESS_A) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
+/**
+ * @note Address: 0x8040A4F4
+ * @note Size: 0x74
+ */
+bool ObjDayEndResultTitl::doUpdateFadeout()
+{
+	updateCommon();
+	mScreenMain->setAlpha(mAlpha);
+
+	if (mAlpha < msVal.mAlphaChangeRate) {
+		mAlpha = 0;
+		return true;
+	} else {
+		mAlpha -= msVal.mAlphaChangeRate;
+		return false;
+	}
+	return false;
+}
+
+/**
+ * @note Address: 0x8040A568
+ * @note Size: 0xCC
+ */
+void ObjDayEndResultTitl::doUpdateFadeoutFinish()
+{
+	::Screen::SetSceneArg arg(SCENE_DAY_END_RESULT_ITEM, getDispMember());
+	SArgDayEndResultItem sarg(1);
+	if (getOwner()->setScene(arg)) {
+		getOwner()->startScene(&sarg);
+	}
+}
+
+/**
+ * @note Address: 0x8040A634
+ * @note Size: 0x144
+ */
+void ObjDayEndResultTitl::doDraw(Graphics& gfx)
+{
+	J2DOrthoGraph* graf = &gfx.mOrthoGraph;
+	graf->setPort();
+	graf->setColor(JUtility::TColor(255, 255, 255, 255));
+	GXSetColorUpdate(GX_FALSE);
+	GXSetAlphaUpdate(GX_TRUE);
+	f32 zero = 0.0f;
+	u16 y    = System::getRenderModeObj()->efbHeight;
+	u16 x    = System::getRenderModeObj()->fbWidth;
+	graf->fillBox(JGeometry::TBox2f(0.0f, 0.0f, zero + x, zero + y));
+	GXSetColorUpdate(GX_TRUE);
+	graf->setPort();
+	mScreenMain->draw(gfx, gfx.mOrthoGraph);
+}
+
+/**
+ * @note Address: 0x8040A778
+ * @note Size: 0xE0
+ */
+void ObjDayEndResultTitl::updateCommon()
+{
+	mMainAnimTrans->setFrame(mAnimTimer1);
+	mMainAnimSRT->setFrame(mAnimTimer2);
+	mScreenMain->animation();
+
+	mAnimTimer1 += PC_ORIG_DT_SCALE(); // FPS Mode: avance continuo
+	if (mAnimTimer1 >= mMainAnimTrans->getFrameMax()) {
+		mAnimTimer1 = 0.0f;
+	}
+
+	mAnimTimer2 += PC_ORIG_DT_SCALE(); // FPS Mode: avance continuo
+	if (mAnimTimer2 >= mMainAnimSRT->getFrameMax()) {
+		mAnimTimer2 = 0.0f;
+	}
+}
+
+/**
+ * @note Address: 0x8040A858
+ * @note Size: 0x48
+ */
+SceneDayEndResultMail::SceneDayEndResultMail()
+{
+	mTableData   = nullptr;
+	mIconArchive = nullptr;
+}
+
+/**
+ * @note Address: 0x8040A8A0
+ * @note Size: 0x58C
+ */
+void SceneDayEndResultMail::doUserCallBackFunc(Resource::MgrCommand* mgr)
+{
+	MailTableFile* file = nullptr;
+	LoadResource::Arg tableArg("/user/Koono/mail_table.szs");
+	LoadResource::Node* tableNode = gLoadResourceMgr->mountArchive(tableArg);
+	if (tableNode) {
+		file = static_cast<MailTableFile*>(JKRGetResource("mail_table.bin", tableNode->mArchive));
+	} else {
+#if defined(VERSION_PAL)
+		JUT_PANICLINE(2684, "failed");
+#else
+		JUT_PANICLINE(2674, "failed");
+#endif
+	}
+
+	int offset                 = 4;
+	BitFlag2<u32, 4> saveFlags = Game::playData->mMailSaveData.mPastLogs;
+
+#ifdef PIKI_PC_PORT
+	// mail_table.bin viene en big-endian (GC).
+	u32 entries = __builtin_bswap32((u32)file->mEntries);
+#else
+	u32 entries = file->mEntries;
+#endif
+	mTableData  = new MailTableData*[entries];
+	for (int i = 0; i < entries; i++) {
+		mTableData[i]   = new MailTableData(reinterpret_cast<MailTableDataEntry*>((u8*)file + offset), saveFlags, i);
+		int fileNameLen = 0;
+		for (u8* ptr = (u8*)mTableData[i]->mFileName; *ptr; ptr++, fileNameLen++) {
+			;
+		}
+		offset += (fileNameLen + 16) & ~0x3;
+	}
+
+	if (!getDispMember()->isID(OWNER_KH, MEMBER_DAY_END_RESULT)) {
+#if defined(VERSION_PAL)
+		JUT_PANICLINE(2700, "disp member err");
+#else
+		JUT_PANICLINE(2690, "disp member err");
+#endif
+	}
+
+	int mailID;
+	DispDayEndResultMail& dispResult = static_cast<DispDayEndResult*>(getDispMember())->mMail;
+	if (dispResult.mHeap && !dispResult.mBackupHeap) {
+		dispResult.mBackupHeap = makeSolidHeap(-1, dispResult.mHeap, false);
+		mailID                 = -1;
+		for (int i = 0; i < entries; i++) {
+			if (dispResult.mMailCategory != mTableData[i]->mFlag[0]) {
+				continue;
+			}
+
+			if (!mTableData[i]->mSaveFlag || (s8)mTableData[i]->mFlag[1] < 0) {
+				mailID = i;
+				break;
+			}
+		}
+
+#if defined(VERSION_PAL)
+		JUT_ASSERTLINE(2720, mailID != -1, "error");
+#else
+		JUT_ASSERTLINE(2710, mailID != -1, "error");
+#endif
+
+		for (int i = 0; i < entries; i++) {
+			if (dispResult.mMailCategory != mTableData[i]->mFlag[0]) {
+				continue;
+			}
+			if (!mTableData[i]->mSaveFlag || (s8)mTableData[i]->mFlag[1] < 0) {
+				if ((s8)mTableData[i]->mFlag[1] > (s8)mTableData[mailID]->mFlag[1]
+				    || ((s8)mTableData[i]->mFlag[1] == (s8)mTableData[mailID]->mFlag[1] && randFloat() < 0.5f)) {
+					mailID = i;
+					break;
+				}
+			}
+		}
+
+		dispResult.mTodayMailID = mailID;
+
+		saveFlags.setBit(dispResult.mTodayMailID);
+
+		Game::playData->mMailSaveData.mPastLogs = saveFlags;
+		Game::playData->mMailSaveData.set_history(dispResult.mTodayMailID);
+
+		mMailFlags = Game::playData->mMailSaveData.mHistory;
+
+		LoadResource::Arg iconArg("/user/Koono/mail_icon.szs");
+		iconArg.mHeap                = dispResult.mBackupHeap;
+		LoadResource::Node* iconNode = gLoadResourceMgr->mountArchive(iconArg);
+		if (iconNode) {
+			mIconArchive = static_cast<JKRMemArchive*>(iconNode->mArchive);
+		} else {
+#if defined(VERSION_PAL)
+			JUT_PANICLINE(2759, "no exist");
+#else
+			JUT_PANICLINE(2749, "no exist");
+#endif
+		}
+	} else {
+		mMailFlags = Game::playData->mMailSaveData.mHistory;
+	}
+
+	og::newScreen::makeLanguageResName(mName, "result_mail.szs");
+	LoadResource::Arg arg(mName);
+	LoadResource::Node* node = gLoadResourceMgr->mountArchive(arg);
+	if (node) {
+		registObj(new ObjDayEndResultMail, node->mArchive);
+	} else {
+#if defined(VERSION_PAL)
+		JUT_PANICLINE(2774, "failed");
+#else
+		JUT_PANICLINE(2764, "failed");
+#endif
+	}
+}
+
+ObjDayEndResultBase::StaticValues ObjDayEndResultBase::msVal;
+ObjDayEndResultTitl::StaticValues ObjDayEndResultTitl::msVal;
+
+} // namespace Screen
+} // namespace kh

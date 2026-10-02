@@ -1,0 +1,10 @@
+.gradle/
+build/
+app/build/
+app/.cxx/
+local.properties
+
+# Firma de release (fase 8): nunca en el repositorio
+keystore.properties
+*.keystore
+*.jks

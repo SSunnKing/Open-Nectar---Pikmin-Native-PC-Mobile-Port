@@ -1,0 +1,192 @@
+NECTAR — PORT NATIVO DE PIKMIN PARA LINUX (x86-64)
+
+Paquete autocontenido: incluye glibc, SDL2, PulseAudio, ALSA y códecs.
+No necesitas instalar dependencias para el grueso del programa.
+
+Requisitos del sistema:
+  - Linux x86-64 con kernel 3.2 o superior.
+  - Driver OpenGL con libglvnd (presente en cualquier distro desde 2017).
+  - Sesión X11 o Wayland.
+  - Tu copia legal de Pikmin USA Rev. 1 (GPIE01) o Pikmin Europa (GPIP01),
+    en ISO o GCM (RVZ/WIA/GCZ si tienes dolphin-tool de Dolphin en el PATH).
+
+Novedades de la 0.6: packs de texturas HD en formato Dolphin (DDS BC7/BC1/
+BC3 o PNG) desde Load/Textures/<GameID>/ junto a pikmin_settings.conf,
+activables en F1 > Gráficos > Texture packs (se aplican al reiniciar);
+geometría residente en GPU y caché de shaders compilados junto a las
+partidas, con lo que el juego va más ligero. El mismo código corre ahora
+en Android, en un paquete aparte (open_nectar_<versión>.apk).
+
+Desde la 0.5: modo Difícil además de Permadeath, reflejos en Olimar, la
+nave y las cebollas, imágenes RVZ/WIA/GCZ mediante el dolphin-tool de una
+instalación de Dolphin, idioma desde F1 en el disco europeo, menú F1 con
+el botón Select/View del mando y arreglo de las partidas PAL no
+reconocidas. Las partidas viven ahora en la carpeta del juego.
+
+No se incluye la ROM ni ningún recurso propiedad de Nintendo.
+La ROM no se copia ni se modifica durante la instalación.
+
+
+-------------------------------------------------------------------
+1. DESEMPAQUETADO
+-------------------------------------------------------------------
+
+Usa el .tar.gz. Un ZIP pierde el permiso de ejecución y el paquete
+fallaría antes de arrancar.
+
+  tar -xzf nectar-linux.tar.gz
+  cd nectar-linux
+
+Con tar.gz no hace falta ningún chmod. Si aun así lo has recibido en
+ZIP, restaura los permisos con:
+
+  chmod +x nectar nectar-launcher nectar.real nectar-launcher.real \
+           lib/ld-linux-x86-64.so.2
+
+
+-------------------------------------------------------------------
+2. INSTALAR LAS DEPENDENCIAS QUE FALTEN
+-------------------------------------------------------------------
+
+Solo hacen falta dos cosas del sistema: las bibliotecas OpenGL y, si
+quieres el instalador con ventanas, zenity.
+
+Debian, Ubuntu, Linux Mint, Pop!_OS:
+
+  sudo apt update
+  sudo apt install zenity libopengl0 libglvnd0 libgbm1 libdrm2 \
+                   libgl1-mesa-dri
+
+Arch, Manjaro, EndeavourOS:
+
+  sudo pacman -S --needed zenity libglvnd mesa
+
+Fedora, Nobara:
+
+  sudo dnf install zenity libglvnd libglvnd-glx libglvnd-egl \
+                   mesa-dri-drivers
+
+openSUSE:
+
+  sudo zypper install zenity libglvnd Mesa-dri
+
+Si usas KDE y prefieres kdialog, sustituye zenity por kdialog en
+cualquiera de los comandos anteriores. Sirve cualquiera de los dos.
+
+zenity es OPCIONAL: sin él, el instalador funciona igual en modo
+texto desde la terminal, o mediante los comandos de la sección 4.
+
+
+-------------------------------------------------------------------
+3. COMPROBAR QUE NO FALTA NADA
+-------------------------------------------------------------------
+
+Antes de instalar, verifica que el sistema resuelve todo:
+
+  ./lib/ld-linux-x86-64.so.2 --library-path ./lib --list ./nectar.real \
+    | grep -i "not found"
+
+Si no imprime nada, está todo correcto. Si aparece alguna biblioteca,
+instala el paquete de la sección 2 que la contenga.
+
+
+-------------------------------------------------------------------
+4. INSTALACIÓN SOLO POR COMANDOS (SIN VENTANAS)
+-------------------------------------------------------------------
+
+Es la vía más fiable y no necesita zenity, kdialog ni entorno gráfico
+para instalar. Indica la ROM y la carpeta destino:
+
+  ./nectar-launcher --rom /ruta/a/pikmin.iso --install-dir ~/Juegos/OpenNectar
+
+Eso extrae los recursos, instala los ejecutables y las bibliotecas en
+esa carpeta, y arranca el juego al terminar.
+
+Para instalar SIN que el juego se inicie después:
+
+  ./nectar-launcher --rom /ruta/a/pikmin.iso \
+                    --install-dir ~/Juegos/OpenNectar \
+                    --extract-only
+
+Para jugar más adelante, desde la carpeta de instalación:
+
+  cd ~/Juegos/OpenNectar
+  ./nectar-launcher
+
+Opciones disponibles:
+
+  --rom ARCHIVO      Imagen ISO o GCM de Pikmin USA Rev. 1.
+  --install-dir DIR  Carpeta donde instalar (se crea si no existe).
+  --extract-only     Instala y termina, sin lanzar el juego.
+  --skip-verify      Omite las comprobaciones de integridad (ver abajo).
+  --help             Muestra la ayuda.
+
+
+-------------------------------------------------------------------
+4b. COMPROBACIONES DE INTEGRIDAD
+-------------------------------------------------------------------
+
+El instalador comprueba dos cosas por su cuenta:
+
+1. Antes de extraer, verifica que la imagen coincide con un volcado
+   íntegro de Pikmin USA Rev. 1. Detecta copias dañadas al
+   transferirlas, que son la causa más habitual de que el juego
+   se instale bien pero luego falle con errores incomprensibles.
+
+2. Al extraer, relee cada archivo escrito y lo compara con lo que
+   salió de la imagen. Detecta discos y memorias USB defectuosos,
+   que producen archivos del tamaño correcto con contenido erróneo.
+
+Esto añade alrededor de un minuto a la instalación. Si prefieres
+omitirlo, usa --skip-verify; pero si el juego falla después, lo
+primero que se te pedirá es que instales sin ese flag.
+
+Nota: al pasar --install-dir el instalador no intenta abrir ninguna
+ventana, así que este método funciona por SSH y en máquinas sin
+zenity ni kdialog.
+
+
+-------------------------------------------------------------------
+5. INSTALACIÓN GRÁFICA
+-------------------------------------------------------------------
+
+Si has instalado zenity o kdialog:
+
+  ./nectar-launcher
+
+Te pedirá la ROM y la carpeta de destino con diálogos. Si haces doble
+clic sin terminal, se reabre automáticamente en una.
+
+Desde una terminal sin zenity ni kdialog, el mismo comando usa el
+instalador en modo texto, que pregunta por teclado.
+
+
+-------------------------------------------------------------------
+6. PROBLEMAS FRECUENTES DURANTE LA INSTALACIÓN
+-------------------------------------------------------------------
+
+"Se necesita Zenity o KDialog para el instalador gráfico."
+    Lo lanzaste con doble clic en un sistema sin esos programas y sin
+    terminal. Instala zenity (sección 2) o usa los comandos de la
+    sección 4.
+
+"El instalador acepta ISO/GCM. Convierte RVZ/WIA/GCZ a ISO..."
+    Tu imagen está comprimida. Conviértela:
+      dolphin-tool convert -f iso -i juego.rvz -o juego.iso
+
+"El directorio lib existente no pertenece a Nectar."
+    Elegiste como destino una carpeta que ya contenía un lib ajeno.
+    El instalador se niega a borrarlo por seguridad. Escoge una
+    carpeta vacía o nueva.
+
+"Permission denied" al ejecutar
+    Los permisos se perdieron al descomprimir. Aplica el chmod de la
+    sección 1, o vuelve a descomprimir desde el .tar.gz.
+
+La ROM es rechazada
+    Debe ser Pikmin USA Rev. 1 (GPIE01, revisión 1), sin comprimir.
+    Otras regiones o revisiones no son compatibles.
+
+Espacio insuficiente
+    Los recursos extraídos ocupan unos 650 MB, más 30 MB de
+    ejecutables y bibliotecas. Deja al menos 1 GB libre en el destino.

@@ -1,0 +1,283 @@
+#ifndef _GOALITEM_H
+#define _GOALITEM_H
+
+#include "CreatureProp.h"
+#include "GlobalGameOptions.h"
+#include "RopeCreature.h"
+#include "SAIEvent.h"
+#include "Shape.h"
+#include "SimpleAI.h"
+#include "SoundMgr.h"
+#include "Suckable.h"
+#include "types.h"
+#include "zen/CallBack.h"
+#include "zen/particle.h"
+
+
+#define IS_DEMO_HIDE_ONYON(flag, color) ((flag) & (1 << (color)))
+
+namespace zen {
+class particleGenerator;
+class particleMdl;
+} // namespace zen
+
+class ItemShapeObject;
+class Piki;
+class SimpleAI;
+class EffShpInst;
+struct Fulcrum;
+
+/**
+ * @brief TODO
+ *
+ * @note Size: 0x58.
+ */
+struct GoalItemProp : public CreatureProp {
+	inline GoalItemProp()
+	{
+		mCreatureProps.mFriction.mValue     = 0.1f;
+		mCreatureProps.mBounceFactor.mValue = 0.8f;
+	}
+
+	// _54     = VTBL
+	// _00-_58 = CreatureProp
+};
+
+/**
+ * @brief TODO
+ *
+ * @note Completely fabricated - not sure what this corresponds to in the DLL yet.
+ */
+struct GoalLeg {
+	Fulcrum* mFulcrum; // _00
+	RopeItem* mRope;   // _04
+};
+
+/**
+ * @brief TODO
+ *
+ * @note Size: 0x494.
+ */
+class GoalItem : public Suckable, public zen::CallBack2<zen::particleGenerator*, zen::particleMdl*> {
+public:
+	enum DemoHideFlags {
+		ShowAll         = 0,      ///< 0x0, don't hide any onyons/null flag.
+		HideBlueOnyon   = 1 << 0, ///< 0x1, hide blue onyon during cutscenes. Use `IS_DEMO_HIDE_ONYON` to check with PikiColor.
+		HideRedOnyon    = 1 << 1, ///< 0x2, hide red onyon during cutscenes. Use `IS_DEMO_HIDE_ONYON` to check with PikiColor.
+		HideYellowOnyon = 1 << 2, ///< 0x4, hide yellow onyon during cutscenes. Use `IS_DEMO_HIDE_ONYON` to check with PikiColor.
+	};
+
+	GoalItem(CreatureProp*, ItemShapeObject*, ItemShapeObject*, ItemShapeObject*, SimpleAI*);
+
+	virtual bool insideSafeArea(immut Vector3f&);                    // _10
+	virtual void startAI(int);                                       // _34
+	virtual f32 getiMass();                                          // _38
+	virtual f32 getSize();                                           // _3C
+	virtual bool needShadow();                                       // _90
+	virtual bool ignoreAtari(Creature*);                             // _98
+	virtual void update();                                           // _E0
+	virtual void refresh(Graphics&);                                 // _EC
+	virtual void playEffect(int);                                    // _12C
+	virtual Vector3f getGoalPos() { return mSRT.t; }                 // _15C
+	virtual f32 getGoalPosRadius() { return 75.0f; }                 // _160
+	virtual Vector3f getSuckPos();                                   // _164
+	virtual void suckMe(Pellet*);                                    // _168
+	virtual int getRouteIndex() { return mWaypointIdx; }             // _170
+	virtual bool invoke(zen::particleGenerator*, zen::particleMdl*); // _180
+	virtual bool isVisible() { return true; }                        // _74
+	virtual bool isAlive() { return true; }                          // _88
+
+	void setFlowEffect(bool);
+	void setSpotActive(bool);
+	void setFlightLight(bool);
+	void enterGoal(Piki*);
+	void exitPikis(int);
+	Piki* exitPiki();
+	void setColorType(int);
+	void startTakeoff();
+	void startLand();
+	void startConeShrink();
+	void startConeEmit();
+	void startBoot();
+	void emitPiki();
+
+	// unused/inlined:
+	void updateConeShrink();
+	void updateConeEmit();
+
+	static u8 demoHideFlag;
+
+	void disableColorAnim()
+	{
+		mColourAnimProgress     = 1.0f;
+		mColourAnimationEnabled = false;
+	}
+
+	void enableColorAnim()
+	{
+		mColourAnimProgress     = 0.0f;
+		mColourAnimationEnabled = true;
+	}
+
+	int getTotalStorePikis() { return mHeldPikis[Leaf] + mHeldPikis[Bud] + mHeldPikis[Flower]; }
+
+	// _00       = VTBL
+	// _00-_3C8  = Suckable
+	// _3C8-_3CC = zen::CallBack2
+	u8 _3CC;                              // _3CC
+	f32 mColourFadeRate;                  // _3D0
+	f32 mColourAnimProgress;              // _3D4
+	bool mColourAnimationEnabled;         // _3D8
+	bool mSpotEffectActive;               // _3D9
+	zen::particleGenerator* mSpotEfx;     // _3DC
+	zen::particleGenerator* mHaloEfx;     // _3E0
+	bool _3E4;                            // _3E4
+	zen::particleGenerator* mSuckEfx;     // _3E8
+	bool _3EC;                            // _3EC
+	int _3F0;                             // _3F0
+	bool _3F4;                            // _3F4
+	bool _3F5;                            // _3F5
+	bool mIsClosing;                      // _3F6
+	f32 mConeSizeTimer;                   // _3F8
+	Vector3f _3FC;                        // _3FC
+	bool mIsConeEmit;                     // _408
+	EffShpInst* mSpotModelEff;            // _40C
+	bool mIsDispensingPikis;              // _410
+	int mPikisToExit;                     // _414
+	f32 mPikiSpawnTimer;                  // _418
+	Vector3f _41C;                        // _41C
+	u16 mOnionColour;                     // _428
+	s16 mWaypointIdx;                     // _42A
+	u32 mHeldPikis[3];                    // _42C, contains counts for leaf/bud/flower
+	ItemShapeObject* _438[3];             // _438
+	// The GameCube layout stored three (fulcrum, rope) pairs in six adjacent
+	// 32-bit slots and accessed them by casting the first slot to GoalLeg*.  A
+	// native pointer is 64-bit, so that overlay ran into the SeContext below.
+	GoalLeg mLegs[3];
+	SeContext _45C;                       // _45C
+	ShapeDynMaterials mAnimatedMaterials; // _484
+};
+
+/**
+ * @brief TODO
+ */
+struct GoalAI : public SimpleAI {
+
+	/**
+	 * @brief TODO
+	 */
+	enum GoalStateID {
+		GOAL_Wait     = 0,
+		GOAL_Effect   = 1,
+		GOAL_Unk2     = 2,
+		GOAL_EmitPiki = 3,
+		GOAL_EmitWait = 4,
+		GOAL_BootInit = 5,
+		GOAL_BootEmit = 6,
+		GOAL_COUNT, // 7
+	};
+
+	/**
+	 * @brief TODO
+	 */
+	struct NotFinished : public SAICondition {
+
+		virtual bool satisfy(AICreature*); // _10
+
+		// _00     = VTBL
+		// _00-_14 = SAICondition
+		// TODO: members
+	};
+
+	/**
+	 * @brief TODO
+	 */
+	struct BootDone : public SAIAction {
+
+		virtual void act(AICreature*); // _08
+
+		// _00     = VTBL
+		// _00-_14 = SAIAction
+		// TODO: members
+	};
+
+	/**
+	 * @brief TODO
+	 */
+	struct BootEmit : public SAIAction {
+
+		virtual void act(AICreature*); // _08
+
+		// _00     = VTBL
+		// _00-_14 = SAIAction
+		// TODO: members
+	};
+
+	/**
+	 * @brief TODO
+	 */
+	struct BootInit : public SAIAction {
+
+		virtual void act(AICreature*); // _08
+
+		// _00     = VTBL
+		// _00-_14 = SAIAction
+		// TODO: members
+	};
+
+	/**
+	 * @brief TODO
+	 */
+	struct Effect : public SAIAction {
+
+		virtual void act(AICreature*); // _08
+
+		// _00     = VTBL
+		// _00-_14 = SAIAction
+		// TODO: members
+	};
+
+	/**
+	 * @brief TODO
+	 */
+	struct EmitPiki : public SAIAction {
+
+		virtual void act(AICreature*); // _08
+
+		// _00     = VTBL
+		// _00-_14 = SAIAction
+		// TODO: members
+	};
+
+	/**
+	 * @brief TODO
+	 */
+	struct EmitWait : public SAIAction {
+
+		virtual void act(AICreature*); // _08
+
+		// _00     = VTBL
+		// _00-_14 = SAIAction
+		// TODO: members
+	};
+
+	/**
+	 * @brief TODO
+	 */
+	struct WaitInit : public SAIAction {
+
+		virtual void act(AICreature*); // _08
+
+		// _00     = VTBL
+		// _00-_14 = SAIAction
+		// TODO: members
+	};
+
+	GoalAI();
+
+	// _00     = VTBL
+	// _00-_?? = SimpleAI
+	// TODO: members
+};
+
+#endif

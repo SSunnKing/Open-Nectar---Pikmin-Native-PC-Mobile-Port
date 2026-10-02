@@ -1,0 +1,73 @@
+#include "DebugLog.h"
+#include "FlowController.h"
+#include "Generator.h"
+#include "NaviMgr.h"
+#include "sysNew.h"
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(__LINE__) // Never used in the DLL
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F0
+ */
+DEFINE_PRINT("genNavi");
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000060
+ */
+GenObjectNavi::GenObjectNavi()
+    : GenObject('navi', "プレイヤー２を生む") // 'generate player 2'
+{
+}
+
+/**
+ * @todo: Documentation
+ */
+GenObject* makeObjectNavi()
+{
+	return new GenObjectNavi();
+}
+
+/**
+ * @todo: Documentation
+ */
+void GenObjectNavi::initialise()
+{
+	GenObjectFactory::factory->registerMember('navi', &makeObjectNavi, "generate NAVI (player2)", 'v0.0');
+}
+
+/**
+ * @todo: Documentation
+ */
+void GenObjectNavi::doRead(RandomAccessStream&)
+{
+}
+
+/**
+ * @todo: Documentation
+ */
+Creature* GenObjectNavi::birth(BirthInfo& info)
+{
+	Navi* newNavi = (Navi*)naviMgr->birth();
+
+	if (newNavi) {
+		PRINT("************ NAVI START POSITION ****************\n");
+		PRINT("\tpos(%f,%f,%f) angle(%f)\n", info.mPosition.x, info.mPosition.y, info.mPosition.z, (info.mRotation.y / PI) * 180.0f);
+		PRINT("*************************************************\n");
+
+		newNavi->init(info.mPosition);
+		newNavi->mSRT.r         = info.mRotation;
+		newNavi->mFaceDirection = newNavi->mSRT.r.y;
+		newNavi->reset();
+		newNavi->mGenerator    = info.mGenerator;
+		newNavi->mNaviCamera   = naviMgr->getNavi()->mNaviCamera;
+		flowCont.mIsVersusMode = TRUE;
+	}
+
+	return newNavi;
+}

@@ -1,0 +1,1307 @@
+#include "jaudio/syncstream.h"
+#include "Dolphin/dvd.h"
+#include "jaudio/aictrl.h"
+#include "jaudio/audiostruct.h"
+#include "jaudio/dspdriver.h"
+#include "jaudio/dspinterface.h"
+#include "jaudio/dummyprobe.h"
+#include "jaudio/dvdthread.h"
+#include "jaudio/interleave.h"
+#include "jaudio/playercall.h"
+#include "jaudio/rate.h"
+#include <stddef.h>
+
+#ifdef PIKI_PC_PORT
+#include "port/jaudio_host.h"
+
+#endif
+
+// fabricated, size 0x14.
+struct UNK_STRUCT {
+	DVDFileInfo* fileinfo; // _00
+	void* addr;            // _04
+	s32 length;            // _08
+	s32 offset;            // _0C
+	DVDCallback callback;  // _10
+};
+
+typedef struct UNK_STRUCT UNK_STRUCT;
+
+static StreamCtrl_ SC[1] ATTRIBUTE_ALIGN(32);
+static UNK_STRUCT copyinfo;
+
+static StreamCallback default_streamsync_call;
+
+static UNK_STRUCT* copy = &copyinfo;
+
+static s16 filter_table[16][2] = {
+	{ +0x0000, +0x0000 }, { +0x0800, +0x0000 }, { +0x0000, +0x0800 }, { +0x0400, +0x0400 }, { +0x1000, -0x0800 }, { +0x0E00, -0x0600 },
+	{ +0x0C00, -0x0400 }, { +0x1200, -0x0A00 }, { +0x1068, -0x08C8 }, { +0x12C0, -0x08FC }, { +0x1400, -0x0C00 }, { +0x0800, -0x0800 },
+	{ +0x0400, -0x0400 }, { -0x0400, +0x0400 }, { -0x0400, +0x0000 }, { -0x0800, +0x0000 },
+};
+
+s16 table4[16] = {
+	0, 1, 2, 3, 4, 5, 6, 7, -8, -7, -6, -5, -4, -3, -2, -1,
+};
+
+/**
+ * @TODO: Documentation
+ */
+void Stop_DirectPCM(dspch_* dspch)
+{
+#ifdef PIKI_PC_PORT
+	PikiJAudioClearDirectPCM(dspch->buffer_idx);
+#endif
+	DSP_PlayStop(dspch->buffer_idx);
+	DSP_FlushChannel(dspch->buffer_idx);
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Play_DirectPCM(dspch_* dspch, s16* baseAddr, u16 loopStart, u32 length)
+{
+	DSPchannel_* buff = GetDspHandle(dspch->buffer_idx); // r3
+
+#ifdef PIKI_PC_PORT
+	buff->baseAddress       = 0;
+#else
+	buff->baseAddress       = (u32)baseAddr;
+#endif
+	buff->isLooping         = FALSE;
+	buff->samplesSourceType = 0x21; // todo: find out what this is
+	buff->remainingLength   = length;
+#ifdef PIKI_PC_PORT
+	buff->loopAddress       = 0;
+	PikiJAudioSetDirectPCM(dspch->buffer_idx, baseAddr, loopStart);
+#else
+	buff->loopAddress       = (u32)baseAddr;
+#endif
+	buff->loopStartPosition = loopStart << 16;
+
+	DSP_SetMixerInitDelayMax(dspch->buffer_idx, 0);
+
+	for (u32 i = 0; i < 6; i++) {
+
+		if (i < 2) {
+			DSP_SetMixerInitVolume(dspch->buffer_idx, i, 0x7fff, 0);
+		} else {
+			DSP_SetMixerInitVolume(dspch->buffer_idx, i, 0, 0);
+		}
+
+		DSP_SetBusConnect(dspch->buffer_idx, i, i + 1);
+	}
+
+	DSP_SetPitch(dspch->buffer_idx, 0x800);
+	DSP_PlayStart(dspch->buffer_idx);
+	DSP_FlushChannel(dspch->buffer_idx);
+}
+
+/**
+ * @TODO: Documentation
+ * @note UNUSED Size: 000018
+ */
+void Get_DirectPCM_LoopRemain(DSPchannel_* channel)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @TODO: Documentation
+ */
+u16 Get_DirectPCM_Counter(DSPchannel_* channel)
+{
+	return channel->currentPosition >> 16;
+}
+
+/**
+ * @TODO: Documentation
+ */
+u32 Get_DirectPCM_Remain(DSPchannel_* channel)
+{
+	return channel->remainingLength;
+}
+
+/**
+ * @TODO: Documentation
+ */
+static BOOL __DVDReadAsyncRetry()
+{
+#ifdef PIKI_PC_PORT
+	/*
+	 * Keep the original one-request retry descriptor, but execute it
+	 * synchronously on the host. This preserves the native callback flow
+	 * without letting a callback outlive the StreamCtrl that owns it.
+	 */
+
+	const s32 result
+	    = DVDReadPrio(copy->fileinfo, copy->addr, copy->length, copy->offset, 1);
+
+	if (copy->callback != NULL) {
+		copy->callback(result, copy->fileinfo);
+	}
+	return result >= 0;
+#else
+	return DVDReadAsyncPrio(copy->fileinfo, copy->addr, copy->length, copy->offset, copy->callback, 1);
+#endif
+}
+
+/**
+ * @TODO: Documentation
+ */
+static BOOL DVDReadAsyncPrio2(DVDFileInfo* info, void* addr, s32 length, s32 offs, DVDCallback callback, s32 prio)
+{
+	(void)prio;
+	copy->fileinfo = info;
+	copy->addr     = addr;
+	copy->length   = length;
+	copy->offset   = offs;
+	copy->callback = callback;
+	return __DVDReadAsyncRetry();
+}
+
+static void LoadADPCM(StreamCtrl_*, int);
+
+/**
+ * @TODO: Documentation
+ */
+static void __LoadFin(s32 size, DVDFileInfo* fileinfo)
+{
+	StreamCtrl_* ctrl;
+
+	for (int i = 0; i < ARRAY_SIZE(SC); i++) {
+		DVDFileInfo* info = &SC[i].fileinfo;
+
+		if (fileinfo == info) {
+			ctrl = &SC[i];
+		}
+	}
+
+	ctrl->isLoadInProgress = FALSE;
+
+	u32 idx = ctrl->buffCtrlMain.currentBufIdx;
+
+	BufControl_* buff = &ctrl->buffCtrl[idx];
+
+#ifdef PIKI_PC_PORT
+	/*
+	 * A failed synchronous host read leaves the marker intact. Roll the
+	 * reservation back and let the normal stream pump retry later instead
+	 * of recursively invoking the callback until the stack overflows.
+	 */
+	if (size < 0) {
+		buff->state = 0;
+		ctrl->bytesRead -= ctrl->lastLoadSize;
+		ctrl->remainingBytes += ctrl->lastLoadSize;
+		return;
+	}
+#endif
+
+	if (ctrl->isFromFile == 1) {
+		u8* data = (u8*)buff->mLength;
+		DCInvalidateRange(data, 0x20);
+
+		// what in tarnation
+		if (data[0] == 0xff && data[1] == 0xad && data[2] == 0xbe && data[3] == 0xef && data[4] == 0xde && data[5] == 0xad
+		    && data[6] == 0xbe && data[7] == 0xef) {
+#ifndef PIKI_PC_PORT
+			__DVDReadAsyncRetry();
+			return;
+#endif
+		}
+	}
+
+	buff->state = 2;
+
+	ctrl->buffCtrlMain.currentBufIdx = (idx + 1) % ctrl->buffCtrlMain.maxBufCount;
+
+	if (ctrl->remainingBytes == 0) {
+		ctrl->isBufferingComplete = TRUE;
+		return;
+	}
+
+	if (ctrl->isFromFile == 0) {
+		return;
+	}
+
+	LoadADPCM(ctrl, 0);
+}
+
+/**
+ * @TODO: Documentation
+ */
+static void LoadADPCM(StreamCtrl_* ctrl, int r28)
+{
+	u32 size;
+	u32 idx           = ctrl->buffCtrlMain.currentBufIdx;
+	BufControl_* buff = &ctrl->buffCtrl[idx];
+	u32 oldsize;
+#if defined(VERSION_G98P01_PIKIDEMO) || defined(VERSION_DPIJ01_PIKIDEMO)
+#else
+	STACK_PAD_VAR(2);
+#endif
+
+	if (ctrl->isLoadInProgress) {
+		return;
+	}
+
+	if (buff->state) {
+		return;
+	}
+
+	oldsize = ctrl->remainingBytes;
+	!oldsize;
+	if (oldsize == 0) {
+		return;
+	}
+
+	size = ctrl->chunkSize;
+
+	if (oldsize < size) {
+		size = oldsize;
+	}
+
+	if (!ctrl->isFromFile) {
+		if (!Jac_CheckStreamRemain(size)) {
+			return;
+		}
+	}
+
+	buff->usedSize = 0;
+	buff->pos      = size;
+	buff->state    = 1;
+
+	if (r28) {
+		ctrl->buffCtrlMain.mLength = size;
+		ctrl->buffCtrlMain.pos     = 0;
+	}
+
+	u32 oldSize = ctrl->bytesRead;
+
+	ctrl->bytesRead += size;
+	ctrl->remainingBytes -= size;
+	ctrl->lastLoadSize = size;
+
+	switch (ctrl->isFromFile) {
+	case 0:
+	{
+		Jac_GetStreamData((u8*)buff->mLength, size);
+		__LoadFin(size, &ctrl->fileinfo);
+		break;
+	}
+	case 1:
+	{
+		u8* data = (u8*)buff->mLength;
+		data[0]  = 0xff;
+		data[1]  = 0xad;
+		data[2]  = 0xbe;
+		data[3]  = 0xef;
+		data[4]  = 0xde;
+		data[5]  = 0xad;
+		data[6]  = 0xbe;
+		data[7]  = 0xef;
+
+		DCStoreRange((void*)buff->mLength, size);
+
+		ctrl->isLoadInProgress = TRUE;
+
+		if (DVDReadAsyncPrio2(&ctrl->fileinfo, (void*)buff->mLength, size, oldSize, __LoadFin, 1) == FALSE) {
+#if defined(VERSION_G98P01_PIKIDEMO) || defined(VERSION_DPIJ01_PIKIDEMO)
+			Console_printf("Error:: DVDREAD Async is missed\n");
+#endif
+		}
+		break;
+	}
+	}
+}
+
+/**
+ * @TODO: Documentation
+ */
+static void BufContInit(BufControl_* ctrl, u8 a, u8 b, u8 c, u8 d, u32 e, u32 f, uintptr_t g)
+{
+	ctrl->state         = a;
+	ctrl->maxBufCount   = b;
+	ctrl->currentBufIdx = c;
+	ctrl->activeBufIdx  = d;
+	ctrl->usedSize      = e;
+	ctrl->pos           = f;
+	ctrl->mLength       = g;
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Init_StreamAudio(void)
+{
+	for (int i = 0; i < ARRAY_SIZE(SC); i++) {
+		SC[i].playbackState = 4;
+		SC[i].controllerId  = i;
+	}
+}
+
+/**
+ * @TODO: Documentation
+ * @note UNUSED Size: 00003C
+ */
+void Get_StreamAudio_Handle(void)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+static s32 StreamAudio_Callback(void*);
+
+/**
+ * @TODO: Documentation
+ */
+BOOL StreamAudio_Start(u32 ctrlID, int soundId, immut char* name, BOOL r6, BOOL r7, StreamHeader_* header)
+{
+	StreamCtrl_* ctrl = &SC[ctrlID];
+	int i;
+	STACK_PAD_VAR(2);
+
+	ctrl->controllerId  = ctrlID;
+	ctrl->streamId      = soundId;
+	ctrl->stopRequested = FALSE;
+	ctrl->isAtEnd       = FALSE;
+	ctrl->isPaused      = FALSE;
+
+	if (name) {
+		Jac_DVDOpen(name, &ctrl->fileinfo);
+		ctrl->isFromFile = 1;
+	} else {
+		ctrl->isFromFile = 0;
+	}
+
+	if (!header) {
+		if (!ctrl->isFromFile) {
+			return FALSE;
+		}
+
+		DVDReadPrio(&ctrl->fileinfo, &ctrl->data[0].header, 0x20, 0, 1);
+#ifdef PIKI_PC_PORT
+	
+		u8* rawHeader         = reinterpret_cast<u8*>(&ctrl->data[0].header);
+		ctrl->data[0].header.fileSize
+		    = (static_cast<u32>(rawHeader[0]) << 24) | (static_cast<u32>(rawHeader[1]) << 16)
+		    | (static_cast<u32>(rawHeader[2]) << 8) | rawHeader[3];
+		ctrl->data[0].header.sampleCount
+		    = (static_cast<u32>(rawHeader[4]) << 24) | (static_cast<u32>(rawHeader[5]) << 16)
+		    | (static_cast<u32>(rawHeader[6]) << 8) | rawHeader[7];
+		ctrl->data[0].header.sampleRate = (static_cast<u16>(rawHeader[8]) << 8) | rawHeader[9];
+		ctrl->data[0].header.audioFormat = (static_cast<u16>(rawHeader[10]) << 8) | rawHeader[11];
+		ctrl->data[0].header._0C          = (static_cast<u16>(rawHeader[12]) << 8) | rawHeader[13];
+		ctrl->data[0].header.frameRate    = (static_cast<u16>(rawHeader[14]) << 8) | rawHeader[15];
+		for (u32 word = 0; word < ARRAY_SIZE(ctrl->data[0].header._10); ++word) {
+			const u32 offset = 0x10 + word * 4;
+			ctrl->data[0].header._10[word]
+			    = (static_cast<u32>(rawHeader[offset]) << 24)
+			    | (static_cast<u32>(rawHeader[offset + 1]) << 16)
+			    | (static_cast<u32>(rawHeader[offset + 2]) << 8) | rawHeader[offset + 3];
+		}
+#endif
+		ctrl->header    = ctrl->data[0].header;
+		ctrl->bytesRead = 0x20;
+	} else {
+		ctrl->header    = *header;
+		ctrl->bytesRead = 0;
+	}
+
+	ctrl->remainingBytes      = ctrl->header.fileSize;
+	ctrl->totalSamples        = ctrl->header.sampleCount;
+	ctrl->samplesDecoded      = 0;
+	ctrl->samplesLoaded       = 0;
+	ctrl->isBufferingComplete = FALSE;
+	ctrl->frameCounter        = 0;
+	ctrl->playbackState       = 0;
+
+	for (i = 0; i < 6; i++) {
+		ctrl->buffCtrl[i].state   = 0;
+		ctrl->buffCtrl[i].mLength = reinterpret_cast<uintptr_t>(&ctrl->data[i]);
+	}
+
+	for (i = 0; i < 2; i++) {
+		ctrl->buffCtrlExtra[i].state = 0;
+	}
+
+	ctrl->loopSize = 0x1000;
+
+	BufContInit(&ctrl->buffCtrlMain, 1, 6, 0, 0, 0x2400, 0, 0);
+	BufContInit(&ctrl->buffCtrlMain2, 2, 2, 0, 0, 0x2000, 0, 0);
+	BufContInit(&ctrl->buffCtrlMain3, 2, 4, 0, 3, 0x400, 0, 0);
+
+	switch (ctrl->header.audioFormat) {
+	case AUDIOFRMT_16BIT_PCM:
+	{
+		ctrl->chunkSize = 0x2400;
+		break;
+	}
+	case AUDIOFRMT_8BIT_PCM:
+	{
+		ctrl->chunkSize = 0x1200;
+		break;
+	}
+	case AUDIOFRMT_ADPCM:
+	{
+		ctrl->chunkSize = 0x2400;
+		break;
+	}
+	case AUDIOFRMT_ADPCM4X:
+	{
+		ctrl->chunkSize = 0x2400;
+		break;
+	}
+	}
+
+	ctrl->autoStart        = r6;
+	ctrl->isLoadInProgress = FALSE;
+	LoadADPCM(ctrl, 1);
+
+	for (u32 i = 0; i < 2; i++) {
+		DeAllocDSPchannel(ctrl->dspch[i], reinterpret_cast<uintptr_t>(&ctrl->dspch[i]));
+
+		ctrl->dspch[i] = 0;
+	}
+
+	ctrl->pitchRatio = 1.0f;
+
+	ctrl->volume[0] = 0x3fff;
+	ctrl->volume[1] = 0x3fff;
+
+	ctrl->mixLevel[0] = 0x5fff;
+	ctrl->mixLevel[1] = 0x5fff;
+
+	ctrl->syncCallback = default_streamsync_call;
+
+	Jac_RegisterDspPlayerCallback(StreamAudio_Callback, ctrl);
+
+	return TRUE;
+}
+
+static void __PcmToLoop(StreamCtrl_*);
+static void __StreamChgVolume(StreamCtrl_* ctrl);
+static void __StreamChgPitch(StreamCtrl_* ctrl);
+static u32 __Decode(StreamCtrl_* ctrl);
+
+/**
+ * @TODO: Documentation
+ */
+static s32 StreamAudio_Callback(void* data)
+{
+	StreamCtrl_* ctrl       = (StreamCtrl_*)data;
+	int bufferUpdatePending = 0;
+	u32 channelIdx;
+	STACK_PAD_VAR(2);
+
+	if (!ctrl->dspch[0]) {
+		for (channelIdx = 0; channelIdx < 2; channelIdx++) {
+			ctrl->dspch[channelIdx]
+			    = AllocDSPchannel(0, reinterpret_cast<uintptr_t>(&ctrl->dspch[channelIdx]));
+#if defined(VERSION_GPIP01)
+			if (ctrl->dspch[channelIdx])
+#endif
+			{
+				ctrl->dspch[channelIdx]->prio = DSPCHAN_MAX_PRIO;
+			}
+		}
+	}
+
+	if (ctrl->frameCounter) {
+		DSPchannel_* buff = GetDspHandle(ctrl->dspch[0]->buffer_idx);
+		if (buff->done) {
+			ctrl->isAtEnd = TRUE;
+		}
+
+		if (ctrl->isAtEnd) {
+			if (ctrl->buffCtrl[ctrl->buffCtrlMain.currentBufIdx].state == 1) {
+				return 0;
+			}
+
+			for (channelIdx = 0; channelIdx < 2; channelIdx++) {
+				Stop_DirectPCM(ctrl->dspch[channelIdx]);
+				DeAllocDSPchannel(ctrl->dspch[channelIdx],
+				                 reinterpret_cast<uintptr_t>(&ctrl->dspch[channelIdx]));
+				ctrl->dspch[channelIdx] = NULL;
+			}
+
+			if (ctrl->syncCallback) {
+				ctrl->syncCallback(ctrl->controllerId, -1);
+			}
+
+			ctrl->playbackState = 4;
+			ctrl->streamId      = -1;
+
+			if (ctrl->isFromFile) {
+				DVDClose(&ctrl->fileinfo);
+			}
+			return -1;
+		}
+
+		int r4 = ctrl->samplesDecoded * ctrl->header.frameRate / ctrl->header.sampleRate;
+
+		if (ctrl->syncCallback) {
+			int callbackResult = ctrl->syncCallback(ctrl->controllerId, r4);
+			// TODO: Figure out what this -1 means
+			if (callbackResult == -1) {
+				ctrl->stopRequested = TRUE;
+			}
+		}
+
+		ctrl->frameCounter++;
+
+		u16 var_r3 = ctrl->loopSize - Get_DirectPCM_Counter(buff);
+		if (var_r3 == 0) {
+			var_r3 = ctrl->loopSize;
+		}
+		u32 var_r4                       = (ctrl->loopSize - var_r3) >> 10;
+		ctrl->buffCtrlMain3.activeBufIdx = var_r4;
+		if (ctrl->buffCtrlMain3.currentBufIdx != var_r4) {
+			bufferUpdatePending = 1;
+		} else {
+			bufferUpdatePending = 0;
+		}
+	}
+
+	if (ctrl->updateFlags) {
+		if (ctrl->updateFlags & 1) {
+			__StreamChgVolume(ctrl);
+		}
+
+		if (ctrl->updateFlags & 2) {
+			__StreamChgPitch(ctrl);
+		}
+
+		ctrl->updateFlags = 0;
+
+		DSP_FlushChannel(ctrl->dspch[0]->buffer_idx);
+		DSP_FlushChannel(ctrl->dspch[1]->buffer_idx);
+	}
+
+	if (ctrl->isPaused) {
+		DSP_SetPauseFlag(ctrl->dspch[0]->buffer_idx, 1);
+		DSP_SetPauseFlag(ctrl->dspch[1]->buffer_idx, 1);
+
+		DSP_FlushChannel(ctrl->dspch[0]->buffer_idx);
+		DSP_FlushChannel(ctrl->dspch[1]->buffer_idx);
+
+		ctrl->playbackState = 6;
+#if defined(VERSION_G98P01_PIKIDEMO) || defined(VERSION_DPIJ01_PIKIDEMO)
+		Console_printf("Pausing... DELAY2 \n");
+#endif
+		return 0;
+	}
+
+	if (ctrl->playbackState == 6) {
+		if (!ctrl->isPaused) {
+			ctrl->playbackState = 1;
+			DSP_SetPauseFlag(ctrl->dspch[0]->buffer_idx, 0);
+			DSP_SetPauseFlag(ctrl->dspch[1]->buffer_idx, 0);
+
+			DSP_FlushChannel(ctrl->dspch[0]->buffer_idx);
+			DSP_FlushChannel(ctrl->dspch[1]->buffer_idx);
+		} else {
+			return 0;
+		}
+	}
+
+	if (ctrl->isBufferingComplete == FALSE && ctrl->playbackState != 5 && ctrl->frameCounter != 0) {
+		DSPchannel_* buff = GetDspHandle(ctrl->dspch[0]->buffer_idx);
+		u32 size          = ctrl->totalSamples - Get_DirectPCM_Remain(buff);
+
+		ctrl->bufferMargin = ctrl->samplesLoaded - size;
+		if (ctrl->bufferMargin < 0x400) {
+			DSP_SetPauseFlag(ctrl->dspch[0]->buffer_idx, 1);
+			DSP_SetPauseFlag(ctrl->dspch[1]->buffer_idx, 1);
+
+			DSP_FlushChannel(ctrl->dspch[0]->buffer_idx);
+			DSP_FlushChannel(ctrl->dspch[1]->buffer_idx);
+
+			ctrl->playbackState = 5;
+		}
+#if defined(VERSION_G98P01_PIKIDEMO) || defined(VERSION_DPIJ01_PIKIDEMO)
+		else if (ctrl->samplesLoaded - size > 0x1000) {
+			Console_printf("Error:: Over Decode %d\n", ctrl->samplesLoaded - size);
+		}
+#endif
+	}
+
+	if (ctrl->playbackState == 5) {
+		DSPchannel_* buff = GetDspHandle(ctrl->dspch[0]->buffer_idx);
+		u32 size          = ctrl->totalSamples - Get_DirectPCM_Remain(buff);
+
+		if (ctrl->samplesLoaded - size > 0xc00 || ctrl->isBufferingComplete == TRUE) {
+			DSP_SetPauseFlag(ctrl->dspch[0]->buffer_idx, 0);
+			DSP_SetPauseFlag(ctrl->dspch[1]->buffer_idx, 0);
+
+			DSP_FlushChannel(ctrl->dspch[0]->buffer_idx);
+			DSP_FlushChannel(ctrl->dspch[1]->buffer_idx);
+
+			ctrl->playbackState = 1;
+		} else {
+			DSP_SetPauseFlag(ctrl->dspch[0]->buffer_idx, 1);
+			DSP_SetPauseFlag(ctrl->dspch[1]->buffer_idx, 1);
+
+			DSP_FlushChannel(ctrl->dspch[0]->buffer_idx);
+			DSP_FlushChannel(ctrl->dspch[1]->buffer_idx);
+		}
+	}
+
+	if (ctrl->buffCtrl[ctrl->buffCtrlMain.activeBufIdx].state == 2 && ctrl->buffCtrlExtra[ctrl->buffCtrlMain2.currentBufIdx].state == 0) {
+		u32 size = __Decode(ctrl);
+
+		ctrl->buffCtrl[ctrl->buffCtrlMain.activeBufIdx].state = 0;
+
+		ctrl->buffCtrlExtra[ctrl->buffCtrlMain2.currentBufIdx].state    = 2;
+		ctrl->buffCtrlExtra[ctrl->buffCtrlMain2.currentBufIdx].usedSize = 0;
+		ctrl->buffCtrlExtra[ctrl->buffCtrlMain2.currentBufIdx].pos      = size;
+
+		ctrl->buffCtrlMain.activeBufIdx = (ctrl->buffCtrlMain.activeBufIdx + 1) % 6;
+
+		ctrl->buffCtrlMain2.currentBufIdx = (ctrl->buffCtrlMain2.currentBufIdx + 1) % 2;
+		ctrl->buffCtrlMain2.mLength += size;
+	}
+
+	if (bufferUpdatePending == 1 || ctrl->frameCounter == 0) {
+		if (ctrl->buffCtrlMain3.currentBufIdx != ctrl->buffCtrlMain3.activeBufIdx) {
+			if (ctrl->buffCtrlExtra[ctrl->buffCtrlMain2.activeBufIdx].state == 2
+			    && ctrl->buffCtrlMain2.mLength >= ctrl->buffCtrlMain3.usedSize) {
+				__PcmToLoop(ctrl);
+				ctrl->buffCtrlMain3.currentBufIdx = (ctrl->buffCtrlMain3.currentBufIdx + 1) % 4;
+				ctrl->buffCtrlMain2.mLength -= ctrl->buffCtrlMain3.usedSize;
+			}
+		} else if (ctrl->frameCounter == 0) {
+			if (ctrl->autoStart == TRUE) {
+				if (ctrl->syncCallback != NULL) {
+					int callbackResult = ctrl->syncCallback(ctrl->controllerId, 0);
+					if (callbackResult == -1) {
+						ctrl->stopRequested = TRUE;
+					}
+					if (callbackResult == 1) {
+						ctrl->autoStart = FALSE;
+					}
+				}
+				ctrl->playbackState = 2;
+				if (!ctrl->stopRequested) {
+					return 0;
+				}
+			} else {
+				ctrl->playbackState = 1;
+				ctrl->frameCounter++;
+#if defined(VERSION_GPIJ01_01) || defined(VERSION_G98P01_PIKIDEMO) || defined(VERSION_DPIJ01_PIKIDEMO)
+#else
+				u32 mode = Jac_GetOutputMode();
+#endif
+				for (channelIdx = 0; channelIdx < 2; channelIdx++) {
+					u16 pitch = (4096.0f * ctrl->header.sampleRate * ctrl->pitchRatio) / JAC_DAC_RATE;
+#if defined(VERSION_GPIP01)
+					u16* REF_pitch = &pitch;
+					STACK_PAD_VAR(5);
+#endif
+					Play_DirectPCM(ctrl->dspch[channelIdx], ctrl->loopBufs[channelIdx], ctrl->loopSize, ctrl->totalSamples);
+#if defined(VERSION_GPIJ01_01) || defined(VERSION_G98P01_PIKIDEMO) || defined(VERSION_DPIJ01_PIKIDEMO)
+					DSP_SetMixerInitVolume(ctrl->dspch[channelIdx]->buffer_idx, channelIdx, ctrl->volume[channelIdx], 0);
+					DSP_SetMixerInitVolume(ctrl->dspch[channelIdx]->buffer_idx, 1 - channelIdx, 0, 0);
+#else
+					switch (mode) {
+					case 0:
+					{
+						DSP_SetMixerInitVolume(ctrl->dspch[channelIdx]->buffer_idx, channelIdx, ctrl->volume[channelIdx] * 0xBFFD / 0x10000,
+						                       0);
+						DSP_SetMixerInitVolume(ctrl->dspch[channelIdx]->buffer_idx, 1 - channelIdx,
+						                       ctrl->volume[channelIdx] * 0xBFFD / 0x10000, 0);
+						break;
+					}
+					default:
+					{
+						DSP_SetMixerInitVolume(ctrl->dspch[channelIdx]->buffer_idx, channelIdx, ctrl->volume[channelIdx], 0);
+						DSP_SetMixerInitVolume(ctrl->dspch[channelIdx]->buffer_idx, 1 - channelIdx, 0, 0);
+						break;
+					}
+					}
+#endif
+					DSP_SetPitch(ctrl->dspch[channelIdx]->buffer_idx, pitch);
+					DSP_FlushChannel(ctrl->dspch[channelIdx]->buffer_idx);
+				}
+			}
+		}
+	}
+
+	if (ctrl->playbackState == 3) {
+		return 0;
+	}
+
+	if (ctrl->stopRequested) {
+		if (ctrl->frameCounter == 0) {
+			if (ctrl->buffCtrl[ctrl->buffCtrlMain.currentBufIdx].state == 1) {
+				return 0;
+			}
+			ctrl->stopRequested = FALSE;
+			if (ctrl->syncCallback != NULL) {
+				ctrl->syncCallback(ctrl->controllerId, -1);
+			}
+			ctrl->playbackState = 4;
+			ctrl->streamId      = -1;
+			return -1;
+		}
+		ctrl->stopRequested = FALSE;
+		ctrl->playbackState = 3;
+		for (channelIdx = 0; channelIdx < 2; channelIdx++) {
+			ForceStopDSPchannel(ctrl->dspch[channelIdx]);
+		}
+	} else {
+		LoadADPCM(ctrl, 0);
+	}
+	return 0;
+}
+
+/**
+ * @TODO: Documentation
+ */
+void RegisterStreamCallback(StreamCallback callback)
+{
+	default_streamsync_call = callback;
+}
+
+/**
+ * @TODO: Documentation
+ */
+static u32 __DecodePCM(StreamCtrl_* ctrl)
+{
+#if defined(VERSION_GPIP01)
+	u32 activeBufIdx;
+	s32 usedSize;
+	s16* rightSamples;
+	u32 sampleCount;
+	s16* leftSamples;
+	s16* sourceSamples;
+	u8* sourceBytes;
+	size_t i;
+
+	activeBufIdx = ctrl->buffCtrlMain.activeBufIdx;
+	leftSamples  = ctrl->leftChanBufs[ctrl->buffCtrlMain2.currentBufIdx];
+	sourceBytes  = ctrl->data[activeBufIdx].data;
+	usedSize     = ctrl->buffCtrl[activeBufIdx].usedSize;
+	sampleCount  = ((s32)ctrl->buffCtrl[activeBufIdx].pos - usedSize) / 4;
+	sourceBytes += usedSize;
+	rightSamples  = ctrl->rightChanBufs[ctrl->buffCtrlMain2.currentBufIdx];
+	sourceSamples = (s16*)sourceBytes;
+#else
+	u32 usedSize;
+	s16* sourceSamples;
+	s16* rightSamples;
+	u32 sampleCount;
+	s16* leftSamples;
+	size_t i;
+
+	usedSize    = ctrl->buffCtrl[ctrl->buffCtrlMain.activeBufIdx].usedSize;
+	sampleCount = (ctrl->buffCtrl[ctrl->buffCtrlMain.activeBufIdx].pos - usedSize) / 4;
+
+	leftSamples   = ctrl->leftChanBufs[ctrl->buffCtrlMain2.currentBufIdx];
+	rightSamples  = ctrl->rightChanBufs[ctrl->buffCtrlMain2.currentBufIdx];
+	sourceSamples = (s16*)&ctrl->data[ctrl->buffCtrlMain.activeBufIdx].data[usedSize];
+#endif
+	for (i = 0; i < sampleCount; i++) {
+		*leftSamples++  = sourceSamples[0];
+		*rightSamples++ = sourceSamples[1];
+		sourceSamples += 2;
+	}
+	ctrl->samplesDecoded += sampleCount;
+	return sampleCount;
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Jac_Decode_ADPCM(u8* src, s16* dst1, s16* dst2, u32 count, u8 arg4, s16* state)
+{
+	s16 sa = state[0];
+	s16 sb = state[1];
+	s16 sc = state[2];
+	s16 sd = state[3];
+	int output;
+	s16 coef1, coef2;
+	u8 header;
+	u8 scale_factor;
+	int i, j;
+	u8 byte, samp1, samp2;
+	for (i = 0; i < count; i++) {
+		header       = *src++;
+		scale_factor = (header >> 4) & 0xF;
+		coef1        = filter_table[header & 0xF][0];
+		coef2        = filter_table[header & 0xF][1];
+		for (j = 0; j < 8; j++) {
+			byte  = *src++;
+			samp1 = byte >> 4;
+			samp2 = byte & 0xF;
+
+			output  = (table4[samp1] << scale_factor) + ((coef1 * sa + coef2 * sb) >> 11);
+			*dst1++ = output;
+			sb      = output;
+
+			output  = (table4[samp2] << scale_factor) + ((coef1 * sb + coef2 * sa) >> 11);
+			*dst1++ = output;
+			sa      = output;
+		}
+		if (arg4) {
+			header       = *src++;
+			scale_factor = (header >> 4) & 0xF;
+			coef1        = filter_table[header & 0xF][0];
+			coef2        = filter_table[header & 0xF][1];
+			for (j = 0; j < 8; j++) {
+				byte  = *src++;
+				samp1 = byte >> 4;
+				samp2 = byte & 0xF;
+
+				output  = (table4[samp1] << scale_factor) + ((coef1 * sc + coef2 * sd) >> 11);
+				*dst2++ = output;
+				sd      = output;
+
+				output  = (table4[samp2] << scale_factor) + ((coef1 * sd + coef2 * sc) >> 11);
+				*dst2++ = output;
+				sc      = output;
+			}
+		}
+	}
+	state[0] = sa;
+	state[1] = sb;
+	state[2] = sc;
+	state[3] = sd;
+}
+
+/**
+ * @TODO: Documentation
+ */
+static u32 __DecodeADPCM(StreamCtrl_* ctrl)
+{
+	STACK_PAD_VAR(4);
+	u32 a = ctrl->buffCtrlMain2.currentBufIdx;
+	u32 b = ctrl->buffCtrlMain.activeBufIdx;
+
+	if (ctrl->frameCounter == 0 && b == 0) {
+		for (int i = 0; i < 4; i++) {
+			ctrl->leftAdpcmState[i] = 0;
+		}
+	}
+
+	s16* dst1 = ctrl->leftChanBufs[a];
+	s16* dst2 = ctrl->rightChanBufs[a];
+
+	u8* src = ctrl->data[b].data;
+	src += ctrl->buffCtrl[b].usedSize;
+
+	u32 count = (ctrl->buffCtrl[b].pos - ctrl->buffCtrl[b].usedSize) / 18;
+
+	Jac_Decode_ADPCM(src, dst1, dst2, count, 1, ctrl->leftAdpcmState);
+
+	u32 size = (count * 16) & 0x7FFFFFFF;
+	ctrl->samplesDecoded += size;
+	return size;
+}
+
+/**
+ * @TODO: Documentation
+ */
+static s16 Clamp16(s32 a)
+{
+	if (a >= 0x7fff) {
+		a = 0x7fff;
+	} else if (a < -0x8000) {
+		a = -0x8000;
+	}
+	return a;
+}
+
+/**
+ * @TODO: Documentation
+ */
+
+static u32 __DecodeADPCM4X(StreamCtrl_* ctrl)
+{
+	STACK_PAD_VAR(6);
+	u32 a = ctrl->buffCtrlMain2.currentBufIdx;
+	u32 b = ctrl->buffCtrlMain.activeBufIdx;
+	u32 count;
+	u32 i;
+	u32 outpos = 0;
+
+	if (ctrl->frameCounter == 0 && b == 0) {
+		for (u32 i = 0; i < 4; i++) {
+			ctrl->leftAdpcmState[i] = 0;
+		}
+		// Not clearing ctrl->_21A20 too?
+	}
+
+	s16* dst1 = ctrl->leftChanBufs[a];
+	s16* dst2 = ctrl->rightChanBufs[a];
+
+	u8* src = ctrl->data[b].data;
+	src += ctrl->buffCtrl[b].usedSize;
+
+	u32 j;
+
+	u16 mixLevel0 = ctrl->mixLevel[0];
+	u16 mixLevel1 = ctrl->mixLevel[1];
+
+	count = (ctrl->buffCtrl[b].pos - ctrl->buffCtrl[b].usedSize) / 36;
+
+	s16 sp6C[16];
+	s16 sp4C[16];
+	s16 sp2C[16];
+	s16 sp0C[16];
+
+	for (i = 0; i < count; i++) {
+		Jac_Decode_ADPCM(src, sp6C, sp4C, 1, 1, ctrl->leftAdpcmState);
+		src += 18;
+		Jac_Decode_ADPCM(src, sp2C, sp0C, 1, 1, ctrl->rightAdpcmState);
+		src += 18;
+		for (j = 0; j < 16; j++) {
+			dst1[outpos] = Clamp16((sp6C[j] * mixLevel0 >> 15) + (sp2C[j] * mixLevel1 >> 15));
+			dst2[outpos] = Clamp16((sp4C[j] * mixLevel0 >> 15) + (sp0C[j] * mixLevel1 >> 15));
+			outpos++;
+		}
+	}
+
+	u32 size = (count << 4) & 0x7FFFFFFF;
+	ctrl->samplesDecoded += size;
+	return size;
+}
+
+/**
+ * @TODO: Documentation
+ */
+static u32 __Decode(StreamCtrl_* ctrl)
+{
+	u32 size;
+	switch (ctrl->header.audioFormat) {
+#if defined(VERSION_GPIP01)
+	case AUDIOFRMT_16BIT_PCM:
+	{
+		size = __DecodePCM(ctrl);
+		break;
+	}
+#endif
+	case AUDIOFRMT_ADPCM:
+	{
+		size = __DecodeADPCM(ctrl);
+		break;
+	}
+	case AUDIOFRMT_ADPCM4X:
+	{
+		size = __DecodeADPCM4X(ctrl);
+		break;
+	}
+	}
+	return size;
+}
+
+/**
+ * @TODO: Documentation
+ */
+static void __PcmToLoop(StreamCtrl_* ctrl)
+{
+	int count  = ctrl->buffCtrlMain3.usedSize;
+	s16* dst1  = &ctrl->loopBufs[0][ctrl->buffCtrlMain3.currentBufIdx * 0x400];
+	s16* dst2  = &ctrl->loopBufs[1][ctrl->buffCtrlMain3.currentBufIdx * 0x400];
+	s16* data1 = dst1;
+	s16* data2 = dst2;
+
+	while (count > 0) {
+		int x   = ctrl->buffCtrlMain2.activeBufIdx;
+		u32 pos = ctrl->buffCtrlMain2.pos + ctrl->buffCtrlExtra[x].usedSize;
+		u32 end = ctrl->buffCtrlExtra[x].pos;
+		while (pos < end && count > 0) {
+			*dst1++ = ctrl->leftChanBufs[x][pos];
+			*dst2++ = ctrl->rightChanBufs[x][pos];
+			pos++;
+			count--;
+		}
+
+		if (pos == end) {
+			ctrl->buffCtrlExtra[x].state     = 0;
+			ctrl->buffCtrlMain2.activeBufIdx = (x + 1) & 1;
+			ctrl->buffCtrlMain2.pos          = 0;
+		} else {
+			ctrl->buffCtrlMain2.pos = pos - ctrl->buffCtrlExtra[x].usedSize;
+		}
+	}
+
+	DCStoreRangeNoSync(data1, ctrl->buffCtrlMain3.usedSize << 1);
+	DCStoreRangeNoSync(data2, ctrl->buffCtrlMain3.usedSize << 1);
+	ctrl->samplesLoaded += ctrl->buffCtrlMain3.usedSize;
+}
+
+/**
+ * @TODO: Documentation
+ */
+BOOL StreamSyncCheckReady(u32 ctrlID)
+{
+	StreamCtrl_* ctrl = &SC[ctrlID];
+
+	if (ctrl->playbackState == 2) {
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/**
+ * @TODO: Documentation
+ */
+BOOL StreamSyncCheckReadyID(u32 ctrlID, u32 r4)
+{
+	StreamCtrl_* ctrl = &SC[ctrlID];
+
+	if (ctrl->streamId == r4) {
+		// why
+		switch (ctrl->playbackState) {
+		case 0:
+		case 2:
+		{
+			return TRUE;
+		}
+		}
+	}
+	return FALSE;
+}
+
+/**
+ * @TODO: Documentation
+ */
+BOOL StreamSyncCheckBusy(u32 ctrlID, u32 unk)
+{
+	StreamCtrl_* ctrl = &SC[ctrlID];
+
+	if (ctrl->playbackState == 4) {
+		return FALSE;
+	}
+	if (ctrl->streamId == unk) {
+		if (ctrl->playbackState == 2) {
+			return FALSE;
+		}
+	}
+	return TRUE;
+}
+
+/**
+ * @TODO: Documentation
+ */
+int StreamSyncPlayAudio(f32 f1, u32 ctrlID, int volumeL, int volumeR)
+{
+	StreamCtrl_* ctrl = &SC[ctrlID];
+
+	if (ctrl->playbackState == 2) {
+		if (!ctrl->dspch[0]) {
+			return FALSE;
+		}
+
+		ctrl->pitchRatio = f1;
+		ctrl->volume[0]  = volumeL;
+		ctrl->volume[1]  = volumeR;
+		ctrl->autoStart  = FALSE;
+		return TRUE;
+	}
+
+	return FALSE;
+}
+
+/**
+ * @TODO: Documentation
+ */
+BOOL StreamSyncStopAudio(u32 ctrlID)
+{
+	StreamCtrl_* ctrl = &SC[ctrlID];
+
+	// perhaps some state?
+	if (ctrl->playbackState == 4) {
+		return FALSE;
+	} else if (ctrl->playbackState == 3) {
+		return FALSE;
+	}
+
+	ctrl->stopRequested = TRUE;
+
+	return TRUE;
+}
+
+/**
+ * @TODO: Documentation
+ */
+static void __StreamChgPitch(StreamCtrl_* ctrl)
+{
+	if (ctrl->dspch[0]) {
+
+		u16 pitch = ctrl->header.sampleRate * 4096.0f * ctrl->pitchRatio / JAC_DAC_RATE;
+
+		for (u32 i = 0; i < 2; i++) {
+			DSP_SetPitch(ctrl->dspch[i]->buffer_idx, pitch);
+		}
+	}
+}
+
+/**
+ * @TODO: Documentation
+ * @note UNUSED Size: 000030
+ */
+void StreamChgPitch(void)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @TODO: Documentation
+ */
+static void __StreamChgVolume(StreamCtrl_* ctrl)
+{
+#if defined(VERSION_GPIJ01_01) || defined(VERSION_G98P01_PIKIDEMO) || defined(VERSION_DPIJ01_PIKIDEMO)
+	if (ctrl->dspch[0]) {
+		for (u32 i = 0; i < 2; i++) {
+			DSP_SetMixerVolume(ctrl->dspch[i]->buffer_idx, i, ctrl->volume[i], 0);
+		}
+	}
+#else
+	if (ctrl->dspch[0]) {
+		u32 i;
+		u8 mode = Jac_GetOutputMode();
+
+		for (i = 0; i < 2; i++) {
+			switch (mode) {
+			case 0:
+			{
+				DSP_SetMixerVolume(ctrl->dspch[i]->buffer_idx, i, ctrl->volume[i] * 0xBFFD / 0x10000, 0);
+				DSP_SetMixerVolume(ctrl->dspch[i]->buffer_idx, 1 - i, ctrl->volume[i] * 0xBFFD / 0x10000, 0);
+				break;
+			}
+			default:
+			{
+				DSP_SetMixerVolume(ctrl->dspch[i]->buffer_idx, i, ctrl->volume[i], 0);
+				DSP_SetMixerVolume(ctrl->dspch[i]->buffer_idx, 1 - i, 0, 0);
+				break;
+			}
+			}
+		}
+	}
+#endif
+}
+
+/**
+ * @TODO: Documentation
+ */
+void StreamChgVolume(u32 ctrlID, int volumeL, int volumeR)
+{
+	StreamCtrl_* ctrl = &SC[ctrlID];
+
+	ctrl->volume[0] = volumeL;
+	ctrl->volume[1] = volumeR;
+
+	ctrl->updateFlags |= 1;
+}
+
+/**
+ * @TODO: Documentation
+ */
+void StreamChgMixLevel(u32 ctrlID, int mixLevelL, int mixLevelR)
+{
+	StreamCtrl_* ctrl = &SC[ctrlID];
+	if (ctrl->dspch[0]) {
+		ctrl->mixLevel[0] = mixLevelL;
+		ctrl->mixLevel[1] = mixLevelR;
+	}
+}
+
+/**
+ * @TODO: Documentation
+ */
+int StreamGetCurrentFrame(u32 streamId, u32 id2)
+{
+	StreamCtrl_* ctrl = &SC[streamId];
+	dspch_* dspCh     = ctrl->dspch[0];
+	int result;
+	STACK_PAD_VAR(2);
+
+	if (dspCh == NULL) {
+		return -1;
+	}
+
+	switch (id2) {
+	case 0:
+	{
+		result = ctrl->samplesDecoded * ctrl->header.frameRate / ctrl->header.sampleRate;
+		break;
+	}
+	case 1:
+	{
+		f32 subframeRate = JAC_DAC_RATE * JAC_SUBFRAMES / JAC_FRAMESAMPLES;
+		result           = ctrl->header.frameRate / subframeRate * ctrl->frameCounter;
+		break;
+	}
+	case 2:
+	{
+		if (ctrl->frameCounter == 0) {
+			result = 0;
+		} else {
+			u32 size = ctrl->totalSamples - Get_DirectPCM_Remain(GetDspHandle(dspCh->buffer_idx));
+			result   = size * (f32)ctrl->header.frameRate / ctrl->header.sampleRate + 0.499f;
+		}
+		break;
+	}
+	}
+
+	return result;
+}
+
+/**
+ * @TODO: Documentation
+ */
+BOOL StreamSetDVDPause(u32 ctrlID, BOOL isPaused)
+{
+	StreamCtrl_* ctrl = &SC[ctrlID];
+
+	if (!ctrl->dspch[0]) {
+		return FALSE;
+	}
+
+	BOOL tmp = ctrl->isPaused;
+
+#if defined(VERSION_GPIP01)
+	BOOL* REF_isPaused = &isPaused;
+#endif
+
+	ctrl->isPaused = isPaused;
+
+	return tmp;
+}
+
+/**
+ * @TODO: Documentation
+ * @note UNUSED Size: 00004C
+ */
+void StreamCheckRemainBuffers(void)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @TODO: Documentation
+ */
+u8 StreamCheckAudioFormat(u32 ctrlID)
+{
+	StreamCtrl_* ctrl = &SC[ctrlID];
+	return ctrl->header.audioFormat;
+}
+
+/**
+ * @TODO: Documentation
+ * @note UNUSED Size: 000038
+ */
+void StreamCheckBufferEmpty(void)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @TODO: Documentation
+ * @note UNUSED Size: 000024
+ */
+void StreamCheckBufferRemainSize(void)
+{
+	TRAP_UNIMPLEMENTED;
+}

@@ -1,0 +1,548 @@
+#include "Game/Entities/Ujia.h"
+#include "Game/EnemyAnimKeyEvent.h"
+#include "Game/EnemyFunc.h"
+
+namespace Game {
+namespace Ujia {
+
+/**
+ * @note Address: 0x80264720
+ * @note Size: 0x3D0
+ */
+void FSM::init(EnemyBase* enemy)
+{
+	create(UJIA_StateCount);
+
+	registerState(new StateDead);
+	registerState(new StatePress);
+	registerState(new StateStay);
+	registerState(new StateAppear);
+	registerState(new StateDive);
+	registerState(new StateMove);
+	registerState(new StateMoveSide);
+	registerState(new StateMoveCentre);
+	registerState(new StateMoveTop);
+	registerState(new StateGoHome);
+	registerState(new StateAttack1);
+}
+
+/**
+ * @note Address: 0x80264AF0
+ * @note Size: 0x5C
+ */
+void StateDead::init(EnemyBase* enemy, StateArg* stateArg)
+{
+	enemy->deathProcedure();
+	enemy->disableEvent(0, EB_Cullable);
+	enemy->mTargetVelocity = Vector3f(0.0f);
+	enemy->startMotion(UJIAANIM_Dead, nullptr);
+}
+
+/**
+ * @note Address: 0x80264B4C
+ * @note Size: 0x44
+ */
+void StateDead::exec(EnemyBase* enemy)
+{
+	if (enemy->mCurAnim->mIsPlaying && enemy->mCurAnim->mType == KEYEVENT_END) {
+		enemy->kill(nullptr);
+	}
+}
+
+/**
+ * @note Address: 0x80264B90
+ * @note Size: 0x4
+ */
+void StateDead::cleanup(EnemyBase* enemy)
+{
+}
+
+/**
+ * @note Address: 0x80264B94
+ * @note Size: 0x64
+ */
+void StatePress::init(EnemyBase* enemy, StateArg* stateArg)
+{
+	enemy->mHealth = 0.0f;
+	enemy->deathProcedure();
+	enemy->disableEvent(0, EB_Cullable);
+	enemy->mTargetVelocity = Vector3f(0.0f);
+	enemy->startMotion(UJIAANIM_PressDead, nullptr);
+}
+
+/**
+ * @note Address: 0x80264BF8
+ * @note Size: 0x44
+ */
+void StatePress::exec(EnemyBase* enemy)
+{
+	if (enemy->mCurAnim->mIsPlaying && enemy->mCurAnim->mType == KEYEVENT_END) {
+		enemy->kill(nullptr);
+	}
+}
+
+/**
+ * @note Address: 0x80264C3C
+ * @note Size: 0x4
+ */
+void StatePress::cleanup(EnemyBase* enemy)
+{
+}
+
+/**
+ * @note Address: 0x80264C40
+ * @note Size: 0xBC
+ */
+void StateStay::init(EnemyBase* enemy, StateArg* stateArg)
+{
+	Obj* uji = OBJ(enemy);
+	uji->resetAppearCheck();
+	uji->setAtari(false);
+	uji->enableEvent(0, EB_Invulnerable);
+	uji->mIsUnderground = true;
+	uji->enableEvent(0, EB_BitterImmune);
+	uji->hardConstraintOn();
+	uji->disableEvent(0, EB_LifegaugeVisible);
+	uji->disableEvent(0, EB_Animating);
+	uji->enableEvent(0, EB_ModelHidden);
+	uji->mTargetVelocity = Vector3f(0.0f);
+	uji->startMotion(UJIAANIM_Appear, nullptr);
+	uji->stopMotion();
+}
+
+/**
+ * @note Address: 0x80264CFC
+ * @note Size: 0xD4
+ */
+void StateStay::exec(EnemyBase* enemy)
+{
+	Obj* uji = OBJ(enemy);
+	uji->setBridgeSearch();
+	if (uji->isBreakBridge()) {
+		transit(uji, UJIA_Appear, nullptr);
+		return;
+	}
+
+	Creature* target = EnemyFunc::getNearestPikminOrNavi(uji, CG_GENERALPARMS(uji).mViewAngle.mValue,
+	                                                     CG_GENERALPARMS(uji).mSightRadius.mValue, nullptr, nullptr, nullptr);
+	if (target && uji->isAppearCheck()) {
+		uji->mTargetCreature = target;
+		transit(uji, UJIA_Appear, nullptr);
+	}
+}
+
+/**
+ * @note Address: 0x80264DD0
+ * @note Size: 0x84
+ */
+void StateStay::cleanup(EnemyBase* enemy)
+{
+	Obj* uji = OBJ(enemy);
+	uji->setAtari(true);
+	uji->disableEvent(0, EB_Invulnerable);
+	uji->mIsUnderground = false;
+	uji->disableEvent(0, EB_BitterImmune);
+	uji->hardConstraintOff();
+	uji->enableEvent(0, EB_Animating);
+	uji->disableEvent(0, EB_ModelHidden);
+}
+
+/**
+ * @note Address: 0x80264E54
+ * @note Size: 0x80
+ */
+void StateAppear::init(EnemyBase* enemy, StateArg* stateArg)
+{
+	Obj* uji = OBJ(enemy);
+	uji->lifeIncrement();
+	uji->hardConstraintOn();
+	uji->enableEvent(0, EB_NoInterrupt);
+	uji->enableEvent(0, EB_LifegaugeVisible);
+	uji->mTargetVelocity = Vector3f(0.0f);
+	uji->setEmotionExcitement();
+	uji->startMotion(UJIAANIM_Appear, nullptr);
+	uji->createAppearEffect();
+}
+
+/**
+ * @note Address: 0x80264ED4
+ * @note Size: 0xDC
+ */
+void StateAppear::exec(EnemyBase* enemy)
+{
+	Obj* uji = OBJ(enemy);
+	if (uji->mCurAnim->mIsPlaying && uji->mCurAnim->mType == KEYEVENT_END) {
+		if (uji->mHealth <= 0.0f) {
+			transit(uji, UJIA_Dead, nullptr);
+			return;
+		}
+
+		if (uji->isBreakBridge()) {
+			transit(uji, uji->checkBreakOrMove(), nullptr);
+			return;
+		}
+
+		transit(uji, UJIA_Move, nullptr);
+	}
+}
+
+/**
+ * @note Address: 0x80264FB0
+ * @note Size: 0x3C
+ */
+void StateAppear::cleanup(EnemyBase* enemy)
+{
+	enemy->hardConstraintOff();
+	enemy->disableEvent(0, EB_NoInterrupt);
+}
+
+/**
+ * @note Address: 0x80264FEC
+ * @note Size: 0x6C
+ */
+void StateDive::init(EnemyBase* enemy, StateArg* stateArg)
+{
+	Obj* uji = OBJ(enemy);
+	uji->hardConstraintOn();
+	uji->enableEvent(0, EB_BitterImmune);
+	uji->mTargetVelocity = Vector3f(0.0f);
+	uji->setEmotionCaution();
+	uji->startMotion(UJIAANIM_Dive, nullptr);
+	uji->createDisAppearEffect();
+}
+
+/**
+ * @note Address: 0x80265058
+ * @note Size: 0x50
+ */
+void StateDive::exec(EnemyBase* enemy)
+{
+	if (enemy->mCurAnim->mIsPlaying && enemy->mCurAnim->mType == KEYEVENT_END) {
+		transit(enemy, UJIA_Stay, nullptr);
+	}
+}
+
+/**
+ * @note Address: 0x802650A8
+ * @note Size: 0x3C
+ */
+void StateDive::cleanup(EnemyBase* enemy)
+{
+	enemy->hardConstraintOff();
+	enemy->disableEvent(0, EB_BitterImmune);
+}
+
+/**
+ * @note Address: 0x802650E4
+ * @note Size: 0x34
+ */
+void StateMove::init(EnemyBase* enemy, StateArg* stateArg)
+{
+	Obj* uji        = OBJ(enemy);
+	uji->mNextState = UJIA_NULL;
+	uji->startMotion(UJIAANIM_Move, nullptr);
+}
+
+/**
+ * @note Address: 0x80265118
+ * @note Size: 0x4C8
+ */
+void StateMove::exec(EnemyBase* enemy)
+{
+	// NON-MATCHING //
+	Obj* uji = OBJ(enemy);
+	if (uji->isBreakBridge()) {
+		uji->mNextState = (StateID)uji->checkBreakOrMove();
+		uji->finishMotion();
+
+	} else {
+		Creature* target = uji->mTargetCreature;
+		if (target && target->isAlive()) {
+			f32 angleDist = uji->turnToTarget(target, CG_GENERALPARMS(uji).mTurnSpeed(), CG_GENERALPARMS(uji).mMaxTurnAngle());
+			uji->setTargetSpeed(CG_GENERALPARMS(uji).mMoveSpeed());
+
+			if (uji->isTargetOutOfRange(target, angleDist, CG_GENERALPARMS(uji).mPrivateRadius(), CG_GENERALPARMS(uji).mSightRadius(),
+			                            CG_GENERALPARMS(uji).mFov(), CG_GENERALPARMS(uji).mSightRadius())) {
+				uji->mTargetCreature = nullptr;
+			} else {
+				if (uji->distanceFromHome() > CG_GENERALPARMS(uji).mTerritoryRadius()) {
+					uji->mTargetCreature = nullptr;
+				}
+			}
+
+		} else {
+			uji->mNextState = UJIA_GoHome;
+			uji->finishMotion();
+		}
+	}
+
+	uji->setInWaterDamage();
+
+	if (uji->mHealth <= 0.0f) {
+		transit(uji, UJIA_Dead, nullptr);
+		return;
+	}
+
+	if (uji->mCurAnim->mIsPlaying && uji->mCurAnim->mType == KEYEVENT_END) {
+		transit(uji, uji->mNextState, nullptr);
+	}
+}
+
+/**
+ * @note Address: 0x802655E0
+ * @note Size: 0x4
+ */
+void StateMove::cleanup(EnemyBase* enemy)
+{
+}
+
+/**
+ * @note Address: 0x802655E4
+ * @note Size: 0x34
+ */
+void StateMoveSide::init(EnemyBase* enemy, StateArg* stateArg)
+{
+	Obj* uji        = OBJ(enemy);
+	uji->mNextState = UJIA_NULL;
+	uji->startMotion(UJIAANIM_Move, nullptr);
+}
+
+/**
+ * @note Address: 0x80265618
+ * @note Size: 0xF4
+ */
+void StateMoveSide::exec(EnemyBase* enemy)
+{
+	Obj* uji = OBJ(enemy);
+	if (uji->isBreakBridge()) {
+		if (uji->moveBridgeSide()) {
+			uji->mNextState = UJIA_MoveCentre;
+			uji->finishMotion();
+		}
+	} else {
+		uji->mNextState = UJIA_GoHome;
+		uji->finishMotion();
+	}
+
+	uji->setInWaterDamage();
+
+	if (uji->mHealth <= 0.0f) {
+		transit(uji, UJIA_Dead, nullptr);
+		return;
+	}
+
+	if (uji->mCurAnim->mIsPlaying && uji->mCurAnim->mType == KEYEVENT_END) {
+		transit(uji, uji->mNextState, nullptr);
+	}
+}
+
+/**
+ * @note Address: 0x8026570C
+ * @note Size: 0x4
+ */
+void StateMoveSide::cleanup(EnemyBase* enemy)
+{
+}
+
+/**
+ * @note Address: 0x80265710
+ * @note Size: 0x34
+ */
+void StateMoveCentre::init(EnemyBase* enemy, StateArg* stateArg)
+{
+	Obj* uji        = OBJ(enemy);
+	uji->mNextState = UJIA_NULL;
+	uji->startMotion(UJIAANIM_Move, nullptr);
+}
+
+/**
+ * @note Address: 0x80265744
+ * @note Size: 0xF4
+ */
+void StateMoveCentre::exec(EnemyBase* enemy)
+{
+	Obj* uji = OBJ(enemy);
+	if (uji->isBreakBridge()) {
+		if (uji->moveBridgeCentre()) {
+			uji->mNextState = UJIA_MoveTop;
+			uji->finishMotion();
+		}
+	} else {
+		uji->mNextState = UJIA_GoHome;
+		uji->finishMotion();
+	}
+
+	uji->setInWaterDamage();
+
+	if (uji->mHealth <= 0.0f) {
+		transit(uji, UJIA_Dead, nullptr);
+		return;
+	}
+
+	if (uji->mCurAnim->mIsPlaying && uji->mCurAnim->mType == KEYEVENT_END) {
+		transit(uji, uji->mNextState, nullptr);
+	}
+}
+
+/**
+ * @note Address: 0x80265838
+ * @note Size: 0x4
+ */
+void StateMoveCentre::cleanup(EnemyBase* enemy)
+{
+}
+
+/**
+ * @note Address: 0x8026583C
+ * @note Size: 0x34
+ */
+void StateMoveTop::init(EnemyBase* enemy, StateArg* stateArg)
+{
+	Obj* uji        = OBJ(enemy);
+	uji->mNextState = UJIA_NULL;
+	uji->startMotion(UJIAANIM_Move, nullptr);
+}
+
+/**
+ * @note Address: 0x80265870
+ * @note Size: 0xF4
+ */
+void StateMoveTop::exec(EnemyBase* enemy)
+{
+	Obj* uji = OBJ(enemy);
+	if (uji->isBreakBridge()) {
+		if (uji->moveBridgeTop()) {
+			uji->mNextState = UJIA_Attack1;
+			uji->finishMotion();
+		}
+	} else {
+		uji->mNextState = UJIA_GoHome;
+		uji->finishMotion();
+	}
+
+	uji->setInWaterDamage();
+
+	if (uji->mHealth <= 0.0f) {
+		transit(uji, UJIA_Dead, nullptr);
+		return;
+	}
+
+	if (uji->mCurAnim->mIsPlaying && uji->mCurAnim->mType == KEYEVENT_END) {
+		transit(uji, uji->mNextState, nullptr);
+	}
+}
+
+/**
+ * @note Address: 0x80265964
+ * @note Size: 0x4
+ */
+void StateMoveTop::cleanup(EnemyBase* enemy)
+{
+}
+
+/**
+ * @note Address: 0x80265968
+ * @note Size: 0x34
+ */
+void StateGoHome::init(EnemyBase* enemy, StateArg* stateArg)
+{
+	Obj* uji        = OBJ(enemy);
+	uji->mNextState = UJIA_NULL;
+	uji->startMotion(UJIAANIM_Move, nullptr);
+}
+
+/**
+ * @note Address: 0x8026599C
+ * @note Size: 0x198
+ */
+void StateGoHome::exec(EnemyBase* enemy)
+{
+	Obj* uji         = OBJ(enemy);
+	Vector3f homePos = Vector3f(uji->mHomePosition);
+	EnemyFunc::walkToTarget(uji, homePos, CG_GENERALPARMS(uji).mMoveSpeed.mValue, CG_GENERALPARMS(uji).mTurnSpeed.mValue,
+	                        CG_GENERALPARMS(uji).mMaxTurnAngle.mValue);
+
+	Vector3f homePos2 = uji->mHomePosition;
+	Vector3f position = uji->getPosition();
+
+	if (position.distance(homePos2) < CG_GENERALPARMS(uji).mHomeRadius.mValue) {
+		uji->finishMotion();
+	}
+
+	uji->setInWaterDamage();
+
+	if (uji->mHealth <= 0.0f) {
+		transit(uji, UJIA_Dead, nullptr);
+		return;
+	}
+
+	if (uji->mCurAnim->mIsPlaying && uji->mCurAnim->mType == KEYEVENT_END) {
+		transit(uji, UJIA_Dive, nullptr);
+	}
+}
+
+/**
+ * @note Address: 0x80265B34
+ * @note Size: 0x4
+ */
+void StateGoHome::cleanup(EnemyBase* enemy)
+{
+}
+
+/**
+ * @note Address: 0x80265B38
+ * @note Size: 0x58
+ */
+void StateAttack1::init(EnemyBase* enemy, StateArg* stateArg)
+{
+	Obj* uji             = OBJ(enemy);
+	uji->mTargetVelocity = Vector3f(0.0f);
+	uji->startMotion(UJIAANIM_Attack1, nullptr);
+	uji->mNextState = UJIA_NULL;
+	uji->createBridgeEffect();
+}
+
+/**
+ * @note Address: 0x80265B90
+ * @note Size: 0x10C
+ */
+void StateAttack1::exec(EnemyBase* enemy)
+{
+	Obj* uji = OBJ(enemy);
+	if (uji->isBreakBridge()) {
+		if (uji->moveBridgeTop()) {
+			uji->mNextState = UJIA_Attack1;
+		} else {
+			uji->mNextState = UJIA_MoveTop;
+		}
+	} else {
+		uji->mNextState = UJIA_GoHome;
+	}
+
+	if (uji->mHealth <= 0.0f) {
+		transit(uji, UJIA_Dead, nullptr);
+		return;
+	}
+
+	if (uji->mCurAnim->mIsPlaying) {
+		if (uji->mCurAnim->mType == KEYEVENT_2) {
+			if (uji->isBreakBridge()) {
+				uji->breakTargetBridge();
+			}
+
+		} else if (uji->mCurAnim->mType == KEYEVENT_END) {
+			transit(uji, uji->mNextState, nullptr);
+		}
+	}
+}
+
+/**
+ * @note Address: 0x80265C9C
+ * @note Size: 0x4
+ */
+void StateAttack1::cleanup(EnemyBase* enemy)
+{
+}
+
+} // namespace Ujia
+} // namespace Game

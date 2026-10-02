@@ -1,0 +1,117 @@
+# IDE folders
+.idea/
+.vs/
+
+# Caches
+__pycache__
+.mypy_cache
+.cache/
+
+# Original files
+orig/*/*
+!orig/*/.gitkeep
+*.dol
+*.rel
+*.elf
+*.o
+*.map
+*.MAP
+*.bat
+
+# Build files
+build/
+build-*/
+/packaging/linux/out/
+/packaging/windows/out/
+/packaging/android/out/
+/packaging.zip
+/save/
+.ninja_*
+build.ninja
+
+# decompctx output
+ctx.*
+*.ctx
+
+# Generated configs
+objdiff.json
+compile_commands.json
+
+# Miscellaneous
+/*.txt
+!/CMakeLists.txt
+*.exe
+!clang-format.exe
+/decomp
+tools/mwcc_compiler
+tools/dtk
+tools/powerpc
+*.id0
+*.id1
+*.id2
+*.nam
+*.idb
+*.til
+mwcc_debugger.py
+/docs
+build.py
+*.lnk
+tools/vc6
+
+# User-supplied game data. These files must never be committed or distributed.
+/assets/*
+!/assets/README.md
+/assets.partial*
+/Pikmin (USA) (Rev 1)/
+/Pikmin*.zip
+*.[iI][sS][oO]
+*.[gG][cC][mM]
+*.[rR][vV][zZ]
+*.[wW][iI][aA]
+*.[wW][bB][fF][sS]
+*.[cC][iI][sS][oO]
+*.[gG][cC][zZ]
+*.[tT][gG][cC]
+
+# Native-port user state and local recovery copies.
+/pikmin_settings.conf
+/backup_audio/
+*.bak
+/snapshots/
+
+# Port a Windows (MinGW)
+build-windows/
+third_party/SDL2-mingw64/
+
+# Documentos internos de trabajo: notas de sesión, planes y auditorías. Viven
+# en el disco de quien desarrolla, no en el repositorio público.
+/AI_HANDOFF.md
+/SIGUIENTE_SESION.md
+/60FPS_FAILED_ATTEMPTS.md
+/PORT_AUDIT.md
+/PORTABILIDAD.md
+/RENDIMIENTO.md
+/REFERENCIAS_EXTERNAS.md
+/REFRESH_RATE_TIMING_PLAN.md
+/PLAN_MAQUINA_ESTADOS_PIKI.md
+/SEPARATION_PLAN.md
+/TEST_PLAN.md
+/MOUSE_INPUT_IMPLEMENTATION_GUIDE.md
+/ROADMAP.md
+/CONTROL_SCHEMES.md
+/README-WINDOWS.md
+/PLAN_WINDOWS.md
+/docs/
+
+# APKs copiados a la raíz para el usuario
+/open_nectar_*.apk*
+
+# Caché de binarios de shader generada al jugar
+/shader_cache/
+
+# Gradle wrapper para Windows (la regla *.bat es para los .bat del decomp)
+!android/gradlew.bat
+
+# Local HD model packs and prototype bundles (converted Nintendo assets; never commit)
+/dist/
+/mods/

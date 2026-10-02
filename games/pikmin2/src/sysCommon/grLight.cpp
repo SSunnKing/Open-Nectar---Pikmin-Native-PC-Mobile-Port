@@ -1,0 +1,315 @@
+#include "Camera.h"
+#include "DebugLog.h"
+#include "Graphics.h"
+#include "Light.h"
+#include "sysMath.h"
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(__LINE__) // Never used in the DLL
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F0
+ */
+DEFINE_PRINT(nullptr);
+
+/**
+ * @todo: Documentation
+ */
+Light::Light()
+    : CoreNode("light")
+{
+	_1C9 = 0;
+	_1D8.set(0.0f, 0.0f, 0.0f);
+	_240            = 60.0f;
+	_244            = 1.0f;
+	_248            = 1000.0f;
+	mLightFlag      = LIGHTFLAG_Unk100 | LIGHTFLAG_Unk200 | LIGHT_Point;
+	mMode           = 3;
+	mDistancedRange = 3005.0f;
+	mAttenuation    = 0.5036f;
+	mSpotMode       = SPOT_Smooth;
+	mSpotAngle      = 45.0f;
+	mConstantAttn   = 0.0f;
+	mLinearAttn     = 0.0f;
+	mQuadAttn       = 0.99559999f;
+	mSpotConstTerm  = 1.0f;
+	mSpotLinearTerm = 0.0f;
+	mSpotQuadTerm   = 0.0f;
+	mObjAttnThreshold = 0.15f;
+	mMapAttnThreshold = 0.05f;
+	mPosition.set(0.0f, 100.0f, 0.0f);
+	mDirection.set(0.0f, -1.0f, 0.0f);
+	mDiffuseColour.set(255, 255, 255, 255);
+
+	setLightDistAttn(mDistancedRange, mAttenuation, mMode);
+}
+
+/**
+ * @todo: Documentation
+ */
+void Light::setLightDistAttn(f32 dist, f32 attn, int mode)
+{
+	mDistancedRange = dist;
+	mAttenuation    = attn;
+	mMode           = mode;
+
+	if (dist < 0.0f) {
+		mode = 0;
+	}
+	if (attn <= 0.0f || attn >= 1.0f) {
+		mode = 0;
+	}
+
+	f32 constAttn;
+	f32 linearAttn;
+	f32 quadAttn;
+	switch (mode) {
+	case 1:
+	{
+		constAttn  = 1.0f;
+		quadAttn   = 0.0f;
+		linearAttn = (1.0f - attn) / (attn * dist);
+		break;
+	}
+	case 2:
+	{
+		constAttn  = 1.0f;
+		linearAttn = 0.5f * (1.0f - attn) / (attn * dist);
+		quadAttn   = 0.5f * (1.0f - attn) / (dist * (attn * dist));
+		break;
+	}
+	case 3:
+	{
+		constAttn  = 1.0f;
+		linearAttn = 0.0f;
+		quadAttn   = (1.0f - attn) / (dist * (attn * dist));
+		break;
+	}
+	case 0:
+	default:
+	{
+		constAttn  = 1.0f;
+		linearAttn = 0.0f;
+		quadAttn   = 0.0f;
+		break;
+	}
+	}
+
+	mConstantAttn   = constAttn;
+	mLinearAttn     = linearAttn;
+	mQuadAttn       = quadAttn;
+	mLightValuesSet = 1;
+}
+
+/**
+ * @todo: Documentation
+ */
+void Light::setLightSpot(f32 angle, int spotMode)
+{
+	if (angle <= 0.0f || angle > 90.0f) {
+		spotMode = SPOT_NoAttn;
+	}
+
+	f32 constTerm;
+	f32 linearTerm;
+	f32 quadTerm;
+
+	f32 angleRadians = angle * PI / 180.0f;
+	f32 tmp;
+	f32 cosTheta = cosf(angleRadians);
+
+	switch (spotMode) {
+	case SPOT_Linear:
+	{
+		constTerm  = -1000.0f * cosTheta;
+		linearTerm = 1000.0f;
+		quadTerm   = 0.0f;
+		break;
+	}
+	case SPOT_Smooth:
+	{
+		constTerm  = -cosTheta / (1.0f - cosTheta);
+		linearTerm = 1.0f / (1.0f - cosTheta);
+		quadTerm   = 0.0f;
+		break;
+	}
+	case SPOT_Quadratic:
+	{
+		constTerm  = 0.0f;
+		linearTerm = -cosTheta / (1.0f - cosTheta);
+		quadTerm   = 1.0f / ((1.0f - cosTheta));
+		break;
+	}
+	case SPOT_Cubic:
+	{
+		tmp        = SQUARE((1.0f - cosTheta));
+		constTerm  = (cosTheta * (cosTheta - 2.0f)) / tmp;
+		linearTerm = 2.0f / tmp;
+		quadTerm   = -1.0f / tmp;
+		break;
+	}
+	case SPOT_Quartic:
+	{
+		tmp        = SQUARE((1.0f - cosTheta));
+		constTerm  = -4.0f * cosTheta / tmp;
+		linearTerm = 4.0f * (1.0f + cosTheta) / tmp;
+		quadTerm   = -4.0f / tmp;
+		break;
+	}
+	case SPOT_Special:
+	{
+		tmp        = SQUARE((1.0f - cosTheta));
+		constTerm  = 1.0f - (2.0f * cosTheta * cosTheta) / tmp;
+		linearTerm = 4.0f * cosTheta / tmp;
+		quadTerm   = -2.0f / tmp;
+		break;
+	}
+	case SPOT_NoAttn:
+	default:
+	{
+		constTerm  = 1.0f;
+		linearTerm = 0.0f;
+		quadTerm   = 0.0f;
+		break;
+	}
+	}
+
+	mSpotConstTerm  = constTerm;
+	mSpotLinearTerm = linearTerm;
+	mSpotQuadTerm   = quadTerm;
+	mLightValuesSet = 1;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00002C (Matching by size)
+ */
+void Light::setLightParallel()
+{
+	mConstantAttn   = 1.0f;
+	mQuadAttn       = 0.0f;
+	mLinearAttn     = 0.0f;
+	mSpotConstTerm  = 1.0f;
+	mSpotQuadTerm   = 0.0f;
+	mSpotLinearTerm = 0.0f;
+	mLightValuesSet = 1;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000218 (Matching by size)
+ */
+void Light::calcLightSizes()
+{
+	if (mLightValuesSet) {
+		mObjRadius = -1.0f;
+		mMapRadius = -1.0f;
+		int i;
+		for (i = 0; i < 0x4000; i += 8) {
+			f32 attenuationAtDistance = 1.0f / (mConstantAttn + mLinearAttn * i + mQuadAttn * SQUARE(i));
+
+			if (mObjRadius == -1.0f && attenuationAtDistance < mObjAttnThreshold) {
+				mObjRadius = i;
+			}
+			if (mMapRadius == -1.0f && attenuationAtDistance < mMapAttnThreshold) {
+				mMapRadius = i;
+			}
+		}
+		if (mObjRadius == -1.0f) {
+			mObjRadius = i;
+		}
+		if (mMapRadius == -1.0f) {
+			mMapRadius = i;
+		}
+		mLightValuesSet = 0;
+	}
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000030 (Matching by size)
+ */
+f32 Light::calcLightMapRadius()
+{
+	calcLightSizes();
+	return mMapRadius;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000030 (Matching by size)
+ */
+f32 Light::calcLightObjRadius()
+{
+	calcLightSizes();
+	return mObjRadius;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0001C4 (Matching by size)
+ */
+void Light::refresh(Graphics& gfx, LFlareGroup* flareGroup)
+{
+	switch (GET_LIGHT_TYPE(mLightFlag)) {
+	case LIGHT_Point:
+	{
+		f32 lightMapRadius = calcLightMapRadius();
+		f32 lightObjRadius = calcLightObjRadius();
+
+		gfx.setColour(mDiffuseColour, true);
+		gfx.useTexture(nullptr, GX_TEXMAP0);
+		bool oldLighting = gfx.setLighting(false, nullptr);
+		gfx.drawSphere(mPosition, lightMapRadius, gfx.mCamera->mLookAtMtx);
+		gfx.setLighting(oldLighting, nullptr);
+
+		if (flareGroup) {
+			Vector3f pos(mPosition);
+			pos.multMatrix(gfx.mCamera->mLookAtMtx);
+			flareGroup->addLFlare(mDiffuseColour, pos, Vector2f(lightMapRadius / 4.0f, lightMapRadius / 4.0f), nullptr, nullptr);
+		}
+		break;
+	}
+	case LIGHT_Spot:
+	{
+		mFrustum->draw(gfx);
+		break;
+	}
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void Light::update()
+{
+	switch (GET_LIGHT_TYPE(mLightFlag)) {
+	case LIGHT_Parallel:
+	{
+		mConstantAttn = 1.0f;
+		mLinearAttn = mQuadAttn = 0.0f;
+		mSpotConstTerm          = 1.0f;
+		mSpotLinearTerm = mSpotQuadTerm = 0.0f;
+		mLightValuesSet                 = 1;
+		break;
+	}
+	case LIGHT_Point:
+	{
+		setLightDistAttn(mDistancedRange, mAttenuation, mMode);
+		mSpotConstTerm  = 1.0f;
+		mSpotLinearTerm = mSpotQuadTerm = 0.0f;
+		break;
+	}
+	case LIGHT_Spot:
+	{
+		setLightSpot(mSpotAngle, mSpotMode);
+		mConstantAttn = 1.0f;
+		mLinearAttn = mQuadAttn = 0.0f;
+		break;
+	}
+	}
+}

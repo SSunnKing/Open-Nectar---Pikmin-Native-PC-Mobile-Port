@@ -1,0 +1,869 @@
+#include "Dolphin/dvd.h"
+#ifdef PIKI_PC_PORT
+#include "audio/pc_ast_stream.h"
+#endif
+#include "Dolphin/os.h"
+#include "JSystem/JAudio/JAS/JASDriver.h"
+#include "JSystem/JAudio/JAS/JASDvd.h"
+#include "JSystem/JAudio/JAS/JASHeap.h"
+#include "JSystem/JAudio/JAS/JASMutexLock.h"
+#include "JSystem/JAudio/JAS/JASAramStream.h"
+#include "JSystem/JAudio/JAS/JASThread.h"
+#include "JSystem/JKernel/JKRAram.h"
+
+JASTaskThread* JASAramStream::sLoadThread;
+u8* JASAramStream::sReadBuffer;
+u32 JASAramStream::sBlockSize;
+u32 JASAramStream::sChannelMax;
+bool JASAramStream::sSystemPauseFlag;
+bool JASAramStream::sFatalErrorFlag;
+
+static const s16 OSC_RELEASE_TABLE[6] = {
+	0, 2, 0, 15, 0, 0,
+};
+
+static const JASOscillator::Data OSC_ENV = { 0, 1.0f, nullptr, OSC_RELEASE_TABLE, 1.0f, 0.0f };
+
+/**
+ * @note Address: 0x800A8FA4
+ * @note Size: 0x90
+ */
+void JASAramStream::initSystem(u32 blockSize, u32 channelMax)
+{
+	if (JASDriver::registerSubFrameCallback(dvdErrorCheck, nullptr)) {
+		if (sLoadThread == nullptr) {
+			sLoadThread = JASDvd::getThreadPointer();
+		}
+		// TODO: replace 0x20 in [] with sizeof header object
+		sReadBuffer      = new (JASDram, 0x20) u8[(blockSize + 0x20) * channelMax];
+		sBlockSize       = blockSize;
+		sChannelMax      = channelMax;
+		sSystemPauseFlag = false;
+		sFatalErrorFlag  = false;
+	}
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x8
+ */
+void JASAramStream::setLoadThread(JASTaskThread*)
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: 0x800A9034
+ * @note Size: 0x158
+ */
+JASAramStream::JASAramStream()
+    : mActiveChannel(nullptr)
+    , _19C(0)
+    , _19D(0)
+    , mPauseFlags(0)
+    , mCurrentReadOffset(0)
+    , mNextBlockSample(0)
+    , mNextReadOffset(0)
+    , mMaxBlocks(0)
+    , _1B0(0)
+    , _1B4(0)
+    , _1B8(0.0f)
+    , mMaxLoadIndex(0)
+    , mCurrentLoadIndex(0)
+    , mCurrentBlock(0)
+    , mAbortFlag(0)
+    , mLoadedCount(0)
+    , mControlFlags(0)
+    , mDataOffset(0)
+    , mDataLength(0)
+    , mCallback(nullptr)
+    , _244(nullptr)
+    , mStreamType(0)
+    , mNumBlocks(0)
+    , mCurrentBlockNum(0)
+    , mBlockCount(0)
+    , mSampleRate(0)
+    , mLoopFlag(0)
+    , mAramSize(0)
+    , mFileSize(0)
+    , mVolume(1.0f)
+    , mPitch(1.0f)
+    , mUseStereo(0)
+{
+	for (int i = 0; i < 6; i++) {
+		mChannels[i]      = nullptr;
+		mSampleData[0][i] = 0;
+		mSampleData[1][i] = 0;
+		mChannelVolume[i] = 1.0f;
+		mChannelPan[i]    = 0.5f;
+		mChannelFxMix[i]  = 0.0f;
+		mChannelDolby[i]  = 0.0f;
+	}
+	for (int i = 0; i < 6; i++) {
+		mMixData[i] = 0;
+	}
+}
+
+/**
+ * @note Address: 0x800A918C
+ * @note Size: 0xF8
+ */
+void JASAramStream::init(u32 dataOffs, u32 dataLen, JASAramStreamCallback callback, void* p4)
+{
+	mDataOffset = dataOffs;
+	mDataLength = dataLen;
+	_1B8        = 0.0f;
+	mPauseFlags = 0;
+	_19C        = 0.01;
+	_19D        = 0;
+	mAbortFlag  = 0;
+	mNumBlocks  = 0;
+
+	for (int i = 0; i < 6; i++) {
+		mChannelVolume[i] = 1.0f;
+		mChannelPan[i]    = 0.5f;
+		mChannelFxMix[i]  = 0.0f;
+		mChannelDolby[i]  = 0.0f;
+	}
+
+	mVolume     = 1.0f;
+	mPitch      = 1.0f;
+	mUseStereo  = 0;
+	mMixData[0] = -1;
+	mCallback   = callback;
+	_244        = p4;
+	OSInitMessageQueue(&mMsgQueueA, mMsgSlotsA, ARRAY_SIZE(mMsgSlotsA));
+	OSInitMessageQueue(&mMsgQueueB, mMsgSlotsB, ARRAY_SIZE(mMsgSlotsB));
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x10
+ */
+void JASAramStream::setBusSetting(u32, u16)
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x58
+ */
+void JASAramStream::prepare(const char*, int)
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: 0x800A9284
+ * @note Size: 0xB8
+ */
+BOOL JASAramStream::prepare(s32 entryNum, int index)
+{
+#ifdef PIKI_PC_PORT
+	// Port: sin ARAM/DSP para streams. El AST se decodifica entero en el host
+	// (pc_ast_stream) y se mezcla en la salida; si no carga, el stream se da
+	// por preparado igualmente para que las esperas del juego no se bloqueen.
+	(void)index;
+	pc_ast_load(entryNum);
+	if (mCallback)
+		mCallback(1, this, _244);
+	return TRUE;
+#endif
+	if (!DVDFastOpen(entryNum, &mFileInfo)) {
+		return FALSE;
+	}
+	if (!JASDriver::registerSubFrameCallback(channelProcCallback, this)) {
+		return FALSE;
+	}
+	if (mAbortFlag != 0) {
+		return FALSE;
+	}
+	HeaderLoadTaskArgs args;
+	args.mStream     = this;
+	args.mDataLength = mDataLength;
+	args.mIndex      = index;
+	return sLoadThread->sendCmdMsg(headerLoadTask, &args, sizeof(args)) != FALSE;
+}
+
+/**
+ * @note Address: 0x800A933C
+ * @note Size: 0x34
+ */
+BOOL JASAramStream::start()
+{
+#ifdef PIKI_PC_PORT
+	// El fin se notifica desde JAIStreamMgr cuando pc_ast_finished().
+	pc_ast_play();
+	if (pc_ast_finished())
+		finishTask(this);
+	return TRUE;
+#endif
+	return OSSendMessage(&mMsgQueueA, nullptr, OS_MESSAGE_NOBLOCK) != FALSE;
+}
+
+/**
+ * @note Address: 0x800A9370
+ * @note Size: 0x38
+ */
+int JASAramStream::stop(u16 p1)
+{
+#ifdef PIKI_PC_PORT
+	(void)p1;
+	pc_ast_stop();
+	finishTask(this);
+	return TRUE;
+#endif
+	return OSSendMessage(&mMsgQueueA, (void*)((u32)p1 << 0x10 | 1), OS_MESSAGE_NOBLOCK) != FALSE;
+}
+
+/**
+ * @note Address: 0x800A93A8
+ * @note Size: 0x48
+ */
+bool JASAramStream::pause(bool p1)
+{
+#ifdef PIKI_PC_PORT
+	pc_ast_pause(p1);
+	return true;
+#endif
+	u32 msg = 3;
+	if (p1) {
+		msg = 2;
+	}
+	if (OSSendMessage(&mMsgQueueA, (void*)msg, OS_MESSAGE_NOBLOCK) == FALSE) {
+		return false;
+	}
+	return true;
+}
+
+/**
+ * @note Address: 0x800A93F0
+ * @note Size: 0x44
+ */
+int JASAramStream::cancel()
+{
+	mAbortFlag = 1;
+#ifdef PIKI_PC_PORT
+	pc_ast_stop();
+	finishTask(this);
+	return TRUE;
+#endif
+	return sLoadThread->sendCmdMsg(finishTask, this) != FALSE;
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x34
+ */
+u32 JASAramStream::getBlockSamples() const
+{
+	if (mStreamType == 0) {
+		return (sBlockSize << 4) / 9;
+	}
+	return sBlockSize >> 1;
+}
+
+/**
+ * @note Address: 0x800A9434
+ * @note Size: 0x30
+ */
+void JASAramStream::headerLoadTask(void* args)
+{
+	HeaderLoadTaskArgs* castedArgs = static_cast<HeaderLoadTaskArgs*>(args);
+	castedArgs->mStream->headerLoad(castedArgs->mDataLength, castedArgs->mIndex);
+}
+
+/**
+ * @note Address: 0x800A9464
+ * @note Size: 0xDC
+ */
+void JASAramStream::firstLoadTask(void* args)
+{
+	HeaderLoadTaskArgs* castedArgs = static_cast<HeaderLoadTaskArgs*>(args);
+	JASAramStream* stream          = castedArgs->mStream;
+	if (!stream->load()) {
+		return;
+	}
+	if (castedArgs->mIndex > 0) {
+		--castedArgs->mIndex;
+		if (castedArgs->mIndex == 0) {
+			if (!sLoadThread->sendCmdMsg(prepareFinishTask, stream)) {
+				sFatalErrorFlag = true;
+			}
+		}
+	}
+	if (castedArgs->mDataLength == 0) {
+		return;
+	}
+	castedArgs->mDataLength--;
+	if (!sLoadThread->sendCmdMsg(firstLoadTask, castedArgs, sizeof(*castedArgs))) {
+		sFatalErrorFlag = true;
+	}
+	JASCriticalSection criticalSection;
+	stream->mLoadedCount++;
+}
+
+/**
+ * @note Address: 0x800A9540
+ * @note Size: 0x20
+ */
+void JASAramStream::loadToAramTask(void* p1)
+{
+	static_cast<JASAramStream*>(p1)->load();
+}
+
+/**
+ * @note Address: 0x800A9560
+ * @note Size: 0x60
+ */
+void JASAramStream::finishTask(void* args)
+{
+	JASDriver::rejectCallback(channelProcCallback, args);
+	JASAramStream* stream = static_cast<JASAramStream*>(args);
+	if (stream->mCallback != nullptr) {
+		stream->mCallback(0, stream, stream->_244);
+		stream->mCallback = nullptr;
+	}
+}
+
+/**
+ * @note Address: 0x800A95C0
+ * @note Size: 0x58
+ */
+void JASAramStream::prepareFinishTask(void* args)
+{
+	JASAramStream* stream = static_cast<JASAramStream*>(args);
+	OSSendMessage(&stream->mMsgQueueB, (void*)4, OS_MESSAGE_BLOCK);
+	if (stream->mCallback != nullptr) {
+		stream->mCallback(1, stream, stream->_244);
+	}
+}
+
+/**
+ * @note Address: 0x800A9618
+ * @note Size: 0x1CC
+ */
+bool JASAramStream::headerLoad(u32 length, int index)
+{
+	if (sFatalErrorFlag) {
+		return false;
+	}
+	if (mAbortFlag != 0) {
+		return false;
+	}
+	if (DVDReadPrio(&mFileInfo, sReadBuffer, 0x40, 0, 1) < 0) {
+		sFatalErrorFlag = true;
+		return false;
+	}
+	u8* buffer        = sReadBuffer;
+	mStreamType       = buffer[9];
+	mNumBlocks        = *(u16*)(buffer + 0x0C);
+	mSampleRate       = *(u32*)(buffer + 0x10);
+	mLoopFlag         = (*(u16*)(buffer + 0x0E) != FALSE);
+	mAramSize         = *(u32*)(buffer + 0x18);
+	mFileSize         = *(u32*)(buffer + 0x1C);
+	mVolume           = buffer[0x28] / 127.0f;
+	mLoadedCount      = 0;
+	mCurrentBlock     = 0;
+	mCurrentLoadIndex = 0;
+	mBlockCount       = length / sBlockSize / *(u16*)(buffer + 0x0C);
+	mCurrentBlockNum  = mBlockCount;
+	mCurrentBlockNum--;
+	mMaxLoadIndex = mCurrentBlockNum;
+
+	// Ensure the loadIndex is valid
+	if (index < 0 || index > mMaxLoadIndex) {
+		index = mMaxLoadIndex;
+	}
+
+	if (mAbortFlag != 0) {
+		return false;
+	}
+
+	FirstLoadTaskArgs loadArgs;
+	loadArgs.mStream         = this;
+	loadArgs.mTotalLoadCount = mMaxLoadIndex - 1;
+	loadArgs.mIndex          = index;
+	if (!sLoadThread->sendCmdMsg(firstLoadTask, &loadArgs, sizeof(loadArgs))) {
+		sFatalErrorFlag = true;
+		return false;
+	}
+
+	JASCriticalSection criticalSection;
+	mLoadedCount++;
+	return true;
+}
+
+/**
+ * @note Address: 0x800A97E4
+ * @note Size: 0x2B4
+ */
+bool JASAramStream::load()
+{
+	{
+		JASCriticalSection cs;
+		mLoadedCount--;
+	}
+
+	if (sFatalErrorFlag) {
+		return false;
+	}
+
+	if (mAbortFlag) {
+		return false;
+	}
+
+	u32 blockSize;
+	if (mStreamType == 0) {
+		blockSize = sBlockSize * 16 / 9;
+	} else {
+		blockSize = sBlockSize / 2;
+	}
+
+	u32 numMaxBlocks = (mFileSize - 1) / blockSize;
+
+	u32 adjustedBlockSize;
+	if (mStreamType == 0) {
+		adjustedBlockSize = sBlockSize * 16 / 9;
+	} else {
+		adjustedBlockSize = sBlockSize / 2;
+	}
+
+	u32 adjustedBlockCount = (mAramSize) / adjustedBlockSize;
+
+	if (mCurrentBlock > numMaxBlocks) {
+		return false;
+	}
+
+	u32 length = sBlockSize * mNumBlocks + 0x20;
+	u32 offset = mCurrentBlock * (sBlockSize * mNumBlocks + 0x20) + 0x40;
+
+	if (mCurrentBlock == numMaxBlocks) {
+		length = mFileInfo.length - offset;
+	}
+
+	if (DVDReadPrio(&mFileInfo, sReadBuffer, length, offset, 1) < 0) {
+		sFatalErrorFlag = true;
+		return false;
+	}
+
+	u32* preBuffer = (u32*)sReadBuffer;
+	u32 size       = mDataOffset + (mCurrentLoadIndex * sBlockSize);
+	for (int i = 0; i < mNumBlocks; i++) {
+		if (JKRMainRamToAram((u8*)(sReadBuffer + 0x20 + preBuffer[1] * i), size + (i * (sBlockSize * mBlockCount)), preBuffer[1], Switch_0,
+		                     0, nullptr, -1, nullptr)
+		    == 0) {
+			sFatalErrorFlag = true;
+			return false;
+		}
+	}
+
+	mCurrentLoadIndex++;
+
+	if (mCurrentLoadIndex >= mMaxLoadIndex) {
+		int nextBlock = mCurrentBlock;
+		nextBlock += mMaxLoadIndex - 1;
+		if (mLoopFlag) {
+			while (nextBlock > numMaxBlocks) {
+				nextBlock -= numMaxBlocks;
+				nextBlock += adjustedBlockCount;
+			}
+		}
+		if (nextBlock == numMaxBlocks || nextBlock + 2 == numMaxBlocks) {
+			mMaxLoadIndex = mBlockCount;
+			OSSendMessage(&mMsgQueueB, (void*)5, OS_MESSAGE_BLOCK);
+		} else {
+			mMaxLoadIndex = mBlockCount - 1;
+		}
+
+		for (int i = 0; i < mNumBlocks; i++) {
+			mSampleData[0][i] = ((s16*)preBuffer)[2 * i + 4];
+			mSampleData[1][i] = ((s16*)preBuffer)[2 * i + 5];
+		}
+		mCurrentLoadIndex = 0;
+	}
+
+	mCurrentBlock++;
+	if (mCurrentBlock > numMaxBlocks && mLoopFlag) {
+		mCurrentBlock = adjustedBlockCount;
+	}
+	return true;
+}
+
+/**
+ * @note Address: 0x800A9A98
+ * @note Size: 0x20
+ */
+s32 JASAramStream::channelProcCallback(void* stream)
+{
+	return static_cast<JASAramStream*>(stream)->channelProc();
+}
+
+/**
+ * @note Address: 0x800A9AB8
+ * @note Size: 0x5C
+ */
+s32 JASAramStream::dvdErrorCheck(void*)
+{
+	u32 status = DVDGetDriveStatus();
+
+	switch (status) {
+	case DVD_STATE_END:
+		sSystemPauseFlag = false;
+		break;
+	case DVD_STATE_WAITING:
+	case DVD_STATE_COVER_CLOSED:
+	// case DVD_STATE_NO_DISK:
+	case DVD_STATE_COVER_OPEN:
+	// case DVD_STATE_WRONG_DISK:
+	// case DVD_STATE_MOTOR_STOPPED:
+	// case DVD_STATE_PAUSING:
+	// case DVD_STATE_IGNORED:
+	// case DVD_STATE_CANCELED:
+	case DVD_STATE_RETRY:
+	case 0xFFFFFFFF:
+	default:
+		sSystemPauseFlag = true;
+		break;
+	case DVD_STATE_BUSY:
+		break;
+	}
+	return 0;
+}
+
+/**
+ * @note Address: 0x800A9B14
+ * @note Size: 0x3C
+ */
+void JASAramStream::channelCallback(u32 p1, JASChannel* chan, JASDsp::TChannel* dspChan, void* stream)
+{
+	static_cast<JASAramStream*>(stream)->updateChannel(p1, chan, dspChan);
+}
+
+/**
+ * @note Address: 0x800A9B50
+ * @note Size: 0x758
+ */
+void JASAramStream::updateChannel(u32 command, JASChannel* chan, JASDsp::TChannel* dspChan)
+{
+	u32 blockSamples = getBlockSamples();
+	switch (command) {
+	case 1: {
+		if (!mActiveChannel) {
+			mActiveChannel     = chan;
+			mNextBlockSample   = blockSamples * mCurrentBlockNum;
+			mNextReadOffset    = 0;
+			mCurrentReadOffset = 0;
+			mMaxBlocks         = (mFileSize - 1) / blockSamples;
+			_1B0               = 0;
+			_1B4               = 0;
+			mControlFlags      = 0;
+		}
+	} break;
+	case 0: {
+		if (dspChan->mIsPlaying) {
+			break;
+		}
+		if (chan == mActiveChannel) {
+			mControlFlags            = 0;
+			u32 currentSampleAddress = dspChan->mCurrentSampleOffset + dspChan->mSamplesPerBlock;
+			if (currentSampleAddress <= mNextBlockSample) {
+				mNextReadOffset += (mNextBlockSample - currentSampleAddress);
+			} else if (!_1B0) {
+				mNextReadOffset += mNextBlockSample;
+				mNextReadOffset += (blockSamples * mCurrentBlockNum) - currentSampleAddress;
+			} else {
+				mNextReadOffset += mNextBlockSample;
+				mNextReadOffset += (blockSamples * mCurrentBlockNum) - currentSampleAddress - dspChan->mLoopStartOffset;
+				mNextReadOffset -= mFileSize;
+				mNextReadOffset += mAramSize;
+				dspChan->mLoopStartOffset = 0;
+				mLoopSampleOffset         = 0;
+				mControlFlags |= 2;
+				if (_1B4 < -1) {
+					_1B4++;
+				}
+				_1B0 = 0;
+			}
+
+			if (mNextReadOffset > mFileSize) {
+				sFatalErrorFlag = true;
+			}
+
+			f32 adjustedReadOffset = f32(_1B4);
+			adjustedReadOffset *= f32(mFileSize - mAramSize);
+			if (_1B4 < -1) {
+				adjustedReadOffset += f32(mNextReadOffset);
+			}
+
+			adjustedReadOffset /= f32(mSampleRate);
+			_1B8 = adjustedReadOffset;
+
+			if (mNextReadOffset + 400 >= mFileSize && !_1B0) {
+				if (mLoopFlag) {
+					u32 val3 = mMaxBlocks + 1;
+					if (val3 >= mCurrentBlockNum) {
+						val3 = 0;
+					}
+					dspChan->mLoopStartOffset = (mAramSize % blockSamples) + (val3 * blockSamples);
+					mLoopSampleOffset         = dspChan->mLoopStartOffset;
+					mControlFlags |= 2;
+				} else {
+					dspChan->mLoopOffset = 0;
+					mEndSampleOffset     = 0;
+					mControlFlags |= 8;
+				}
+
+				dspChan->mCurrentSampleOffset
+				    -= (blockSamples * mCurrentBlockNum) - ((mFileSize % blockSamples) + (mMaxBlocks * blockSamples));
+				mCurrentSampleOffset = dspChan->mCurrentSampleOffset;
+				mControlFlags |= 1;
+				mMaxBlocks += (mFileSize - 1) / blockSamples - (mAramSize / blockSamples) + 1;
+				_1B0 = 1;
+			}
+
+			u32 sampleOffset = dspChan->mSampleOffset - (u32)chan->mWaveData;
+			if (sampleOffset != 0) {
+				sampleOffset--;
+			}
+
+			u32 blockIndex = sampleOffset / sBlockSize;
+			if (blockIndex != mCurrentReadOffset) {
+				u32 isNewBlock = mCurrentReadOffset > blockIndex;
+				while (blockIndex != mCurrentReadOffset) {
+					if (sLoadThread->sendCmdMsg(&loadToAramTask, this) == 0) {
+						sFatalErrorFlag = true;
+						break;
+					}
+
+					{
+						JASCriticalSection cs;
+						mLoadedCount++;
+					}
+					mCurrentReadOffset++;
+					if (mCurrentReadOffset >= mCurrentBlockNum) {
+						mCurrentReadOffset = 0;
+					}
+				}
+
+				if (isNewBlock) {
+					mMaxBlocks -= mCurrentBlockNum;
+					if (_19D) {
+						if (!_1B0) {
+							dspChan->mCurrentSampleOffset += blockSamples;
+							mCurrentSampleOffset = dspChan->mCurrentSampleOffset;
+							mControlFlags |= 1;
+						}
+						dspChan->mNextSampleOffset += blockSamples;
+						mNextSampleOffset = dspChan->mNextSampleOffset;
+						mControlFlags |= 4;
+						mCurrentBlockNum = mBlockCount;
+						_19D             = 0;
+
+					} else if (mCurrentBlockNum != mBlockCount - 1) {
+						mCurrentBlockNum = mBlockCount - 1;
+						dspChan->mNextSampleOffset -= blockSamples;
+						mNextSampleOffset = dspChan->mNextSampleOffset;
+						mControlFlags |= 4;
+						if (!_1B0) {
+							dspChan->mCurrentSampleOffset -= blockSamples;
+							mCurrentSampleOffset = dspChan->mCurrentSampleOffset;
+							mControlFlags |= 1;
+						}
+					}
+				}
+			} else if (mLoadedCount == 0 && !sSystemPauseFlag) {
+				mPauseFlags &= ~2;
+				mPauseFlags &= ~4;
+			}
+
+			mNextBlockSample = dspChan->mCurrentSampleOffset + dspChan->mSamplesPerBlock;
+
+			if (mLoadedCount >= mBlockCount - 2) {
+				mPauseFlags |= 4;
+			}
+
+		} else {
+			if (mControlFlags & 0x1) {
+				dspChan->mCurrentSampleOffset = mCurrentSampleOffset;
+			}
+			if (mControlFlags & 0x2) {
+				dspChan->mLoopStartOffset = mLoopSampleOffset;
+			}
+			if (mControlFlags & 0x4) {
+				dspChan->mNextSampleOffset = mNextSampleOffset;
+			}
+			if (mControlFlags & 0x8) {
+				dspChan->mLoopOffset = mEndSampleOffset;
+			}
+		}
+		bool check = false;
+		int count  = 0;
+		for (count; count < 6; count++) {
+			if (chan == mChannels[count]) {
+				break;
+			}
+		}
+		dspChan->mLast   = mSampleData[0][count];
+		dspChan->mPenult = mSampleData[1][count];
+	} break;
+	case 2: {
+		bool check = false;
+		for (int i = 0; i < 6; i++) {
+			if (chan == mChannels[i]) {
+				mChannels[i] = nullptr;
+			} else if (mChannels[i]) {
+				check = true;
+			}
+		}
+		if (!check) {
+			mAbortFlag = 1;
+			if (sLoadThread->sendCmdMsg(&finishTask, this) == 0) {
+				sFatalErrorFlag = true;
+				return;
+			}
+		}
+	} break;
+	}
+
+	chan->setPauseFlag(mPauseFlags != 0);
+}
+
+/**
+ * @note Address: 0x800AA2A8
+ * @note Size: 0x1E4
+ */
+int JASAramStream::channelProc()
+{
+	OSMessage msg;
+	while (OSReceiveMessage(&mMsgQueueB, &msg, OS_MESSAGE_NOBLOCK)) {
+		switch ((u32)msg) {
+		case 4:
+			_19C = true;
+			break;
+		case 5:
+			_19D = true;
+			break;
+		}
+	}
+
+	if (!_19C) {
+		return 0;
+	}
+
+	while (OSReceiveMessage(&mMsgQueueA, &msg, OS_MESSAGE_NOBLOCK)) {
+		switch ((u32)msg & 0xFF) {
+		case 0:
+			channelStart();
+			break;
+		case 1:
+			channelStop((u32)msg >> 16);
+			break;
+		case 2:
+			mPauseFlags |= 1;
+			break;
+		case 3:
+			mPauseFlags &= ~1;
+			break;
+		}
+	}
+
+	if (!mChannels[0]) {
+		return 0;
+	}
+
+	if (sFatalErrorFlag) {
+		mPauseFlags |= 8;
+	}
+	if (sSystemPauseFlag) {
+		mPauseFlags |= 2;
+	}
+
+	for (int i = 0; i < mNumBlocks; i++) {
+		JASChannel* channel     = mChannels[i];
+		channel->mVolumeChannel = mVolume * mChannelVolume[i];
+		channel->mPitchChannel  = mPitch;
+		if (mUseStereo) {
+			channel->mPanChannel = mChannelPan[i];
+		}
+		channel->mFxMixChannel = mChannelFxMix[i];
+		channel->mDolbyChannel = mChannelDolby[i];
+	}
+
+	if (!mUseStereo && mNumBlocks == 2) {
+		mChannels[0]->mPanChannel = 0.0f;
+		mChannels[1]->mPanChannel = 1.0f;
+	}
+
+	return 0;
+}
+
+/**
+ * @note Address: 0x800AA48C
+ * @note Size: 0x240
+ */
+void JASAramStream::channelStart()
+{
+	static const int one = 1;
+	u8 blockType;
+	switch (mStreamType) {
+	case 0:
+		blockType = 0;
+		break;
+	case 1:
+		blockType = 3;
+		break;
+	}
+	for (int i = 0; i < mNumBlocks; i++) {
+		JASWaveInfo* info      = &mWaveInfos[i];
+		info->mFormat          = blockType;
+		info->mLoopOffset      = -1;
+		info->mLoopStartOffset = 0;
+
+		u32 val = mCurrentBlockNum;
+		val *= getBlockSamples();
+		info->mLoopEndOffset = val;
+		info->mSampleCount   = info->mLoopEndOffset;
+		info->mLast          = 0;
+		info->mPenult        = 0;
+		info->_24            = (void*)&one;
+
+		JASChannel* chan
+		    = new (JASPoolAllocObject<JASChannel, JASCreationPolicy::NewFromRootHeap, JASThreadingModel::SingleThreaded>::alloc())
+		        JASChannel(channelCallback, this);
+
+		chan->mPriority = 127;
+		chan->setPanPower(0.0f, 0.0f, 1.0f);
+		chan->mPanCalcType   = 1;
+		chan->mFxMixCalcType = 1;
+		chan->mDolbyCalcType = 1;
+
+		for (int i = 0; i < 6; i++) {
+			chan->setMixConfig(i, mMixData[i]);
+		}
+
+		chan->mActivePitch   = f32(mSampleRate) / JASDriver::getDacRate();
+		chan->mModifiedPitch = chan->mActivePitch;
+		chan->setOscInit(0, &OSC_ENV);
+		chan->mWaveInfo   = info;
+		chan->mWaveData   = (void*)(mDataOffset + (i * (sBlockSize * mBlockCount)));
+		chan->mWaveFormat = 0;
+		chan->playForce();
+		mChannels[i] = chan;
+	}
+	mActiveChannel = nullptr;
+}
+
+/**
+ * @note Address: 0x800AA6CC
+ * @note Size: 0x78
+ */
+void JASAramStream::channelStop(u16 p1)
+{
+	for (int i = 0; i < mNumBlocks; i++) {
+		if (mChannels[i] != nullptr) {
+			mChannels[i]->release(p1);
+		}
+	}
+}

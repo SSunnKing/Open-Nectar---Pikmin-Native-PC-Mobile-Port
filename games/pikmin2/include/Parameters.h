@@ -1,0 +1,177 @@
+#ifndef _PARAMETERS_H
+#define _PARAMETERS_H
+
+#include "types.h"
+
+class AgeServer;
+class Parameters;
+class RandomAccessStream;
+
+/**
+ * @brief Wrapper class for packing and unpacking fourcc-style identifiers.
+ *
+ * IDs are stored as s32s, with helper functions for setting it from a string.
+ *
+ * @warning This allows for 4-byte character constants, but parameter reading/writing assumes this will be packed into 3 bytes.
+ * Any strings provided should only be 3 characters to ensure no data loss.
+ * @note Size: 0x4.
+ */
+class ayuID {
+public:
+	/// Constructs a blank ID.
+	ayuID() { mID = 0; }
+
+	/**
+	 * @brief Construct a new ID from an input string.
+	 * @param id String to convert to a fourcc ID.
+	 */
+	ayuID(immut char* const id) { Set(id); }
+
+	/**
+	 * @brief Converts a string to a fourcc ID and sets it as the ID.
+	 * @param id String ID to convert and store.
+	 */
+	void Set(immut char* id)
+	{
+#if defined(PIKI_PC_PORT)
+		// Parameter files store their tags in GameCube byte order. Directly
+		// reinterpreting the string only produced the same value on PowerPC.
+		mID = (static_cast<u32>(static_cast<u8>(id[0])) << 24)
+		    | (static_cast<u32>(static_cast<u8>(id[1])) << 16)
+		    | (static_cast<u32>(static_cast<u8>(id[2])) << 8)
+		    | static_cast<u32>(static_cast<u8>(id[3]));
+#else
+		mID = *(s32*)id;
+#endif
+	}
+
+	/**
+	 * @brief Gets the fourcc ID.
+	 * @return A reference to the packed integer ID.
+	 */
+	s32& Num() { return mID; };
+
+	s32 mID; // _00, fourcc-style (32-bit) packed identifier.
+};
+
+/**
+ * @brief Abstract base class for individual parameters to be read from file.
+ *
+ * Implemented in a singly-linked list, with serialisation support.
+ *
+ * @note Size: 0xC.
+ */
+struct BaseParm {
+	BaseParm(Parameters*, ayuID);
+
+	// _08    = VTBL
+	ayuID mID;       ///< _00, fourcc-style identifier for the parameter.
+	BaseParm* mNext; ///< _04, next parameter in the (singly-linked) list.
+
+	virtual int size() = 0; // _08
+#ifdef WIN32
+	virtual void genAge(AgeServer&) { }
+#endif
+
+	/**
+	 * @brief Writes parameter to file stream - trivial in base class.
+	 * @param output File stream to write to - unused in base class.
+	 */
+	virtual void write(RandomAccessStream& output) { } // _0C
+
+	/**
+	 * @brief Reads parameter from file stream - trivial in base class.
+	 * @param input File stream to read from - unused in base class.
+	 */
+	virtual void read(RandomAccessStream& input) { } // _10
+};
+
+/**
+ * @brief Container for a singly-linked list of `BaseParm` parameters, representing a block from a parameter file.
+ *
+ * @note Constructor and members differ slightly between the DLL and DOL - the name is removed in the DOL.
+ * @note Size: 0x4 (0x8 in DLL).
+ */
+class Parameters {
+public:
+	/**
+	 * @brief Constructs an empty parameters list.
+	 * @param name Name for this collection of parameters.
+	 */
+	Parameters(immut char* name)
+	{
+		mFirstParm = nullptr;
+#if defined(WIN32)
+		mName = name;
+#endif
+	}
+
+	void write(RandomAccessStream&);
+	void read(RandomAccessStream&);
+
+#ifdef WIN32
+	void genAge(AgeServer&, int);
+	void genAgeParms(AgeServer&, int);
+#endif
+
+	// unused/inlined:
+
+	int sizeInFile();
+
+#ifdef WIN32
+	immut char* mName;    ///< _00, name for this collection of parameters.
+#endif                    //
+	BaseParm* mFirstParm; ///< _00, pointer to first parameter node in the list.
+};
+
+/**
+ * @brief TODO
+ *
+ * @note Size: 0xC + sizeof(T) (so usually 0x10).
+ */
+template <typename T>
+struct Parm : public BaseParm {
+	Parm(Parameters* owner, T value, T min, T max, ayuID id, immut char* name)
+	    : BaseParm(owner, id)
+	{
+#ifdef WIN32
+		mName         = name;
+		mValue        = value;
+		mDefaultValue = value;
+		mMinValue     = min;
+		mMaxValue     = max;
+#else
+		mValue = value;
+#endif
+	}
+
+	virtual int size() { return sizeof(T); } // _08
+	virtual void write(RandomAccessStream&); // _0C
+	virtual void read(RandomAccessStream&);  // _10
+
+	T& operator()() { return mValue; }
+	void operator()(T val) { mValue = val; }
+
+#ifdef WIN32
+	virtual void genAge(AgeServer&);
+#endif
+
+	// _08     = VTBL
+	// _00-_0C = BaseParm
+	T mValue;          // _0C
+#ifdef WIN32           //
+	T mDefaultValue;   // _10
+	T mMinValue;       // _14
+	T mMaxValue;       // _18
+	immut char* mName; // _1C
+#endif
+};
+
+// For some reason, giving `CreatureProp::Parms` its parameter strings messes up matching.
+#if defined(BUILD_MATCHING) && !defined(WIN32)
+#define MATCHING_PARM_NAME(name) nullptr
+#else
+#define MATCHING_PARM_NAME(name) name
+#endif
+
+#endif

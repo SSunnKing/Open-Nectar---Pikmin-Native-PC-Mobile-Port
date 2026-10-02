@@ -1,0 +1,56 @@
+name: Linux build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake pkg-config binutils libsdl2-dev libgl1-mesa-dev
+      - name: Build standalone package
+        # Compila (x86-64 genérico, sin -march=native), ejecuta los tests,
+        # genera el paquete autocontenido con sus librerías y lo verifica.
+        run: packaging/linux/package-standalone.sh --clean
+      - name: Verify distributable contains no game data
+        run: |
+          if find . -path './.git' -prune -o -type f \( -iname '*.iso' -o -iname '*.gcm' -o -iname '*.rvz' -o -path './assets/dataDir/*' \) -print -quit | grep -q .; then
+            echo 'Proprietary game data found in repository'
+            exit 1
+          fi
+      - name: Archive package with executable permissions
+        run: tar -czf nectar-linux.tar.gz -C packaging/linux/out nectar-linux
+      - name: Upload standalone package
+        uses: actions/upload-artifact@v4
+        with:
+          name: nectar-linux
+          path: nectar-linux.tar.gz
+
+  smoke-clean-distro:
+    # Install the graphics runtime documented in packaging/linux/README.txt.
+    # SDL2 and the non-driver runtime must come from the package itself.
+    needs: build
+    runs-on: ubuntu-latest
+    container: debian:12
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nectar-linux
+      - name: Extract package with executable permissions
+        run: tar -xzf nectar-linux.tar.gz
+      - name: Install documented graphics runtime
+        run: apt-get update && apt-get install -y --no-install-recommends libgl1 libopengl0 libglvnd0 libgbm1 libdrm2 libgl1-mesa-dri
+      - name: Standalone package runs on clean Debian 12
+        run: |
+          cd nectar-linux
+          chmod +x nectar nectar-launcher
+          ./nectar-launcher --help
+          # Resolve with the packaged loader, as the launch wrappers do. Do not
+          # inject the bundled libc into the clean distro's own ldd process.
+          if ./lib/ld-linux-x86-64.so.2 --library-path ./lib --list ./nectar.real | grep 'not found'; then
+            echo 'Unresolved dependencies in the standalone package'
+            exit 1
+          fi

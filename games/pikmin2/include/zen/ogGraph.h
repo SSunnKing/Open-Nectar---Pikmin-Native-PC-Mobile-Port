@@ -1,0 +1,38 @@
+#ifndef _ZEN_OGGRAPH_H
+#define _ZEN_OGGRAPH_H
+
+#include "Piki.h"
+#include "types.h"
+
+class Controller;
+class Graphics;
+class P2DScreen;
+class P2DPane;
+
+namespace zen {
+
+/**
+ * @brief Manages calculation and rendering of Pikmin population graphs, typically for result screens.
+ *
+ * @note Size: 0x14.
+ */
+struct ogGraphMgr {
+public:
+	ogGraphMgr(P2DScreen* pParent);
+
+	void draw(u8 alpha);
+
+private:
+	void SetDummyLineData();
+	void MakeData();
+
+	P2DPane* mParent;               // _00
+	int mMaxPikis;                  // _04
+	int mMinPikis;                  // _08
+	int mDefaultMaxPikmin;          // _0C
+	bool mHasColor[PikiColorCount]; // _10
+};
+
+} // namespace zen
+
+#endif

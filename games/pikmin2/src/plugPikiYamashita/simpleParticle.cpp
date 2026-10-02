@@ -1,0 +1,124 @@
+#include "DebugLog.h"
+#include "Graphics.h"
+#include "zen/particle.h"
+#if defined(PIKI_PC_PORT)
+#include "timing/pc_render_phase.h"
+#endif
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(__LINE__) // Never used in the DLL
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F4
+ */
+DEFINE_PRINT("simpleParticle")
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000150
+ */
+zen::particleMdl* zen::simplePtclManager::create(Texture* tex, s16 lifeTime, const Vector3f& globalPos, const Vector3f& vel,
+                                                 const Vector3f& accel, f32 size, f32 rotSpeed, const Colour& primColor,
+                                                 const Colour& envColor, zen::CallBack1<zen::particleMdl*>* cbPtcl)
+{
+	particleMdl* ptcl = pmGetParticle();
+	if (ptcl) {
+		ptcl->mSimpleTex      = tex;
+		ptcl->mLifeTime       = lifeTime;
+		ptcl->mGlobalPosition = globalPos;
+		ptcl->mLocalPosition.set(0.0f, 0.0f, 0.0f);
+		ptcl->mVelocity     = vel;
+		ptcl->mAcceleration = accel;
+		ptcl->mSize         = size;
+		ptcl->mScaleFactor  = 1.0f;
+		ptcl->mRotSpeed     = (32767.0f * rotSpeed / TAU);
+		ptcl->mPrimaryColor = primColor;
+		ptcl->mEnvColor     = envColor;
+		ptcl->mPtclCallBack = cbPtcl;
+	} else {
+		PRINT("particle buffer is EMPTY.\n");
+	}
+
+	return ptcl;
+}
+
+/**
+ * @todo: Documentation
+ */
+void zen::simplePtclManager::update(f32 timeStep)
+{
+#if defined(PIKI_PC_PORT)
+	if (!pc_render_is_authoritative()) {
+		return;
+	}
+#endif
+
+	zenList* next;
+	for (zenList* list = getTopList(); list != getOrigin(); list = next) {
+		next              = list->mNext;
+		particleMdl* ptcl = (particleMdl*)list;
+		if (ptcl->mAge + 1 == ptcl->mLifeTime) {
+			pmPutParticle(ptcl);
+			continue;
+		}
+
+		if (ptcl->mPtclCallBack) {
+			ptcl->mPtclCallBack->invoke(ptcl);
+		} else {
+			ptcl->mVelocity.add(ptcl->mAcceleration);
+			ptcl->mLocalPosition.add(ptcl->mVelocity);
+			ptcl->mAlphaFactor = 1.0f - f32(ptcl->mAge) / f32(ptcl->mLifeTime);
+			ptcl->mRotAngle += ptcl->mRotSpeed;
+		}
+
+		ptcl->mAgeTimer += timeStep;
+		ptcl->mAge = RoundOff(ptcl->mAgeTimer);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void zen::simplePtclManager::draw(Graphics& gfx)
+{
+	zenList* list;
+	zenList* next;
+
+	bool light = gfx.setLighting(false, nullptr);
+	int blend  = gfx.setCBlending(BLEND_Additive);
+
+	gfx.setDepth(false);
+	gfx.useMatrix(gfx.mCamera->mLookAtMtx, 0);
+
+	if (gfx.initParticle(false)) {
+		for (list = getTopList(); list != getOrigin(); list = next) {
+			next              = list->mNext;
+			particleMdl* ptcl = (particleMdl*)list;
+			gfx.useTexture(ptcl->mSimpleTex, GX_TEXMAP0);
+			gfx.setBlendMode(84, 11, 2);
+			Colour primColor(ptcl->mPrimaryColor.r, ptcl->mPrimaryColor.g, ptcl->mPrimaryColor.b,
+			                 RoundOff(ptcl->mPrimaryColor.a * ptcl->mAlphaFactor));
+			gfx.setPrimEnv(&primColor, &ptcl->mEnvColor);
+			gfx.drawRotParticle(*gfx.mCamera, ptcl->mLocalPosition + ptcl->mGlobalPosition, -ptcl->mRotAngle,
+			                    ptcl->mSize * ptcl->mScaleFactor * 25.0f);
+		}
+	}
+
+	gfx.setDepth(true);
+	gfx.setCBlending(blend);
+	gfx.setLighting(light, nullptr);
+}
+
+/**
+ * @todo: Documentation
+ */
+void zen::simplePtclManager::forceFinish()
+{
+	while (getOrigin() != getTopList()) {
+		pmPutParticle(getTopList());
+	}
+}

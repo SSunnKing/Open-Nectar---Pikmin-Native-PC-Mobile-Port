@@ -1,0 +1,11 @@
+{
+  "version": "2.0.0",
+  "configurations": [
+    {
+      "name": "F5 Anything: Custom Command",
+      "type": "f5anything",
+      "request": "launch",
+      "command": "ninja"
+    }
+  ]
+}

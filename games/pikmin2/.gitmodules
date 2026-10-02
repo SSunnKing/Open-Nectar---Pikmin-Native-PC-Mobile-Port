@@ -1,0 +1,3 @@
+[submodule "pikmin2-decomp"]
+	path = pikmin2-decomp
+	url = https://github.com/projectPiki/pikmin2

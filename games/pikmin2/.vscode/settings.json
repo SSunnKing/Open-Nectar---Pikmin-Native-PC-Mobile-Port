@@ -1,0 +1,16 @@
+{
+    "[c]": {
+        "files.encoding": "utf8",
+        "editor.defaultFormatter": "ms-vscode.cpptools"
+    },
+
+    "[cpp]": {
+        "files.encoding": "utf8",
+        "editor.defaultFormatter": "xaver.clang-format",
+    },
+
+    "editor.tabSize": 4,
+    "files.exclude": {
+        "**/*.ctx": true
+    },
+}

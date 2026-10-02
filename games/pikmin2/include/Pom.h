@@ -1,0 +1,205 @@
+#ifndef _POM_H
+#define _POM_H
+
+#include "Boss.h"
+#include "Shape.h"
+#include "types.h"
+#include "zen/CallBack.h"
+#include "zen/particle.h"
+
+struct PomAi;
+struct PomGenOpenStarCallBack;
+class ShapeDynMaterials;
+
+// Redundant parenthesis surrounding the call to `Parm::Operator()` fixes matching for the DLL
+#define POM_PARM(parm)        C_POM_PARM(this, parm)
+#define C_POM_PARM(pom, parm) (static_cast<PomProp*>((pom)->mProps)->mPomProps.parm())
+
+/**
+ * @brief TODO.
+ */
+struct PomProp : public BossProp, public CoreNode {
+public:
+	/**
+	 * @brief TODO.
+	 *
+	 * @note Offset comments are relative to PomProp for ease of use.
+	 */
+	struct Parms : public Parameters {
+		inline Parms() // TODO
+		    : Parameters("pom::Parms")
+		    , mSquashAmount(this, 0.2f, 0.0f, 0.0f, "s00", "くっつきバネ(init)")
+		    , mSquashPersistence(this, 0.5f, 0.0f, 0.0f, "s01", "くっつきバネ(cont)")
+		    , mSquashMultiplier(this, 0.15f, 0.0f, 0.0f, "s02", "くっつきバネ(power)")
+		    , mCloseWaitTime(this, 10.0f, 0.0f, 0.0f, "p00", "花を閉じる時間")
+		    , mDischargeAngle(this, 180.0f, 0.0f, 0.0f, "p10", "ピキを吐く角度")
+		    , mMaxPikiPerCycle(this, 10, 0, 0, "i00", "花を閉じるピキ数")
+		    , mMinCycles(this, 10, 0, 0, "i10", "死亡発射回数(Min)")
+		    , mMaxCycles(this, 10, 0, 0, "i11", "死亡発射回数(Max)")
+		    , mDoAnimLoopWhenClosed(this, 0, 0, 1, "i20", "花を閉じた時のループ")
+		    , mDoKillSameColorPiki(this, FALSE, FALSE, TRUE, "i90", "Kill Same Color Piki")
+		    , mStickOrSwallow(this, 1, 0, 1, "i91", "Stick or Swallow")
+		    , mOpenOnInteractionOnly(this, 0, 0, 1, "i92", "Default and Collide")
+		{
+		}
+
+		// _200-_204 = Parameters
+		Parm<f32> mSquashAmount;          // _204, s00
+		Parm<f32> mSquashPersistence;     // _214, s01
+		Parm<f32> mSquashMultiplier;      // _224, s02
+		Parm<f32> mCloseWaitTime;         // _234, p00
+		Parm<f32> mDischargeAngle;        // _244, p10
+		Parm<int> mMaxPikiPerCycle;       // _254, i00
+		Parm<int> mMinCycles;             // _264, i10
+		Parm<int> mMaxCycles;             // _274, i11
+		Parm<int> mDoAnimLoopWhenClosed;  // _284, i20
+		Parm<BOOL> mDoKillSameColorPiki;  // _294, i90
+		Parm<int> mStickOrSwallow;        // _2A4, i91 - 0=stick and attack, 1=swallowed
+		Parm<int> mOpenOnInteractionOnly; // _2B4, i92 - 0=open immediately, 1=open after interacting
+	};
+
+	PomProp();
+
+	virtual void read(RandomAccessStream& input) // _08
+	{
+		mCreatureProps.read(input);
+		mBossProps.read(input);
+		mPomProps.read(input);
+	};
+
+	// _54       = VTBL 1
+	// _1EC      = VTBL 2
+	// _00-_1EC  = BossProp
+	// _1EC-_200 = CoreNode
+	Parms mPomProps; // _200
+};
+
+/**
+ * @brief TODO.
+ *
+ * @note Size: 0x3D4.
+ */
+class Pom : public Boss {
+	friend struct PomAi;
+
+public:
+	Pom(CreatureProp*);
+
+	virtual void init(immut Vector3f&);               // _28
+	virtual f32 getiMass();                           // _38
+	virtual void collisionCallback(immut CollEvent&); // _A8
+	virtual void update();                            // _E0
+	virtual void refresh(Graphics&);                  // _EC
+	virtual void doAI();                              // _104
+	virtual void doAnimation();                       // _108
+	virtual void doKill();                            // _10C
+	virtual void exitCourse();                        // _110
+	virtual void drawShape(Graphics&);                // _120
+
+	void setColor(int);
+
+private:
+	// _00      = VTBL
+	// _00-_3B8 = Boss
+	bool mIsPikiOrPlayerTouching;         // _3B8
+	int mColor;                           // _3BC
+	PomAi* mPomAi;                        // _3C0
+	ShapeDynMaterials mAnimatedMaterials; // _3C4
+};
+
+/**
+ * @brief TODO.
+ *
+ * @note Size: 0x24.
+ */
+struct PomAi : public PaniAnimKeyListener {
+public:
+	PomAi(Pom*);
+
+	void initAI(Pom*);
+	void killCallBackEffect(bool);
+	void update();
+	void collidePetal(Creature*);
+
+private:
+	virtual void animationKeyUpdated(immut PaniAnimKeyEvent&); // _08
+
+	void keyAction0();
+	void keyAction1();
+	void keyAction2();
+	void keyAction3();
+	void keyLoopEnd();
+	void keyFinished();
+	void playSound(int);
+	void setCollideSound(Creature*);
+	void setEveryFrame();
+	void checkSwayAndScale();
+	void calcSwayAndScale();
+	void setInitPosition();
+	int killStickPiki();
+	void createPikiHead();
+	void emitPomOpenEffect(u32);
+	void createPomOpenEffect();
+	void calcPetalStickers();
+	void resultFlagOn();
+	void resultFlagSeen();
+	bool isMotionFinishTransit();
+	bool deadTransit();
+	bool petalOpenTransit();
+	bool petalShakeTransit();
+	bool petalCloseTransit();
+	bool dischargeTransit();
+	void initDie(int);
+	void initWait(int);
+	void initPetalOpen(int);
+	void initPetalShake(int);
+	void initPetalClose(int);
+	void initDischarge(int);
+	void dieState();
+	void waitState();
+	void openState();
+	void shakeState();
+	void closeState();
+	void dischargeState();
+
+	// _00     = VTBL
+	// _00-_04 = PaniAnimKeyListener
+	Pom* mPom;                                 // _04
+	bool mHasCollided;                         // _08
+	bool mPlaySound;                           // _09
+	bool mIsOpening;                           // _0A
+	int mPrevStickPikiCount;                   // _0C
+	int mReleasedSeedCount;                    // _10
+	int mMaxSeedCount;                         // _14
+	f32 mDeformAmount;                         // _18
+	f32 mCurrentDeform;                        // _1C
+	PomGenOpenStarCallBack* mOpenStarCallBack; // _20
+};
+
+/**
+ * @brief TODO
+ *
+ * @note Size: 0x8.
+ */
+struct PomGenOpenStarCallBack : public zen::CallBack1<zen::particleGenerator*> {
+public:
+	PomGenOpenStarCallBack() { }
+
+	virtual bool invoke(zen::particleGenerator* ptcl) // _08
+	{
+		if (!*mIsActive) {
+			ptcl->finish();
+		}
+
+		return true;
+	}
+
+	void set(bool* val) { mIsActive = val; }
+
+private:
+	// _00     = VTBL
+	// _00-_04 = zen::CallBack1
+	bool* mIsActive; // _04, points to _0A in PomAi
+};
+
+#endif

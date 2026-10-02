@@ -1,0 +1,1035 @@
+#include "jaudio/oneshot.h"
+#include "jaudio/audiostruct.h"
+#include "jaudio/bankdrv.h"
+#include "jaudio/bankread.h"
+#include "jaudio/bx.h"
+#include "jaudio/connect.h"
+#include "jaudio/driverinterface.h"
+#include "jaudio/dspdriver.h"
+#include "jaudio/rate.h"
+#include "jaudio/tables.h"
+#include "jaudio/waveread.h"
+#include <stddef.h>
+
+static int Jesus1Shot_Update(jc_*, JCSTATUS);
+
+static s16 OSC_REL[] = { 1, 10, 0, 15 };
+
+Osc_ PERC_ENV    = { 0, 1.0f, 0, 0, 1.0f, 0 };
+Osc_ OSC_ENV     = { 0, 1.0f, 0, OSC_REL, 1.0f, 0 };
+u8 polys_table[] = { 0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32 };
+
+#ifdef PIKI_PC_PORT
+static u8 SoundIdByte(SOUNDID_ sound, u32 index)
+{
+	return static_cast<u8>(sound.value >> ((3 - index) * 8));
+}
+#else
+static u8 SoundIdByte(SOUNDID_ sound, u32 index)
+{
+	return sound.bytes[index];
+}
+#endif
+
+static u32 VmapWaveId(const Vmap_* map)
+{
+	return (static_cast<u32>(static_cast<u16>(map->mWsysID)) << 16) | static_cast<u16>(map->mWaveID);
+}
+
+/**
+ * @TODO: Documentation
+ */
+static u8 __GetTrigger(jc_* jc, u8 n)
+{
+	switch (n) {
+	case 1:
+	{
+		return jc->velocity;
+	}
+	case 2:
+	{
+		return jc->note;
+	}
+	}
+	return 0;
+}
+
+/**
+ * @TODO: Documentation
+ */
+static f32 __Clamp01(f32 val)
+{
+	if (val < 0.0f) {
+		return 0.0f;
+	}
+	if (val > 1.0f) {
+		return 1.0f;
+	}
+	return val;
+}
+
+/**
+ * @TODO: Documentation
+ */
+static void __Clamp01InitPan(jc_* jc)
+{
+	for (u32 i = 1; i < 3; i++) {
+		jc->panMatrices[i].values[0] = __Clamp01(jc->panMatrices[i].values[0]);
+	}
+}
+
+/**
+ * @TODO: Documentation
+ */
+static void __DoEffect(jc_* jc, u8 id, f32 val)
+{
+	switch (id) {
+	case 1:
+	{
+		jc->currentPitch *= val;
+		break;
+	}
+	case 0:
+	{
+		jc->currentVolume *= val;
+		break;
+	}
+	case 2:
+	{
+		jc->panMatrices[1].values[1] = val;
+		break;
+	}
+	case 3:
+	{
+		jc->panMatrices[2].values[1] = val;
+		break;
+	}
+	case 4:
+	{
+		jc->panMatrices[3].values[1] = val;
+		break;
+	}
+	}
+}
+
+/**
+ * @TODO: Documentation
+ */
+static void EffecterInit(jc_* jc, Inst_* inst)
+{
+	jc->pitchModifier            = 1.0f;
+	jc->volumeModifier           = 1.0f;
+	jc->panMatrices[1].values[1] = 0.5f;
+	jc->panMatrices[2].values[1] = 0.0f;
+	jc->panMatrices[3].values[1] = 0.0f;
+
+	STACK_PAD_VAR(2);
+	for (u32 i = 0; i < 2; i++) {
+		if (inst->mSensors[i]) {
+			u8 trigger     = __GetTrigger(jc, inst->mSensors[i]->type);
+			f32 sense      = Bank_SenseToOfs(inst->mSensors[i], trigger);
+			f32* REF_sense = &sense;
+			__DoEffect(jc, inst->mSensors[i]->id, sense);
+		}
+
+		if (inst->mEffects[i]) {
+			f32 r = Bank_RandToOfs(inst->mEffects[i]);
+			__DoEffect(jc, inst->mEffects[i]->id, r);
+		}
+
+		if (inst->mOscillators[i]) {
+			jc->mOscBuffers[i].state = 1;
+			jc->mOscillators[i]      = inst->mOscillators[i];
+			f32 ofs                  = Bank_OscToOfs(jc->mOscillators[i], &jc->mOscBuffers[i]);
+			DoEffectOsc(jc, jc->mOscillators[i]->mode, ofs);
+		} else {
+			jc->mOscillators[i] = NULL;
+		}
+	}
+
+	STACK_PAD_VAR(2);
+	__Clamp01InitPan(jc);
+}
+
+/**
+ * @TODO: Documentation
+ */
+static void EffecterInit_Perc(jc_* jc, PercKeymap_* keymap, u16 id)
+{
+	jc->pitchModifier            = 1.0f;
+	jc->volumeModifier           = 1.0f;
+	jc->panMatrices[1].values[1] = 0.5f;
+	jc->panMatrices[2].values[1] = 0.0f;
+	jc->panMatrices[3].values[1] = 0.0f;
+
+	// PERC instruments only have rand and not osc
+	for (u32 i = 0; i < 2; i++) {
+		Rand_* randomEffect = static_cast<Rand_*>(i == 0 ? keymap->_08 : keymap->_0C);
+		if (randomEffect) {
+			f32 r      = Bank_RandToOfs(randomEffect);
+			f32* REF_r = &r;
+			__DoEffect(jc, randomEffect->id, r);
+		}
+
+		jc->mOscillators[i] = NULL;
+	}
+	jc->mOscillators[0]      = &PERC_ENV;
+	jc->mOscBuffers[0].state = TRUE;
+	Bank_OscToOfs(jc->mOscillators[0], &jc->mOscBuffers[0]);
+	jc->mOscBuffers[0].releaseParam = id;
+	__Clamp01InitPan(jc);
+}
+
+/**
+ * @TODO: Documentation
+ */
+static void EffecterInit_Osc(jc_* jc)
+{
+	jc->pitchModifier            = 1.0f;
+	jc->volumeModifier           = 1.0f;
+	jc->panMatrices[1].values[1] = 0.5f;
+	jc->panMatrices[2].values[1] = 0.0f;
+	jc->panMatrices[3].values[1] = 0.0f;
+
+	for (u32 i = 0; i < 2; i++) {
+		jc->mOscillators[i] = NULL;
+	}
+
+	jc->mOscillators[0]      = &OSC_ENV;
+	jc->mOscBuffers[0].state = TRUE;
+	Bank_OscToOfs(jc->mOscillators[0], &jc->mOscBuffers[0]);
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Effecter_Overwrite_1ShotD(jc_* jc, Osc_* osc, u32 id)
+{
+	if (jc != NULL && osc != NULL && id < ARRAY_SIZE(jc->mOscBuffers)) {
+		jc->mOscBuffers[id].state = TRUE;
+		jc->mOscillators[id]      = osc;
+		DoEffectOsc(jc, jc->mOscillators[id]->mode, Bank_OscToOfs(jc->mOscillators[id], &jc->mOscBuffers[id]));
+	}
+}
+
+/**
+ * @TODO: Documentation
+ * @note UNUSED Size: 000060
+ */
+void Effecter_Overwrite_1Shot(jc_* jc, Osc_* osc1, Osc_* osc2)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @TODO: Documentation
+ */
+static jc_* __Oneshot_Play_Start(jcs_* jcs, jc_* jc, u32 noteId)
+{
+	BOOL play;
+
+	if (noteId == 0) {
+		noteId = -1;
+	}
+	jc->noteId         = noteId;
+	jc->lastNotePlayed = jc->noteId;
+	jc->updateCallback = Jesus1Shot_Update;
+	jc->dspChannel     = AllocDSPchannel(0, reinterpret_cast<uintptr_t>(jc));
+
+	if (jc->dspChannel == NULL) {
+		play = CheckLogicalChannel(jc);
+	} else {
+		play = PlayLogicalChannel(jc);
+	}
+
+	if (jc->dspChannel == NULL && play == TRUE) {
+		if (Add_WaitDSPChannel(jc) == TRUE) {
+			List_AddChannelTail(&jcs->waitingChannels, jc);
+			return jc;
+		} else {
+			List_AddChannelTail(&jcs->freeChannels, jc);
+			return NULL;
+		}
+	} else if (play == FALSE) {
+		DeAllocDSPchannel(jc->dspChannel, reinterpret_cast<uintptr_t>(jc));
+		jc->dspChannel = NULL;
+		List_AddChannelTail(&jcs->freeChannels, jc);
+		return NULL;
+	} else {
+		List_AddChannelTail(&jcs->activeChannels, jc);
+	}
+	return jc;
+}
+
+/**
+ * @TODO: Documentation
+ */
+static jc_* __Oneshot_GetLogicalChannel(jcs_* jcs, WaveID_* wave)
+{
+	if (wave && (wave->heap.startAddress == 0 || wave->data == NULL)) {
+		return FALSE;
+	}
+
+	jc_* chan = List_GetChannel(&jcs->freeChannels);
+	jc_* chan2;
+	jc_** REF_chan2 = &chan2;
+	STACK_PAD_VAR(6);
+	if (chan == NULL) {
+
+		if (FixAllocChannel(jcs, 1) == FALSE) {
+			return 0;
+		}
+		jcs->chanAllocCount++;
+		chan = List_GetChannel(&jcs->freeChannels);
+		if (chan == NULL) {
+			return 0;
+		}
+
+		if (jcs->voiceStealingMode == 1) {
+			chan2 = List_GetChannel(&jcs->releasingChannels);
+			if (chan2 == NULL) {
+				chan2 = List_GetChannel(&jcs->activeChannels);
+				if (chan2) {
+					List_CountChannel(&jcs->waitingChannels);
+				}
+			}
+
+			if (chan2) {
+				chan2->mOscBuffers[0].state = 6;
+				List_AddChannel(&jcs->waitingChannels, chan2);
+				if (chan2->dspChannel) {
+					ForceStopDSPchannel(chan2->dspChannel);
+				}
+			}
+		}
+	}
+	Channel_Init(chan);
+	if (wave) {
+		chan->waveData        = wave->data;
+		chan->chanData        = wave->heap.startAddress;
+		chan->logicalChanType = 0;
+	}
+	chan->_18 = 0;
+	UpdatePanPower_1Shot(chan, 1.0f, 1.0f, 1.0f, 1.0f);
+	return chan;
+}
+
+/**
+ * @TODO: Documentation
+ */
+Perc_* PercRead(u32 bankIndex, u32 percIndex)
+{
+	Bank_* bank = Bank_Get(bankIndex);
+	if (bank == NULL) {
+		return NULL;
+	}
+
+	return Bank_PercChange(bank, percIndex);
+}
+
+/**
+ * @TODO: Documentation
+ */
+Inst_* InstRead(u32 bankIndex, u32 instIndex)
+{
+
+	Bank_* bank = Bank_Get(bankIndex);
+	if (bank == NULL) {
+		return NULL;
+	}
+
+	return Bank_InstChange(bank, instIndex);
+}
+
+/**
+ * @TODO: Documentation
+ */
+Vmap_* VmapRead(Inst_* inst, u8 key, u8 velocity)
+{
+	Vmap_* map = Bank_GetInstVmap(inst, key, velocity);
+	return !map ? NULL : map;
+}
+
+/**
+ * @TODO: Documentation
+ */
+static void __Oneshot_WavePause(jc_* jc, u8 pauseFlag)
+{
+	jc->pauseFlag = pauseFlag;
+	jc->toFlush   = 1;
+}
+
+/**
+ * @TODO: Documentation
+ */
+static BOOL __Oneshot_StartMonoPolyCheck(jc_* jc, u32 id)
+{
+	jcs_* mgr = jc->chanMgr;
+	jc_* chan = mgr->activeChannels;
+	u8 flag   = id >> 0x18;
+	u8 poly   = polys_table[flag & 0xf];
+
+	u32 index = 0;
+
+	if (poly == 0) {
+		return TRUE;
+	}
+
+	while (TRUE) {
+		if (chan == NULL) {
+			break;
+		}
+
+		if (chan->soundId == id) {
+			if (flag & 0x20) {
+				index++;
+			} else {
+				chan->polyphonyCounter++;
+				if (chan->polyphonyCounter == poly) {
+					if (flag & 0x10) {
+						ForceStopLogicalChannel(chan);
+					} else {
+						__Oneshot_WavePause(chan, 1);
+					}
+				}
+			}
+		}
+		chan = chan->nextChan;
+	}
+
+	chan = mgr->releasingChannels;
+	while (TRUE) {
+		if (chan == NULL) {
+			break;
+		}
+
+		if (chan->soundId == id) {
+			if (flag & 0x20) {
+				index++;
+			} else {
+				chan->polyphonyCounter++;
+				if (chan->polyphonyCounter == poly) {
+					ForceStopLogicalChannel(chan);
+				}
+			}
+		}
+
+		chan = chan->nextChan;
+	}
+
+	if (flag & 0x20) {
+		jc->polyphonyCounter = index;
+		if (index < poly) {
+			return TRUE;
+		}
+		return FALSE;
+	}
+
+	jc->polyphonyCounter = 0;
+	return TRUE;
+}
+
+/**
+ * @TODO: Documentation
+ */
+static void __Oneshot_StopMonoPolyCheck(jc_* jc, u32 id)
+{
+	jc_* chan;
+	u8 poly;
+
+	chan = jc->chanMgr->activeChannels;
+	poly = polys_table[id >> 0x18 & 0xf];
+
+	if (id && poly) {
+
+		while (TRUE) {
+			if (chan == NULL) {
+				break;
+			}
+
+			int flag = id >> 0x18 & 0x20;
+			if (chan->soundId == id) {
+				if (flag) {
+					if (chan->polyphonyCounter > jc->polyphonyCounter) {
+						chan->polyphonyCounter--;
+						if (chan->polyphonyCounter == poly - 1) {
+							__Oneshot_WavePause(chan, 0);
+						}
+					}
+				} else {
+					if (chan->polyphonyCounter > jc->polyphonyCounter) {
+						chan->polyphonyCounter--;
+						if (chan->polyphonyCounter < poly) {
+							__Oneshot_WavePause(chan, 0);
+						}
+					}
+				}
+			}
+
+			chan = chan->nextChan;
+		}
+	}
+
+	STACK_PAD_VAR(2);
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Init_1shot(jcs_* jcs, u32 id)
+{
+	if (jcs->chanCount != 0) {
+		FixReleaseChannelAll(jcs);
+	}
+	InitJcs(jcs);
+	FixAllocChannel(jcs, id);
+	if (id == 0) {
+		jcs->voiceStealingMode = 0;
+	} else {
+		jcs->voiceStealingMode = 1;
+	}
+
+	STACK_PAD_VAR(2);
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Stop_1Shot(jc_* jc)
+{
+	if (jc->dspChannel == 0) {
+		Jesus1Shot_Update(jc, JCSTAT_Unk6);
+	} else {
+		Jesus1Shot_Update(jc, JCSTAT_Unk0);
+	}
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Stop_1Shot_R(jc_* jc, u16 id)
+{
+	if (jc->dspChannel == 0) {
+		Jesus1Shot_Update(jc, JCSTAT_Unk6);
+	} else {
+		jc->mOscBuffers[0].releaseParam = id;
+		Jesus1Shot_Update(jc, JCSTAT_Unk0);
+	}
+}
+
+/**
+ * @TODO: Documentation
+ */
+void AllStop_1Shot(jcs_* jcs)
+{
+	List_CountChannel(&jcs->freeChannels);
+	List_CountChannel(&jcs->activeChannels);
+	List_CountChannel(&jcs->releasingChannels);
+	List_CountChannel(&jcs->waitingChannels);
+
+	jc_* jc = jcs->activeChannels;
+	jc_* next;
+	jc_** REF_jc = &jc;
+	STACK_PAD_VAR(4);
+	while (jc) {
+		next = jc->nextChan;
+		Stop_1Shot(jc);
+		jc = next;
+	}
+}
+
+/*
+ * Note: Equivalent to `JASChannel::sweepProc` in later JAudio.
+ */
+static BOOL Extra_Update(jc_* jc, JCSTATUS status)
+{
+	if (jc->pitchSweepSteps != 0) {
+		f32 pitch = jc->targetPitch;
+		pitch -= jc->currentPitch;
+		pitch /= jc->pitchSweepSteps;
+		jc->currentPitch += pitch;
+		jc->pitchSweepSteps--;
+
+		if (jc->pitchSweepSteps == 0) {
+			jc->pitchSweepUpdater = NULL;
+		}
+	}
+	return FALSE;
+}
+
+/**
+ * @TODO: Documentation
+ */
+void SetPitchTarget_1Shot(jc_* jc, f32 pitch, u32 steps)
+{
+	if (steps == 0) {
+		jc->currentPitch      = pitch;
+		jc->pitchSweepUpdater = NULL;
+		return;
+	}
+
+	jc->targetPitch       = pitch;
+	jc->pitchSweepSteps   = steps;
+	jc->pitchSweepUpdater = Extra_Update;
+}
+
+/*
+ * Note: (Roughly) Equivalent to `JASChannel::setKeySweepTarget` in later JAudio.
+ */
+void SetKeyTarget_1Shot(jc_* jc, u8 key, u32 steps)
+{
+	int pitchKey;
+	if (jc == 0) {
+		return;
+	}
+
+	if (jc->logicalChanType == 2 || jc->waveData == NULL) {
+		pitchKey = key;
+	} else {
+		pitchKey = key + 60 - jc->waveData->key;
+	}
+
+	if (pitchKey < 0) {
+		pitchKey = 0;
+	}
+	if (pitchKey > 0x7f) {
+		pitchKey = 0x7f;
+	}
+
+	f32 pitch = C5BASE_PITCHTABLE[pitchKey];
+	SetPitchTarget_1Shot(jc, jc->basePitch * pitch, steps);
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Gate_1Shot(jc_* jc, u8 key, u8 velocity, s32 noteId)
+{
+	STACK_PAD_VAR(2);
+	if (jc->noteId == -1) {
+		jc->noteId         = noteId;
+		jc->lastNotePlayed = jc->noteId;
+
+		int pitchTableIndex;
+		if (jc->logicalChanType == 2) {
+			pitchTableIndex = key;
+		} else {
+			pitchTableIndex = key + 60 - jc->waveData->key;
+		}
+
+		if (pitchTableIndex < 0) {
+			pitchTableIndex = 0;
+		}
+
+		if (pitchTableIndex > 0x7f) {
+			pitchTableIndex = 0x7f;
+		}
+
+		f32 pitch         = C5BASE_PITCHTABLE[pitchTableIndex];
+		jc->velocity      = velocity;
+		jc->note          = key;
+		jc->currentPitch  = jc->basePitch * pitch;
+		jc->currentVolume = jc->velocity / 127.0f;
+		jc->currentVolume = jc->currentVolume * jc->currentVolume * jc->baseVolume;
+	}
+}
+
+/**
+ * @TODO: Documentation
+ */
+void UpdatePause_1Shot(jc_* jc, u8 pauseFlag)
+{
+	jc->pauseFlag = pauseFlag;
+}
+
+/**
+ * @TODO: Documentation
+ */
+void UpdatePanPower_1Shot(jc_* channel, f32 leftPower, f32 rightPower, f32 centerPower, f32 v4)
+{
+	f32 val = leftPower + rightPower + centerPower;
+	if (val == 0.0f) {
+		return;
+	}
+
+	channel->panMatrices[0].values[0] = leftPower / val;
+	channel->panMatrices[0].values[1] = rightPower / val;
+	channel->panMatrices[0].values[2] = centerPower / val;
+}
+
+/**
+ * @TODO: Documentation
+ * @note UNUSED Size: 000068
+ */
+void CountChan(jc_* jc)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @TODO: Documentation
+ * @note UNUSED Size: 000068
+ */
+void CountChanD(jc_* jc)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @TODO: Documentation
+ * @note UNUSED Size: 000080
+ */
+void CheckChan(jc_* jc)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @TODO: Documentation
+ * @note UNUSED Size: 0000AC
+ */
+void PrintChan(immut char* str, jc_* jc, u32 id)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @TODO: Documentation
+ */
+void FlushRelease_1Shot(jcs_* jcs)
+{
+	int count = List_CountChannel(&jcs->releasingChannels);
+
+	for (u32 i = 0; i < count; i++) {
+		jc_* chan = List_GetChannel(&jcs->releasingChannels);
+		if (chan == NULL) {
+			break;
+		}
+
+		for (int j = 0; j < 2; j++) {
+			if (chan->mOscillators[j]) {
+				if (chan->mOscBuffers[j].state != 6 && chan->mOscBuffers[j].state != 7) {
+					chan->mOscBuffers[j].state = 6;
+				}
+			}
+		}
+
+		List_AddChannelTail(&jcs->releasingChannels, chan);
+	}
+}
+
+/**
+ * @TODO: Documentation
+ */
+static BOOL Jesus1Shot_Update(jc_* jc, JCSTATUS jstatus)
+{
+	u32 test    = FALSE;
+	jc_** jcptr = &jc;
+	s32 status  = jstatus;
+
+	if (status == 0) {
+		for (u32 i = 0; i < 2; i++) {
+			if (jc->mOscillators[i]) {
+				Oscbuf_* buf = &jc->mOscBuffers[i];
+				if (buf->state != 6 && buf->state != 7) {
+					buf->state = 4;
+					test       = TRUE;
+				}
+			}
+		}
+
+		if (test && List_CutChannel(jc) != -1) {
+			List_AddChannelTail(&jc->chanMgr->releasingChannels, jc);
+			if (jc->dspChannel) {
+				u8 flag   = jc->channelPriority >> 8;
+				u32 test2 = flag;
+				if ((flag & 0xff) == 0) {
+					test2 = 1;
+				}
+				jc->dspChannel->prio = test2;
+			}
+		}
+		jc->noteId = -1;
+		return FALSE;
+	} else if (status == 1 || status == 2 || status == 6) {
+		if (jc->chanMgr->chanAllocCount) {
+			if (List_CutChannel(jc) != -1) {
+				jc->chanMgr->chanAllocCount--;
+				int id      = jc->soundId;
+				jc->soundId = 0;
+				__Oneshot_StopMonoPolyCheck(jc, id);
+				FixReleaseChannel(jc);
+			}
+		} else {
+			if (List_CutChannel(jc) != -1) {
+				int id      = jc->soundId;
+				jc->soundId = 0;
+				__Oneshot_StopMonoPolyCheck(jc, id);
+				List_AddChannel(&jc->chanMgr->freeChannels, jc);
+			}
+		}
+		if (status != 6) {
+			StopLogicalChannel(jc);
+		} else {
+			Del_WaitDSPChannel(jc);
+		}
+		jc->note           = -1;
+		jc->noteId         = -1;
+		jc->updateCallback = NULL;
+	}
+	return FALSE;
+
+	STACK_PAD_VAR(4);
+}
+
+/**
+ * @TODO: Documentation
+ */
+u32 One_CheckInstWave(SOUNDID_ sound)
+{
+	const u8 bankId = SoundIdByte(sound, 0);
+	Inst_* inst     = InstRead(bankId, SoundIdByte(sound, 1));
+	if (inst == NULL) {
+		return 1;
+	}
+
+	Vmap_* map = VmapRead(inst, SoundIdByte(sound, 2), SoundIdByte(sound, 3));
+	if (map == NULL) {
+		return 2;
+	}
+
+	const u32 waveId  = VmapWaveId(map);
+	CtrlGroup_* group = WaveidToWavegroup(waveId, bankId);
+	if (group == NULL) {
+		return 3;
+	}
+
+	WaveID_* handle = GetSoundHandle(group, waveId);
+	if (handle == 0) {
+		return 4;
+	}
+
+	return 0;
+}
+
+/**
+ * @TODO: Documentation
+ * @note UNUSED Size: 000090
+ */
+void Get_CtrlWave(SOUNDID_ sound)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @TODO: Documentation
+ */
+jc_* Play_1shot(jcs_* jcs, SOUNDID_ sound, u32 id)
+{
+	jc_* chan;
+	Inst_* inst;
+	WaveID_* wave;
+	BOOL test = FALSE;
+
+	const u8 bankId     = SoundIdByte(sound, 0);
+	const u8 instrument = SoundIdByte(sound, 1);
+	const u8 key        = SoundIdByte(sound, 2);
+	const u8 velocity   = SoundIdByte(sound, 3);
+
+	inst = InstRead(bankId, instrument);
+	if (inst == NULL) {
+		return NULL;
+	}
+
+	Vmap_* map = VmapRead(inst, key, velocity);
+	if (map == NULL) {
+		return NULL;
+	}
+
+	const u32 waveId  = VmapWaveId(map);
+	CtrlGroup_* group = WaveidToWavegroup(waveId, bankId);
+	if (group == NULL) {
+		return NULL;
+	}
+
+	wave = GetSoundHandle(group, waveId);
+	if (wave == NULL) {
+		return NULL;
+	}
+
+	chan = __Oneshot_GetLogicalChannel(jcs, wave);
+	if (chan == NULL) {
+		return NULL;
+	}
+
+	int val = key + 60 - wave->data->key;
+	if (val < 0) {
+		val = 0;
+	}
+	if (val > 127) {
+		val = 127;
+	}
+	f32 pitch                      = C5BASE_PITCHTABLE[val];
+	chan->velocity                 = velocity;
+	chan->note                     = key;
+	chan->basePitch                = map->mPitch * (wave->data->sampleRate / JAC_DAC_RATE) * inst->mGainMultiplier;
+	chan->currentPitch             = chan->basePitch * pitch;
+	chan->baseVolume               = map->mVolume * inst->mFreqMultiplier;
+	chan->currentVolume            = chan->velocity / 127.0f;
+	chan->currentVolume            = chan->currentVolume * chan->currentVolume * chan->baseVolume;
+	chan->panMatrices[1].values[0] = 0.5f;
+	chan->panMatrices[2].values[0] = 0.0f;
+	chan->panMatrices[3].values[0] = 0.0f;
+	EffecterInit(chan, inst);
+
+	int flag = sound.value >> 0x10 | inst->mFlag << 0x18;
+	switch (inst->mFlag & 0xc0) {
+	case 0xc0:
+	{
+		flag |= 0xffffff;
+		break;
+	}
+	case 0x80:
+	{
+		flag |= 0xff;
+		break;
+	}
+	case 0x40:
+	{
+		flag |= Bank_GetInstKeymap(inst, key) << 0x10;
+		break;
+	}
+	}
+
+	chan->soundId = 0;
+	if (__Oneshot_StartMonoPolyCheck(chan, flag) == FALSE) {
+		if (inst->mFlag & 0x10) {
+			List_AddChannelTail(&jcs->freeChannels, chan);
+			return FALSE;
+		}
+		test = TRUE;
+	}
+	chan->soundId = flag;
+
+	jc_* newjc = __Oneshot_Play_Start(jcs, chan, id);
+	if (test) {
+		__Oneshot_WavePause(newjc, 1);
+	}
+	return newjc;
+
+	STACK_PAD_VAR(2);
+}
+
+/**
+ * @TODO: Documentation
+ */
+jc_* Play_1shot_Perc(jcs_* jcs, SOUNDID_ sound, u32 id)
+{
+	jc_* chan;
+	Perc_* perc;
+	u32* idp = &id;
+
+	const u8 bankId    = SoundIdByte(sound, 0);
+	const u8 percussion = SoundIdByte(sound, 1);
+	const u8 key        = SoundIdByte(sound, 2);
+	const u8 velocity   = SoundIdByte(sound, 3);
+
+	perc = PercRead(bankId, percussion);
+	if (perc == NULL) {
+		return NULL;
+	}
+
+	PercKeymap_* keymap = perc->mKeyRegions[key];
+	Vmap_* map           = Bank_GetPercVmap(perc, key, velocity);
+	if (map == NULL) {
+		return NULL;
+	}
+
+	u32 x;
+
+	const u32 waveId  = VmapWaveId(map);
+	CtrlGroup_* group = WaveidToWavegroup(waveId, bankId);
+	if (group == NULL) {
+		return NULL;
+	}
+
+	WaveID_* wave = GetSoundHandle(group, waveId);
+	if (wave == NULL) {
+		return NULL;
+	}
+
+	chan = __Oneshot_GetLogicalChannel(jcs, wave);
+	if (chan == NULL) {
+		return NULL;
+	}
+
+	chan->velocity = velocity;
+	chan->note     = key;
+
+	chan->basePitch    = (wave->data->sampleRate / JAC_DAC_RATE) * map->mPitch * keymap->mVolume;
+	chan->currentPitch = chan->basePitch;
+
+	chan->baseVolume    = map->mVolume * keymap->mPitch;
+	chan->currentVolume = chan->velocity / 127.0f;
+	chan->currentVolume = chan->currentVolume * chan->currentVolume * chan->baseVolume;
+
+	u16 flag;
+	if (perc->mMagic == 'PER2') {
+		chan->panMatrices[1].values[0] = perc->panTable[key] / 127.0f;
+		flag                           = perc->releaseTable[key];
+	} else {
+		flag                           = 1000;
+		chan->panMatrices[1].values[0] = 0.5f;
+	}
+	chan->panMatrices[2].values[0] = 0.0f;
+	chan->panMatrices[3].values[0] = 0.0f;
+	EffecterInit_Perc(chan, keymap, flag);
+	chan->soundId = 0;
+
+	return __Oneshot_Play_Start(jcs, chan, id);
+
+	STACK_PAD_VAR(10);
+}
+
+/**
+ * @TODO: Documentation
+ */
+jc_* Play_1shot_Osc(jcs_* jcs, SOUNDID_ sound, u32 id)
+{
+	jc_* chan;
+	u32 ids = id;
+	int pit;
+	jcs_* mgr = jcs;
+
+	chan = __Oneshot_GetLogicalChannel(mgr, NULL);
+	if (chan == NULL) {
+		return NULL;
+	}
+
+	chan->chanData        = SoundIdByte(sound, 1) - 0xf0;
+	chan->logicalChanType = 2;
+
+	pit = SoundIdByte(sound, 2);
+	if (pit < 0) {
+		pit = 0;
+	}
+	if (pit > 127) {
+		pit = 127;
+	}
+	f32 pitch                      = C5BASE_PITCHTABLE[pit];
+	chan->velocity                 = SoundIdByte(sound, 3);
+	chan->note                     = SoundIdByte(sound, 2);
+	chan->basePitch                = 16736.016f / JAC_DAC_RATE;
+	chan->currentPitch             = chan->basePitch * pitch;
+	chan->baseVolume               = 1.0f;
+	chan->currentVolume            = chan->velocity / 127.0f;
+	chan->currentVolume            = chan->currentVolume * chan->currentVolume;
+	chan->panMatrices[1].values[0] = 0.5f;
+	chan->panMatrices[2].values[0] = 0.0f;
+	chan->panMatrices[3].values[0] = 0.0f;
+	EffecterInit_Osc(chan);
+	chan->soundId = 0;
+	return __Oneshot_Play_Start(mgr, chan, ids);
+
+	STACK_PAD_VAR(6);
+}
