@@ -27,6 +27,7 @@ static PcGpuEvidence evidence(int nvidia, int eglFile, int chose, int optOut, in
     e.userAlreadyChose         = chose;
     e.optedOut                 = optOut;
     e.forceEglRoute            = forceEgl;
+    e.nvidiaOnly               = 0;
     return e;
 }
 

@@ -64,6 +64,10 @@ enum {
 };
 void pc_window_set_key_binding(int action, SDL_Scancode scancode);
 SDL_Scancode pc_window_get_key_binding(int action);
+// Issue #68: segunda tecla por acción (SDL_SCANCODE_UNKNOWN = ninguna).
+void pc_window_set_key_binding2(int action, SDL_Scancode scancode);
+SDL_Scancode pc_window_get_key_binding2(int action);
+SDL_Scancode pc_window_default_key_binding2(int action);
 
 // Mouse buttons are bindable like keys (issue #42): they ride in the keyboard
 // binding table as pseudo-scancodes past SDL_NUM_SCANCODES, so

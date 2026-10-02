@@ -2,6 +2,7 @@
 #ifdef PIKI_PC_PORT
 extern "C" int pc_settings_get_all_flowers(void);
 extern "C" int pc_settings_get_piki_invincible(void);
+extern "C" int pc_settings_get_blues_only_water(void);
 #endif
 #include "Game/PikiMgr.h"
 #include "Game/PikiParms.h"
@@ -134,6 +135,13 @@ int Piki::getCurrActionID()
  */
 void Piki::onInit(CreatureInitArg* initArg)
 {
+#ifdef PIKI_PC_PORT
+	// Los Pikmin se reutilizan de una reserva: nada de su vida anterior.
+	mPcHasDryPos    = false;
+	mPcRescueStreak = 0;
+	mPcDryFrames    = 0;
+	mPcHasGoodPos   = false;
+#endif
 	mTekiKillID = -1;
 	mNavi       = nullptr;
 	initColor();
@@ -310,7 +318,14 @@ void Piki::update()
 		mEffectsContext->mPosition = mLeafStemOffset;
 		sys->mTimers->_stop("pu-1");
 
+#ifdef PIKI_PC_PORT
+		if (isAlive() && !mWaterBox) {
+			pcNoteDryGround();
+		}
+		if (isAlive() && mWaterBox && !pcStepOutOfWater()) {
+#else
 		if (isAlive() && mWaterBox) {
+#endif
 			int stateID  = getStateID();
 			int pikiType = getKind();
 			if (stateID != PIKISTATE_WaterHanged && stateID != PIKISTATE_Drown && !mCurrentState->dead() && pikiType != Blue
@@ -324,7 +339,59 @@ void Piki::update()
 			}
 		}
 	}
+#ifdef PIKI_PC_PORT
+	pcGuardPosition();
+#endif
 }
+
+#ifdef PIKI_PC_PORT
+static bool pcBadVec(const Vector3f& v)
+{
+	return !(v.x == v.x && v.y == v.y && v.z == v.z) || fabsf(v.x) > 1.0e6f || fabsf(v.y) > 1.0e6f || fabsf(v.z) > 1.0e6f;
+}
+
+/**
+ * @brief Red de seguridad: un Pikmin con la posición en NaN (o disparada) no
+ *        se dibuja en ningún sitio pero sigue vivo -- "desaparece". Vuelve a
+ *        su última posición buena y se suelta de lo que tuviera agarrado. Se
+ *        avisa en la terminal con lo necesario para encontrar el origen.
+ */
+void Piki::pcGuardPosition()
+{
+	if (!isAlive()) {
+		return;
+	}
+	if (!pcBadVec(mPosition) && !pcBadVec(mVelocity)) {
+		mPcGoodPos    = mPosition;
+		mPcHasGoodPos = true;
+		return;
+	}
+	static int sReports = 0;
+	if (sReports < 30) {
+		sReports++;
+		CollPart* part = mStuckCollPart;
+		fprintf(stderr,
+		        "[NAN] Piki kind=%d state=%d action=%d pos=(%f,%f,%f) vel=(%f,%f,%f) stuckTo=%s part=%s type=%d\n",
+		        (int)getKind(), getStateID(), getCurrActionID(), mPosition.x, mPosition.y, mPosition.z, mVelocity.x,
+		        mVelocity.y, mVelocity.z, mSticker ? mSticker->getCreatureName() : "-",
+		        part ? "yes" : "-", part ? (int)part->mPartType : -1);
+		fflush(stderr);
+	}
+	if (isStickTo()) {
+		endStick();
+	}
+	Vector3f pos;
+	if (mPcHasGoodPos) {
+		pos = mPcGoodPos;
+	} else if (mNavi) {
+		pos = mNavi->getPosition();
+	} else {
+		return;
+	}
+	setPosition(pos, false);
+	mVelocity = Vector3f(0.0f);
+}
+#endif
 
 /**
  * @note Address: 0x801486F0
@@ -537,6 +604,11 @@ void Piki::attachRadar(bool)
  */
 void Piki::inWaterCallback(WaterBox* wbox)
 {
+#ifdef PIKI_PC_PORT
+	if (pcStepOutOfWater()) {
+		return;
+	}
+#endif
 	int stateID  = getStateID();
 	int pikiType = getKind();
 
@@ -569,6 +641,80 @@ void Piki::inWaterCallback(WaterBox* wbox)
 		mSoundObj->startFreePikiSetSound(PSSE_PK_SE_WATER_IN, PSGame::SeMgr::SETSE_PikiLanding, 90, 0);
 	}
 }
+
+#ifdef PIKI_PC_PORT
+/**
+ * @brief Mod "Blues Only In Water": recuerda el último suelo seco y llano.
+ *
+ * Solo suelo llano: desde una pendiente fuerte el Pikmin resbala de vuelta al
+ * agua y se quedaba atrapado para siempre (issue #69).
+ */
+void Piki::pcNoteDryGround()
+{
+	if (mFloorTriangle && mFloorTriangle->mTrianglePlane.mNormal.y >= 0.7f) {
+		mPcLastDryPos = mPosition;
+		mPcHasDryPos  = true;
+		if (++mPcDryFrames > 60) {
+			mPcRescueStreak = 0;
+		}
+	}
+}
+
+/**
+ * @brief Mod "Blues Only In Water": un Pikmin que no es azul y entra solo al
+ *        agua vuelve a la orilla en vez de ahogarse. Lanzado, soplado o
+ *        arrastrado por un enemigo, el agua sigue siendo un peligro.
+ */
+bool Piki::pcStepOutOfWater()
+{
+	if (!pc_settings_get_blues_only_water() || !isAlive() || !mCurrentState || mCurrentState->dead()) {
+		return false;
+	}
+	const int kind = getKind();
+	if (kind == Blue || kind == Bulbmin) {
+		return false;
+	}
+	switch (getStateID()) {
+	case PIKISTATE_Flying:
+	case PIKISTATE_Blow:
+	case PIKISTATE_Flick:
+	case PIKISTATE_Hanged:
+	case PIKISTATE_WaterHanged:
+	case PIKISTATE_Drown:
+	case PIKISTATE_Swallowed:
+	case PIKISTATE_Pressed:
+	case PIKISTATE_DenkiDying:
+	case PIKISTATE_FallMeck:
+	case PIKISTATE_Dying:
+	case PIKISTATE_Dead:
+	case PIKISTATE_Suikomi:
+	case PIKISTATE_Holein:
+	case PIKISTATE_Fountainon:
+		return false;
+	default:
+		break;
+	}
+
+	// Si el sitio guardado lo devuelve al agua una y otra vez (orilla junto a
+	// una pendiente), se descarta y va junto a su capitán, como al silbarlo.
+	mPcDryFrames = 0;
+	if (++mPcRescueStreak >= 5) {
+		mPcHasDryPos    = false;
+		mPcRescueStreak = 0;
+	}
+	Vector3f pos;
+	if (mPcHasDryPos) {
+		pos = mPcLastDryPos;
+	} else if (mNavi) {
+		pos = mNavi->getPosition();
+	} else {
+		return false;
+	}
+	setPosition(pos, false);
+	mVelocity = Vector3f(0.0f);
+	return true;
+}
+#endif
 
 /**
  * @note Address: 0x80148D18

@@ -1151,10 +1151,18 @@ void pc_window_poll_events(PADStatus* pad) {
     // aiming, so that key stops sending B for as long as it is down. The
     // whistle is unaffected in practice -- right click is wired to B on its
     // own, below -- and with the mod off nothing changes.
-    const bool freeCamHeld = pc_settings_get_free_camera() && held(PC_KEY_ACT_B);
+    // Solo mientras se juega, y solo las teclas: en menús, pausa y pantallas B
+    // vuelve a ser B, y un clic asignado a B siempre manda B (antes del #68 el
+    // clic derecho iba aparte y no se anulaba).
+    const int bindB1 = sKeyBindings[PC_KEY_ACT_B], bindB2 = sKeyBindings2[PC_KEY_ACT_B];
+    const bool bKeyHeld = (!pc_bind_is_mouse(bindB1) && pc_window_binding_held(bindB1, state, boundMouse))
+                       || (!pc_bind_is_mouse(bindB2) && pc_window_binding_held(bindB2, state, boundMouse));
+    const bool freeCamHeld = pc_settings_get_free_camera() && pc_settings_in_gameplay() && bKeyHeld;
 
     if (held(PC_KEY_ACT_A))        button |= PAD_BUTTON_A;
-    if (held(PC_KEY_ACT_B) && !freeCamHeld) button |= PAD_BUTTON_B;
+    const bool bMouseHeld = (pc_bind_is_mouse(bindB1) && pc_window_binding_held(bindB1, state, boundMouse))
+                         || (pc_bind_is_mouse(bindB2) && mouseSecondOk && pc_window_binding_held(bindB2, state, boundMouse));
+    if (bMouseHeld || (bKeyHeld && !freeCamHeld)) button |= PAD_BUTTON_B;
     if (held(PC_KEY_ACT_X))        button |= PAD_BUTTON_X;
     if (held(PC_KEY_ACT_Y))        button |= PAD_BUTTON_Y;
     if (held(PC_KEY_ACT_Z))        button |= PAD_TRIGGER_Z;

@@ -6,7 +6,14 @@
 #include "Game/cellPyramid.h"
 #include "CNode.h"
 
+#ifdef PIKI_PC_PORT
+// "Pikmin Limit" sube el máximo de Pikmin a 500 y cada uno ocupa un punto del
+// radar: con 160 se agotaban y los tesoros u otros objetos posteriores
+// dejaban de verse en el mapa. Hueco para todos los Pikmin más lo original.
+#define RADAR_MAX_OBJECTS (160 + 500)
+#else
 #define RADAR_MAX_OBJECTS 160
+#endif
 
 struct Radar {
 	enum cRadarType {

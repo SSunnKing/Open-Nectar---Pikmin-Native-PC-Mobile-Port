@@ -14,6 +14,23 @@ extern "C" int pc_first_person_active(void);
 extern "C" void pc_settings_note_lock_on(int hasTarget);
 extern "C" void pc_settings_note_gameplay_frame(void);
 extern "C" void pc_discord_set_playing(const char* zoneName, const char* zoneKey, const char* stateLine);
+extern "C" int pc_settings_get_debug_keys(void);
+extern "C" const unsigned char* SDL_GetKeyboardState(int* numkeys);
+
+// Debug Keys: F6 adelanta una hora (en Infinite Day, solo la luz).
+static void pcDebugKeys()
+{
+	static bool sF6WasDown = false;
+	const int kScancodeF6  = 63; // SDL_SCANCODE_F6
+	int numKeys            = 0;
+	const unsigned char* keys = SDL_GetKeyboardState(&numKeys);
+	const bool down = pc_settings_get_debug_keys() && keys && numKeys > kScancodeF6 && keys[kScancodeF6];
+	Game::GameSystem* gs = Game::gameSystem;
+	if (down && !sF6WasDown && gs && gs->mTimeMgr && gs->isStoryMode() && !gs->mIsInCave) {
+		gs->mTimeMgr->pcDebugAdvanceHour();
+	}
+	sF6WasDown = down;
+}
 // Mod "Captain Health": escalar el dano recibido en vez de la vida mantiene
 // honestos la barra y el aviso de vida baja, que leen el maximo original.
 static f32 pcNaviHurt(f32 damage)
@@ -103,6 +120,7 @@ static void pcUpdateCameraMods(Navi* navi)
 	}
 	pc_settings_note_gameplay_frame();
 	pcDiscordNoteGameplay();
+	pcDebugKeys();
 
 	// Lock-On. La pulsacion se consume siempre, para que no quede encolada y
 	// salte sola al activar el mod.

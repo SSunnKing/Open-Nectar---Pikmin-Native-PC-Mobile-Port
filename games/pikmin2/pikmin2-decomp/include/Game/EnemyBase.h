@@ -692,6 +692,12 @@ struct EnemyBase : public Creature, public SysShape::MotionListener, virtual pub
 	EnemyFSMState* mCurrentLifecycleState;      // _2B4
 	EnemyBaseFSM::StateMachine* mLifecycleFSM;  // _2B8
 	                                            // PelletView: _2BC - _2C8
+#ifdef PIKI_PC_PORT
+	// Red de seguridad contra posiciones NaN (enemigos que "desaparecen").
+	Vector3f mPcGoodPos;
+	bool mPcHasGoodPos = false;
+	void pcGuardPosition();
+#endif
 };
 
 struct EarthquakeStateArg : public StateArg {

@@ -161,6 +161,7 @@ struct PcConfig {
     int allOnions = 0;          // cebollas roja, amarilla y azul (se graba en la partida)
     int breakableGates = 0;     // issue #70: los Pikmin rompen a golpes las compuertas reforzadas
     int freeCamPadPct = 100;    // issue #66: sensibilidad del stick derecho con la cámara libre
+    int eternalNight = 0;       // siempre de noche (luz y luna), el reloj del día sigue igual
     int p2Selection = 0;        // issue #67: cruceta como en Pikmin 2 (tipo fijo, arriba/abajo hoja/capullo/flor/bomba)
     // Reglas del modo VS (índices de las opciones del menú previo).
     int vsDuration = 2;  // 5 / 10 / 15 / 25 / 30 min
@@ -273,6 +274,7 @@ struct PcConfig {
         breakableGates = 0;
         freeCamPadPct = 100;
         p2Selection = 0;
+        eternalNight = 0;
         allOnions = 0;
         vsDuration = 2;
         vsRocketWin = 1;
@@ -1092,6 +1094,7 @@ void saveConfig() {
     out << "breakableGates = " << sConfig.breakableGates << "\n";
     out << "freeCamPadPct = " << sConfig.freeCamPadPct << "\n";
     out << "p2Selection = " << sConfig.p2Selection << "\n";
+    out << "eternalNight = " << sConfig.eternalNight << "\n";
     out << "hideOlimarText = " << sConfig.hideOlimarText << "\n";
     out << "speedrunIntroHidden = " << sConfig.speedrunIntroHidden << "\n";
     out << "onionStep10 = " << sConfig.onionStep10 << "\n";
@@ -1290,6 +1293,7 @@ void loadConfig() {
         else if (key == "breakableGates") {
             sConfig.breakableGates = atoi(val.c_str()) ? 1 : 0;
         }
+        else if (key == "eternalNight") sConfig.eternalNight = atoi(val.c_str()) ? 1 : 0;
         else if (key == "p2Selection") {
             sConfig.p2Selection = atoi(val.c_str()) ? 1 : 0;
         }
@@ -1322,7 +1326,8 @@ void loadConfig() {
         else if (key == "vsPikiLimit") sConfig.vsPikiLimit = std::clamp(atoi(val.c_str()), 0, 2);
         else if (key == "vsPellets") sConfig.vsPellets = std::clamp(atoi(val.c_str()), 0, 3);
         else if (key == "lockOn") {
-            sConfig.lockOn = atoi(val.c_str()) ? 1 : 0;
+            // 0 = off, 1 = manual (lo que era "On"), 2 = automático.
+            sConfig.lockOn = std::clamp(atoi(val.c_str()), 0, 2);
         }
         else if (key == "charge") {
             sConfig.charge = atoi(val.c_str()) ? 1 : 0;
@@ -2600,7 +2605,8 @@ void modsRowChange(int row, bool left, bool right) {
     }
     // Fijar objetivo.
     else if (row == 15) {
-        if (left || right) sPending.lockOn = sPending.lockOn ? 0 : 1;
+        if (right) sPending.lockOn = (sPending.lockOn + 1) % 3;
+        if (left) sPending.lockOn = (sPending.lockOn + 2) % 3;
     }
     // Mandar el escuadrón contra el objetivo fijado.
     else if (row == 16) {
@@ -2650,6 +2656,9 @@ void modsRowChange(int row, bool left, bool right) {
     }
     else if (row == 37) {
         if (!pc_hardmode_active() && (left || right)) sPending.breakableGates = sPending.breakableGates ? 0 : 1;
+    }
+    else if (row == 40) {
+        if (left || right) sPending.eternalNight = sPending.eternalNight ? 0 : 1;
     }
     else if (row == 39) {
         if (left || right) sPending.p2Selection = sPending.p2Selection ? 0 : 1;
@@ -4711,31 +4720,19 @@ void pc_settings_note_lock_on(int hasTarget) {
     sLockOnActive = hasTarget;
 }
 
+// True mientras el juego avisa de que hay partida en marcha (no menús, pausa
+// ni pantallas). Free Camera solo se queda la tecla B en ese caso.
+int pc_settings_in_gameplay(void) {
+    return SDL_GetTicks() - sLastGameplayFrameMs < 250 ? 1 : 0;
+}
+
 void pc_settings_note_gameplay_frame(void) {
     sLastGameplayFrameMs = SDL_GetTicks();
 }
 
-// Aviso de objetivo fijado. Provisional hasta que haya un anillo sobre el
-// enemigo: sin nada en pantalla no hay forma de saber si el mod responde.
+// El objetivo fijado se marca en el mundo (anillo y marcador, en navi.cpp);
+// aquí ya no se dibuja nada.
 void pc_settings_draw_lock_on(void) {
-    if (!sLockOnActive || !pc_settings_get_lock_on()) return;
-    if (sMenuOpen || pc_glass_menu_active()) return;
-    if (!gsys || !gsys->mDGXGfx) return;
-    if (sLastGameplayFrameMs == 0 || SDL_GetTicks() - sLastGameplayFrameMs > 250) return;
-
-    DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
-    ensureFont();
-    if (!sFont) return;
-
-    const int screenW = gfx->mScreenWidth;
-    const int screenH = gfx->mScreenHeight;
-    PcSettingsP2DFrame nativeFrame(screenW, screenH);
-    Matrix4f ortho;
-    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
-
-    const char* txt = "LOCK ON";
-    drawTextOutline(screenW / 2 - menuTextWidth(txt) / 2, (int)(screenH * 0.12f),
-                    "%s", Colour(255, 90, 60, 255), Colour(30, 0, 0, 255), txt);
 }
 
 void pc_settings_draw_idle_counter(void) {
@@ -5788,6 +5785,7 @@ int pc_settings_get_breakable_gates(void) { if (pc_speedrun_active()) return 0;
     return pc_hardmode_active() ? 0 : sConfig.breakableGates;
 }
 int pc_settings_get_p2_selection(void) { return sConfig.p2Selection; }
+int pc_settings_get_eternal_night(void) { return sConfig.eternalNight; }
 float pc_settings_get_free_camera_pad_scale(void) { return sConfig.freeCamPadPct / 100.0f; }
 int pc_settings_get_bomb_control(void) { if (pc_speedrun_active()) return 0;
     return sConfig.bombControl;
@@ -6042,7 +6040,7 @@ void modsRowValue(int i, char* value, size_t n) {
         else snprintf(value, n, "%s", sPending.infiniteDay ? "On" : "Off (original)");
         break;
     case 14: snprintf(value, n, "%s", sPending.freeCamera ? "On" : "Off (original)"); break;
-    case 15: snprintf(value, n, "%s", sPending.lockOn ? "On" : "Off (original)"); break;
+    case 15: snprintf(value, n, "%s", sPending.lockOn == 2 ? "Automatic" : sPending.lockOn == 1 ? "Manual" : "Off (original)"); break;
     case 16:
         if (!sPending.lockOn) snprintf(value, n, "Needs Lock-On");
         else snprintf(value, n, "%s", sPending.charge ? "On" : "Off (original)");
@@ -6065,6 +6063,7 @@ void modsRowValue(int i, char* value, size_t n) {
         else snprintf(value, n, "%s", sPending.breakableGates ? "On" : "Off (original)");
         break;
     case 39: snprintf(value, n, "%s", sPending.p2Selection ? "On" : "Off"); break;
+    case 40: snprintf(value, n, "%s", sPending.eternalNight ? "On" : "Off (original)"); break;
     case 38: snprintf(value, n, sPending.freeCamPadPct == 100 ? "%d%%  (original)" : "%d%%", sPending.freeCamPadPct); break;
     case 28: speedPctLabel(sPending.carrySpeedPct, value, n); break;
     case 29: speedPctLabel(sPending.naviSpeedPct, value, n); break;
@@ -6197,7 +6196,7 @@ const GroupRow kCameraRows[] = {
     { SRC_MODS, 14, "Free Camera", "Turn the camera as in Pikmin 3: hold Left Shift and move the mouse, or use the right stick on a controller. Swarm gets its own button." },
     { SRC_MODS, 38, "Free Camera Pad Sensitivity", "How fast the right stick turns the free camera on a controller. 100% is the default." },
     { SRC_MODS, 18, "First Person", "Allows a view from Olimar's helmet. Switch in game with its button (V / L3)." },
-    { SRC_MODS, 15, "Lock-On", "Target the nearest enemy or object with the Lock-On button (R / R3)." },
+    { SRC_MODS, 15, "Lock-On", "Automatic: locks onto the nearest enemy or object as you approach. Manual: lock with the Lock-On button (bindable in Controls)." },
     { SRC_MODS, 16, "Charge", "With a target locked, send the whole squad at it." },
 };
 
@@ -6216,6 +6215,7 @@ const GroupRow kGameplayRows[] = {
 // Infinite Day (fila 13) vive dentro de Day Length como su última opción.
 const GroupRow kCheatsRows[] = {
     { SRC_MODS, 5, "Day Length", "Minutes of daylight per day. 13.5 is the original; Infinite stops the sun." },
+    { SRC_MODS, 40, "Eternal Night", "Always night, whatever the day length: night lighting, and the moon crosses the day bar instead of the sun." },
     { SRC_MODS, 11, "Olimar Health", "Olimar's toughness, as a share of the original. Infinite takes no damage." },
     { SRC_MODS, 12, "Enemy Health", "Enemy toughness, as a share of the original. Insta Kill drops them in one hit." },
     { SRC_MODS, 4, "Pikmin Limit", "Most Pikmin on the field at once. 100 is the original; more costs performance." },

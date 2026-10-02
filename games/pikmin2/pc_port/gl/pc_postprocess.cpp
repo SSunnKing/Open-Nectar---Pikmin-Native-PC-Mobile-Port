@@ -239,10 +239,15 @@ std::string pc_post_build_ssao_shader()
 	// Taking both neighbours on each axis and keeping whichever is nearer in
 	// depth means the difference never crosses a discontinuity unless both
 	// sides do.
-	src += "    vec3 Pr = viewPos(vUV + vec2(uTexel.x, 0.0));\n";
-	src += "    vec3 Pl = viewPos(vUV - vec2(uTexel.x, 0.0));\n";
-	src += "    vec3 Pu = viewPos(vUV + vec2(0.0, uTexel.y));\n";
-	src += "    vec3 Pd = viewPos(vUV - vec2(0.0, uTexel.y));\n";
+	// Two texels rather than one. Depth is stored in steps, and on a slope
+	// seen at a glancing angle neighbouring pixels either share a step or
+	// straddle one: a one-texel difference tilts the normal every few rows,
+	// and that tilt is what drew parallel lines across sloped ground. Over two
+	// texels a step weighs half as much.
+	src += "    vec3 Pr = viewPos(vUV + vec2(2.0 * uTexel.x, 0.0));\n";
+	src += "    vec3 Pl = viewPos(vUV - vec2(2.0 * uTexel.x, 0.0));\n";
+	src += "    vec3 Pu = viewPos(vUV + vec2(0.0, 2.0 * uTexel.y));\n";
+	src += "    vec3 Pd = viewPos(vUV - vec2(0.0, 2.0 * uTexel.y));\n";
 	src += "    vec3 dx = (abs(Pr.z - P.z) < abs(P.z - Pl.z)) ? (Pr - P) : (P - Pl);\n";
 	src += "    vec3 dy = (abs(Pu.z - P.z) < abs(P.z - Pd.z)) ? (Pu - P) : (P - Pd);\n";
 	// A region of constant depth -- a cleared buffer, a flat wall exactly
@@ -286,6 +291,15 @@ std::string pc_post_build_ssao_shader()
 	src += "        }\n";
 	src += "    }\n";
 	src += "    occlusion = occlusion / float(" + std::to_string(kSamples) + ") * uAOParams.y;\n";
+	// Where depth can no longer resolve the surface, fade the effect out.
+	// The GameCube projection uses half the depth range, so a 24-bit step at
+	// view depth z spans 2 z^2 (f - n) / (n f 2^24) world units: millimetres
+	// near the camera, whole units in the distance. Once a step is a sizeable
+	// part of the search radius a slope reads as a staircase and the occlusion
+	// comes out as bands. Near the camera nothing changes.
+	src += "    float nearP = uProjInfo.z, farP = uProjInfo.w;\n";
+	src += "    float depthStep = 2.0 * z * z * (farP - nearP) / (nearP * farP * 16777216.0);\n";
+	src += "    occlusion *= 1.0 - smoothstep(0.02 * uAOParams.x, 0.1 * uAOParams.x, depthStep);\n";
 	src += "    oColour = vec4(vec3(clamp(1.0 - occlusion, 0.0, 1.0)), 1.0);\n";
 	src += "}\n";
 	return src;
@@ -316,6 +330,17 @@ std::string pc_post_build_ao_blur_shader()
 	// Scaled by distance: a centimetre of depth difference means something very
 	// different a metre away than it does across the whole stage.
 	src += "    float tolerance = max(centre * 0.02, 1.0);\n";
+	// The slope of the surface along the blur axis. On a distant plane seen at
+	// a glancing angle depth changes a lot from one pixel to the next while it
+	// is still one surface; compared against the centre alone every neighbour
+	// looked like another surface, nothing was averaged, and the rotation noise
+	// stayed on screen as fine diagonal lines. Comparing against where the
+	// plane would put each tap keeps the blur on the plane and still stops at
+	// real edges. The nearer-side difference is used so a silhouette next to
+	// the centre does not set the slope.
+	src += "    float dPlus = viewDepth(vUV + uBlurStep);\n";
+	src += "    float dMinus = viewDepth(vUV - uBlurStep);\n";
+	src += "    float slope = (abs(dPlus - centre) < abs(centre - dMinus)) ? (dPlus - centre) : (centre - dMinus);\n";
 	src += "    float total = 0.0;\n";
 	src += "    float weightSum = 0.0;\n";
 	// Seven taps rather than five. The kernel has to be at least as wide as the
@@ -324,7 +349,8 @@ std::string pc_post_build_ao_blur_shader()
 	src += "        vec2 uv = vUV + uBlurStep * float(i);\n";
 	src += "        float d = viewDepth(uv);\n";
 	src += "        float spatial = exp(-float(i * i) * 0.25);\n";
-	src += "        float depthWeight = max(1.0 - abs(d - centre) / tolerance, 0.0);\n";
+	src += "        float expected = centre + slope * float(i);\n";
+	src += "        float depthWeight = max(1.0 - abs(d - expected) / tolerance, 0.0);\n";
 	src += "        float w = spatial * depthWeight;\n";
 	src += "        total += texture(uSource, uv).r * w;\n";
 	src += "        weightSum += w;\n";

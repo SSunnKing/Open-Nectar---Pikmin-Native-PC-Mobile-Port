@@ -123,6 +123,7 @@ struct PcConfig {
 
     // Keyboard bindings (scancodes for each action)
     int keyboardBindings[PC_KEY_ACT_COUNT];
+    int keyboardBindings2[PC_KEY_ACT_COUNT]; // issue #68: segunda tecla (0 = ninguna)
 
     // Mouse sensitivity (0.1 - 5.0, default 1.0)
     float mouseSensitivity = 1.0f;
@@ -184,6 +185,7 @@ struct PcConfig {
     int unlockZones = 0;        // abre todas las zonas (se graba en la partida)
     int noDayAdvance = 0;       // el contador de días no avanza
     int allOnions = 0;          // cebollas roja, amarilla y azul (se graba en la partida)
+    int freeCamPadPct = 100;    // issue #66: sensibilidad del stick derecho con la cámara libre
     // Reglas del modo VS (índices de las opciones del menú previo).
     int vsDuration = 2;  // 5 / 10 / 15 / 25 / 30 min
     int vsRocketWin = 1; // cohete asediable y destruirlo gana
@@ -289,6 +291,7 @@ struct PcConfig {
         naviSpeedPct = 100;
         unlockZones = 0;
         noDayAdvance = 0;
+        freeCamPadPct = 100;
         allOnions = 0;
         vsDuration = 2;
         vsRocketWin = 1;
@@ -328,6 +331,7 @@ struct PcConfig {
         hdModelsDisabled = 0;
         for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
             keyboardBindings[i] = kDefaultKeyBindings[i];
+            keyboardBindings2[i] = pc_window_default_key_binding2(i);
             gamepadBindings[i] = -1; // -1 = not remapped (use default)
             gamepadBindingsP2[i] = -1;
         }
@@ -527,6 +531,10 @@ int menuActStep(int act, int dir) {
 }
 int sControlSelection = 0; // index into PC_KEY_ACT_COUNT
 bool sWaitingForKey = false; // true while capturing a new key
+bool sCaptureSecond = false; // issue #68: la captura va a la segunda tecla
+void startKeyCapture(int action, bool second);
+// "Space / Mouse Left", o solo la principal si no hay segunda.
+void keyBindingPairName(int action, char* out, size_t n);
 // Enter / Space / pad A started capture while still held. Ignore them until
 // they are released, otherwise the same press is stored as the new binding.
 bool sCaptureWaitRelease = false;
@@ -652,6 +660,17 @@ int stepPct(int current, const int* stops, int count, bool back) {
 }
 
 // -1 al final: Infinite para Olimar, Insta Kill para los enemigos.
+// Sensibilidad del stick derecho con la cámara libre (issue #66).
+constexpr int kFreeCamPadPcts[]   = { 25, 50, 75, 100, 125, 150, 200 };
+constexpr int kFreeCamPadPctCount = int(sizeof(kFreeCamPadPcts) / sizeof(kFreeCamPadPcts[0]));
+
+int clampFreeCamPadPct(int pct) {
+    for (int i = 0; i < kFreeCamPadPctCount; i++) {
+        if (kFreeCamPadPcts[i] == pct) return pct;
+    }
+    return 100;
+}
+
 constexpr int kHealthPcts[]    = { 25, 50, 75, 100, 150, 200, 300, 500, -1 };
 constexpr int kHealthPctCount  = int(sizeof(kHealthPcts) / sizeof(kHealthPcts[0]));
 
@@ -902,6 +921,7 @@ void applyControls(const PcConfig& config) {
     pc_window_set_cstick_invert(config.cStickInvert);
     for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
         pc_window_set_key_binding(i, static_cast<SDL_Scancode>(config.keyboardBindings[i]));
+        pc_window_set_key_binding2(i, static_cast<SDL_Scancode>(config.keyboardBindings2[i]));
         pc_window_set_gamepad_binding(i, config.gamepadBindings[i]);
 #if !PIKI_P2_HOST // Pikmin 2: un solo juego de botones (sin mandos por jugador aún)
         pc_window_set_gamepad_binding_p2(i, config.gamepadBindingsP2[i]);
@@ -1142,6 +1162,7 @@ void saveConfig() {
     out << "unlockZones = " << sConfig.unlockZones << "\n";
     out << "noDayAdvance = " << sConfig.noDayAdvance << "\n";
     out << "allOnions = " << sConfig.allOnions << "\n";
+    out << "freeCamPadPct = " << sConfig.freeCamPadPct << "\n";
     out << "vsDuration = " << sConfig.vsDuration << "\n";
     out << "vsRocketWin = " << sConfig.vsRocketWin << "\n";
     out << "vsRocketHp = " << sConfig.vsRocketHp << "\n";
@@ -1186,6 +1207,7 @@ void saveConfig() {
     // Keyboard bindings
     for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
         out << "key_" << i << " = " << sConfig.keyboardBindings[i] << "\n";
+        out << "key2_" << i << " = " << sConfig.keyboardBindings2[i] << "\n";
     }
     // Gamepad bindings
     for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
@@ -1341,6 +1363,7 @@ void loadConfig() {
         else if (key == "unlockZones") sConfig.unlockZones = atoi(val.c_str()) ? 1 : 0;
         else if (key == "noDayAdvance") sConfig.noDayAdvance = atoi(val.c_str()) ? 1 : 0;
         else if (key == "allOnions") sConfig.allOnions = atoi(val.c_str()) ? 1 : 0;
+        else if (key == "freeCamPadPct") sConfig.freeCamPadPct = clampFreeCamPadPct(atoi(val.c_str()));
         else if (key == "vsDuration") sConfig.vsDuration = std::clamp(atoi(val.c_str()), 0, 4);
         else if (key == "vsRocketWin") sConfig.vsRocketWin = atoi(val.c_str()) ? 1 : 0;
         else if (key == "vsRocketHp") sConfig.vsRocketHp = std::clamp(atoi(val.c_str()), 0, 2);
@@ -1447,6 +1470,15 @@ void loadConfig() {
         }
         else if (key == "stickInvert") sConfig.stickInvert = atoi(val.c_str()) & 3;
         else if (key == "cStickInvert") sConfig.cStickInvert = atoi(val.c_str()) & 3;
+        else if (key.rfind("key2_", 0) == 0) {
+            int idx = atoi(key.substr(5).c_str());
+            if (idx >= 0 && idx < PC_KEY_ACT_COUNT) {
+                const int scancode = atoi(val.c_str());
+                if (pc_bind_is_valid(scancode)) {
+                    sConfig.keyboardBindings2[idx] = scancode;
+                }
+            }
+        }
         else if (key.rfind("key_", 0) == 0) {
             int idx = atoi(key.substr(4).c_str());
             if (idx >= 0 && idx < PC_KEY_ACT_COUNT) {
@@ -1549,11 +1581,6 @@ bool captureConfirmHeld(SDL_GameController* ctl)
 	return ctl && SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_A);
 }
 
-bool isCaptureModifierScancode(int sc)
-{
-	return sc == SDL_SCANCODE_LCTRL || sc == SDL_SCANCODE_RCTRL || sc == SDL_SCANCODE_LSHIFT || sc == SDL_SCANCODE_RSHIFT
-	    || sc == SDL_SCANCODE_LALT || sc == SDL_SCANCODE_RALT || sc == SDL_SCANCODE_LGUI || sc == SDL_SCANCODE_RGUI;
-}
 } // namespace
 
 bool keyWentDown(SDL_Scancode sc) {
@@ -1945,16 +1972,15 @@ void pollMenuInput() {
             sControlSelection = menuActStep(sControlSelection, 1);
             return;
         }
-        if (ok) {
-            sWaitingForKey = true;
-            sCapturePrevMouse = SDL_GetMouseState(NULL, NULL);
-            pc_window_take_mouse_pressed(); // drop presses from before capture
-            sCaptureWaitRelease = true;
+        if (ok || right) {
+            // A: tecla principal. Derecha: segunda tecla (issue #68).
+            startKeyCapture(sControlSelection, right && !ok);
             return;
         }
-        if (left || right) {
-            // Reset to default on left/right.
+        if (left) {
+            // Izquierda: las dos vuelven a su valor por defecto.
             sPending.keyboardBindings[sControlSelection] = kDefaultKeyBindings[sControlSelection];
+            sPending.keyboardBindings2[sControlSelection] = pc_window_default_key_binding2(sControlSelection);
             return;
         }
         // B / ESC exits submenu.
@@ -2326,12 +2352,15 @@ void pollKeyCapture(SDL_GameController* ctl) {
             sCaptureWaitRelease = false;
         return;
     }
+    // Issue #68: Shift, Ctrl y Alt también se pueden asignar, y Supr o
+    // Retroceso dejan la tecla vacía (acción desactivada en esa ranura).
+    int* slot = sCaptureSecond ? sPending.keyboardBindings2 : sPending.keyboardBindings;
     for (int sc = 0; sc < SDL_NUM_SCANCODES; sc++) {
         if (!keyWentDown(static_cast<SDL_Scancode>(sc)))
             continue;
-        if (isCaptureModifierScancode(sc))
-            continue;
-        sPending.keyboardBindings[sControlSelection] = sc;
+        if (sc == SDL_SCANCODE_DELETE || sc == SDL_SCANCODE_BACKSPACE)
+            sc = SDL_SCANCODE_UNKNOWN;
+        slot[sControlSelection] = sc;
         sWaitingForKey = false;
         break;
     }
@@ -2344,7 +2373,7 @@ void pollKeyCapture(SDL_GameController* ctl) {
         sCapturePrevMouse = SDL_GetMouseState(NULL, NULL);
         for (int b = SDL_BUTTON_LEFT; b <= PC_BIND_MOUSE_LAST - PC_BIND_MOUSE_BASE; b++) {
             if (!(mouseWent & SDL_BUTTON(b))) continue;
-            sPending.keyboardBindings[sControlSelection] = PC_BIND_MOUSE_BASE + b;
+            slot[sControlSelection] = PC_BIND_MOUSE_BASE + b;
             sWaitingForKey = false;
             break;
         }
@@ -2635,6 +2664,9 @@ void modsRowChange(int row, bool left, bool right) {
     }
     else if (row == 22) {
         if (left || right) sPending.throwCancelB = sPending.throwCancelB ? 0 : 1;
+    }
+    else if (row == 38) {
+        if (left || right) sPending.freeCamPadPct = stepPct(sPending.freeCamPadPct, kFreeCamPadPcts, kFreeCamPadPctCount, left);
     }
     else if (row == 33) {
         if (left || right) sPending.quickGrab = sPending.quickGrab ? 0 : 1;
@@ -4368,13 +4400,21 @@ void pc_settings_note_lock_on(int hasTarget) {
 #if PIKI_P2_HOST
 void pc_p2_cheats_poll(void);
 void pc_p2_count_idle_pikis(void);
+void pc_p2_trace_pikis(void);
 #endif
+// True mientras el juego avisa de que hay partida en marcha (no menús, pausa
+// ni pantallas). Free Camera solo se queda la tecla B en ese caso.
+int pc_settings_in_gameplay(void) {
+    return SDL_GetTicks() - sLastGameplayFrameMs < 250 ? 1 : 0;
+}
+
 void pc_settings_note_gameplay_frame(void) {
     PC_SETTINGS_HOST_ALLOC();
     sLastGameplayFrameMs = SDL_GetTicks();
 #if PIKI_P2_HOST
     pc_p2_cheats_poll();    // zonas y cebollas (pc_p2_cheats.cpp)
     pc_p2_count_idle_pikis();
+    pc_p2_trace_pikis();
     pc_achievements_poll(); // Pikmin 2: los logros salen de la partida (mira 1 vez/s)
 #endif
 }
@@ -5087,13 +5127,11 @@ void pc_settings_draw(void) {
             bool waiting = sWaitingForKey && selected;
 
             const char* actionName = pc_window_get_key_action_name(act);
-            const char* scName = pc_window_binding_name(sPending.keyboardBindings[act]);
-
             char value[96];
             if (waiting) {
-                snprintf(value, sizeof(value), "[Press a key or mouse button...]");
+                snprintf(value, sizeof(value), "%s", sCaptureSecond ? "[2nd: press a key / Del: none]" : "[Press a key / Del: none]");
             } else {
-                snprintf(value, sizeof(value), "%s", scName ? scName : "None");
+                keyBindingPairName(act, value, sizeof(value));
             }
             drawSubmenuRow(gfx, subX + 20, itemY, subW - 40,
                            actionName, value, selected);
@@ -5429,6 +5467,8 @@ int pc_settings_get_infinite_day(void) {
     return pc_hardmode_active() ? 0 : sConfig.infiniteDay;
 }
 
+float pc_settings_get_free_camera_pad_scale(void) { return sConfig.freeCamPadPct / 100.0f; }
+
 int pc_settings_get_free_camera(void) {
     return sConfig.freeCamera;
 }
@@ -5736,6 +5776,7 @@ void modsRowValue(int i, char* value, size_t n) {
     case 21: snprintf(value, n, sPending.throwSpeedPct == 100 ? "%d%%  (original)" : "%d%%", sPending.throwSpeedPct); break;
     case 22: snprintf(value, n, "%s", sPending.throwCancelB ? "On" : "Off (original)"); break;
     case 33: snprintf(value, n, "%s", sPending.quickGrab ? "On" : "Off (original)"); break;
+    case 38: snprintf(value, n, sPending.freeCamPadPct == 100 ? "%d%%  (original)" : "%d%%", sPending.freeCamPadPct); break;
     case 23: snprintf(value, n, "%s", sPending.noTrip ? "On" : "Off (original)"); break;
     case 24: snprintf(value, n, "%s", sPending.onionStep10 ? "On" : "Off (original)"); break;
     case 25: snprintf(value, n, "%s", sPending.instantWhistle ? "On" : "Off (original)"); break;
@@ -5871,17 +5912,19 @@ const GroupRow kControlsRows[] = {
     { SRC_ADV, 6, "Gyro Invert (X/Y)", "Inverts gyro aiming: none, horizontal, vertical or both." },
     { SRC_ADV, 7, "Gyro Calibrate", "Put the pad or phone down, keep it still and press A. Fixes a drifting cursor." },
     { SRC_RECENTER, 0, "Gyro Recenter Button", "Button that brings the cursor back in front of the captain. A: assign it." },
-    { SRC_KEYS, 0, "Keyboard Bindings", "Choose the key or mouse button for each action." },
+    { SRC_KEYS, 0, "Keyboard Bindings", "Two keys or mouse buttons per action. A: main key, Right: second key, Left: defaults. While waiting, Del clears the slot. Shift, Ctrl and Alt can be bound." },
     { SRC_PADS, 0, "Gamepad Bindings", "Choose the pad button for each action." },
 };
 
 const GroupRow kCameraRows[] = {
 #if PIKI_P2_HOST
     { SRC_MODS, 14, "Free Camera", "Turn the camera with the mouse or right stick, as in Pikmin 3. Swarm gets its own button." },
+    { SRC_MODS, 38, "Free Camera Pad Sensitivity", "How fast the right stick turns the free camera on a controller. 100% is the default." },
     { SRC_MODS, 18, "First Person", "Allows a view from the captain's helmet. Switch in game with its button (V / L3)." },
     { SRC_MODS, 15, "Lock-On", "Target the enemy under the cursor with the Lock-On button (R / R3). Press again to release." },
 #else
     { SRC_MODS, 14, "Free Camera", "Turn the camera as in Pikmin 3: hold Left Shift and move the mouse, or use the right stick on a controller. Swarm gets its own button." },
+    { SRC_MODS, 38, "Free Camera Pad Sensitivity", "How fast the right stick turns the free camera on a controller. 100% is the default." },
     { SRC_MODS, 18, "First Person", "Allows a view from Olimar's helmet. Switch in game with its button (V / L3)." },
     { SRC_MODS, 15, "Lock-On", "Target the nearest enemy or object with the Lock-On button (R / R3)." },
     { SRC_MODS, 16, "Charge", "With a target locked, send the whole squad at it." },
@@ -5936,6 +5979,9 @@ const GroupRow kCheatsRows[] = {
 #endif
 #if PIKI_DEBUG_KEYS && !PIKI_P2_HOST
     { SRC_MODS, 19, "Debug Keys (F5/F6)", "Developer shortcuts on F5 and F6." },
+#endif
+#if PIKI_P2_HOST
+    { SRC_MODS, 19, "Debug Keys (F6)", "F6: advance the clock by one in-game hour, capped just before sunset (with Infinite Day it only moves the lighting)." },
 #endif
 };
 
@@ -6120,8 +6166,19 @@ const char* disabledReason(const GroupRow& r) {
 
 int sPickerFocusRow = 0; // fila en la que abre el selector de teclas/botones
 
-void startKeyCapture(int action) {
+void keyBindingPairName(int action, char* out, size_t n) {
+    const int second = sPending.keyboardBindings2[action];
+    if (second == SDL_SCANCODE_UNKNOWN) {
+        snprintf(out, n, "%s", pc_window_binding_name(sPending.keyboardBindings[action]));
+    } else {
+        snprintf(out, n, "%s / %s", pc_window_binding_name(sPending.keyboardBindings[action]),
+                 pc_window_binding_name(second));
+    }
+}
+
+void startKeyCapture(int action, bool second) {
     sControlSelection = action;
+    sCaptureSecond = second;
     sWaitingForKey = true;
     sCapturePrevMouse = SDL_GetMouseState(NULL, NULL);
     pc_window_take_mouse_pressed(); // descartar clics de antes de la captura
@@ -6290,9 +6347,11 @@ void pc_settings_row_value(int group, int row, char* out, unsigned long n) {
         return;
     }
     if (group == PC_SET_PICKER_KEYBOARD && row >= 0 && row < PC_KEY_ACT_COUNT) {
-        if (sWaitingForKey && sControlSelection == row) { snprintf(out, n, "[Press a key or mouse button...]"); return; }
-        const char* name = pc_window_binding_name(sPending.keyboardBindings[row]);
-        snprintf(out, n, "%s", name ? name : "None");
+        if (sWaitingForKey && sControlSelection == row) {
+            snprintf(out, n, "%s", sCaptureSecond ? "[2nd: press a key / Del: none]" : "[Press a key / Del: none]");
+            return;
+        }
+        keyBindingPairName(row, out, (size_t)n);
         return;
     }
     if (group == PC_SET_PICKER_GAMEPAD && row >= 0 && row < PC_KEY_ACT_COUNT) {
@@ -6361,8 +6420,12 @@ void pc_settings_row_change(int group, int row, int dir, bool ok) {
         applyVideo();
         startVideoConfirm();
     } else if (group == PC_SET_PICKER_KEYBOARD && row >= 0 && row < PC_KEY_ACT_COUNT) {
-        if (ok) startKeyCapture(row);
-        else if (dir) sPending.keyboardBindings[row] = kDefaultKeyBindings[row];
+        // A: tecla principal; derecha: segunda tecla; izquierda: por defecto (issue #68).
+        if (ok || dir > 0) startKeyCapture(row, dir > 0 && !ok);
+        else if (dir < 0) {
+            sPending.keyboardBindings[row] = kDefaultKeyBindings[row];
+            sPending.keyboardBindings2[row] = pc_window_default_key_binding2(row);
+        }
     } else if (group == PC_SET_PICKER_GAMEPAD && row >= 0 && row < PC_KEY_ACT_COUNT) {
         if (ok) startButtonCapture(row);
         else if (dir) pendingPadBinds()[row] = -1;

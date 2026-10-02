@@ -7,7 +7,11 @@
 #include "P2DScreen.h"
 
 #define MAX_CAVEDISP_NAME 5
+#ifdef PIKI_PC_PORT
+#define MAX_RADAR_COUNT   (200 + 500) // ver RADAR_MAX_OBJECTS en Radar.h
+#else
 #define MAX_RADAR_COUNT   200
+#endif
 
 namespace Game {
 struct Navi;

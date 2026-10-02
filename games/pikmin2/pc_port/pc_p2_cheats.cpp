@@ -64,3 +64,27 @@ void pc_p2_count_idle_pikis(void)
 	}
 	GameStat::freePikis = idle;
 }
+
+// Diagnóstico (PIKMIN2_PIKI_TRACE=1): una vez por segundo, posición, estado,
+// acción y si está en el agua de cada Pikmin vivo, junto a la del capitán.
+void pc_p2_trace_pikis(void)
+{
+	static const bool enabled = getenv("PIKMIN2_PIKI_TRACE") != nullptr;
+	static Uint32 sLast       = 0;
+	if (!enabled || !Game::pikiMgr) return;
+	const Uint32 now = SDL_GetTicks();
+	if (now - sLast < 1000) return;
+	sLast = now;
+	int n = 0;
+	Iterator<Game::Piki> it(Game::pikiMgr);
+	CI_LOOP(it)
+	{
+		Game::Piki* piki = *it;
+		if (!piki->isAlive()) continue;
+		const Vector3f p = piki->getPosition();
+		fprintf(stderr, "[PIKI] #%d kind=%d state=%d action=%d pos=(%.0f, %.0f, %.0f) water=%d visible=%d navi=%p\n", n++,
+		        (int)piki->getKind(), piki->getStateID(), piki->getCurrActionID(), p.x, p.y, p.z, piki->mWaterBox ? 1 : 0,
+		        piki->isAlive() && !piki->isZikatu() ? 1 : 0, (void*)piki->mNavi);
+	}
+	fflush(stderr);
+}

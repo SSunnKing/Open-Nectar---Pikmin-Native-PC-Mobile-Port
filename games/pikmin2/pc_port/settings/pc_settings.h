@@ -70,6 +70,7 @@ int pc_settings_get_navi_health_pct(void);
 int pc_settings_get_teki_health_pct(void);
 int pc_settings_get_infinite_day(void);
 int pc_settings_get_free_camera(void);
+float pc_settings_get_free_camera_pad_scale(void); ///< issue #66, 1 = default
 /// Radio máximo del silbato, % del original (100 = sin cambio).
 int pc_settings_get_whistle_radius_pct(void);
 /// Multiplicador de la velocidad de las animaciones de coger y lanzar (1 = original).
@@ -131,6 +132,7 @@ bool pc_vs_end_screen_active(void);
 /// Sin él, el contador de ociosos seguiría dibujándose en los menús, porque
 /// GameStat::freePikis conserva su valor al salir de la fase.
 void pc_settings_note_gameplay_frame(void);
+int pc_settings_in_gameplay(void);
 /// Estado del Lock-On para el HUD: lo fija Navi cada frame.
 void pc_settings_note_lock_on(int hasTarget);
 void pc_settings_draw_lock_on(void);

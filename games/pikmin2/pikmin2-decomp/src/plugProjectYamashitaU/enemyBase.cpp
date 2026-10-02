@@ -1049,6 +1049,9 @@ void EnemyBase::setEmotionNone()
  */
 void EnemyBase::onInit(CreatureInitArg* arg)
 {
+#ifdef PIKI_PC_PORT
+	mPcHasGoodPos = false; // los enemigos también se reutilizan de una reserva
+#endif
 	clearStick();
 	mCurAnim->mIsPlaying = false;
 	mInstantDamage       = 0.0f;
@@ -1554,7 +1557,50 @@ void EnemyBase::setParameters()
 void EnemyBase::update()
 {
 	static_cast<EnemyBaseFSM::StateMachine*>(mLifecycleFSM)->update(this);
+#ifdef PIKI_PC_PORT
+	pcGuardPosition();
+#endif
 }
+
+#ifdef PIKI_PC_PORT
+static bool pcBadVec(const Vector3f& v)
+{
+	return !(v.x == v.x && v.y == v.y && v.z == v.z) || fabsf(v.x) > 1.0e6f || fabsf(v.y) > 1.0e6f || fabsf(v.z) > 1.0e6f;
+}
+
+/**
+ * @brief Red de seguridad: un enemigo con la posición o la velocidad en NaN
+ *        deja de verse aunque sigue ahí -- "desaparece" al tocarlo. Vuelve a
+ *        su última posición buena y se avisa en la terminal.
+ */
+void EnemyBase::pcGuardPosition()
+{
+	if (!isAlive()) {
+		return;
+	}
+	if (!pcBadVec(mPosition) && !pcBadVec(mCurrentVelocity)) {
+		mPcGoodPos    = mPosition;
+		mPcHasGoodPos = true;
+		return;
+	}
+	static int sReports = 0;
+	if (sReports < 30) {
+		sReports++;
+		fprintf(stderr, "[NAN] Enemy %s pos=(%f,%f,%f) vel=(%f,%f,%f) rot=(%f,%f,%f) health=%f stuckPikmin=%d\n", getCreatureName(),
+		        mPosition.x, mPosition.y, mPosition.z, mCurrentVelocity.x, mCurrentVelocity.y, mCurrentVelocity.z, mRotation.x,
+		        mRotation.y, mRotation.z, mHealth, (int)mStuckPikminCount);
+		fflush(stderr);
+	}
+	mCurrentVelocity = Vector3f(0.0f);
+	mTargetVelocity  = Vector3f(0.0f);
+	if (pcBadVec(mRotation)) {
+		mRotation = Vector3f(0.0f);
+	}
+	if (mPcHasGoodPos) {
+		onSetPosition(mPcGoodPos);
+	}
+}
+#endif
 
 /**
  * Checks if the EnemyBase is in a finishable state for the waiting birth type drop.

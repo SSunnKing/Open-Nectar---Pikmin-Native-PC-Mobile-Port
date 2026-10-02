@@ -298,6 +298,19 @@ struct Piki : public FakePiki {
 	SysShape::Model* mLeafModel;      // _2BC
 	int mMgrIndex;                    // _2C0
 	Navi* mNavi;                      // _2C4
+#ifdef PIKI_PC_PORT
+	// Mod "Blues Only In Water" (issue #69): saca del agua al que entró solo.
+	bool pcStepOutOfWater();
+	void pcNoteDryGround();
+	void pcGuardPosition();
+	Vector3f mPcLastDryPos;
+	bool mPcHasDryPos   = false;
+	int mPcRescueStreak = 0; ///< rescates seguidos sin asentarse en seco
+	int mPcDryFrames    = 0; ///< frames seguidos en suelo seco y llano
+	// Red de seguridad contra posiciones NaN (Pikmin que "desaparecen").
+	Vector3f mPcGoodPos;
+	bool mPcHasGoodPos = false;
+#endif
 };
 } // namespace Game
 

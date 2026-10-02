@@ -179,6 +179,9 @@ static char sLastVideoError[256] = { 0 };
 
 // Keyboard remapping state (PC only).
 static SDL_Scancode sKeyBindings[PC_KEY_ACT_COUNT];
+// Issue #68: segunda tecla por acción. Los clics que antes estaban fijos en
+// el código (izquierdo = A, derecho = B, central = Z) son sus valores por defecto.
+static SDL_Scancode sKeyBindings2[PC_KEY_ACT_COUNT];
 static bool sSwarmHeld = false; // PC_KEY_ACT_SWARM sampled by the last poll
 
 // Lock-On y Charge se consumen como flanco: el bucle sondea el mando muchas
@@ -255,6 +258,15 @@ const SDL_Scancode kDefaultKeyBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_GYRO_RECENTER */ SDL_SCANCODE_UNKNOWN, // el giroscopio va en el mando
 };
 
+SDL_Scancode pc_window_default_key_binding2(int action) {
+    switch (action) {
+    case PC_KEY_ACT_A: return static_cast<SDL_Scancode>(PC_BIND_MOUSE_BASE + SDL_BUTTON_LEFT);
+    case PC_KEY_ACT_B: return static_cast<SDL_Scancode>(PC_BIND_MOUSE_BASE + SDL_BUTTON_RIGHT);
+    case PC_KEY_ACT_Z: return static_cast<SDL_Scancode>(PC_BIND_MOUSE_BASE + SDL_BUTTON_MIDDLE);
+    default: return SDL_SCANCODE_UNKNOWN;
+    }
+}
+
 // Default gamepad bindings (SDL_GameControllerButton).
 const int kDefaultGamepadBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_A       */ SDL_CONTROLLER_BUTTON_A,
@@ -297,8 +309,21 @@ static void initKeyBindings() {
     if (sKeyBindingsInitialized) return;
     for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
         sKeyBindings[i] = kDefaultKeyBindings[i];
+        sKeyBindings2[i] = pc_window_default_key_binding2(i);
     }
     sKeyBindingsInitialized = true;
+}
+
+void pc_window_set_key_binding2(int action, SDL_Scancode scancode) {
+    if (action < 0 || action >= PC_KEY_ACT_COUNT) return;
+    initKeyBindings();
+    sKeyBindings2[action] = scancode;
+}
+
+SDL_Scancode pc_window_get_key_binding2(int action) {
+    if (action < 0 || action >= PC_KEY_ACT_COUNT) return SDL_SCANCODE_UNKNOWN;
+    initKeyBindings();
+    return sKeyBindings2[action];
 }
 
 void pc_window_set_key_binding(int action, SDL_Scancode scancode) {
@@ -557,6 +582,7 @@ bool pc_window_gamepad_any_held(SDL_GameController* controller)
 void pc_window_reset_key_bindings(void) {
     for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
         sKeyBindings[i] = kDefaultKeyBindings[i];
+        sKeyBindings2[i] = pc_window_default_key_binding2(i);
     }
 }
 
@@ -567,6 +593,7 @@ Uint32 pc_window_take_mouse_pressed(void) {
 }
 
 const char* pc_window_binding_name(int binding) {
+    if (binding == SDL_SCANCODE_UNKNOWN) return "None";
     if (pc_bind_is_mouse(binding)) {
         static char name[24];
         switch (binding - PC_BIND_MOUSE_BASE) {
@@ -834,7 +861,7 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     // which defaults to D-pad Down here because the mod frees it up.
     if (pc_settings_get_free_camera()) {
         if (abs(rx) > axisDeadZone) {
-            pc_window_add_camera_drag(-(float)rx / 32767.0f * 0.02f);
+            pc_window_add_camera_drag(-(float)rx / 32767.0f * 0.02f * pc_settings_get_free_camera_pad_scale());
         }
         if (SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) swarmHeld = true;
     } else {
@@ -927,6 +954,18 @@ void pc_window_poll_events(PADStatus* pad) {
                 // is invisible to SDL_GetMouseState, so remember every press.
                 if (event.button.button >= 1 && event.button.button <= 8)
                     sMousePressedMask |= SDL_BUTTON(event.button.button);
+                // Issue #52: Escape (or the OS) can drop the mouse out of
+                // relative mode, which froze the cursor until the option was
+                // toggled. A click in the window takes it back.
+                if (!sSettingsMenuOpen && sControlMode == PC_CONTROL_MOUSE_CURSOR && !sMouseRelativeMode
+                    && event.button.which != SDL_TOUCH_MOUSEID) {
+                    sMouseRelativeMode = true;
+                    SDL_SetRelativeMouseMode(SDL_TRUE);
+                    int dummyX, dummyY;
+                    SDL_GetRelativeMouseState(&dummyX, &dummyY);
+                    sMouseCursorDeltaX = 0.0f;
+                    sMouseCursorDeltaY = 0.0f;
+                }
                 break;
             case SDL_MOUSEWHEEL: {
                 // SDL reports natural-scroll flipping through the direction
@@ -950,6 +989,11 @@ void pc_window_poll_events(PADStatus* pad) {
                     event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
                     sMouseCursorDeltaX = 0.0f;
                     sMouseCursorDeltaY = 0.0f;
+                }
+                // Some platforms release the relative-mode grab while the
+                // window is unfocused; put it back on return (issue #52).
+                if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED && !sSettingsMenuOpen) {
+                    SDL_SetRelativeMouseMode(sMouseRelativeMode ? SDL_TRUE : SDL_FALSE);
                 }
                 break;
             case SDL_CONTROLLERDEVICEADDED:
@@ -1040,7 +1084,15 @@ void pc_window_poll_events(PADStatus* pad) {
     const Uint8* state = SDL_GetKeyboardState(NULL);
     // Bindings may name a mouse button (issue #42); sample the mouse once here.
     const Uint32 boundMouse = SDL_GetMouseState(NULL, NULL);
-    auto held = [&](int action) { return pc_window_binding_held(sKeyBindings[action], state, boundMouse); };
+    // La segunda tecla con un clic solo cuenta fuera de Classic, como los clics
+    // fijos que sustituye (en Classic el ratón no juega).
+    const bool mouseSecondOk = sControlMode != PC_CONTROL_CLASSIC;
+    auto held = [&](int action) {
+        if (pc_window_binding_held(sKeyBindings[action], state, boundMouse)) return true;
+        const int second = sKeyBindings2[action];
+        if (pc_bind_is_mouse(second) && !mouseSecondOk) return false;
+        return pc_window_binding_held(second, state, boundMouse);
+    };
 
     u16 button = 0;
     s8  stickX = 0;
@@ -1057,10 +1109,18 @@ void pc_window_poll_events(PADStatus* pad) {
     // aiming, so that key stops sending B for as long as it is down. The
     // whistle is unaffected in practice -- right click is wired to B on its
     // own, below -- and with the mod off nothing changes.
-    const bool freeCamHeld = pc_settings_get_free_camera() && held(PC_KEY_ACT_B);
+    // Solo mientras se juega, y solo las teclas: en menús, pausa y pantallas B
+    // vuelve a ser B, y un clic asignado a B siempre manda B (antes del #68 el
+    // clic derecho iba aparte y no se anulaba).
+    const int bindB1 = sKeyBindings[PC_KEY_ACT_B], bindB2 = sKeyBindings2[PC_KEY_ACT_B];
+    const bool bKeyHeld = (!pc_bind_is_mouse(bindB1) && pc_window_binding_held(bindB1, state, boundMouse))
+                       || (!pc_bind_is_mouse(bindB2) && pc_window_binding_held(bindB2, state, boundMouse));
+    const bool freeCamHeld = pc_settings_get_free_camera() && pc_settings_in_gameplay() && bKeyHeld;
 
     if (held(PC_KEY_ACT_A))        button |= PAD_BUTTON_A;
-    if (held(PC_KEY_ACT_B) && !freeCamHeld) button |= PAD_BUTTON_B;
+    const bool bMouseHeld = (pc_bind_is_mouse(bindB1) && pc_window_binding_held(bindB1, state, boundMouse))
+                         || (pc_bind_is_mouse(bindB2) && mouseSecondOk && pc_window_binding_held(bindB2, state, boundMouse));
+    if (bMouseHeld || (bKeyHeld && !freeCamHeld)) button |= PAD_BUTTON_B;
     if (held(PC_KEY_ACT_X))        button |= PAD_BUTTON_X;
     if (held(PC_KEY_ACT_Y))        button |= PAD_BUTTON_Y;
     if (held(PC_KEY_ACT_Z))        button |= PAD_TRIGGER_Z;
@@ -1164,6 +1224,15 @@ void pc_window_poll_events(PADStatus* pad) {
         int mouseX, mouseY;
         Uint32 mouseState = 0;
         bool isRelative = sMouseRelativeMode;
+
+        // Issue #52: if SDL let go of relative mode behind our back (long
+        // idle in a menu, screen lock), the cursor stopped until the option
+        // was toggled. Re-assert it while the window has focus.
+        if (isRelative && !SDL_GetRelativeMouseMode() && (SDL_GetWindowFlags(sWindow) & SDL_WINDOW_INPUT_FOCUS)) {
+            SDL_SetRelativeMouseMode(SDL_TRUE);
+            int dummyX, dummyY;
+            SDL_GetRelativeMouseState(&dummyX, &dummyY);
+        }
         
         if (isRelative) {
             mouseState = SDL_GetRelativeMouseState(&mouseX, &mouseY);
@@ -1236,23 +1305,9 @@ void pc_window_poll_events(PADStatus* pad) {
             }
         }
         
-        // Also map mouse buttons to A/B for convenience. El ratón va con el
-        // dueño del teclado (P2 si se le asignó el teclado).
-        u16 mouseButton = 0;
-        if (mouseState & SDL_BUTTON(SDL_BUTTON_LEFT)) {
-            mouseButton |= PAD_BUTTON_A;
-        }
-        if (mouseState & SDL_BUTTON(SDL_BUTTON_RIGHT)) {
-            mouseButton |= PAD_BUTTON_B;
-        }
-        if (mouseState & SDL_BUTTON(SDL_BUTTON_MIDDLE)) {
-            mouseButton |= PAD_TRIGGER_Z;
-        }
-        if (sKeyboardOwner == 1) {
-            kbButton2 |= mouseButton;
-        } else {
-            button |= mouseButton;
-        }
+        // Los clics izquierdo/derecho/central ya no van fijos aquí: son la
+        // segunda tecla por defecto de A/B/Z y se pueden cambiar (issue #68).
+        (void)mouseState;
     }
 
     pad[0].button      = button;

@@ -60,6 +60,11 @@ typedef struct PcGpuEvidence {
     /// Non-zero if NECTAR_PRIME_EGL=1: also pin EGL to the NVIDIA vendor file.
     /// Off by default; see the EGL note above.
     int forceEglRoute;
+    /// Non-zero if the NVIDIA card is the only GPU (a desktop, not a hybrid
+    /// laptop). There is nothing to offload to, and asking for PRIME anyway
+    /// breaks the window on Wayland ("Could not get EGL display", then
+    /// BadValue on the GLX retry).
+    int nvidiaOnly;
 } PcGpuEvidence;
 
 /// What to do about it. Each field means "set this variable"; the caller sets
@@ -92,6 +97,8 @@ void pc_gpu_preference_clear(void);
 
 /// Non-zero if the NVIDIA kernel module is loaded.
 int pc_gpu_preference_nvidia_present(void);
+/// 1 if the NVIDIA card is the only GPU in /sys/class/drm (no hybrid setup).
+int pc_gpu_preference_nvidia_only(void);
 
 /// Non-zero if this process is on a Wayland session (Xwayland included).
 int pc_gpu_preference_session_is_wayland(void);

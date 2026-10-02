@@ -4330,7 +4330,10 @@ static bool ao_build()
         // The bias discards the shallow self-occlusion that the faceted
         // derivative normal produces on flat ground.
         glUniform4f_ptr(glGetUniformLocation_ptr(sSsaoProgram, "uAOParams"),
-                        sPostEffects.ssaoRadius, sPostEffects.ssaoIntensity, 0.02f, 0.0f);
+                        // Bias (z): samples within ~6 degrees of the surface
+                        // plane are not occluders. At 0.02 the small normal
+                        // error from stepped depth still counted, in bands.
+                        sPostEffects.ssaoRadius, sPostEffects.ssaoIntensity, 0.1f, 0.0f);
     }
     if (glUniform2f_ptr) {
         // The neighbour taps that build the normal step one pixel of this
@@ -5586,7 +5589,9 @@ void pc_gfx_set_tev_order(GXTevStageID stage, GXTexCoordID coord, GXTexMapID map
     state_touched();
     if (stage >= GX_TEVSTAGE0 && stage < GX_MAXTEVSTAGE) {
         sTevStages[stage].texMap = map;
-        sTevStages[stage].texCoord = coord;
+        // GXSetTevOrder writes GX_TEXCOORD_NULL as TEXCOORD0 and keeps the texture
+        // enabled when the map is valid; the raw 0xFF used to be clamped to coordinate 3 (#58).
+        sTevStages[stage].texCoord = (coord >= GX_MAX_TEXCOORD) ? GX_TEXCOORD0 : coord;
         sTevStages[stage].textureEnabled = map >= GX_TEXMAP0 && map < GX_MAX_TEXMAP;
         if (chan == GX_COLOR_NULL || chan == GX_COLOR_ZERO) sTevStages[stage].rasChannel = -1;
         else if (chan == GX_COLOR1 || chan == GX_ALPHA1 || chan == GX_COLOR1A1) sTevStages[stage].rasChannel = 1;

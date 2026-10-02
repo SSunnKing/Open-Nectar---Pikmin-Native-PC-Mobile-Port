@@ -97,6 +97,13 @@ f32 Tube::getPosRatio(const Vector3f& point)
 
 	Vector3f sep = point - mStartPos;
 
+#ifdef PIKI_PC_PORT
+	// Un tubo de longitud cero (extremos en el mismo punto) daba 0/0 = NaN, y
+	// un Pikmin enganchado a él acababa en NaN: invisible, sin desaparecer.
+	if (mag <= 0.0001f) {
+		return 0.0f;
+	}
+#endif
 	return axis.dot(sep) / mag;
 }
 

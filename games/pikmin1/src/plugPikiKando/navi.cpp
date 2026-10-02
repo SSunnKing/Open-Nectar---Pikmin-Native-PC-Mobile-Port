@@ -32,6 +32,7 @@ static f32 pcNaviHurt(f32 damage) { return damage; }
 #endif
 #include "AIConstant.h"
 #include "BombItem.h"
+#include "Boss.h"
 #include "CPlate.h"
 #include "DebugLog.h"
 #include "DoorItem.h"
@@ -663,6 +664,12 @@ void Navi::reset()
 	mCursorNaviDist       = mCursorPosition.length();
 	mCursorTargetPosition = mCursorPosition;
 	mCursorWorldPos.set(0.0f, 0.0f, 0.0f);
+#if defined(PIKI_PC_PORT)
+	mPcLockTarget = nullptr;
+	mPcLockIgnore = nullptr;
+	mPcAimOffset.set(0.0f, 0.0f, 0.0f);
+	mPcPinnedOffset.set(0.0f, 0.0f, 0.0f);
+#endif
 	mWalkAnimPrevDir = mFaceDirection;
 	mNextThrowPiki   = nullptr;
 	mNaviLightEfx->changeEffect(EffectMgr::EFF_Navi_Light);
@@ -1188,10 +1195,115 @@ void Navi::pcUpdateBombCommand()
 }
 
 /**
- * @brief Mod "Lock-On": fija el enemigo más cercano al cursor.
+ * @brief Mod "Lock-On": qué se puede fijar.
  *
- * El objetivo se valida cada frame recorriendo tekiMgr, en vez de guardar un
- * puntero y confiar en él: un enemigo puede morir y desaparecer entre frames.
+ * Enemigos y jefes, y los objetos con los que trabajan los Pikmin: pellets y
+ * piezas de la nave, puentes y rocas (WorkObject), muros y bombas.
+ */
+static bool pcLockable(Creature* c)
+{
+	if (!c || !c->isAlive() || !c->isVisible()) {
+		return false;
+	}
+	if (c->isTeki() || c->isBoss()) {
+		return true;
+	}
+	switch (c->mObjType) {
+	case OBJTYPE_Pellet:
+	case OBJTYPE_WorkObject:
+	case OBJTYPE_Gate:
+	case OBJTYPE_Bomb:
+		return true;
+	default:
+		return false;
+	}
+}
+
+/**
+ * @brief Recorre todo lo fijable. Devuelve true si `fn` corta el recorrido.
+ */
+template <typename F>
+static bool pcForEachLockable(F fn)
+{
+	ObjectMgr* mgrs[] = { tekiMgr, bossMgr, pelletMgr, workObjectMgr, itemMgr };
+	for (ObjectMgr* mgr : mgrs) {
+		if (!mgr) {
+			continue;
+		}
+		Iterator iter(mgr);
+		CI_LOOP(iter)
+		{
+			Creature* c = *iter;
+			if (pcLockable(c) && fn(c)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/**
+ * @brief Radio del objetivo en el suelo: de él salen el alcance y el anillo.
+ *
+ * Los puentes, rocas y muros son más grandes que su getSize(); su esfera
+ * central da mejor idea de lo que ocupan.
+ */
+static f32 pc_lock_target_radius(Creature* c)
+{
+	// Los enemigos no sobrescriben getSize() (siempre 15), así que se mira
+	// también su esfera central y la envolvente de colisión. La envolvente se
+	// lee directa: getBoundingSphereRadius() la dobla con el enemigo dormido.
+	f32 r = c->getSize();
+	const f32 centre = c->getCentreSize();
+	if (centre > r) {
+		r = centre;
+	}
+	if (c->mCollInfo && c->mCollInfo->hasInfo()) {
+		CollPart* bound = c->mCollInfo->getBoundingSphere();
+		if (bound && bound->mRadius * 0.8f > r) {
+			r = bound->mRadius * 0.8f;
+		}
+	}
+	return r > 4.0f ? r : 4.0f;
+}
+
+/**
+ * @brief Radio del anillo de cursor.mod en el suelo, sacado de sus vértices.
+ */
+static f32 pcCursorShapeRadius()
+{
+	static f32 radius = 0.0f;
+	if (radius <= 0.0f) {
+		Shape* shape = GlobalShape::cursorShape;
+		for (int i = 0; shape && i < shape->mVertexCount; i++) {
+			const Vector3f& v = shape->mVertexList[i];
+			const f32 d       = speedy_sqrtf(v.x * v.x + v.z * v.z);
+			if (d > radius) {
+				radius = d;
+			}
+		}
+		if (radius <= 0.0f) {
+			radius = 10.0f;
+		}
+	}
+	return radius;
+}
+
+static f32 pcLockDistXZ(Creature* c, immut Vector3f& pos)
+{
+	Vector3f sep = c->getCentre() - pos;
+	return speedy_sqrtf(sep.x * sep.x + sep.z * sep.z);
+}
+
+/**
+ * @brief Mod "Lock-On": fija el enemigo u objeto más cercano al cursor.
+ *
+ * Tres modos (ajuste lockOn): 0 apagado, 1 manual con el botón Lock-On, 2
+ * automático: se fija solo al acercar el cursor y se suelta al alejarse el
+ * capitán o con el botón.
+ *
+ * El objetivo se valida cada frame recorriendo los managers, en vez de guardar
+ * un puntero y confiar en él: puede morir y desaparecer entre frames.
  */
 void Navi::pcUpdateLockOn()
 {
@@ -1199,80 +1311,110 @@ void Navi::pcUpdateLockOn()
 	// quede encolada y salte sola al activarlo.
 	const bool lockPressed   = pc_window_take_lockon_press();
 	const bool chargePressed = pc_window_take_swarm_press();
+	const int mode           = pc_settings_get_lock_on();
 
 	static const bool kDebug = getenv("NECTAR_LOCKON_DEBUG") != nullptr;
 	if (kDebug && lockPressed) {
-		fprintf(stderr, "[lock-on] tecla leida  mod=%d naviID=%d tekiMgr=%p cursor=(%.1f %.1f %.1f)\n",
-		        pc_settings_get_lock_on(), mNaviID, (void*)tekiMgr, mCursorWorldPos.x, mCursorWorldPos.y, mCursorWorldPos.z);
+		fprintf(stderr, "[lock-on] tecla leida  mod=%d naviID=%d cursor=(%.1f %.1f %.1f)\n", mode, mNaviID, mCursorWorldPos.x,
+		        mCursorWorldPos.y, mCursorWorldPos.z);
 		fflush(stderr);
 	}
 
-	if (!pc_settings_get_lock_on() || !tekiMgr || mNaviID != 0) {
+	if (!mode || mNaviID != 0) {
 		mPcLockTarget = nullptr;
+		mPcLockIgnore = nullptr;
 		pc_settings_note_lock_on(0);
 		return;
 	}
 
+	// Donde apunta el jugador. Con objetivo, el cursor visible está clavado en
+	// él y el libre sigue en mPcAimOffset.
+	Vector3f aim = mSRT.t + (mPcLockTarget ? mPcAimOffset : mCursorPosition);
+
 	if (mPcLockTarget) {
-		bool stillValid = false;
-		Iterator iter(tekiMgr);
-		CI_LOOP(iter)
-		{
-			Creature* teki = *iter;
-			if (teki == mPcLockTarget) {
-				// Se suelta si muere, si deja de verse, o si el capitán se
-				// aleja: el doble del alcance del cursor, así que la distancia
-				// va con la escala del juego y no con un número inventado.
-				Vector3f away  = teki->mSRT.t - mSRT.t;
-				away.y         = 0.0f;
-				const f32 keep = NAVI_PARM(mCursorMaxRadius) * 2.0f;
-				stillValid     = teki->isAlive() && teki->isVisible() && away.length() < keep;
-				break;
-			}
+		Creature* target = mPcLockTarget;
+		const bool found = pcForEachLockable([target](Creature* c) { return c == target; });
+		bool stillValid  = false;
+		if (found) {
+			// Se suelta si el capitán se aleja: el doble del alcance del
+			// cursor, así que la distancia va con la escala del juego.
+			Vector3f away  = target->mSRT.t - mSRT.t;
+			away.y         = 0.0f;
+			const f32 keep = NAVI_PARM(mCursorMaxRadius) * 2.0f + pc_lock_target_radius(target);
+			stillValid     = away.length() < keep;
 		}
 		if (!stillValid) {
 			mPcLockTarget = nullptr;
+			if (mode == 2) {
+				// El cursor vuelve a donde apuntaba el jugador.
+				mCursorPosition       = mPcAimOffset;
+				mCursorTargetPosition = mPcAimOffset;
+				mCursorNaviDist       = mPcAimOffset.length();
+			}
 		}
 	}
 
+	// El objetivo soltado a mano en automático no se recoge otra vez hasta
+	// que el cursor sale de él.
+	if (mPcLockIgnore) {
+		Creature* ignore = mPcLockIgnore;
+		const bool found = pcForEachLockable([ignore](Creature* c) { return c == ignore; });
+		if (!found || pcLockDistXZ(ignore, aim) > pc_lock_target_radius(ignore) + 12.0f) {
+			mPcLockIgnore = nullptr;
+		}
+	}
+
+	auto pickNearest = [&]() -> Creature* {
+		// El alcance sale del tamaño del propio objetivo, no de un radio fijo:
+		// con uno fijo se enganchaba al más cercano aunque apuntases a campo
+		// abierto.
+		Creature* best = nullptr;
+		f32 bestDist   = 0.0f;
+		pcForEachLockable([&](Creature* c) {
+			if (c == mPcLockIgnore) {
+				return false;
+			}
+			const f32 dist = pcLockDistXZ(c, aim);
+			if (dist > pc_lock_target_radius(c) + 12.0f) {
+				return false;
+			}
+			if (!best || dist < bestDist) {
+				best     = c;
+				bestDist = dist;
+			}
+			return false;
+		});
+		if (kDebug && best) {
+			fprintf(stderr, "[lock-on] objetivo=%p tipo=%d dist=%.1f\n", (void*)best, (int)best->mObjType, bestDist);
+			fflush(stderr);
+		}
+		return best;
+	};
+
+	Creature* acquired = nullptr;
 	if (lockPressed) {
 		if (mPcLockTarget) {
-			mPcLockTarget = nullptr; // segunda pulsación suelta el objetivo
+			// Segunda pulsación suelta el objetivo.
+			if (mode == 2) {
+				mPcLockIgnore = mPcLockTarget;
+			}
+			mPcLockTarget = nullptr;
 		} else {
-			// El alcance sale del tamaño del propio enemigo, no de un radio
-			// fijo: con uno fijo se enganchaba al bicho más cercano al cursor
-			// aunque estuvieses apuntando a campo abierto.
-			Creature* best = nullptr;
-			f32 bestDist   = 0.0f;
-			Iterator iter(tekiMgr);
-			CI_LOOP(iter)
-			{
-				Creature* teki = *iter;
-				if (!teki->isTeki() || !teki->isAlive() || !teki->isVisible()) {
-					continue;
-				}
-				Vector3f sep = teki->mSRT.t - mCursorWorldPos;
-				f32 dist     = speedy_sqrtf(sep.x * sep.x + sep.z * sep.z);
-				f32 reach    = teki->getSize() + 12.0f;
-				if (dist > reach) {
-					continue;
-				}
-				if (!best || dist < bestDist) {
-					best     = teki;
-					bestDist = dist;
-				}
-			}
-			mPcLockTarget = best;
-			if (kDebug) {
-				fprintf(stderr, "[lock-on] objetivo=%p dist=%.1f\n", (void*)best, bestDist);
-				fflush(stderr);
-			}
+			acquired = pickNearest();
 		}
+	} else if (mode == 2 && !mPcLockTarget) {
+		acquired = pickNearest();
+	}
+	if (acquired) {
+		mPcLockTarget   = acquired;
+		mPcAimOffset    = mCursorPosition;
+		mPcPinnedOffset = mCursorPosition;
 	}
 
 	pc_settings_note_lock_on(mPcLockTarget != nullptr);
 
-	if (mPcLockTarget && chargePressed && pc_settings_get_charge()) {
+	// Cargar solo tiene sentido contra lo que se ataca.
+	if (mPcLockTarget && chargePressed && pc_settings_get_charge() && (mPcLockTarget->isTeki() || mPcLockTarget->isBoss())) {
 		Iterator iterPiki(pikiMgr);
 		CI_LOOP(iterPiki)
 		{
@@ -1298,14 +1440,91 @@ void Navi::pcUpdateLockOn()
  * anillo, la estela y el destino del lanzamiento, así que fijarlo aquí deja
  * todo eso pegado al enemigo sin tocar el dibujo.
  */
+/**
+ * @brief Aro del Lock-On en el suelo, alrededor del objetivo fijado.
+ *
+ * Sustituye al de cursor.mod mientras hay objetivo: escalar aquel modelo
+ * engordaba el trazo y la colita con el tamaño del enemigo. Este va en
+ * tramos que giran despacio, con el mismo color que el cursor, y cada
+ * vértice se apoya en el terreno.
+ */
+void Navi::pcDrawLockRing(Graphics& gfx)
+{
+	static const int kDashes     = 8;
+	static const int kDashSegs   = 5; // segmentos por tramo; más, sigue mejor el terreno
+	static const f32 kDashFill   = 0.7f;
+	static const f32 kHalfStroke = 1.4f;
+
+	static f32 spin = 0.0f;
+	spin += gsys->getFrameTime() * 0.8f;
+	if (spin > TAU) {
+		spin -= TAU;
+	}
+
+	// Mismo color que el aro original (magenta), Louie o el tinte de J2.
+	Colour colour(235, 70, 235, 230);
+	if (pcHasTint()) {
+		GXColor t = pcTint();
+		colour.set(t.r, t.g, t.b, 230);
+	} else if (pcCaptain() == PC_CAPTAIN_LOUIE) {
+		colour.set(60, 130, 255, 230);
+	}
+
+	const Vector3f centre = mPcLockTarget->getCentre();
+	const f32 radius      = pc_lock_target_radius(mPcLockTarget) + 5.0f;
+
+	const bool prevLighting = gfx.setLighting(false, nullptr);
+	gfx.useMatrix(gfx.mCamera->mLookAtMtx, 0);
+	gfx.useTexture(nullptr, GX_TEXMAP0);
+	const int prevBlend = gfx.setCBlending(BLEND_Alpha);
+	const int prevCull  = gfx.setCullFront(2);
+	gfx.setColour(colour, true);
+
+	Vector2f uv[4];
+	for (int i = 0; i < 4; i++) {
+		uv[i].set(0.0f, 0.0f);
+	}
+	const f32 dashArc = TAU / kDashes;
+	for (int d = 0; d < kDashes; d++) {
+		const f32 start = spin + d * dashArc;
+		const f32 step  = dashArc * kDashFill / kDashSegs;
+		for (int k = 0; k < kDashSegs; k++) {
+			const f32 a0 = start + k * step;
+			const f32 a1 = a0 + step;
+			Vector3f quad[4];
+			const f32 rad[4] = { radius - kHalfStroke, radius + kHalfStroke, radius + kHalfStroke, radius - kHalfStroke };
+			const f32 ang[4] = { a0, a0, a1, a1 };
+			for (int v = 0; v < 4; v++) {
+				quad[v].x = centre.x + rad[v] * sinf(ang[v]);
+				quad[v].z = centre.z + rad[v] * cosf(ang[v]);
+				quad[v].y = mapMgr->getMinY(quad[v].x, quad[v].z, true) + 1.5f;
+			}
+			gfx.drawOneTri(quad, nullptr, uv, 4);
+		}
+	}
+
+	gfx.setCullFront(prevCull);
+	gfx.setCBlending(prevBlend);
+	gfx.setLighting(prevLighting, nullptr);
+}
+
 void Navi::pcPinCursorToLock()
 {
 	if (!mPcLockTarget) {
 		pcPinCursorFirstPerson();
 		return;
 	}
-	Vector3f offset = mPcLockTarget->mSRT.t - mSRT.t;
+	// Lo que el jugador ha movido el cursor desde el último clavado sigue
+	// contando en el cursor libre: al soltar, el cursor vuelve ahí.
+	mPcAimOffset = mPcAimOffset + (mCursorPosition - mPcPinnedOffset);
+	if (mPcAimOffset.length() > NAVI_PARM(mCursorMaxRadius)) {
+		mPcAimOffset.normalise();
+		mPcAimOffset = mPcAimOffset * NAVI_PARM(mCursorMaxRadius);
+	}
+
+	Vector3f offset = mPcLockTarget->getCentre() - mSRT.t;
 	offset.y        = 0.0f;
+	mPcPinnedOffset       = offset;
 	mCursorPosition       = offset;
 	mCursorTargetPosition = offset;
 	mCursorNaviDist       = offset.length();
@@ -2817,6 +3036,11 @@ void Navi::refresh(Graphics& gfx)
 
 		mWorldMtx = orientMatrix;
 		mWorldMtx.setTranslation(mCursorWorldPos);
+#if defined(PIKI_PC_PORT)
+		// Lock-On: el aro del cursor se sustituye por uno propio alrededor del
+		// objetivo (pcDrawLockRing), de trazo fijo sea cual sea su tamaño.
+		const bool pcLocked = mPcLockTarget && pc_settings_get_lock_on() && mNaviID == 0;
+#endif
 
 		// Estela: emite mientras el cursor se desplaza; quieto, deja de emitir
 		// y las partículas que quedan se desvanecen solas.
@@ -2864,7 +3088,10 @@ void Navi::refresh(Graphics& gfx)
 				pc_gfx_set_mat_color_tint(red ? GXColor { 255, 60, 40, 255 } : GXColor { 40, 110, 255, 255 });
 			}
 #endif
-			GlobalShape::cursorShape->drawshape(gfx, *gfx.mCamera, nullptr);
+#if defined(PIKI_PC_PORT)
+			if (!pcLocked)
+#endif
+				GlobalShape::cursorShape->drawshape(gfx, *gfx.mCamera, nullptr);
 #if defined(PIKI_PC_PORT)
 			if (cursorTinted) pc_gfx_clear_mat_color_tint();
 #endif
@@ -2878,8 +3105,47 @@ void Navi::refresh(Graphics& gfx)
 
 			bool isLighting                                       = gfx.setLighting(false, nullptr);
 			GlobalShape::markerShape2->mMaterialList->colour()    = markerColour;
+#if defined(PIKI_PC_PORT)
+			// Lock-On: el marcador flota encima del objetivo, girando y
+			// subiendo y bajando, en vez de quedarse en el suelo.
+			if (pcLocked) {
+				static f32 bob = 0.0f;
+				bob += gsys->getFrameTime() * 4.0f;
+				if (bob > TAU) {
+					bob -= TAU;
+				}
+				Vector3f top = mPcLockTarget->getCentre();
+				f32 topY     = top.y + mPcLockTarget->getCentreSize();
+				const f32 h  = mPcLockTarget->getHeight();
+				if (h > 0.0f && mPcLockTarget->mSRT.t.y + h > topY) {
+					topY = mPcLockTarget->mSRT.t.y + h;
+				}
+				// La esfera central se queda a media altura en los enemigos; la
+				// envolvente sí llega al lomo.
+				if (mPcLockTarget->mCollInfo && mPcLockTarget->mCollInfo->hasInfo()) {
+					CollPart* bound = mPcLockTarget->mCollInfo->getBoundingSphere();
+					if (bound && bound->mCentre.y + bound->mRadius > topY) {
+						topY = bound->mCentre.y + bound->mRadius;
+					}
+				}
+				// marker.mod ya lleva ~28 de altura sobre su origen.
+				top.y = topY - 22.0f + 3.0f * sinf(bob);
+				Matrix4f floatMtx;
+				Vector3f markerScale(1.0f, 1.0f, 1.0f);
+				Vector3f markerRot(0.0f, bob * 0.5f, 0.0f);
+				floatMtx.makeSRT(markerScale, markerRot, top);
+				gfx.useMatrix(Matrix4f::ident, 0);
+				gfx.mCamera->mLookAtMtx.multiplyTo(floatMtx, viewMtx);
+				gfx.useMatrix(viewMtx, 0);
+			}
+#endif
 			GlobalShape::markerShape2->drawshape(gfx, *gfx.mCamera, nullptr);
 			gfx.setLighting(isLighting, nullptr);
+#if defined(PIKI_PC_PORT)
+			if (pcLocked) {
+				pcDrawLockRing(gfx);
+			}
+#endif
 #if defined(PIKI_PC_PORT)
 			pc_gfx_shadow_exclude(0);
 #endif

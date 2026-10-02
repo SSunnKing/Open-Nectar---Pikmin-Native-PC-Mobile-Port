@@ -3,6 +3,24 @@
 extern "C" int pc_settings_get_infinite_day(void);
 extern "C" int pc_settings_get_day_minutes(void);
 #include "Game/GameSystem.h"
+
+// Mods "Infinite Day" y "Day Length" (luz natural): el reloj de la partida se
+// para o va a otro ritmo, pero la luz sigue este reloj visual, que avanza al
+// ritmo original, pasa por la noche y vuelve a amanecer. La barra del sol
+// sigue con el reloj de la partida. Fuera de esos mods es el mismo reloj.
+static f32 sPcVisualTimeOfDay = 7.0f;
+static bool sPcVisualActive   = false;
+
+// El día 1 solo termina al atardecer (su pausa no deja ir al atardecer), así
+// que "Infinite Day" no lo para: si no, el día 1 no acabaría nunca.
+static bool pcInfiniteDay(u32 dayCount) { return pc_settings_get_infinite_day() && dayCount != 0; }
+
+static bool pcVisualClockWanted(u32 dayCount)
+{
+	Game::GameSystem* gs = Game::gameSystem;
+	return gs && gs->isStoryMode() && gs->mSection && !gs->mIsInCave
+	    && (pcInfiniteDay(dayCount) || pc_settings_get_day_minutes() > 0);
+}
 #endif
 #include "JSystem/JKernel/JKRDvdRipper.h"
 #include "stream.h"
@@ -47,6 +65,9 @@ void TimeMgr::init()
 void TimeMgr::setTime(f32 time)
 {
 	mCurrentTimeOfDay = time;
+#ifdef PIKI_PC_PORT
+	sPcVisualTimeOfDay = time;
+#endif
 	mCurrentRealTime  = (mCurrentTimeOfDay / TIMEMGR_DAY_HOURS) * mParms.mParms.mDayLengthSeconds.mValue;
 
 	updateSlot();
@@ -83,6 +104,20 @@ void TimeMgr::setEndTime()
 #pragma dont_inline on
 void TimeMgr::updateSlot()
 {
+#ifdef PIKI_PC_PORT
+	// La luz lee el reloj visual; se restaura al salir para que el resto del
+	// juego siga viendo la hora de la partida.
+	const f32 pcGameTime = mCurrentTimeOfDay;
+	if (sPcVisualActive) {
+		mCurrentTimeOfDay = sPcVisualTimeOfDay;
+	}
+	pcUpdateSlotFor();
+	mCurrentTimeOfDay = pcGameTime;
+}
+
+void TimeMgr::pcUpdateSlotFor()
+{
+#endif
 	// NIGHT
 	if ((mCurrentTimeOfDay < mParms.mParms.mMorningStartTime.mValue) || mCurrentTimeOfDay >= mParms.mParms.mEveningEndTime.mValue) {
 		mLightSetting = SUNTIME_Night;
@@ -173,8 +208,17 @@ void TimeMgr::update()
 		// Mods "Infinite Day" y "Day Length": el reloj se para o avanza a otro
 		// ritmo, pero solo en la superficie de la partida (fuera, el titulo y
 		// los menus siguen con su tiempo propio).
+		sPcVisualActive = pcVisualClockWanted(mDayCount);
+		if (sPcVisualActive) {
+			sPcVisualTimeOfDay += mSpeedFactor * sys->mDeltaTime * (TIMEMGR_DAY_HOURS / mParms.mParms.mDayLengthSeconds.mValue);
+			if (sPcVisualTimeOfDay >= TIMEMGR_DAY_HOURS) {
+				sPcVisualTimeOfDay -= TIMEMGR_DAY_HOURS;
+			}
+		} else {
+			sPcVisualTimeOfDay = mCurrentTimeOfDay;
+		}
 		if (gameSystem && gameSystem->isStoryMode() && gameSystem->mSection && !gameSystem->mIsInCave) {
-			if (pc_settings_get_infinite_day()) {
+			if (pcInfiniteDay(mDayCount)) {
 				updateSlot();
 				return;
 			}
@@ -208,6 +252,41 @@ void TimeMgr::update()
  * @note Address: 0x80127398
  * @note Size: 0x18
  */
+#ifdef PIKI_PC_PORT
+/// Como getSunGaugeRatio, pero con la hora de la luz: mueve la dirección del sol.
+f32 TimeMgr::pcGetLightSunRatio()
+{
+	if (!sPcVisualActive) {
+		return getSunGaugeRatio();
+	}
+	const f32 gameTime = mCurrentTimeOfDay;
+	mCurrentTimeOfDay  = sPcVisualTimeOfDay;
+	const f32 ratio    = getSunGaugeRatio();
+	mCurrentTimeOfDay  = gameTime;
+	return ratio;
+}
+
+/// Tecla F6 (Debug Keys): una hora más. Con "Infinite Day" solo avanza la luz,
+/// para no llegar al atardecer y terminar el día.
+void TimeMgr::pcDebugAdvanceHour()
+{
+	if (!pcInfiniteDay(mDayCount)) {
+		const f32 next = mCurrentTimeOfDay + 1.0f;
+		const f32 cap  = mParms.mParms.mDayEndTime.mValue - 0.01f;
+		const f32 keep = sPcVisualTimeOfDay;
+		setTime(next > cap ? cap : next);
+		sPcVisualTimeOfDay = sPcVisualActive ? keep : mCurrentTimeOfDay;
+	}
+	if (sPcVisualActive) {
+		sPcVisualTimeOfDay += 1.0f;
+		if (sPcVisualTimeOfDay >= TIMEMGR_DAY_HOURS) {
+			sPcVisualTimeOfDay -= TIMEMGR_DAY_HOURS;
+		}
+	}
+	updateSlot();
+}
+#endif
+
 bool TimeMgr::isDayOver()
 {
 	return mCurrentTimeOfDay > mParms.mParms.mDayEndTime.mValue;

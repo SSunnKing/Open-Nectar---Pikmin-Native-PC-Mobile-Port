@@ -843,7 +843,17 @@ void CollPart::calcStickLocal(Vector3f& input, Vector3f& localPosition)
 		makeMatrixTo(mtx);
 
 		Matrixf inv;
+#ifdef PIKI_PC_PORT
+		// Con una matriz no invertible PSMTXInverse no escribe nada e `inv`
+		// quedaba con basura de la pila: el Pikmin se enganchaba a un sitio
+		// aleatorio (o NaN). Se trata como el caso degenerado de abajo.
+		if (!PSMTXInverse(mtx.mMatrix.mtxView, inv.mMatrix.mtxView)) {
+			localPosition = Vector3f(0.0f);
+			return;
+		}
+#else
 		PSMTXInverse(mtx.mMatrix.mtxView, inv.mMatrix.mtxView);
+#endif
 
 		f32 len = mtx.getRowLength(0);
 		if (FABS(len) < 0.001f) {

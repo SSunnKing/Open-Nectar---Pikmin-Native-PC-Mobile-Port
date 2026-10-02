@@ -78,6 +78,11 @@ struct TimeMgr : public CNode {
 	void updateSlot();
 	void update();
 	void updateFrame();
+#ifdef PIKI_PC_PORT
+	void pcUpdateSlotFor();
+	f32 pcGetLightSunRatio();
+	void pcDebugAdvanceHour();
+#endif
 
 	inline void setFlag(u32 flag) { mFlags.typeView |= flag; }
 	inline void resetFlag(u32 flag) { mFlags.typeView &= ~flag; }

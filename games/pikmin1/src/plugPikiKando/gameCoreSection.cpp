@@ -2180,8 +2180,13 @@ static void pcDebugKeys()
 		// Under "Infinite Day" the playable clock stays held (pushing it would
 		// reach sunset and end the day); only the visual clock moves on.
 		const bool clockHeld = pc_settings_get_infinite_day() != 0 && clock.mCurrentDay != 1;
+		const f32 visualBefore = gPcVisualTimeOfDay;
 		if (!clockHeld) {
 			clock.setTime(next >= clock.mHoursInDay ? clock.mHoursInDay - 0.01f : next);
+			// Con "Day Length" la luz va por su cuenta: solo se le suma la hora.
+			if (pc_settings_get_day_minutes() > 0) {
+				gPcVisualTimeOfDay = visualBefore;
+			}
 		}
 		// The visual clock (lighting, sun/moon) wraps into a new dawn.
 		gPcVisualTimeOfDay += 1.0f;

@@ -23,6 +23,9 @@
 #include "sysNew.h"
 #include "timers.h"
 #include "zen/ogTest.h"
+#if defined(PIKI_PC_PORT)
+#include "settings/pc_settings.h"
+#endif
 
 /// Global game state.
 GameFlow gameflow;
@@ -159,6 +162,9 @@ void WorldClock::setTime(f32 timeOfDay)
 	mCurrentGameMinute = (60.0f / mRealSecsPerGameHour) * mRealSecsIntoHour;
 	mTimeOfDay         = f32(mCurrentGameHour) + (mRealSecsIntoHour / mRealSecsPerGameHour);
 	mPrevTimeOfDay     = mTimeOfDay;
+#if defined(PIKI_PC_PORT)
+	gPcVisualTimeOfDay = mTimeOfDay; // la luz arranca con el reloj (amanecer, F6...)
+#endif
 }
 
 /**
@@ -246,11 +252,23 @@ f32 gPcVisualTimeOfDay = 7.0f;
 
 void pcVisualClockUpdate(WorldClock& clock, bool clockHeld)
 {
-	if (!clockHeld) {
+	// "Day Length" personalizado: el reloj del nivel va a otro ritmo, pero la
+	// luz sigue al ritmo original (27 min reales por día de 24 h).
+	// "Eternal Night": la luz se queda en medianoche pase lo que pase con el
+	// reloj del nivel. El icono de la barra lo decide esta misma hora, así que
+	// sale la luna, y su posición sigue al reloj del nivel como la del sol.
+	if (pc_settings_get_eternal_night()) {
+		gPcVisualTimeOfDay = 0.0f;
+		return;
+	}
+	const int dayMinutes = pc_settings_get_day_minutes();
+	if (!clockHeld && dayMinutes <= 0) {
 		gPcVisualTimeOfDay = clock.mTimeOfDay;
 		return;
 	}
-	gPcVisualTimeOfDay += gsys->getFrameTime() / clock.mRealSecsPerGameHour;
+	const f32 secsPerHour = dayMinutes > 0 ? clock.mRealSecsPerGameHour * 27.0f / (f32(dayMinutes) * 2.0f)
+	                                       : clock.mRealSecsPerGameHour;
+	gPcVisualTimeOfDay += gsys->getFrameTime() / secsPerHour;
 	if (gPcVisualTimeOfDay >= HOURS_IN_DAY) {
 		gPcVisualTimeOfDay -= HOURS_IN_DAY;
 	}

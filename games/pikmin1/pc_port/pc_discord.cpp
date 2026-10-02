@@ -29,6 +29,24 @@
 #include <unistd.h>
 #endif
 
+#if PIKI_P2_HOST
+// Pikmin 2: el operator new global va al heap JKR del juego, que no es seguro
+// entre hilos y cuyas secciones se destruyen. Todo lo de este módulo (el hilo
+// y los textos que guarda) usa malloc.
+bool pc_host_alloc_active();
+void pc_host_alloc_set(bool active);
+namespace {
+struct PcDiscordHostAlloc {
+	bool prev = pc_host_alloc_active();
+	PcDiscordHostAlloc() { pc_host_alloc_set(true); }
+	~PcDiscordHostAlloc() { pc_host_alloc_set(prev); }
+};
+} // namespace
+#define PC_DISCORD_HOST_ALLOC() PcDiscordHostAlloc pcDiscordHostAlloc
+#else
+#define PC_DISCORD_HOST_ALLOC() ((void)0)
+#endif
+
 namespace {
 
 // Application "Open Nectar" in the Discord Developer Portal: its name is what
@@ -237,6 +255,7 @@ std::string buildActivity(const State& st, bool inGame, long long startEpoch)
 
 void threadMain()
 {
+	PC_DISCORD_HOST_ALLOC();
 	Connection conn;
 	const long long startEpoch = (long long)time(nullptr);
 	double nextConnectTry = 0.0;
@@ -288,6 +307,7 @@ void threadMain()
 
 extern "C" void pc_discord_init(const char* gameName)
 {
+	PC_DISCORD_HOST_ALLOC();
 	if (sRunning || getenv("OPEN_NECTAR_NO_DISCORD")) return;
 	if (gameName) sGameName = gameName;
 	sRunning = true;
@@ -303,6 +323,7 @@ extern "C" void pc_discord_shutdown(void)
 
 extern "C" void pc_discord_set_playing(const char* zoneName, const char* zoneKey, const char* stateLine)
 {
+	PC_DISCORD_HOST_ALLOC();
 	std::lock_guard<std::mutex> lock(sMutex);
 	sState.zoneName     = zoneName ? zoneName : "";
 	sState.zoneKey      = zoneKey ? zoneKey : "app";
