@@ -25,6 +25,8 @@ int pc_settings_cli(int argc, char** argv);
 // Handles the F1 toggle and navigation. If the menu is open it consumes the
 // pad (returns true) so the game does not react to the same input.
 bool pc_settings_consume_game_input(void);
+// 1 mientras el menú F1 está abierto.
+int pc_settings_menu_is_open(void);
 /// Pide abrir/cerrar el menú desde fuera del teclado (botón táctil). Se
 /// atiende en la siguiente lectura de entrada, como si fuera F1.
 void pc_settings_request_toggle(void);

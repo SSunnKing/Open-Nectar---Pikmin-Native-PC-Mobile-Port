@@ -52,6 +52,7 @@ public:
 	void pcInsertCoopItem(DrawMenu* menu);
 	void pcInsertAdvancedItem(DrawMenu* menu);
 	DrawMenu* mAdvancedMenu = nullptr; ///< option.blo reetiquetado: Display / Save / Back
+	bool mPcAchievementsOpen = false; ///< Options > Achievements abierto en el menú de cristal
 	void pcSetupAdvancedMenu();
 #endif
 	void draw(Graphics&);

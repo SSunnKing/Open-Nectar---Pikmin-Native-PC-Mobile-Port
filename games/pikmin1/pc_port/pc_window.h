@@ -157,6 +157,12 @@ bool pc_window_last_input_is_gamepad(void);
 // Keyboard vs gamepad follows pc_window_last_input_is_gamepad(). In mouse
 // cursor mode, A/B/Z also list the matching mouse button.
 void pc_window_message_control_label(char tag, char* buf, unsigned bufSize);
+// 1 si los avisos de botones deben mostrar el mando (último dispositivo usado,
+// o el asignado al jugador en coop); 0 si teclado y ratón.
+int pc_window_prompt_uses_gamepad(void);
+// Nombre corto de la tecla asignada al botón de GameCube `tag` ('a', 'b', 'x',
+// 'y', 'z', 'l', 'r', 'c', 's', 'p'); vacío si no hay.
+void pc_window_key_prompt_label(char tag, char* buf, unsigned bufSize);
 // Cooperativo: jugador (0/1) al que van dirigidos los textos de tutorial;
 // con asignación explícita de dispositivos la etiqueta usa el suyo en vez
 // del último dispositivo usado. -1 = sin preferencia.

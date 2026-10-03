@@ -7,6 +7,7 @@
 #include "Dolphin/vi.h"
 #include "pc_window.h"
 #include "gl/pc_gfx.h"
+#include "pc_keycaps.h"
 #include <cstdio>
 #include <cstring>
 
@@ -46,6 +47,7 @@ void VIWaitForRetrace(void)    {
     pc_glass_menu_draw();
 #endif
     pc_gfx_present();
+    pc_keycaps_draw(); // teclas en lugar de los botones de GameCube (teclado y ratón)
 #if PIKI_PC_TOUCH
     pc_touch_draw();
 #endif

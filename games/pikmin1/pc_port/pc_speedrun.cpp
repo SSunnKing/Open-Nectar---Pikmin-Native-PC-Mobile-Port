@@ -1,4 +1,8 @@
 #include "pc_speedrun.h"
+#if PIKI_PC_TOUCH
+#include "touch/pc_touch.h"
+#include "Dolphin/pad.h"
+#endif
 #include "pc_window.h"
 #include "settings/pc_settings_p2d.h"
 #include "Colour.h"
@@ -162,6 +166,51 @@ void drawPad(float x, float y, SDL_GameController* ctl)
     textCentered(x + 90.5f, y + 51, lab.back, kLabel, 4, 6);
     textCentered(x + 109.5f, y + 51, lab.start, kLabel, 4, 6);
 }
+
+#if PIKI_PC_TOUCH
+// Pantalla táctil: un mando de GameCube pequeño con lo que usa el juego
+// original (stick, C-Stick, A, B, X, Y, Z, L, R y Start), encendido según el
+// estado que el juego recibe de la capa táctil.
+void drawTouchPad(float x, float y)
+{
+    u16 b = 0;
+    s8 sx = 0, sy = 0, cx = 0, cy = 0;
+    pc_touch_last_pad(&b, &sx, &sy, &cx, &cy);
+    auto on = [&](u16 mask) { return (b & mask) != 0; };
+
+    // Gatillos L y R arriba, Z junto a R.
+    fillRound(x + 6, y, 34, 8, 4, on(PAD_TRIGGER_L) ? kDown : kIdle);
+    fillRound(x + 100, y, 34, 8, 4, on(PAD_TRIGGER_R) ? kDown : kIdle);
+    fillRound(x + 104, y + 10, 26, 6, 3, on(PAD_TRIGGER_Z) ? kDown : kIdle);
+    textCentered(x + 23, y + 4, "L", kLabel, 4, 6);
+    textCentered(x + 117, y + 4, "R", kLabel, 4, 6);
+    textCentered(x + 117, y + 13, "Z", kLabel, 3, 5);
+
+    // Cuerpo.
+    fillRound(x, y + 18, 140, 56, 22, kPanel);
+
+    // Stick (izquierda) y C-Stick (abajo a la derecha). En GC la Y va hacia
+    // arriba; en pantalla, hacia abajo.
+    drawStick(x + 30, y + 42, sx / 127.0f, -sy / 127.0f, false);
+    fillCircle(x + 86, y + 62, 8.0f, kIdle);
+    const bool cMoved = std::abs(cx) > 30 || std::abs(cy) > 30;
+    fillCircle(x + 86 + cx / 127.0f * 4.0f, y + 62 - cy / 127.0f * 4.0f, 4.0f, cMoved ? kDown : Colour(225, 235, 250, 160));
+
+    // Start en el centro.
+    fillCircle(x + 64, y + 40, 4.0f, on(PAD_BUTTON_START) ? kDown : kIdle);
+
+    // A grande, B abajo a la izquierda, X a la derecha, Y arriba.
+    const float ax = x + 110, ay = y + 44;
+    fillCircle(ax, ay, 9.0f, on(PAD_BUTTON_A) ? kDown : kIdle);
+    textCentered(ax, ay, "A", kLabel, 5, 8);
+    fillCircle(ax - 15, ay + 9, 5.5f, on(PAD_BUTTON_B) ? kDown : kIdle);
+    textCentered(ax - 15, ay + 9, "B", kLabel, 4, 6);
+    fillCircle(ax + 16, ay - 2, 5.5f, on(PAD_BUTTON_X) ? kDown : kIdle);
+    textCentered(ax + 16, ay - 2, "X", kLabel, 4, 6);
+    fillCircle(ax - 3, ay - 15, 5.5f, on(PAD_BUTTON_Y) ? kDown : kIdle);
+    textCentered(ax - 3, ay - 15, "Y", kLabel, 4, 6);
+}
+#endif
 
 // ─── Teclado y ratón ───────────────────────────────────────────────────────
 
@@ -640,6 +689,13 @@ void pc_speedrun_draw(void)
 
     // Visor de controles: el mando si es lo último que se ha usado.
     SDL_GameController* ctl = pc_window_get_controller();
+#if PIKI_PC_TOUCH
+    // Móvil: la capa táctil en vez del teclado y ratón.
+    if (pc_touch_visible()) {
+        drawTouchPad(12, y + 4);
+        return;
+    }
+#endif
     if (ctl && pc_window_last_input_is_gamepad()) drawPad(12, y + 4, ctl);
     else drawKeyboard(14, y + 6);
 }

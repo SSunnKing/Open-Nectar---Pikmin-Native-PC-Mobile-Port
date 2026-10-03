@@ -210,9 +210,9 @@ void inputList(const PcNavEdges& e)
 		}
 		sOptFocus = false;
 	}
+	// Se entra a una sección concreta desde "Advanced": L/R no cambia de
+	// sección (para eso se vuelve al panel Advanced).
 	if (e.tabPrev || e.tabNext) {
-		const int tab = activeTab();
-		openTab((tab + (e.tabNext ? 1 : -1) + PC_SET_GROUP_COUNT) % PC_SET_GROUP_COUNT);
 		return;
 	}
 	bool left = e.left, right = e.right, ok = e.ok;
@@ -220,8 +220,6 @@ void inputList(const PcNavEdges& e)
 		int x, y;
 		tapToPanelSpace(e.tapX, e.tapY, &x, &y);
 		if (inRect(closeRect(), x, y)) { sOpen = false; return; } // vuelve al panel "Advanced"
-		for (int t = 0; t < PC_SET_GROUP_COUNT; t++)
-			if (inRect(tabRect(t), x, y)) { if (t != activeTab() || inPicker()) openTab(t); return; }
 		int it[kMaxItems];
 		const int count = items(it, kMaxItems);
 		for (int v = 0; v < kVisible && sScroll + v < count; v++) {
@@ -345,14 +343,10 @@ void textWrapped(int x, int y, int w, const char* text, Colour c, int fw, int fh
 
 void drawTabs()
 {
+	// Solo la sección abierta desde "Advanced" (Display, Graphics...), como
+	// título de la barra; las demás no se muestran.
 	pc_settings_p2d_plate(kTabBarX, kTabBarY, kTabBarW, kTabBarH, 1);
-	const int active = activeTab();
-	for (int t = 0; t < PC_SET_GROUP_COUNT; t++) {
-		const Rect r = tabRect(t);
-		const bool on = t == active;
-		if (on) pc_settings_p2d_plate(r.x + 2, r.y, r.w - 4, r.h, 2);
-		textCentered(r.x + r.w / 2, r.y + 3, pc_settings_group_name(t), on ? kSelDark : kDim, 10, 15);
-	}
+	textCentered(kTabBarX + kTabBarW / 2, kTabBarY + 7, pc_settings_group_name(activeTab()), kSelDark, 10, 15);
 	const Rect c = closeRect();
 	textCentered(c.x + c.w / 2, c.y + 3, "X", kDim, 11, 16);
 }
@@ -466,10 +460,10 @@ void drawFooter()
 	const bool bindings = sGroup == PC_SET_PICKER_KEYBOARD || sGroup == PC_SET_PICKER_GAMEPAD;
 	const char* help = sOptFocus ? "Up/Down: choose    A: apply    Left/B: back"
 	                 : bindings ? "A: rebind    Left/Right: default    B/Esc: back"
-	                 : inPicker() ? "L/R: tab    A: select    Up/Down: move    B/Esc: back"
+	                 : inPicker() ? "A: select    Up/Down: move    B/Esc: back"
 	                 : pc_settings_row_is_action(sGroup, sRowSel)
-	                     ? "L/R: tab    A: select    Up/Down: move    B/Esc: back"
-	                     : "L/R: tab    Right: options    Up/Down: move    B/Esc: back";
+	                     ? "A: select    Up/Down: move    B/Esc: back"
+	                     : "Right: options    Up/Down: move    B/Esc: back";
 	textCentered(cx, y, help, kHelp, 10, 14);
 }
 

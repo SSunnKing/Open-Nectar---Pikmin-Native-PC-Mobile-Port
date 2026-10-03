@@ -477,6 +477,64 @@ static const char* mouseButtonAliasForTag(char tag)
 	}
 }
 
+int pc_window_prompt_uses_gamepad(void) { return promptUsesGamepad() ? 1 : 0; }
+
+// Nombre corto de la tecla (o botón del ratón) asignada al botón de GameCube
+// `tag`, para la tecla dibujada sobre los menús del juego (pc_keycaps). Sin el
+// alias de ratón que añaden los mensajes: en un icono no cabe.
+void pc_window_key_prompt_label(char tag, char* buf, unsigned bufSize)
+{
+	if (!buf || bufSize == 0)
+		return;
+	buf[0] = '\0';
+	auto compact4 = [&](int up, int left, int down, int right, const char* fallback) {
+		const int acts[4] = { up, left, down, right };
+		char out[8]       = { 0 };
+		for (int i = 0; i < 4; i++) {
+			const SDL_Scancode k = pc_window_get_key_binding(acts[i]);
+			const char* name     = pc_bind_is_mouse(k) ? nullptr : SDL_GetScancodeName(k);
+			if (!name || !name[0] || name[1] != '\0') {
+				snprintf(buf, bufSize, "%s", fallback);
+				return;
+			}
+			out[i] = name[0];
+		}
+		snprintf(buf, bufSize, "%s", out);
+	};
+	switch (tag) {
+	case 's':
+		compact4(PC_KEY_ACT_STICK_UP, PC_KEY_ACT_STICK_LEFT, PC_KEY_ACT_STICK_DOWN, PC_KEY_ACT_STICK_RIGHT, "Move");
+		return;
+	case 'c':
+		compact4(PC_KEY_ACT_CSTICK_UP, PC_KEY_ACT_CSTICK_LEFT, PC_KEY_ACT_CSTICK_DOWN, PC_KEY_ACT_CSTICK_RIGHT, "C-Stick");
+		return;
+	case 'p':
+		snprintf(buf, bufSize, "%s", pc_window_binding_name(pc_window_get_key_binding(PC_KEY_ACT_START)));
+		return;
+	default: break;
+	}
+	const int action = messageTagToAction(tag);
+	if (action < 0) {
+		return;
+	}
+	snprintf(buf, bufSize, "%s", pc_window_binding_name(pc_window_get_key_binding(action)));
+	// Nombres cortos para que la tecla quepa donde iba el botón.
+	static const struct {
+		const char* from;
+		const char* to;
+	} kShort[] = {
+		{ "Left Shift", "LShift" }, { "Right Shift", "RShift" }, { "Left Ctrl", "LCtrl" }, { "Right Ctrl", "RCtrl" },
+		{ "Left Alt", "LAlt" },     { "Right Alt", "RAlt" },     { "Return", "Enter" },    { "Escape", "Esc" },
+		{ "Backspace", "Bksp" },    { "CapsLock", "Caps" },      { "Left GUI", "LWin" },   { "Right GUI", "RWin" },
+	};
+	for (const auto& e : kShort) {
+		if (strcmp(buf, e.from) == 0) {
+			snprintf(buf, bufSize, "%s", e.to);
+			break;
+		}
+	}
+}
+
 void pc_window_message_control_label(char tag, char* buf, unsigned bufSize)
 {
 	if (!buf || bufSize == 0)

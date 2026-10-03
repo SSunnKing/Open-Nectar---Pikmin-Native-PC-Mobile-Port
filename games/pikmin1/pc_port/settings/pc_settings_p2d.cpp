@@ -169,6 +169,8 @@ void pc_settings_p2d_text(int x, int y, const char* text, Colour color, int font
         pane->isImage = false;
         pane->setTexture(plates[3], 0);
         pane->setWhite(Colour(255, 220, 80, 255));
+        pane->initBlack();
+        pane->setAlpha(255);
         return;
     }
     // Long device names and help lines stay inside the current page. Labels
@@ -233,12 +235,34 @@ void pc_settings_p2d_image(int x, int y, int w, int h, Texture* texture, float u
 
 void pc_settings_p2d_plate(int x, int y, int w, int h, int style)
 {
+    // Fondo azul como el F1 de Pikmin 2. El cristal de P1 (w08_160) es casi
+    // transparente, así que teñirlo no basta: los paneles grandes de cristal
+    // (columnas, ventanas) llevan debajo la placa 0 en azul. Las cajas
+    // pequeñas no, porque bajo ellas va la placa amarilla de selección.
+    const bool glassPanel = (style == 1 || style == 3) && w >= 150 && h >= 150;
+    if (glassPanel) {
+        // La placa 0 fija la zona en la que se encoge el texto; la base no debe
+        // cambiarla, o todo el texto se comprime a esta columna.
+        const int keepLeft = contentLeft, keepRight = contentRight;
+        pc_settings_p2d_plate(x, y, w, h, 0);
+        contentLeft  = keepLeft;
+        contentRight = keepRight;
+    }
     MenuPane* pane = next(x,y,w,h);
     if (!pane) return;
     pane->isText = false;
     pane->isIcon = false;
     pane->isImage = false;
     pane->initWhite();
+    pane->setAlpha(255);
+    if (style == 0) {
+        // De la textura oscura de la placa sale un degradado azul.
+        pane->setBlack(Colour(22, 50, 150, 0));
+        pane->setWhite(Colour(120, 175, 255, 255));
+        pane->setAlpha(235);
+    } else {
+        pane->initBlack();
+    }
     // 3: el cristal de las ventanas del juego con las esquinas a tamaño de
     // burbuja: borde plateado grueso y el brillo grande de la esquina.
     pane->bigCorners = style == 3 ? std::min(34, std::min(w, h) / 2) : 0;

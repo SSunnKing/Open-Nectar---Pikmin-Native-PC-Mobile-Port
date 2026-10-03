@@ -230,6 +230,9 @@ struct PcMenuExtend {
 	int shiftY;
 	u32 panelParentTag;
 	int widen; ///< px extra de ancho del cristal, repartidos a ambos lados.
+	/// Los huecos ocultos en el .blo no ocupan sitio (Options: "Language" no
+	/// existe en esta versión y dejaba un hueco entre Sound y Rumble).
+	bool compactHidden;
 };
 #endif
 

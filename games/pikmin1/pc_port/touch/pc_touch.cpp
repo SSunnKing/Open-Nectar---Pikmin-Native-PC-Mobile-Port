@@ -774,6 +774,18 @@ void pc_touch_on_finger(long long fingerId, PcTouchPhase phase, float x, float y
 	}
 }
 
+static u16 sLastPadButtons = 0;
+static s8 sLastPadStick[4] = { 0, 0, 0, 0 };
+
+void pc_touch_last_pad(u16* buttons, s8* stickX, s8* stickY, s8* substickX, s8* substickY)
+{
+	if (buttons) *buttons = sLastPadButtons;
+	if (stickX) *stickX = sLastPadStick[0];
+	if (stickY) *stickY = sLastPadStick[1];
+	if (substickX) *substickX = sLastPadStick[2];
+	if (substickY) *substickY = sLastPadStick[3];
+}
+
 bool pc_touch_merge_pad(u16* button, s8* stickX, s8* stickY, s8* substickX, s8* substickY)
 {
 	if (sLayoutRequested) {
@@ -848,6 +860,13 @@ bool pc_touch_merge_pad(u16* button, s8* stickX, s8* stickY, s8* substickX, s8* 
 		if (ny < -0.55f) touchButtons |= PAD_BUTTON_DOWN;
 		if (ny >  0.55f) touchButtons |= PAD_BUTTON_UP;
 	}
+	// Lo que el juego ve este frame (táctil más mando), para el visor de
+	// controles del modo Speedrun.
+	sLastPadButtons = *button;
+	sLastPadStick[0] = *stickX;
+	sLastPadStick[1] = *stickY;
+	sLastPadStick[2] = *substickX;
+	sLastPadStick[3] = *substickY;
 	const u16 menuEdges = touchButtons & ~sPreviousMenuButtons;
 	if (menuEdges) pc_settings_touch_buttons(menuEdges);
 	sPreviousMenuButtons = touchButtons;

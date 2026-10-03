@@ -1,7 +1,10 @@
 #include "zen/ogMenu.h"
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
+#endif
+#if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
+#include "pc_keycaps.h"
 #include <cmath>
 #include <cstring>
 #endif
@@ -187,7 +190,11 @@ struct TouchHelpIconCallBack : public P2DPaneCallBack {
 };
 } // namespace
 
-/// Gesto de deslizar sobre la flecha L/R del menú, donde iba la letra.
+#endif // PIKI_PC_TOUCH
+
+#if defined(PIKI_PC_PORT)
+/// Sobre la letra de la flecha L/R del menú: el gesto de deslizar (táctil) o
+/// la tecla asignada a L/R (teclado y ratón).
 struct TouchSwipeHintCallBack : public P2DPaneCallBack {
 	TouchSwipeHintCallBack(P2DPane* pane, char tag)
 	    : P2DPaneCallBack(pane, PANETYPE_Picture)
@@ -197,14 +204,24 @@ struct TouchSwipeHintCallBack : public P2DPaneCallBack {
 	virtual bool invoke(P2DPane*) { return true; }
 	virtual bool draw(P2DPane* pane)
 	{
-		if (!pc_touch_visible()) return true;
+#if PIKI_PC_TOUCH
+		const bool touch = pc_touch_visible();
+#else
+		const bool touch = false;
+#endif
+		const bool keys = !touch && pc_keycaps_wanted();
+		if (!touch && !keys) return true;
 		// La letra ocupa (21,27)-(49,59) dentro de la flecha de 50x80; el
 		// gesto se centra ahí y se hace algo mayor que la letra.
 		const f32 w = f32(pane->getWidth());
 		float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
 		if (pc_gfx_project_current(w * 0.5f - 14.0f, 27.0f, 0.0f, &x0, &y0)
 		    && pc_gfx_project_current(w * 0.5f + 14.0f, 59.0f, 0.0f, &x1, &y1)) {
-			pc_touch_mark_help_icon(mTag, (x0 + x1) * 0.5f, (y0 + y1) * 0.5f, std::fabs(x1 - x0) * 1.9f);
+#if PIKI_PC_TOUCH
+			if (touch) pc_touch_mark_help_icon(mTag, (x0 + x1) * 0.5f, (y0 + y1) * 0.5f, std::fabs(x1 - x0) * 1.9f);
+#endif
+			// Las etiquetas de tecla van en minúscula ('l'/'r').
+			if (keys) pc_keycaps_mark(char(mTag - 'A' + 'a'), (x0 + x1) * 0.5f, (y0 + y1) * 0.5f, std::fabs(y1 - y0), 1.0f);
 		}
 		return true;
 	}
@@ -238,6 +255,9 @@ void zen::ogDrawLR::pcApplyTouchHints(bool touch)
 		else mPcLetterPanes[i]->show();
 	}
 }
+#endif // PIKI_PC_PORT
+
+#if PIKI_PC_TOUCH
 
 void zen::ogDrawScrController::collectGamecubeArt(P2DPane* pane)
 {

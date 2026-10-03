@@ -296,18 +296,27 @@ void zen::DrawMenu::pcExtendMenu(immut PcMenuExtend& ext)
 		}
 		// Recolocar toda la familia con el paso nuevo, en absoluto desde el
 		// primer hueco; los iconos también se alinean en X con el primero
-		// (en option.blo el hueco oculto los tiene descolocados).
+		// (en option.blo el hueco oculto los tiene descolocados). Con
+		// compactHidden, un hueco oculto (su texto he%02d) no avanza la fila.
 		const int x0 = first->getPosH(), y0 = first->getPosV();
+		int row = 0;
 		for (int i = 0; i < total; i++) {
 			sprintf(buf, kFamilies[f], i);
 			P2DPane* pane = mScreen.search(P2DPaneLibrary::makeTag(buf), false);
+			char textTag[8];
+			sprintf(textTag, "he%02d", i);
+			P2DPane* text   = mScreen.search(P2DPaneLibrary::makeTag(textTag), false);
+			const bool skip = ext.compactHidden && text && !text->IsVisible();
 			if (pane) {
 				const int dx = f >= 2 ? x0 - pane->getPosH() : 0;
-				pane->add(dx, (y0 + spacing * i + ext.shiftY) - pane->getPosV());
+				pane->add(dx, (y0 + spacing * row + ext.shiftY) - pane->getPosV());
+			}
+			if (!skip) {
+				row++;
 			}
 		}
 		if (f == 0) {
-			listGrow = spacing * (total - 1) - dy * (n - 1);
+			listGrow = spacing * (row - 1) - dy * (n - 1);
 		}
 	}
 	// Cristal del panel: imágenes sin tag bajo panelParentTag; el resto de

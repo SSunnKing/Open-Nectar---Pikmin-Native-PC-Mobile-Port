@@ -5,6 +5,11 @@
 #include "P2D/Util.h"
 #include "Texture.h"
 #include "zen/ogSub.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_keycaps.h"
+#include "pc_gfx.h"
+#include <cmath>
+#endif
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
 #include "pc_gfx.h"
@@ -395,6 +400,20 @@ void P2DPicture::drawTexCoord(int x, int y, int width, int height, f32 uBL, f32 
 	mtx->multiplyTo(mWorldMtx, mtx1);
 	GXLoadPosMtxImm(mtx1.mMtx, 0);
 
+#if defined(PIKI_PC_PORT)
+	// Con teclado y ratón, los dibujos de botón de GameCube se sustituyen por
+	// la tecla asignada a ese botón, que se pinta al final del frame.
+	if (pc_keycaps_wanted()) {
+		if (const char keyTag = pc_keycaps_tag_for_texture(mTexName)) {
+			float kx0 = 0, ky0 = 0, kx1 = 0, ky1 = 0;
+			if (mAlpha > 0 && pc_gfx_project_current(f32(x), f32(y), 0.0f, &kx0, &ky0)
+			    && pc_gfx_project_current(f32(xEnd), f32(yEnd), 0.0f, &kx1, &ky1)) {
+				pc_keycaps_mark(keyTag, (kx0 + kx1) * 0.5f, (ky0 + ky1) * 0.5f, std::fabs(ky1 - ky0), f32(mAlpha) / 255.0f);
+			}
+			return;
+		}
+	}
+#endif
 #if PIKI_PC_TOUCH
 	// Con la capa táctil activa, los dibujos de botón de GameCube (el "A"
 	// que parpadea en los mensajes, los X/Y de copiar/borrar partida...) se

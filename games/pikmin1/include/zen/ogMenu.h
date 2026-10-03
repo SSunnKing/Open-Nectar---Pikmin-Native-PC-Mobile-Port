@@ -10,6 +10,9 @@
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
 #endif
+#if defined(PIKI_PC_PORT)
+#include "pc_keycaps.h"
+#endif
 
 class Controller;
 class Graphics;
@@ -198,13 +201,15 @@ public:
 		_0C = mScreen->search('ya_r', true);
 		_08->hide();
 		_0C->hide();
-#if PIKI_PC_TOUCH
+#if defined(PIKI_PC_PORT)
 		pcInitTouchHints();
 #endif
 	}
-#if PIKI_PC_TOUCH
+#if defined(PIKI_PC_PORT)
+	// Táctil o teclado: la letra de la flecha se oculta y en su sitio va el
+	// gesto o la tecla asignada.
 	void pcInitTouchHints();
-	void pcApplyTouchHints(bool touch);
+	void pcApplyTouchHints(bool hideLetters);
 	P2DPane* mPcLetterPanes[4];
 	int mPcLetterCount;
 	bool mPcTouchHintsApplied;
@@ -242,7 +247,9 @@ public:
 	{
 		f32 time = gsys->getFrameTime();
 #if PIKI_PC_TOUCH
-		pcApplyTouchHints(pc_touch_visible());
+		pcApplyTouchHints(pc_touch_visible() || pc_keycaps_wanted());
+#elif defined(PIKI_PC_PORT)
+		pcApplyTouchHints(pc_keycaps_wanted());
 #endif
 		_14      = NMathF::sin(-_10) * 0.25f + 0.75f;
 		_18      = NMathF::sin(-_10) * 0.25f + 0.75f;

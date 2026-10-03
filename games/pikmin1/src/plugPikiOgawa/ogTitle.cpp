@@ -82,8 +82,8 @@ zen::ogScrTitleMgr::ogScrTitleMgr()
 	mMainMenu          = mMenuNoChallenge;
 
 #if defined(PIKI_PC_PORT)
-	// Options con un hueco más al final: Advanced Options (ajustes del port).
-	const PcMenuExtend extOptions = { 1, 36, -24, 'yoko', 40 };
+	// Options con dos huecos más al final: Achievements y Advanced Options.
+	const PcMenuExtend extOptions = { 2, 36, -40, 'yoko', 40, true };
 	mOptionsMenu  = new DrawMenu("screen/blo/option.blo", false, false, &extOptions);
 	pcInsertAdvancedItem(mOptionsMenu);
 #else
@@ -181,36 +181,41 @@ void zen::ogScrTitleMgr::pcInsertCoopItem(DrawMenu* menu)
 			box[i] = static_cast<P2DTextBox*>(menu->getScreenPtr()->search(P2DPaneLibrary::makeTag(buf), true));
 		}
 		// Originales: 0 Start, 1 Options[, 2 Challenge]. Las cajas quedan
-		// (todas centradas en la misma X); solo viaja el texto.
+		// (todas centradas en la misma X); solo viaja el texto. Orden PC:
+		// Start / Co-op / VS / Options / Speedrun / Challenge Mode.
 		char* optionsText   = box[1]->getString();
 		char* challengeText = n >= 6 ? box[2]->getString() : nullptr;
-		box[1]->setString(sSpeedrunLabel);
-		box[2]->setString(sCoopLabel);
-		box[3]->setString(sVsLabel);
-		box[4]->setString(optionsText);
+		box[1]->setString(sCoopLabel);
+		box[2]->setString(sVsLabel);
+		box[3]->setString(optionsText);
+		box[4]->setString(sSpeedrunLabel);
 		if (challengeText) box[5]->setString(challengeText);
 	}
 }
 
-// Options: Sound / Language / Rumble / High Scores / Advanced Options. El
-// hueco clonado (4) recibe el texto, con la caja ensanchada para que no se
-// parta en dos líneas.
+// Options: Sound / Language / Rumble / High Scores / Achievements / Advanced
+// Options. Los huecos clonados (4 y 5) reciben el texto, con la caja
+// ensanchada para que no se parta en dos líneas.
 void zen::ogScrTitleMgr::pcInsertAdvancedItem(DrawMenu* menu)
 {
-	static char sAdvancedLabel[] = "Advanced Options";
+	static char sAchievementsLabel[] = "Achievements";
+	static char sAdvancedLabel[]     = "Advanced Options";
+	static char* kLabels[2]          = { sAchievementsLabel, sAdvancedLabel };
 	static immut char* kFamilies[] = { "he%02d", "hm%02d" };
 	char buf[8];
-	for (int f = 0; f < 2; f++) {
-		sprintf(buf, kFamilies[f], 4);
-		P2DTextBox* box = static_cast<P2DTextBox*>(menu->getScreenPtr()->search(P2DPaneLibrary::makeTag(buf), false));
-		if (!box) {
-			continue;
+	for (int slot = 4; slot <= 5; slot++) {
+		for (int f = 0; f < 2; f++) {
+			sprintf(buf, kFamilies[f], slot);
+			P2DTextBox* box = static_cast<P2DTextBox*>(menu->getScreenPtr()->search(P2DPaneLibrary::makeTag(buf), false));
+			if (!box) {
+				continue;
+			}
+			box->setString(kLabels[slot - 4]);
+			const int cx = box->getPosH() + box->getWidth() / 2;
+			const int w  = 400;
+			box->resize(w, box->getHeight());
+			box->move(cx - w / 2, box->getPosV());
 		}
-		box->setString(sAdvancedLabel);
-		const int cx = box->getPosH() + box->getWidth() / 2;
-		const int w  = 400;
-		box->resize(w, box->getHeight());
-		box->move(cx - w / 2, box->getPosV());
 	}
 }
 #endif
@@ -340,7 +345,13 @@ zen::ogScrTitleMgr::TitleStatus zen::ogScrTitleMgr::update(Controller* input)
 			break;
 		}
 #if defined(PIKI_PC_PORT)
-		// Orden PC: Start / Speedrun / Co-op / VS / Options / Challenge Mode.
+		// Orden en pantalla: Start / Co-op / VS / Options / Speedrun /
+		// Challenge Mode. Abajo se trabaja con el orden interno de siempre
+		// (0 Start, 1 Speedrun, 2 Co-op, 3 VS, 4 Options, 5 Challenge Mode).
+		static const int kPcRowToAction[6] = { 0, 2, 3, 4, 1, 5 };
+		if (mCurrentSelection >= 0 && mCurrentSelection < 6) {
+			mCurrentSelection = kPcRowToAction[mCurrentSelection];
+		}
 		if (mCurrentSelection >= 0 && mCurrentSelection <= 3) {
 			pc_vs_set_pending(false);
 			// Speedrun solo si es lo elegido: cualquier otra salida vuelve a
@@ -419,17 +430,20 @@ zen::ogScrTitleMgr::TitleStatus zen::ogScrTitleMgr::update(Controller* input)
 			break;
 		}
 		// 0 Display, 1 Graphics, 2 Controls, 3 Camera, 4 Gameplay, 5 Cheats, 6 Data, 7 Back.
+		// Back es la última fila del panel, no "el grupo siguiente al último":
+		// desde que existe Achievements (grupo 7) la fila 7 abría los logros.
+		constexpr int kAdvancedBack = 7;
 		const bool cancelled = mAdvancedMenu->checkSelectMenuCancel();
-		if (!cancelled && mCurrentSelection >= 0 && mCurrentSelection < PC_SET_GROUP_COUNT) {
+		if (!cancelled && mCurrentSelection >= 0 && mCurrentSelection < kAdvancedBack) {
 			pc_glass_menu_open_list(mCurrentSelection);
 			mAdvancedMenu->start(mCurrentSelection);
 			break;
 		}
-		if (cancelled || mCurrentSelection == PC_SET_GROUP_COUNT) {
+		if (cancelled || mCurrentSelection == kAdvancedBack) {
 			pc_settings_rows_end(true); // salir guarda, igual que cerrar F1
 			mAdvancedMenu->setCancelSelectMenuNo(-1);
 			// De vuelta a Options, con Advanced Options marcado.
-			mOptionsMenu->start(4);
+			mOptionsMenu->start(5);
 			mCurrentMenuID = MENU_Options;
 		}
 		break;
@@ -437,6 +451,19 @@ zen::ogScrTitleMgr::TitleStatus zen::ogScrTitleMgr::update(Controller* input)
 #endif
 	case MENU_Options:
 	{
+#if defined(PIKI_PC_PORT)
+		// Achievements: la lista de logros la pinta y maneja pc_glass_menu;
+		// al cerrarla se vuelve a Options con Achievements marcado.
+		if (mPcAchievementsOpen) {
+			if (pc_glass_menu_active()) {
+				break;
+			}
+			mPcAchievementsOpen = false;
+			pc_settings_rows_end(true);
+			mOptionsMenu->start(4);
+			break;
+		}
+#endif
 		mOptionsMenu->update(input);
 		int flag1         = mOptionsMenu->getStatusFlag();
 		mCurrentSelection = mOptionsMenu->getSelectMenu();
@@ -481,6 +508,13 @@ zen::ogScrTitleMgr::TitleStatus zen::ogScrTitleMgr::update(Controller* input)
 		}
 #if defined(PIKI_PC_PORT)
 		if (mCurrentSelection == 4) {
+			// Achievements: la página de logros del F1, en el menú de cristal.
+			pc_settings_rows_begin();
+			pc_glass_menu_open_list(PC_SET_GROUP_ACHIEVEMENTS);
+			mPcAchievementsOpen = true;
+			break;
+		}
+		if (mCurrentSelection == 5) {
 			// Advanced Options: panel propio (option.blo) con los grupos de
 			// ajustes del port; las listas las pinta pc_glass_menu.
 			pc_settings_rows_begin();
