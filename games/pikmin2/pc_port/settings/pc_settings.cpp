@@ -3058,6 +3058,69 @@ void drawTextOutline(int x, int y, const char* fmt, Colour main, Colour shadow, 
     drawText("%s", buf);
 }
 
+// Línea de ayuda centrada en cx. Con el marco P2D, cada letra de botón suelta
+// (A, B, X, Y, Z seguida de espacio, "/" o ":") se dibuja con el icono del
+// botón del juego; el resto del texto no cambia.
+void drawHelpLine(int cx, int y, const char* text, Colour c, int maxWidth = 570) {
+    if (!pc_settings_p2d_active()) {
+        drawTextOutline(cx - menuTextWidth(text) / 2, y, "%s", c, Colour(8, 12, 28, 255), text);
+        return;
+    }
+    // Tan grande como quepa (14 → 10) en el ancho del recuadro.
+    int fw = 14, fh = 20, icon = 26;
+    auto isButton = [&](const char* p) {
+        const bool startOk = p == text || p[-1] == ' ';
+        const bool endOk   = p[1] == ' ' || p[1] == '/' || p[1] == ':';
+        return startOk && endOk && std::strchr("ABXYZ", *p) != nullptr;
+    };
+    // Medir: trozos de texto + iconos.
+    char chunk[256];
+    int n = 0;
+    auto measure = [&]() {
+        int total = 0;
+        n = 0;
+        for (const char* p = text;; ++p) {
+            if (*p == '\0' || isButton(p)) {
+                chunk[n] = '\0';
+                total += pc_settings_p2d_text_width(chunk, fw);
+                n = 0;
+                if (*p == '\0') break;
+                total += icon;
+                continue;
+            }
+            if (n < int(sizeof(chunk)) - 1) chunk[n++] = *p;
+        }
+        return total;
+    };
+    int total = measure();
+    while (total > maxWidth && fw > 10) {
+        --fw;
+        fh = fw * 20 / 14;
+        icon = fw * 26 / 14;
+        total = measure();
+    }
+    int x = cx - total / 2;
+    n = 0;
+    for (const char* p = text;; ++p) {
+        if (*p == '\0' || isButton(p)) {
+            chunk[n] = '\0';
+            if (n) {
+                pc_settings_p2d_text_styled(x, y, chunk, c, c, fw, fh, false);
+                x += pc_settings_p2d_text_width(chunk, fw);
+            }
+            n = 0;
+            if (*p == '\0') break;
+            if (!pc_settings_p2d_button(x, y + (fh - icon) / 2 - 1, icon, *p)) {
+                const char letter[2] = { *p, '\0' };
+                pc_settings_p2d_text(x + (icon - pc_settings_p2d_text_width(letter, fw)) / 2, y, letter, c, fw, fh);
+            }
+            x += icon;
+            continue;
+        }
+        if (n < int(sizeof(chunk)) - 1) chunk[n++] = *p;
+    }
+}
+
 void drawPikminPanel(DGXGraphics* gfx, int x, int y, int w, int h, int radius) {
     if (pc_settings_p2d_active()) {
         pc_settings_p2d_plate(x, y, w, h, 0);
@@ -3769,8 +3832,7 @@ void pc_newgame_prompt_draw(void) {
     const char* help = difficultyStep
                            ? "Left/Right: choose    A / Enter: start    B / Esc: back"
                            : "Left/Right: choose    A / Enter: next    B / Esc: back";
-    drawTextOutline(panelX + panelW / 2 - menuTextWidth(help) / 2, panelY + 212,
-                    "%s", Colour(150, 165, 195, 255), Colour(8, 12, 28, 255), help);
+    drawHelpLine(panelX + panelW / 2, panelY + 212, help, Colour(150, 165, 195, 255));
 }
 
 
@@ -3919,8 +3981,7 @@ void pc_playercount_prompt_draw(void) {
 
     const char* help = es ? "Izq/Der: elegir    A / Intro: seguir    B / Esc: volver"
                           : "Left/Right: choose    A / Enter: next    B / Esc: back";
-    drawTextOutline(panelX + panelW / 2 - menuTextWidth(help) / 2, panelY + 212,
-                    "%s", Colour(150, 165, 195, 255), Colour(8, 12, 28, 255), help);
+    drawHelpLine(panelX + panelW / 2, panelY + 212, help, Colour(150, 165, 195, 255));
 }
 
 
@@ -4098,9 +4159,7 @@ void captainPickDraw(DGXGraphics* gfx, int panelX, int panelY, int panelW, int p
     const bool noticing = louieMissing && SDL_GetTicks() < sDevAssignLouieNoticeUntil;
     const char* help = noticing ? "Louie model not installed: Advanced Options > HD Models (Louie zip)."
                      : (louieMissing ? "Louie: model not installed (Advanced Options > HD Models)." : helpDefault);
-    drawTextOutline(panelX + panelW / 2 - menuTextWidth(help) / 2, panelY + 220,
-                    "%s", noticing ? Colour(255, 160, 120, 255) : Colour(150, 165, 195, 255),
-                    Colour(8, 12, 28, 255), help);
+    drawHelpLine(panelX + panelW / 2, panelY + 220, help, noticing ? Colour(255, 160, 120, 255) : Colour(150, 165, 195, 255));
 }
 }
 
@@ -4342,8 +4401,7 @@ void pc_devassign_prompt_draw(void) {
                             "%s", Colour(150, 165, 195, 255), Colour(8, 12, 28, 255), p1);
         }
         const char* help = "Esc: back";
-        drawTextOutline(panelX + panelW / 2 - menuTextWidth(help) / 2, panelY + 212,
-                        "%s", Colour(150, 165, 195, 255), Colour(8, 12, 28, 255), help);
+        drawHelpLine(panelX + panelW / 2, panelY + 212, help, Colour(150, 165, 195, 255));
         return;
     }
 
@@ -4379,8 +4437,7 @@ void pc_devassign_prompt_draw(void) {
     drawTextOutline(panelX + panelW / 2 - menuTextWidth(detail) / 2, panelY + 186,
                     "%s", Colour(190, 200, 220, 255), Colour(8, 12, 28, 255), detail);
     const char* help = "Left/Right: choose    A / Enter: confirm    B / Esc: back";
-    drawTextOutline(panelX + panelW / 2 - menuTextWidth(help) / 2, panelY + 212,
-                    "%s", Colour(150, 165, 195, 255), Colour(8, 12, 28, 255), help);
+    drawHelpLine(panelX + panelW / 2, panelY + 212, help, Colour(150, 165, 195, 255));
 }
 #else
 // Pikmin 2 no tiene estas pantallas: nunca estan activas.
@@ -5312,8 +5369,7 @@ void pc_settings_draw(void) {
             drawTextOutline(boxX + boxW / 2 - menuTextWidth(line2) / 2, boxY + 68, "%s",
                             Colour(255, 240, 180, 255), Colour(18, 26, 56, 255), line2);
             const char* prompt = "A: Restart now   B: Not yet";
-            drawTextOutline(boxX + boxW / 2 - menuTextWidth(prompt) / 2, boxY + 106, "%s",
-                            Colour(255, 255, 255, 255), Colour(18, 26, 56, 255), prompt);
+            drawHelpLine(boxX + boxW / 2, boxY + 106, prompt, Colour(255, 255, 255, 255));
         }
         return;
     }
@@ -5431,8 +5487,7 @@ void pc_settings_draw(void) {
             drawTextOutline(boxX + boxW / 2 - menuTextWidth(line2) / 2, ty + 26, "%s",
                             Colour(255, 240, 180, 255), Colour(18, 26, 56, 255), line2);
             const char* prompt = "A: Restart now   B: Not yet";
-            drawTextOutline(boxX + boxW / 2 - menuTextWidth(prompt) / 2, ty + 64, "%s",
-                            Colour(255, 255, 255, 255), Colour(18, 26, 56, 255), prompt);
+            drawHelpLine(boxX + boxW / 2, ty + 64, prompt, Colour(255, 255, 255, 255));
         }
 
         return; // Don't draw footer when texture packs submenu is open.

@@ -331,6 +331,24 @@ void loadFont()
                 width  = wid[0x0C + (code - wStart) * 2 + 1];
             }
         }
+        // Los dígitos traen ancho fijo (para contadores alineados): en texto
+        // corrido quedaban separados ("128 0x720"). Se ajustan a su trazo
+        // visible con un píxel de aire a cada lado.
+        if (c >= '0' && c <= '9') {
+            int minX = (int)cellW, maxX = -1;
+            for (unsigned y = 0; y < cellH; y++) {
+                for (unsigned x = 0; x < cellW; x++) {
+                    if (sAtlas[((ay + y) * kAtlasW + (ax + x)) * 4 + 3] > 40) {
+                        if ((int)x < minX) minX = (int)x;
+                        if ((int)x > maxX) maxX = (int)x;
+                    }
+                }
+            }
+            if (maxX >= minX) {
+                offset = (short)(minX > 1 ? minX - 1 : 0);
+                width  = (short)(maxX - minX + 3);
+            }
+        }
         sInfo.glyphs[c] = { (short)ax, (short)ay, offset, width, true };
     }
     freeArchive(arcData);
