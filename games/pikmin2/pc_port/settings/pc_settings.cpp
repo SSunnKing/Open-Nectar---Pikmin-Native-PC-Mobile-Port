@@ -3196,7 +3196,9 @@ void f1Plate(DGXGraphics* gfx, int x, int y, int w, int h, int style) {
 
 int f1TextW(const char* t, int fw) {
 #if PIKI_P2_HOST
-    return pc_p2_text_width(t, fw); // Pikmin 2: fuente del shim escalada a fw
+    // Pikmin 2: con la capa de cristal, su fuente (pikmin2main.bfn); sin ella,
+    // la del shim escalada a fw.
+    return pc_settings_p2d_active() ? pc_settings_p2d_text_width(t, fw) : pc_p2_text_width(t, fw);
 #else
     return pc_settings_p2d_active() ? pc_settings_p2d_text_width(t, fw) : menuTextWidth(t);
 #endif
@@ -3204,8 +3206,8 @@ int f1TextW(const char* t, int fw) {
 
 void f1Text(int x, int y, const char* t, Colour c, int fw, int fh) {
 #if PIKI_P2_HOST
-    (void)fh;
-    pc_p2_text(x, y, t, c, Colour(0, 9, 15, c.a), fw);
+    if (pc_settings_p2d_active()) pc_settings_p2d_text(x, y, t, c, fw, fh);
+    else pc_p2_text(x, y, t, c, Colour(0, 9, 15, c.a), fw);
 #else
     if (pc_settings_p2d_active()) pc_settings_p2d_text(x, y, t, c, fw, fh);
     else drawTextOutline(x, y, "%s", c, Colour(0, 9, 15, 255), t);

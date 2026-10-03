@@ -86,6 +86,9 @@ struct PcUiVertex {
 };
 void pc_gfx_ui_draw(const PcUiVertex* verts, int count, int virtW, int virtH,
                     const unsigned char* fontI8, int fontW, int fontH);
+// Atlas RGBA (w x h) para tex=2: se muestrea con el color del vértice como
+// multiplicador. Se sube de nuevo cuando cambia `generation`.
+void pc_gfx_ui_set_atlas(const unsigned char* rgba, int w, int h, unsigned generation);
 // Desenfoca una región del render target dada en coordenadas GX (640x480 con
 // el mapeo de UI vigente). `passes` ida-y-vuelta a 1/8 (2-3 para un cristal).
 void pc_gfx_blur_gx_rect(int gxX, int gxY, int gxW, int gxH, int passes);

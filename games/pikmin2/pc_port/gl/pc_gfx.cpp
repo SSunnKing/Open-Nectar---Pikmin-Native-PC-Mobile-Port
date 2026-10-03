@@ -1954,7 +1954,11 @@ static bool ensure_ui_program()
         "uniform sampler2D uTex;\n"
         "in vec2 vUV; in vec4 vCol; in float vTex;\n"
         "out vec4 oColour;\n"
-        "void main() { float t = texture(uTex, vUV).r; oColour = vec4(vCol.rgb, vCol.a * mix(1.0, t, vTex)); }\n";
+        "uniform sampler2D uAtlas;\n"
+        "void main() {\n"
+        "  if (vTex > 1.5) { oColour = texture(uAtlas, vUV) * vCol; return; }\n"
+        "  float t = texture(uTex, vUV).r; oColour = vec4(vCol.rgb, vCol.a * mix(1.0, t, vTex));\n"
+        "}\n";
     GLuint vs = glCreateShader_ptr(GL_VERTEX_SHADER);
     glShaderSource_ptr(vs, 1, &kVert, nullptr);
     glCompileShader_ptr(vs);
@@ -1992,6 +1996,19 @@ static bool ensure_ui_program()
     glVertexAttribPointer_ptr(3, 1, GL_FLOAT, GL_FALSE, stride, (const void*)offsetof(PcUiVertex, tex));
     restore_stream_vao();
     return true;
+}
+
+static const unsigned char* sUiAtlasPixels = nullptr;
+static int sUiAtlasW = 0, sUiAtlasH = 0;
+static unsigned sUiAtlasGen = 0, sUiAtlasUploadedGen = ~0u;
+static GLuint sUiAtlasTex = 0;
+
+void pc_gfx_ui_set_atlas(const unsigned char* rgba, int w, int h, unsigned generation)
+{
+    sUiAtlasPixels = rgba;
+    sUiAtlasW      = w;
+    sUiAtlasH      = h;
+    sUiAtlasGen    = generation;
 }
 
 void pc_gfx_ui_draw(const PcUiVertex* verts, int count, int virtW, int virtH,
@@ -2043,6 +2060,26 @@ void pc_gfx_ui_draw(const PcUiVertex* verts, int count, int virtW, int virtH,
     if (glActiveTexture_ptr) glActiveTexture_ptr(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, sUiFontTex);
     glUniform1i_ptr(glGetUniformLocation_ptr(sUiProgram, "uTex"), 0);
+    // Atlas RGBA (texturas del juego y glifos del menú de cristal), unidad 1.
+    if (sUiAtlasPixels && (sUiAtlasGen != sUiAtlasUploadedGen || !sUiAtlasTex)) {
+        if (!sUiAtlasTex) glGenTextures(1, &sUiAtlasTex);
+        if (glActiveTexture_ptr) glActiveTexture_ptr(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, sUiAtlasTex);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, sUiAtlasW, sUiAtlasH, 0, GL_RGBA, GL_UNSIGNED_BYTE, sUiAtlasPixels);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        sUiAtlasUploadedGen = sUiAtlasGen;
+    }
+    if (sUiAtlasTex) {
+        if (glActiveTexture_ptr) glActiveTexture_ptr(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, sUiAtlasTex);
+        if (glActiveTexture_ptr) glActiveTexture_ptr(GL_TEXTURE0);
+    }
+    glUniform1i_ptr(glGetUniformLocation_ptr(sUiProgram, "uAtlas"), 1);
     glBindVertexArray_ptr(sUiVAO);
     glBindBuffer_ptr(GL_ARRAY_BUFFER, sUiVBO);
     glBufferData_ptr(GL_ARRAY_BUFFER, GLsizeiptr(ndc.size() * sizeof(PcUiVertex)), ndc.data(), GL_STREAM_DRAW);
