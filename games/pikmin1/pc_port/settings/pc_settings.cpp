@@ -5953,9 +5953,9 @@ const char* pc_settings_group_summary(int group) {
     switch (group) {
     case PC_SET_GROUP_DISPLAY: return "Window, resolution, frame rate";
     case PC_SET_GROUP_GRAPHICS: return "Effects, colour, texture packs";
-    case PC_SET_GROUP_CONTROLS: return "Mouse, sticks, gyro, bindings";
-    case PC_SET_GROUP_CAMERA: return "Free camera, first person, lock-on";
-    case PC_SET_GROUP_GAMEPLAY: return "Pikmin behaviour, co-op";
+    case PC_SET_GROUP_CONTROLS: return "Actions, lock-on, sticks, gyro, bindings";
+    case PC_SET_GROUP_CAMERA: return "Free camera, first person, co-op view";
+    case PC_SET_GROUP_GAMEPLAY: return "Pikmin behaviour, eternal night, HUD";
     case PC_SET_GROUP_CHEATS: return "Day, health, Pikmin limit, whistle";
     case PC_SET_GROUP_DATA: return "Save transfer, reset settings";
     case PC_SET_GROUP_ACHIEVEMENTS: return "Unlocked achievements and how to get the rest";
@@ -6176,10 +6176,12 @@ const GroupRow kControlsRows[] = {
     { SRC_MODS, 34, "Whistle Pluck", "Hold the whistle over sprouts to pluck them one after another." },
     { SRC_MODS, 17, "Throw While Moving", "Throw Pikmin while running, instead of Olimar stopping first." },
     { SRC_MODS, 22, "Cancel Throw With B", "While holding a Pikmin with A, press B to put it back in the squad." },
-    { SRC_MODS, 35, "Bomb Control", "Bomb button (B / assign on a pad): a Yellow with a bomb rock throws it at the cursor, or drops it lit at its feet if the cursor is too close. Ones already thrown go first." },
-    { SRC_MODS, 39, "Pikmin 2 Selection", "D-pad as in Pikmin 2: Left/Right keeps the chosen colour for every throw, and with A held Up/Down picks leaf, bud, flower or a Yellow with a bomb rock. Off: Left/Right only picks the next throw." },
     { SRC_MODS, 33, "Quick Grab", "The Pikmin to throw appears in Olimar's hand at once, so throwing is just as fast with the squad behind him." },
+    { SRC_MODS, 39, "Pikmin 2 Selection", "D-pad as in Pikmin 2: Left/Right keeps the chosen colour for every throw, and with A held Up/Down picks leaf, bud, flower or a Yellow with a bomb rock. Off: Left/Right only picks the next throw." },
     { SRC_MODS, 24, "Onion: Y for Steps of 10", "In the Onion menu, hold Y while moving up or down to move 10 Pikmin at a time." },
+    { SRC_MODS, 35, "Bomb Control", "Bomb button (B / assign on a pad): a Yellow with a bomb rock throws it at the cursor, or drops it lit at its feet if the cursor is too close. Ones already thrown go first." },
+    { SRC_MODS, 15, "Lock-On", "Automatic: locks onto the nearest enemy or object as you approach. Manual: lock with the Lock-On button (bindable in Controls)." },
+    { SRC_MODS, 16, "Charge", "With a target locked, send the whole squad at it." },
     { SRC_ADV, 1, "Stick Dead Zone", "Ignores small stick movements. Raise it if a worn stick drifts." },
     { SRC_ADV, 2, "Stick Invert (X/Y)", "Inverts the movement stick." },
     { SRC_ADV, 3, "C-Stick Invert (X/Y)", "Inverts the right stick (C-Stick)." },
@@ -6196,8 +6198,8 @@ const GroupRow kCameraRows[] = {
     { SRC_MODS, 14, "Free Camera", "Turn the camera as in Pikmin 3: hold Left Shift and move the mouse, or use the right stick on a controller. Swarm gets its own button." },
     { SRC_MODS, 38, "Free Camera Pad Sensitivity", "How fast the right stick turns the free camera on a controller. 100% is the default." },
     { SRC_MODS, 18, "First Person", "Allows a view from Olimar's helmet. Switch in game with its button (V / L3)." },
-    { SRC_MODS, 15, "Lock-On", "Automatic: locks onto the nearest enemy or object as you approach. Manual: lock with the Lock-On button (bindable in Controls)." },
-    { SRC_MODS, 16, "Charge", "With a target locked, send the whole squad at it." },
+    { SRC_MODS, 6, "Co-op Split Screen", "How the screen divides in two-player co-op." },
+    { SRC_MODS, 7, "Co-op Merged Camera", "Joins both halves into one view while the captains are close." },
 };
 
 const GroupRow kGameplayRows[] = {
@@ -6205,17 +6207,15 @@ const GroupRow kGameplayRows[] = {
     { SRC_MODS, 1, "Chain Pikmin Actions", "Pikmin that finish a task go on to the next one nearby." },
     { SRC_MODS, 8, "Better Pathfinding", "Gets Pikmin moving again when they stall on their route." },
     { SRC_MODS, 9, "Blues Only In Water", "Only blue Pikmin walk into water on their own." },
+    { SRC_MODS, 23, "No Tripping", "Pikmin running in the squad never trip and fall behind." },
+    { SRC_MODS, 40, "Eternal Night", "Always night, whatever the day length: night lighting, and the moon crosses the day bar instead of the sun." },
     { SRC_MODS, 10, "Idle Pikmin Counter", "Shows how many Pikmin are standing idle." },
     { SRC_MODS, 36, "Hide Olimar's Texts", "Skip the text boxes Olimar shows while you play: first Pikmin, ship parts, tips. The ending texts stay." },
-    { SRC_MODS, 23, "No Tripping", "Pikmin running in the squad never trip and fall behind." },
-    { SRC_MODS, 6, "Co-op Split Screen", "How the screen divides in two-player co-op." },
-    { SRC_MODS, 7, "Co-op Merged Camera", "Joins both halves into one view while the captains are close." },
 };
 
 // Infinite Day (fila 13) vive dentro de Day Length como su última opción.
 const GroupRow kCheatsRows[] = {
     { SRC_MODS, 5, "Day Length", "Minutes of daylight per day. 13.5 is the original; Infinite stops the sun." },
-    { SRC_MODS, 40, "Eternal Night", "Always night, whatever the day length: night lighting, and the moon crosses the day bar instead of the sun." },
     { SRC_MODS, 11, "Olimar Health", "Olimar's toughness, as a share of the original. Infinite takes no damage." },
     { SRC_MODS, 12, "Enemy Health", "Enemy toughness, as a share of the original. Insta Kill drops them in one hit." },
     { SRC_MODS, 4, "Pikmin Limit", "Most Pikmin on the field at once. 100 is the original; more costs performance." },
@@ -6325,19 +6325,21 @@ const GroupSection kSections[] = {
     { PC_SET_GROUP_GRAPHICS, 12, "CONTENT" },
     { PC_SET_GROUP_CONTROLS, 0, "SCHEME" },
     { PC_SET_GROUP_CONTROLS, 3, "ACTIONS" },
-    { PC_SET_GROUP_CONTROLS, 7, "STICKS" },
-    { PC_SET_GROUP_CONTROLS, 10, "GYRO" },
-    { PC_SET_GROUP_CONTROLS, 15, "BINDINGS" },
+    { PC_SET_GROUP_CONTROLS, 10, "COMBAT" },
+    { PC_SET_GROUP_CONTROLS, 13, "STICKS" },
+    { PC_SET_GROUP_CONTROLS, 16, "GYRO" },
+    { PC_SET_GROUP_CONTROLS, 21, "BINDINGS" },
     { PC_SET_GROUP_CAMERA, 0, "CAMERA" },
-    { PC_SET_GROUP_CAMERA, 2, "TARGETING" },
+    { PC_SET_GROUP_CAMERA, 3, "CO-OP" },
     { PC_SET_GROUP_GAMEPLAY, 0, "PIKMIN" },
-    { PC_SET_GROUP_GAMEPLAY, 6, "CO-OP" },
+    { PC_SET_GROUP_GAMEPLAY, 5, "WORLD" },
+    { PC_SET_GROUP_GAMEPLAY, 6, "HUD" },
     { PC_SET_GROUP_CHEATS, 0, "DAY & HEALTH" },
     { PC_SET_GROUP_CHEATS, 3, "PIKMIN" },
     { PC_SET_GROUP_CHEATS, 9, "OLIMAR" },
     { PC_SET_GROUP_CHEATS, 10, "PROGRESS" },
 #if PIKI_DEBUG_KEYS
-    { PC_SET_GROUP_CHEATS, 13, "DEBUG" },
+    { PC_SET_GROUP_CHEATS, 14, "DEBUG" },
 #endif
     { PC_SET_GROUP_DATA, 0, "SAVE FILE" },
     { PC_SET_GROUP_DATA, 2, "SETTINGS" },

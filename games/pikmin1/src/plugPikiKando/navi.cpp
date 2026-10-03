@@ -59,6 +59,7 @@ static f32 pcNaviHurt(f32 damage) { return damage; }
 #include "Pcam/Camera.h"
 #include "Pcam/CameraManager.h"
 #include "Pellet.h"
+#include "PelletState.h"
 #include "Piki.h"
 #include "PikiAI.h"
 #include "PikiHeadItem.h"
@@ -80,6 +81,7 @@ static f32 pcNaviHurt(f32 damage) { return damage; }
 #include "sysMath.h"
 #include "sysNew.h"
 #include "teki.h"
+#include "TAI/Palm.h"
 #include "zen/Math.h"
 #include "zen/ogTutorial.h"
 
@@ -1500,6 +1502,387 @@ void Navi::pcDrawLockRing(Graphics& gfx)
 				quad[v].y = mapMgr->getMinY(quad[v].x, quad[v].z, true) + 1.5f;
 			}
 			gfx.drawOneTri(quad, nullptr, uv, 4);
+		}
+	}
+
+	gfx.setCullFront(prevCull);
+	gfx.setCBlending(prevBlend);
+	gfx.setLighting(prevLighting, nullptr);
+}
+
+/**
+ * @brief Eternal Night: centro del ambiente (luciérnagas, luces de pellets).
+ *
+ * La cámara de partida no rellena mFocus (sí la de las cinemáticas), así que
+ * se parte del capitán y se adelanta hacia donde mira la cámara, para cubrir
+ * lo que hay en pantalla y no solo sus pies.
+ */
+static Vector3f pcNightCentre(Camera* cam)
+{
+	Navi* navi = naviMgr ? naviMgr->getNavi() : nullptr;
+	if (!navi) {
+		return cam ? cam->mPosition : Vector3f(0.0f, 0.0f, 0.0f);
+	}
+	Vector3f centre = navi->mSRT.t;
+	if (cam) {
+		Vector3f ahead(-cam->mViewZAxis.x, 0.0f, -cam->mViewZAxis.z);
+		if (ahead.length() > 0.0001f) {
+			ahead.normalise();
+			centre = centre + ahead * 150.0f;
+		}
+	}
+	return centre;
+}
+
+/**
+ * @brief Eternal Night: pellets de número que brillan (no cuerpos ni piezas).
+ *
+ * Vale también para los que siguen en su flor, que todavía no cuentan como
+ * visibles para el juego.
+ */
+static bool pcNightPelletGlows(Pellet* pel, int* colourOut = nullptr)
+{
+	if (!pel->isAlive() || !pel->mConfig || pel->isUfoParts() || !pelletMgr) {
+		return false;
+	}
+	const int state = pel->getState();
+	if (state == PELSTATE_Goal || state == PELSTATE_Dead) {
+		return false;
+	}
+	// El color sale del ID (pb10, pr10, py10...) con la tabla del propio
+	// juego: el mPelletColor de la configuración no sigue el orden de
+	// PELCOLOR y una amarilla salía con efectos rojos.
+	int colour = PELCOLOR_NULL;
+	int type   = 0;
+	if (!pelletMgr->decomposeNumberPellet(pel->mConfig->mPelletId.mId, colour, type)) {
+		return false;
+	}
+	if (colour < PELCOLOR_Blue || colour > PELCOLOR_Yellow) {
+		return false;
+	}
+	if (colourOut) {
+		*colourOut = colour;
+	}
+	return true;
+}
+
+static Colour pcNightPelletColour(int colour)
+{
+	return colour == PELCOLOR_Red ? Colour(255, 60, 40, 255)
+	     : colour == PELCOLOR_Blue ? Colour(60, 120, 255, 255) : Colour(255, 210, 50, 255);
+}
+
+/**
+ * @brief Eternal Night: latido común del brillo de los pellets (0.6 a 1).
+ *
+ * Lo comparten el realce de la píldora (Pellet::doRender) y su halo, para que
+ * los dos suban y bajen a la vez. Cada pellet va desfasado según su posición.
+ */
+f32 gPcNightPulse = 0.0f;
+
+f32 pcNightPelletPulse(Pellet* pel)
+{
+	return 0.8f + 0.2f * sinf(gPcNightPulse + (pel->mSRT.t.x + pel->mSRT.t.z) * 0.05f);
+}
+
+/**
+ * @brief Eternal Night: realce de ambiente para dibujar un pellet fosforescente.
+ *
+ * Devuelve false si el pellet no brilla (otro modo, cuerpos, piezas...).
+ */
+bool pc_night_pellet_glow(Pellet* pel, GXColor* boost)
+{
+	int colour = PELCOLOR_NULL;
+	if (!pc_settings_get_eternal_night() || !pcNightPelletGlows(pel, &colour)) {
+		return false;
+	}
+	const Colour c = pcNightPelletColour(colour);
+	const f32 k    = 0.75f * pcNightPelletPulse(pel);
+	boost->r       = u8(c.r * k);
+	boost->g       = u8(c.g * k);
+	boost->b       = u8(c.b * k);
+	boost->a       = 255;
+	return true;
+}
+
+/**
+ * @brief Eternal Night: luciérnagas alrededor del capitán y pellets que brillan.
+ *
+ * Como la nieve y los pétalos de Pikmin 2 (un emisor que persigue al capitán),
+ * pero simulado aquí: cada luciérnaga lleva su rumbo, su altura y su ritmo de
+ * parpadeo, cosa que los datos de un efecto .pcr no permiten. Se dibujan con
+ * el halo de las luces del título (halowhit.txe) en mezcla aditiva.
+ *
+ * La textura se carga en el heap del nivel, así que va en el capitán (que se
+ * crea con cada nivel) y no en una estática que sobreviviría al heap.
+ */
+void Navi::pcDrawNightAmbience(Graphics& gfx)
+{
+	if (!pc_settings_get_eternal_night() || mNaviID != 0) {
+		return;
+	}
+	if (!mPcGlowTex) {
+		mPcGlowTex = gsys->loadTexture("effects/halowhit.txe", true);
+		// Cargada a mitad de partida, fuera de la fase en que el juego sube
+		// las suyas: sin attach() nunca llega a GXInitTexObj y sale transparente.
+		if (mPcGlowTex) {
+			mPcGlowTex->attach();
+		}
+		if (!mPcGlowTex) {
+			static bool sWarned = false;
+			if (!sWarned) {
+				fprintf(stderr, "[eternal-night] no se pudo cargar effects/halowhit.txe\n");
+				fflush(stderr);
+				sWarned = true;
+			}
+			return;
+		}
+	}
+
+	struct Firefly {
+		Vector3f mPos;
+		Vector3f mDir;     // rumbo actual (horizontal, unitario)
+		Vector3f mWantDir; // rumbo al que gira poco a poco
+		f32 mSpeed;
+		f32 mHover;        // altura sobre el suelo
+		f32 mTurnTimer;
+		f32 mPhase;
+		f32 mBlinkRate;
+		f32 mAge;
+		f32 mLife;
+	};
+	// Repartidas por lo que ve la cámara (alrededor de su foco), no solo junto
+	// al capitán, para que el campo entero se vea habitado.
+	static const int kFireflies    = 70;
+	static const f32 kSpawnMin     = 0.0f;
+	static const f32 kSpawnMax     = 520.0f;
+	static const f32 kDespawnDist  = 650.0f;
+	static Firefly sFlies[kFireflies];
+	static bool sInit       = false;
+	static u32 sSeed        = 0x2545F491;
+	static Texture* sTexFor = nullptr; // nivel nuevo (textura nueva): se reparten de cero
+
+	const Vector3f centre = pcNightCentre(gfx.mCamera);
+
+	auto rnd = [&]() -> f32 {
+		sSeed = sSeed * 1664525u + 1013904223u;
+		return f32(sSeed >> 8) / f32(1 << 24);
+	};
+	auto randDir = [&]() -> Vector3f {
+		const f32 a = rnd() * TAU;
+		return Vector3f(sinf(a), 0.0f, cosf(a));
+	};
+	auto spawn = [&](Firefly& f, bool anyAge) {
+		const f32 a = rnd() * TAU;
+		const f32 r = kSpawnMin + rnd() * (kSpawnMax - kSpawnMin);
+		f.mPos.set(centre.x + r * sinf(a), 0.0f, centre.z + r * cosf(a));
+		f.mHover     = 8.0f + rnd() * 32.0f;
+		f.mPos.y     = mapMgr->getMinY(f.mPos.x, f.mPos.z, true) + f.mHover;
+		f.mDir       = randDir();
+		f.mWantDir   = randDir();
+		f.mSpeed     = 5.0f + rnd() * 8.0f;
+		f.mTurnTimer = 1.0f + rnd() * 2.5f;
+		f.mPhase     = rnd() * TAU;
+		f.mBlinkRate = 0.6f + rnd() * 1.2f;
+		f.mLife      = 7.0f + rnd() * 8.0f;
+		f.mAge       = anyAge ? rnd() * f.mLife : 0.0f;
+	};
+
+	if (!sInit || sTexFor != mPcGlowTex) {
+		for (int i = 0; i < kFireflies; i++) {
+			spawn(sFlies[i], true);
+		}
+		sInit   = true;
+		sTexFor = mPcGlowTex;
+	}
+
+	const f32 dt = gsys->getFrameTime();
+	for (int i = 0; i < kFireflies; i++) {
+		Firefly& f = sFlies[i];
+		f.mAge += dt;
+		Vector3f away = f.mPos - centre;
+		away.y        = 0.0f;
+		if (f.mAge >= f.mLife || away.length() > kDespawnDist) {
+			spawn(f, false);
+			continue;
+		}
+		// Cambia de rumbo cada poco, y gira hacia él despacio: vuelo errático
+		// pero sin quiebros.
+		f.mTurnTimer -= dt;
+		if (f.mTurnTimer <= 0.0f) {
+			f.mWantDir   = randDir();
+			f.mTurnTimer = 1.0f + rnd() * 2.5f;
+		}
+		const f32 turn = dt * 0.8f;
+		f.mDir         = f.mDir + (f.mWantDir - f.mDir) * (turn > 1.0f ? 1.0f : turn);
+		if (f.mDir.length() > 0.0001f) {
+			f.mDir.normalise();
+		}
+		f.mPos.x += f.mDir.x * f.mSpeed * dt;
+		f.mPos.z += f.mDir.z * f.mSpeed * dt;
+		const f32 bob = 4.0f * sinf(f.mAge * 1.3f + f.mPhase);
+		const f32 want = mapMgr->getMinY(f.mPos.x, f.mPos.z, true) + f.mHover + bob;
+		// La altura sigue al terreno con retraso, para que no salte en cada escalón.
+		f.mPos.y += (want - f.mPos.y) * (dt * 2.0f > 1.0f ? 1.0f : dt * 2.0f);
+	}
+
+	const bool prevLighting = gfx.setLighting(false, nullptr);
+	gfx.useMatrix(gfx.mCamera->mLookAtMtx, 0);
+	gfx.useTexture(mPcGlowTex, GX_TEXMAP0);
+	const int prevBlend = gfx.setCBlending(BLEND_Additive);
+	const int prevCull  = gfx.setCullFront(2);
+
+	// Billboard a mano con drawOneTri: drawParticle pasa por initParticle,
+	// que declara la coordenada de textura como XYZ y en el PC descuadra los
+	// vértices (no pintaba nada).
+	const Vector3f camX = gfx.mCamera->mViewXAxis;
+	const Vector3f camY = gfx.mCamera->mViewYAxis;
+	const Vector3f camZ = gfx.mCamera->mViewZAxis; // hacia la cámara
+	Vector2f uv[4];
+	uv[0].set(0.0f, 0.0f);
+	uv[1].set(1.0f, 0.0f);
+	uv[2].set(1.0f, 1.0f);
+	uv[3].set(0.0f, 1.0f);
+	auto drawGlow = [&](immut Vector3f& pos, f32 radius) {
+		const Vector3f x = camX * radius;
+		const Vector3f y = camY * radius;
+		Vector3f quad[4];
+		quad[0] = pos - x + y;
+		quad[1] = pos + x + y;
+		quad[2] = pos + x - y;
+		quad[3] = pos - x - y;
+		gfx.drawOneTri(quad, nullptr, uv, 4);
+	};
+	// Lo mismo tumbado en el suelo (charco de luz).
+	auto drawPool = [&](immut Vector3f& pos, f32 radius) {
+		Vector3f quad[4];
+		quad[0].set(pos.x - radius, pos.y, pos.z - radius);
+		quad[1].set(pos.x + radius, pos.y, pos.z - radius);
+		quad[2].set(pos.x + radius, pos.y, pos.z + radius);
+		quad[3].set(pos.x - radius, pos.y, pos.z + radius);
+		gfx.drawOneTri(quad, nullptr, uv, 4);
+	};
+	static f32 sparkTime = 0.0f;
+	// Chispitas de su color aclarado: suben por encima del pellet, se
+	// encienden y se apagan, como los PelKira de Pikmin 2.
+	auto drawSparks = [&](immut Vector3f& c, f32 size, f32 seed, immut Colour& base) {
+		for (int j = 0; j < 3; j++) {
+			f32 t = sparkTime * 0.35f + j / 3.0f + seed;
+			t     = t - floorf(t); // la semilla puede ser negativa
+			const f32 a   = seed * 7.0f + j * 2.1f + t * 1.5f;
+			const f32 r   = size * 0.7f;
+			const f32 lum = sinf(t * PI);
+			Vector3f p(c.x + r * cosf(a), c.y + size * 0.3f + t * (size * 1.5f + 14.0f), c.z + r * sinf(a));
+			gfx.setColour(Colour(u8((base.r * 0.4f + 153) * lum), u8((base.g * 0.4f + 153) * lum),
+			                     u8((base.b * 0.4f + 153) * lum), 255), true);
+			drawGlow(p, 3.2f);
+		}
+	};
+
+	{
+		for (int i = 0; i < kFireflies; i++) {
+			Firefly& f = sFlies[i];
+			// Aparece y se apaga suave; entre medias late a su ritmo, con
+			// momentos casi apagada como una luciérnaga de verdad.
+			f32 fade = 1.0f;
+			if (f.mAge < 1.2f) {
+				fade = f.mAge / 1.2f;
+			} else if (f.mLife - f.mAge < 1.2f) {
+				fade = (f.mLife - f.mAge) / 1.2f;
+			}
+			const f32 s     = 0.5f + 0.5f * sinf(f.mAge * f.mBlinkRate * TAU * 0.5f + f.mPhase);
+			const f32 blink = 0.15f + 0.85f * s * s;
+			const f32 k     = fade * blink;
+			// Halo amplio y tenue, y un núcleo pequeño casi blanco.
+			gfx.setColour(Colour(u8(120 * k), u8(255 * k), u8(60 * k), 255), true);
+			drawGlow(f.mPos, 7.0f);
+			gfx.setColour(Colour(u8(220 * k), u8(255 * k), u8(170 * k), 255), true);
+			drawGlow(f.mPos, 2.2f);
+		}
+
+		// Pellets de número. La píldora en sí ya sale fosforescente (realce de
+		// ambiente en Pellet::doRender); aquí solo se le añade un halo ceñido
+		// al contorno y unas chispitas de su color que suben despacio, como los
+		// pellets de Pikmin 2 (PelKira). Un halo grande y tenue parecía humo.
+		gPcNightPulse += dt * 1.6f;
+		if (gPcNightPulse > TAU) {
+			gPcNightPulse -= TAU;
+		}
+		sparkTime += dt;
+		if (sparkTime > 1000.0f) {
+			sparkTime -= 1000.0f;
+		}
+		if (pelletMgr) {
+			Iterator iter(pelletMgr);
+			CI_LOOP(iter)
+			{
+				Pellet* pel = static_cast<Pellet*>(*iter);
+				int colour = PELCOLOR_NULL;
+				if (!pcNightPelletGlows(pel, &colour)) {
+					continue;
+				}
+				Vector3f diff = pel->mSRT.t - centre;
+				if (diff.x * diff.x + diff.z * diff.z > 1200.0f * 1200.0f) {
+					continue;
+				}
+				const f32 seed  = (pel->mSRT.t.x + pel->mSRT.t.z) * 0.05f;
+				const f32 k     = pcNightPelletPulse(pel);
+				const f32 size  = pel->getSize();
+				const Vector3f c = pel->getCentre();
+				const Colour base = pcNightPelletColour(colour);
+
+				// Charco de luz de su color en la superficie donde está (o
+				// debajo, si la llevan): es lo que da la sensación de que emite
+				// luz, sin luces de escena que cambien de color al moverse.
+				Vector3f ground(c.x, mapMgr->getMinY(c.x, c.z, true) + 0.6f, c.z);
+				// Ceñido (poco más que la píldora) e intenso: uno grande y suave se
+				// solapaba con los vecinos y mezclaba colores en una neblina.
+				gfx.setColour(Colour(u8(base.r * k * 0.85f), u8(base.g * k * 0.85f), u8(base.b * k * 0.85f), 255), true);
+				drawPool(ground, size * 1.7f + 4.0f);
+
+				// Borde de luz ceñido a la silueta, adelantado hacia la cámara
+				// para que no se hunda en lo que tiene debajo.
+				gfx.setColour(Colour(u8(base.r * k * 0.8f), u8(base.g * k * 0.8f), u8(base.b * k * 0.8f), 255), true);
+				drawGlow(c + camZ * (size * 0.9f), size * 1.2f + 2.0f);
+
+				drawSparks(c, size, seed, base);
+			}
+		}
+
+		// Flores de pellet: la píldora va dentro del modelo de la flor (un
+		// TEKI_Palm), no es un Pellet, así que solo se le pone el borde de luz
+		// y las chispitas en la cabeza. La cabeza es lo alto de su esfera
+		// envolvente.
+		if (tekiMgr) {
+			Iterator iter(tekiMgr);
+			CI_LOOP(iter)
+			{
+				Teki* teki = static_cast<Teki*>(*iter);
+				if (teki->mTekiType != TEKI_Palm || teki->mStateID != PALMSTATE_Normal || !teki->isAlive()
+				    || !teki->mPersonality || !teki->mCollInfo || !teki->mCollInfo->hasInfo()) {
+					continue;
+				}
+				const int colour = teki->mPersonality->mPelletColor;
+				if (colour < PELCOLOR_Blue || colour > PELCOLOR_Yellow) {
+					continue;
+				}
+				Vector3f diff = teki->mSRT.t - centre;
+				if (diff.x * diff.x + diff.z * diff.z > 1200.0f * 1200.0f) {
+					continue;
+				}
+				CollPart* bound = teki->mCollInfo->getBoundingSphere();
+				if (!bound) {
+					continue;
+				}
+				const Vector3f head(teki->mSRT.t.x, bound->mCentre.y + bound->mRadius * 0.55f, teki->mSRT.t.z);
+				const f32 seed  = (teki->mSRT.t.x + teki->mSRT.t.z) * 0.05f;
+				const f32 k     = 0.8f + 0.2f * sinf(gPcNightPulse + seed);
+				const f32 size  = 7.0f;
+				const Colour base = pcNightPelletColour(colour);
+				gfx.setColour(Colour(u8(base.r * k), u8(base.g * k), u8(base.b * k), 255), true);
+				drawGlow(head + camZ * (size * 0.9f), size * 1.8f + 2.0f);
+				drawSparks(head, size, seed, base);
+			}
 		}
 	}
 
@@ -2984,6 +3367,9 @@ void Navi::refresh(Graphics& gfx)
 {
 	draw(gfx);
 	if (!movieMode()) {
+#if defined(PIKI_PC_PORT)
+		pcDrawNightAmbience(gfx);
+#endif
 		if (gsys->mToggleColls) {
 			mapMgr->showCollisions(mSRT.t);
 		}

@@ -22,6 +22,10 @@
 #include "sysNew.h"
 #include "teki.h"
 #include "zen/Math.h"
+#if defined(PIKI_PC_PORT)
+#include "gl/pc_gfx.h"
+bool pc_night_pellet_glow(Pellet* pel, GXColor* boost); // navi.cpp, Eternal Night
+#endif
 
 /**
  * @todo: Documentation
@@ -1369,7 +1373,21 @@ void Pellet::doRender(Graphics& gfx, Matrix4f& mtx)
 
 	if (mPelletView) {
 		if (aiCullable()) {
+#if defined(PIKI_PC_PORT)
+			// Eternal Night: también los que se dibujan por su vista (los de
+			// las flores).
+			GXColor viewBoost;
+			const bool viewGlowing = pc_night_pellet_glow(this, &viewBoost);
+			if (viewGlowing) {
+				pc_gfx_set_amb_boost(viewBoost);
+			}
+#endif
 			mPelletView->viewDraw(gfx, mtx);
+#if defined(PIKI_PC_PORT)
+			if (viewGlowing) {
+				pc_gfx_clear_amb_boost();
+			}
+#endif
 		}
 		return;
 	}
@@ -1390,7 +1408,20 @@ void Pellet::doRender(Graphics& gfx, Matrix4f& mtx)
 	}
 
 	if (aiCullable()) {
+#if defined(PIKI_PC_PORT)
+		// Eternal Night: los pellets de número salen fosforescentes.
+		GXColor glowBoost;
+		const bool glowing = pc_night_pellet_glow(this, &glowBoost);
+		if (glowing) {
+			pc_gfx_set_amb_boost(glowBoost);
+		}
+#endif
 		mShapeObject->mShape->drawshape(gfx, *gfx.mCamera, &mAnimatedMaterials);
+#if defined(PIKI_PC_PORT)
+		if (glowing) {
+			pc_gfx_clear_amb_boost();
+		}
+#endif
 	}
 }
 

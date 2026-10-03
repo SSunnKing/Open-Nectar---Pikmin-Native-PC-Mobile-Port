@@ -4838,6 +4838,25 @@ void pc_gfx_set_chan_amb_color(GXChannelID chan, GXColor color) {
     ch->ambColor[3] = color.a / 255.0f;
 }
 
+// Realce del ambiente del canal 0 (Eternal Night: pellets fosforescentes).
+// Se suma al ambiente del material al subirlo al shader, así que el objeto
+// muestra su color aunque la escena esté a oscuras.
+static float sAmbBoost[3] = { 0.0f, 0.0f, 0.0f };
+static bool  sAmbBoostOn  = false;
+
+void pc_gfx_set_amb_boost(GXColor boost) {
+    state_touched();
+    sAmbBoost[0] = boost.r / 255.0f;
+    sAmbBoost[1] = boost.g / 255.0f;
+    sAmbBoost[2] = boost.b / 255.0f;
+    sAmbBoostOn  = true;
+}
+
+void pc_gfx_clear_amb_boost(void) {
+    state_touched();
+    sAmbBoostOn = false;
+}
+
 static GXColor sMatColorTint = { 255, 255, 255, 255 };
 static bool    sMatColorTintOn = false;
 
@@ -7613,6 +7632,11 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
         ambG = sChannels[0].ambColor[1];
         ambB = sChannels[0].ambColor[2];
         ambA = sChannels[0].ambColor[3];
+        if (sAmbBoostOn) {
+            ambR = std::min(1.0f, ambR + sAmbBoost[0]);
+            ambG = std::min(1.0f, ambG + sAmbBoost[1]);
+            ambB = std::min(1.0f, ambB + sAmbBoost[2]);
+        }
         u32 mask = sChannels[0].lightMask;
         for (int i = 0; i < 8 && numLights < 4; i++) {
             if (mask & (1u << i)) {

@@ -124,6 +124,9 @@ void pc_gfx_set_chan_mat_color(GXChannelID chan, GXColor color);
 // Se aplica a cada GXSetChanMatColor mientras esté activo; 255 = sin cambio.
 void pc_gfx_set_mat_color_tint(GXColor tint);
 void pc_gfx_clear_mat_color_tint(void);
+// Suma al ambiente del canal 0 mientras esté activo (objetos que "brillan").
+void pc_gfx_set_amb_boost(GXColor boost);
+void pc_gfx_clear_amb_boost(void);
 // Multiplicador del color final de todo lo que dibuje el shader principal
 // (tinte del HUD de J2 en coop). (1,1,1) lo quita.
 void pc_gfx_set_out_tint(float r, float g, float b);

@@ -221,11 +221,13 @@ public:
 	void pcUpdateBombCommand();
 	void pcPinCursorToLock();
 	void pcDrawLockRing(Graphics& gfx);
+	void pcDrawNightAmbience(Graphics& gfx);
 	void pcPinCursorFirstPerson();
 	Creature* mPcLockTarget = nullptr; ///< Mod "Lock-On": enemigo u objeto fijado.
 	Creature* mPcLockIgnore = nullptr; ///< Automático: soltado a mano, no se recoge hasta salir de él.
 	Vector3f mPcAimOffset;             ///< Cursor libre (lo que apunta el jugador) mientras el visible está clavado.
 	Vector3f mPcPinnedOffset;          ///< Último desplazamiento con el que se clavó el cursor.
+	Texture* mPcGlowTex = nullptr;     ///< Eternal Night: halo de luciérnagas y pellets (va con el heap del nivel).
 #endif
 	int mPendingLowerMotionId;            // _6FC
 	int mLowerMotionCooldown;             // _700
