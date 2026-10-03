@@ -82,6 +82,7 @@ struct TimeMgr : public CNode {
 	void pcUpdateSlotFor();
 	f32 pcGetLightSunRatio();
 	void pcDebugAdvanceHour();
+	static bool pcVisualActive(); ///< Luz siguiendo el reloj visual (Infinite Day, Day Length, Eternal Night).
 #endif
 
 	inline void setFlag(u32 flag) { mFlags.typeView |= flag; }

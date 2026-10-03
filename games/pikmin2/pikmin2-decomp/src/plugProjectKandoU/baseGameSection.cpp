@@ -1447,6 +1447,226 @@ void BaseGameSection::draw3D(Graphics& gfx)
 	newdraw_draw3D_all(gfx);
 }
 
+#ifdef PIKI_PC_PORT
+extern "C" int pc_settings_get_eternal_night(void);
+
+namespace {
+/**
+ * @brief Eternal Night: luciérnagas por lo que ve la cámara.
+ *
+ * Igual que en Pikmin 1, pero sin nada de P1: cada luciérnaga lleva su rumbo,
+ * su altura y su parpadeo, y se dibuja como un halo aditivo con GX directo.
+ * El halo es una textura I8 generada aquí (degradado radial), así que no
+ * depende de ningún archivo.
+ */
+struct PcFirefly {
+	Vector3f mPos;
+	Vector3f mDir;
+	Vector3f mWantDir;
+	f32 mSpeed;
+	f32 mHover;
+	f32 mTurnTimer;
+	f32 mPhase;
+	f32 mBlinkRate;
+	f32 mAge;
+	f32 mLife;
+};
+
+const int kPcFireflies   = 70;
+const f32 kPcSpawnMax    = 520.0f;
+const f32 kPcDespawnDist = 650.0f;
+PcFirefly sPcFlies[kPcFireflies];
+bool sPcFliesInit = false;
+u32 sPcFlySeed    = 0x2545F491;
+
+f32 pcFlyRand()
+{
+	sPcFlySeed = sPcFlySeed * 1664525u + 1013904223u;
+	return f32(sPcFlySeed >> 8) / f32(1 << 24);
+}
+
+Vector3f pcFlyRandDir()
+{
+	const f32 a = pcFlyRand() * TAU;
+	return Vector3f(sinf(a), 0.0f, cosf(a));
+}
+
+f32 pcFlyGround(f32 x, f32 z)
+{
+	if (!Game::mapMgr) {
+		return 0.0f;
+	}
+	Vector3f p(x, 0.0f, z);
+	return Game::mapMgr->getMinY(p);
+}
+
+void pcFlySpawn(PcFirefly& f, const Vector3f& centre, bool anyAge)
+{
+	const f32 a = pcFlyRand() * TAU;
+	const f32 r = pcFlyRand() * kPcSpawnMax;
+	f.mPos.x     = centre.x + r * sinf(a);
+	f.mPos.z     = centre.z + r * cosf(a);
+	f.mHover     = 8.0f + pcFlyRand() * 32.0f;
+	f.mPos.y     = pcFlyGround(f.mPos.x, f.mPos.z) + f.mHover;
+	f.mDir       = pcFlyRandDir();
+	f.mWantDir   = pcFlyRandDir();
+	f.mSpeed     = 5.0f + pcFlyRand() * 8.0f;
+	f.mTurnTimer = 1.0f + pcFlyRand() * 2.5f;
+	f.mPhase     = pcFlyRand() * TAU;
+	f.mBlinkRate = 0.6f + pcFlyRand() * 1.2f;
+	f.mLife      = 7.0f + pcFlyRand() * 8.0f;
+	f.mAge       = anyAge ? pcFlyRand() * f.mLife : 0.0f;
+}
+
+// Textura del halo: 32x32 I8 en bloques de 8x4, como la espera GX.
+u8 sPcGlowTexData[32 * 32] ATTRIBUTE_ALIGN(32);
+GXTexObj sPcGlowTexObj;
+bool sPcGlowTexReady = false;
+
+void pcBuildGlowTex()
+{
+	for (int y = 0; y < 32; y++) {
+		for (int x = 0; x < 32; x++) {
+			const f32 dx = (x + 0.5f - 16.0f) / 16.0f;
+			const f32 dy = (y + 0.5f - 16.0f) / 16.0f;
+			f32 d        = 1.0f - sqrtf(dx * dx + dy * dy);
+			d            = d < 0.0f ? 0.0f : d;
+			const int v  = int(255.0f * d * d);
+			const int blk = (y / 4) * 4 + (x / 8);
+			sPcGlowTexData[blk * 32 + (y % 4) * 8 + (x % 8)] = u8(v > 255 ? 255 : v);
+		}
+	}
+	GXInitTexObj(&sPcGlowTexObj, sPcGlowTexData, 32, 32, GX_TF_I8, GX_CLAMP, GX_CLAMP, GX_FALSE);
+	GXInitTexObjLOD(&sPcGlowTexObj, GX_LINEAR, GX_LINEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE, GX_ANISO_1);
+	sPcGlowTexReady = true;
+}
+
+void pcDrawNightFireflies(Graphics& gfx, Viewport* port)
+{
+	Game::GameSystem* gs = Game::gameSystem;
+	if (!pc_settings_get_eternal_night() || !gs || !gs->isStoryMode() || gs->mIsInCave || !Game::naviMgr) {
+		return;
+	}
+	Game::Navi* navi = Game::naviMgr->getActiveNavi();
+	if (!navi) {
+		return;
+	}
+	if (!sPcGlowTexReady) {
+		pcBuildGlowTex();
+	}
+
+	Matrixf* view = port->getMatrix(true);
+	const Vector3f camX(view->mMatrix.mtxView[0][0], view->mMatrix.mtxView[0][1], view->mMatrix.mtxView[0][2]);
+	const Vector3f camY(view->mMatrix.mtxView[1][0], view->mMatrix.mtxView[1][1], view->mMatrix.mtxView[1][2]);
+	// La cámara mira hacia -Z: el centro se adelanta del capitán hacia ahí,
+	// para cubrir lo que hay en pantalla y no solo sus pies.
+	Vector3f centre = navi->getPosition();
+	Vector3f ahead(-view->mMatrix.mtxView[2][0], 0.0f, -view->mMatrix.mtxView[2][2]);
+	const f32 aheadLen = sqrtf(ahead.x * ahead.x + ahead.z * ahead.z);
+	if (aheadLen > 0.0001f) {
+		centre.x += ahead.x / aheadLen * 150.0f;
+		centre.z += ahead.z / aheadLen * 150.0f;
+	}
+
+	if (!sPcFliesInit) {
+		for (int i = 0; i < kPcFireflies; i++) {
+			pcFlySpawn(sPcFlies[i], centre, true);
+		}
+		sPcFliesInit = true;
+	}
+
+	const f32 dt = sys->mDeltaTime;
+	for (int i = 0; i < kPcFireflies; i++) {
+		PcFirefly& f = sPcFlies[i];
+		f.mAge += dt;
+		const f32 ax = f.mPos.x - centre.x;
+		const f32 az = f.mPos.z - centre.z;
+		if (f.mAge >= f.mLife || ax * ax + az * az > kPcDespawnDist * kPcDespawnDist) {
+			pcFlySpawn(f, centre, false);
+			continue;
+		}
+		// Cambia de rumbo cada poco y gira hacia él despacio.
+		f.mTurnTimer -= dt;
+		if (f.mTurnTimer <= 0.0f) {
+			f.mWantDir   = pcFlyRandDir();
+			f.mTurnTimer = 1.0f + pcFlyRand() * 2.5f;
+		}
+		const f32 turn = dt * 0.8f > 1.0f ? 1.0f : dt * 0.8f;
+		f.mDir.x += (f.mWantDir.x - f.mDir.x) * turn;
+		f.mDir.z += (f.mWantDir.z - f.mDir.z) * turn;
+		const f32 len = sqrtf(f.mDir.x * f.mDir.x + f.mDir.z * f.mDir.z);
+		if (len > 0.0001f) {
+			f.mDir.x /= len;
+			f.mDir.z /= len;
+		}
+		f.mPos.x += f.mDir.x * f.mSpeed * dt;
+		f.mPos.z += f.mDir.z * f.mSpeed * dt;
+		const f32 bob  = 4.0f * sinf(f.mAge * 1.3f + f.mPhase);
+		const f32 want = pcFlyGround(f.mPos.x, f.mPos.z) + f.mHover + bob;
+		const f32 k    = dt * 2.0f > 1.0f ? 1.0f : dt * 2.0f;
+		f.mPos.y += (want - f.mPos.y) * k;
+	}
+
+	// GX: primitivas con la vista de la cámara, textura modulada por el color
+	// del vértice, mezcla aditiva y Z sin escritura.
+	gfx.initPrimDraw(view);
+	GXSetNumTexGens(1);
+	GXSetTexCoordGen2(GX_TEXCOORD0, GX_TG_MTX2X4, GX_TG_TEX0, GX_IDENTITY, GX_FALSE, GX_PTIDENTITY);
+	GXLoadTexObj(&sPcGlowTexObj, GX_TEXMAP0);
+	GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
+	GXSetTevOp(GX_TEVSTAGE0, GX_MODULATE);
+	GXSetChanCtrl(GX_COLOR0A0, GX_FALSE, GX_SRC_VTX, GX_SRC_VTX, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
+	GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
+	GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_ONE, GX_LO_CLEAR);
+	GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
+	GXSetZMode(GX_TRUE, GX_LEQUAL, GX_FALSE);
+
+	auto quad = [&](const Vector3f& p, f32 radius, u8 r, u8 g, u8 b) {
+		const f32 xx = camX.x * radius, xy = camX.y * radius, xz = camX.z * radius;
+		const f32 yx = camY.x * radius, yy = camY.y * radius, yz = camY.z * radius;
+		GXBegin(GX_QUADS, GX_VTXFMT0, 4);
+		GXPosition3f32(p.x - xx + yx, p.y - xy + yy, p.z - xz + yz);
+		GXColor4u8(r, g, b, 255);
+		GXTexCoord2f32(0.0f, 0.0f);
+		GXPosition3f32(p.x + xx + yx, p.y + xy + yy, p.z + xz + yz);
+		GXColor4u8(r, g, b, 255);
+		GXTexCoord2f32(1.0f, 0.0f);
+		GXPosition3f32(p.x + xx - yx, p.y + xy - yy, p.z + xz - yz);
+		GXColor4u8(r, g, b, 255);
+		GXTexCoord2f32(1.0f, 1.0f);
+		GXPosition3f32(p.x - xx - yx, p.y - xy - yy, p.z - xz - yz);
+		GXColor4u8(r, g, b, 255);
+		GXTexCoord2f32(0.0f, 1.0f);
+		GXEnd();
+	};
+
+	for (int i = 0; i < kPcFireflies; i++) {
+		PcFirefly& f = sPcFlies[i];
+		// Fundido al nacer y al morir; entre medias late a su ritmo, con
+		// momentos casi apagada.
+		f32 fade = 1.0f;
+		if (f.mAge < 1.2f) {
+			fade = f.mAge / 1.2f;
+		} else if (f.mLife - f.mAge < 1.2f) {
+			fade = (f.mLife - f.mAge) / 1.2f;
+		}
+		const f32 sn    = 0.5f + 0.5f * sinf(f.mAge * f.mBlinkRate * TAU * 0.5f + f.mPhase);
+		const f32 blink = 0.15f + 0.85f * sn * sn;
+		const f32 kk    = fade * blink;
+		// Halo amplio y tenue, y núcleo pequeño casi blanco.
+		quad(f.mPos, 7.0f, u8(120 * kk), u8(255 * kk), u8(60 * kk));
+		quad(f.mPos, 2.2f, u8(220 * kk), u8(255 * kk), u8(170 * kk));
+	}
+
+	// Vuelve al estado que espera el resto del dibujo.
+	GXSetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
+	GXSetBlendMode(GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, GX_LO_CLEAR);
+}
+} // namespace
+#endif
+
 /**
  * @note Address: 0x8014EF64
  * @note Size: 0x1D4
@@ -1479,6 +1699,9 @@ void BaseGameSection::drawParticle(Graphics& gfx, int viewport)
 			}
 		}
 		particleMgr->draw(port, 2);
+#ifdef PIKI_PC_PORT
+		pcDrawNightFireflies(gfx, port);
+#endif
 	}
 }
 

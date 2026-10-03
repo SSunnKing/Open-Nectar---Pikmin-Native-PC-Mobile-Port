@@ -160,6 +160,7 @@ struct PcConfig {
     int bluesOnlyWater = 0;
     // Mod: show how many Pikmin are idle on the map (0=off, 1=on).
     int idleCounter = 0;
+    int eternalNight = 0;       // siempre de noche (luz), el reloj del día sigue igual
     // Mods: health as a percentage of the original. Applied as a divisor on
     // incoming damage rather than by resizing the health bar, so the life
     // gauge and every "below a quarter" check keep reading correctly.
@@ -274,6 +275,7 @@ struct PcConfig {
         betterPathfinding = 0;
         bluesOnlyWater = 0;
         idleCounter = 0;
+        eternalNight = 0;
         naviHealthPct = 100;
         tekiHealthPct = 100;
         infiniteDay = 0;
@@ -1144,6 +1146,7 @@ void saveConfig() {
     out << "betterPathfinding = " << sConfig.betterPathfinding << "\n";
     out << "bluesOnlyWater = " << sConfig.bluesOnlyWater << "\n";
     out << "idleCounter = " << sConfig.idleCounter << "\n";
+    out << "eternalNight = " << sConfig.eternalNight << "\n";
     out << "naviHealthPct = " << sConfig.naviHealthPct << "\n";
     out << "tekiHealthPct = " << sConfig.tekiHealthPct << "\n";
     out << "infiniteDay = " << sConfig.infiniteDay << "\n";
@@ -1320,6 +1323,7 @@ void loadConfig() {
         else if (key == "bluesOnlyWater") {
             sConfig.bluesOnlyWater = atoi(val.c_str()) ? 1 : 0;
         }
+        else if (key == "eternalNight") sConfig.eternalNight = atoi(val.c_str()) ? 1 : 0;
         else if (key == "idleCounter") {
             sConfig.idleCounter = atoi(val.c_str()) ? 1 : 0;
         }
@@ -2613,6 +2617,10 @@ void modsRowChange(int row, bool left, bool right) {
     // Contador de Pikmin ociosos en el HUD.
     else if (row == 10) {
         if (left || right) sPending.idleCounter = sPending.idleCounter ? 0 : 1;
+    }
+    // Siempre de noche.
+    else if (row == 40) {
+        if (left || right) sPending.eternalNight = sPending.eternalNight ? 0 : 1;
     }
     // Vida de Olimar, en porcentaje de la original.
     else if (row == 11) {
@@ -5453,6 +5461,10 @@ int pc_settings_get_idle_counter(void) {
     return sConfig.idleCounter;
 }
 
+int pc_settings_get_eternal_night(void) {
+    return sConfig.eternalNight;
+}
+
 int pc_settings_get_navi_health_pct(void) {
     return pc_hardmode_active() ? 100 : sConfig.naviHealthPct;
 }
@@ -5659,21 +5671,19 @@ const char* pc_settings_group_name(int group) {
 
 const char* pc_settings_group_summary(int group) {
     switch (group) {
-#if PIKI_P2_HOST
     case PC_SET_GROUP_DISPLAY: return "Window, resolution, frame rate";
     case PC_SET_GROUP_GRAPHICS: return "Effects, colour, texture packs";
-    case PC_SET_GROUP_CONTROLS: return "Mouse, sticks, gyro, bindings";
+    case PC_SET_GROUP_CONTROLS: return "Actions, lock-on, sticks, gyro, bindings";
+#if PIKI_P2_HOST
+    case PC_SET_GROUP_CAMERA: return "Free camera, first person";
 #else
-    case PC_SET_GROUP_DISPLAY: return "Window, resolution, frame rate";
-    case PC_SET_GROUP_GRAPHICS: return "Effects, colour, texture packs";
-    case PC_SET_GROUP_CONTROLS: return "Mouse, sticks, gyro, bindings";
+    case PC_SET_GROUP_CAMERA: return "Free camera, first person, co-op view";
 #endif
-    case PC_SET_GROUP_CAMERA: return "Free camera, first person, lock-on";
 #if PIKI_P2_HOST
-    case PC_SET_GROUP_GAMEPLAY: return "Whistle, Pikmin behaviour";
+    case PC_SET_GROUP_GAMEPLAY: return "Pikmin behaviour, eternal night, HUD";
     case PC_SET_GROUP_CHEATS: return "Day, health, Pikmin limit, speed";
 #else
-    case PC_SET_GROUP_GAMEPLAY: return "Pikmin behaviour, co-op";
+    case PC_SET_GROUP_GAMEPLAY: return "Pikmin behaviour, eternal night, HUD";
     case PC_SET_GROUP_CHEATS: return "Day, health, Pikmin limit, whistle";
 #endif
     case PC_SET_GROUP_DATA: return "Save transfer, reset settings";
@@ -5757,6 +5767,7 @@ void modsRowValue(int i, char* value, size_t n) {
     case 8: snprintf(value, n, "%s", sPending.betterPathfinding ? "On" : "Off (original)"); break;
     case 9: snprintf(value, n, "%s", sPending.bluesOnlyWater ? "On" : "Off (original)"); break;
     case 10: snprintf(value, n, "%s", sPending.idleCounter ? "On" : "Off (original)"); break;
+    case 40: snprintf(value, n, "%s", sPending.eternalNight ? "On" : "Off (original)"); break;
     case 11: healthPctLabel(sPending.naviHealthPct, "Infinite", value, n); break;
     case 12: healthPctLabel(sPending.tekiHealthPct, "Insta Kill", value, n); break;
     case 13:
@@ -5886,24 +5897,15 @@ const GroupRow kGraphicsRows[] = {
 };
 
 const GroupRow kControlsRows[] = {
+#if PIKI_P2_HOST
     { SRC_MODS, 0, "Control Scheme", "Classic: the stick moves the cursor, as on GameCube. Mouse Cursor: aim with the mouse." },
     { SRC_ADV, 0, "Mouse Sensitivity", "How far the cursor moves for each movement of the mouse." },
-#if PIKI_P2_HOST
     { SRC_MODS, 3, "Mouse Wheel", "What the wheel does: change the colour of the Pikmin in hand, or zoom the camera." },
-#else
-    { SRC_MODS, 3, "Mouse Wheel", "What the wheel does: change the Pikmin colour to throw, or zoom the camera." },
-#endif
     { SRC_MODS, 2, "Hold to Pluck", "Keep the button held to pluck sprouts one after another." },
-#if !PIKI_P2_HOST // P2 ya permite andar con un Pikmin en la mano
-    { SRC_MODS, 17, "Throw While Moving", "Throw Pikmin while running, instead of Olimar stopping first." },
-#endif
     { SRC_MODS, 22, "Cancel Throw With B", "While holding a Pikmin with A, press B to put it back in the squad." },
-#if PIKI_P2_HOST
     { SRC_MODS, 33, "Quick Grab", "Any Pikmin in the squad goes straight to the captain's hand, however far behind it is." },
-#else
-    { SRC_MODS, 33, "Quick Grab", "The Pikmin to throw appears in Olimar's hand at once, so throwing is just as fast with the squad behind him." },
-#endif
     { SRC_MODS, 24, "Onion: Y for Steps of 10", "In the Onion menu, hold Y while moving up or down to move 10 Pikmin at a time." },
+    { SRC_MODS, 15, "Lock-On", "Target the enemy under the cursor with the Lock-On button (R / R3). Press again to release." },
     { SRC_ADV, 1, "Stick Dead Zone", "Ignores small stick movements. Raise it if a worn stick drifts." },
     { SRC_ADV, 2, "Stick Invert (X/Y)", "Inverts the movement stick." },
     { SRC_ADV, 3, "C-Stick Invert (X/Y)", "Inverts the right stick (C-Stick)." },
@@ -5914,6 +5916,31 @@ const GroupRow kControlsRows[] = {
     { SRC_RECENTER, 0, "Gyro Recenter Button", "Button that brings the cursor back in front of the captain. A: assign it." },
     { SRC_KEYS, 0, "Keyboard Bindings", "Two keys or mouse buttons per action. A: main key, Right: second key, Left: defaults. While waiting, Del clears the slot. Shift, Ctrl and Alt can be bound." },
     { SRC_PADS, 0, "Gamepad Bindings", "Choose the pad button for each action." },
+#else
+    { SRC_MODS, 0, "Control Scheme", "Classic: the stick moves the cursor, as on GameCube. Mouse Cursor: aim with the mouse." },
+    { SRC_ADV, 0, "Mouse Sensitivity", "How far the cursor moves for each movement of the mouse." },
+    { SRC_MODS, 3, "Mouse Wheel", "What the wheel does: change the Pikmin colour to throw, or zoom the camera." },
+    { SRC_MODS, 2, "Hold to Pluck", "Keep the button held to pluck sprouts one after another." },
+    { SRC_MODS, 34, "Whistle Pluck", "Hold the whistle over sprouts to pluck them one after another." },
+    { SRC_MODS, 17, "Throw While Moving", "Throw Pikmin while running, instead of Olimar stopping first." },
+    { SRC_MODS, 22, "Cancel Throw With B", "While holding a Pikmin with A, press B to put it back in the squad." },
+    { SRC_MODS, 33, "Quick Grab", "The Pikmin to throw appears in Olimar's hand at once, so throwing is just as fast with the squad behind him." },
+    { SRC_MODS, 39, "Pikmin 2 Selection", "D-pad as in Pikmin 2: Left/Right keeps the chosen colour for every throw, and with A held Up/Down picks leaf, bud, flower or a Yellow with a bomb rock. Off: Left/Right only picks the next throw." },
+    { SRC_MODS, 24, "Onion: Y for Steps of 10", "In the Onion menu, hold Y while moving up or down to move 10 Pikmin at a time." },
+    { SRC_MODS, 35, "Bomb Control", "Bomb button (B / assign on a pad): a Yellow with a bomb rock throws it at the cursor, or drops it lit at its feet if the cursor is too close. Ones already thrown go first." },
+    { SRC_MODS, 15, "Lock-On", "Automatic: locks onto the nearest enemy or object as you approach. Manual: lock with the Lock-On button (bindable in Controls)." },
+    { SRC_MODS, 16, "Charge", "With a target locked, send the whole squad at it." },
+    { SRC_ADV, 1, "Stick Dead Zone", "Ignores small stick movements. Raise it if a worn stick drifts." },
+    { SRC_ADV, 2, "Stick Invert (X/Y)", "Inverts the movement stick." },
+    { SRC_ADV, 3, "C-Stick Invert (X/Y)", "Inverts the right stick (C-Stick)." },
+    { SRC_ADV, 4, "Gyro Aiming", "Aim the cursor by turning a gyro pad or the phone. In first person it looks around." },
+    { SRC_ADV, 5, "Gyro Sensitivity", "How far the cursor moves when you turn the pad." },
+    { SRC_ADV, 6, "Gyro Invert (X/Y)", "Inverts gyro aiming: none, horizontal, vertical or both." },
+    { SRC_ADV, 7, "Gyro Calibrate", "Put the pad or phone down, keep it still and press A. Fixes a drifting cursor." },
+    { SRC_RECENTER, 0, "Gyro Recenter Button", "Button that brings the cursor back in front of Olimar. A: assign it." },
+    { SRC_KEYS, 0, "Keyboard Bindings", "Two keys or mouse buttons per action. A: main key, Right: second key, Left: defaults. While waiting, Del clears the slot. Shift, Ctrl and Alt can be bound." },
+    { SRC_PADS, 0, "Gamepad Bindings", "Choose the pad button for each action." },
+#endif
 };
 
 const GroupRow kCameraRows[] = {
@@ -5921,28 +5948,30 @@ const GroupRow kCameraRows[] = {
     { SRC_MODS, 14, "Free Camera", "Turn the camera with the mouse or right stick, as in Pikmin 3. Swarm gets its own button." },
     { SRC_MODS, 38, "Free Camera Pad Sensitivity", "How fast the right stick turns the free camera on a controller. 100% is the default." },
     { SRC_MODS, 18, "First Person", "Allows a view from the captain's helmet. Switch in game with its button (V / L3)." },
-    { SRC_MODS, 15, "Lock-On", "Target the enemy under the cursor with the Lock-On button (R / R3). Press again to release." },
 #else
     { SRC_MODS, 14, "Free Camera", "Turn the camera as in Pikmin 3: hold Left Shift and move the mouse, or use the right stick on a controller. Swarm gets its own button." },
     { SRC_MODS, 38, "Free Camera Pad Sensitivity", "How fast the right stick turns the free camera on a controller. 100% is the default." },
     { SRC_MODS, 18, "First Person", "Allows a view from Olimar's helmet. Switch in game with its button (V / L3)." },
-    { SRC_MODS, 15, "Lock-On", "Target the nearest enemy or object with the Lock-On button (R / R3)." },
-    { SRC_MODS, 16, "Charge", "With a target locked, send the whole squad at it." },
+    { SRC_MODS, 6, "Co-op Split Screen", "How the screen divides in two-player co-op." },
+    { SRC_MODS, 7, "Co-op Merged Camera", "Joins both halves into one view while the captains are close." },
 #endif
 };
 
 const GroupRow kGameplayRows[] = {
+#if PIKI_P2_HOST
     { SRC_MODS, 25, "Instant Whistle Response", "Whistled Pikmin join the squad at once, without stopping to turn and look first." },
-#if !PIKI_P2_HOST // Pikmin 2 ya encadena tareas (Brain::exec -> invokeAIFree)
+    { SRC_MODS, 23, "No Tripping", "Pikmin running in the squad never trip and fall behind." },
+    { SRC_MODS, 40, "Eternal Night", "Always night above ground, whatever the day length. Fireflies fly around the field." },
+    { SRC_MODS, 10, "Idle Pikmin Counter", "Shows how many Pikmin are standing idle." },
+#else
+    { SRC_MODS, 25, "Instant Whistle Response", "Whistled Pikmin join the squad at once, without stopping to turn and look first." },
     { SRC_MODS, 1, "Chain Pikmin Actions", "Pikmin that finish a task go on to the next one nearby." },
     { SRC_MODS, 8, "Better Pathfinding", "Gets Pikmin moving again when they stall on their route." },
     { SRC_MODS, 9, "Blues Only In Water", "Only blue Pikmin walk into water on their own." },
-#endif
-    { SRC_MODS, 10, "Idle Pikmin Counter", "Shows how many Pikmin are standing idle." },
     { SRC_MODS, 23, "No Tripping", "Pikmin running in the squad never trip and fall behind." },
-#if !PIKI_P2_HOST // P2: tiene su propio 2P
-    { SRC_MODS, 6, "Co-op Split Screen", "How the screen divides in two-player co-op." },
-    { SRC_MODS, 7, "Co-op Merged Camera", "Joins both halves into one view while the captains are close." },
+    { SRC_MODS, 40, "Eternal Night", "Always night, whatever the day length: night lighting, and the moon crosses the day bar instead of the sun." },
+    { SRC_MODS, 10, "Idle Pikmin Counter", "Shows how many Pikmin are standing idle." },
+    { SRC_MODS, 36, "Hide Olimar's Texts", "Skip the text boxes Olimar shows while you play: first Pikmin, ship parts, tips. The ending texts stay." },
 #endif
 };
 
@@ -6076,15 +6105,30 @@ const GroupSection kSections[] = {
     { PC_SET_GROUP_GRAPHICS, 4, "POST-PROCESSING" },
     { PC_SET_GROUP_GRAPHICS, 8, "COLOUR" },
     { PC_SET_GROUP_GRAPHICS, 12, "CONTENT" },
+#if PIKI_P2_HOST
     { PC_SET_GROUP_CONTROLS, 0, "SCHEME" },
     { PC_SET_GROUP_CONTROLS, 3, "ACTIONS" },
-    { PC_SET_GROUP_CONTROLS, 7, "STICKS" },
-    { PC_SET_GROUP_CONTROLS, 10, "GYRO" },
-    { PC_SET_GROUP_CONTROLS, 15, "BINDINGS" },
+    { PC_SET_GROUP_CONTROLS, 7, "COMBAT" },
+    { PC_SET_GROUP_CONTROLS, 8, "STICKS" },
+    { PC_SET_GROUP_CONTROLS, 11, "GYRO" },
+    { PC_SET_GROUP_CONTROLS, 16, "BINDINGS" },
     { PC_SET_GROUP_CAMERA, 0, "CAMERA" },
-    { PC_SET_GROUP_CAMERA, 2, "TARGETING" },
     { PC_SET_GROUP_GAMEPLAY, 0, "PIKMIN" },
-    { PC_SET_GROUP_GAMEPLAY, 6, "CO-OP" },
+    { PC_SET_GROUP_GAMEPLAY, 2, "WORLD" },
+    { PC_SET_GROUP_GAMEPLAY, 3, "HUD" },
+#else
+    { PC_SET_GROUP_CONTROLS, 0, "SCHEME" },
+    { PC_SET_GROUP_CONTROLS, 3, "ACTIONS" },
+    { PC_SET_GROUP_CONTROLS, 10, "COMBAT" },
+    { PC_SET_GROUP_CONTROLS, 13, "STICKS" },
+    { PC_SET_GROUP_CONTROLS, 16, "GYRO" },
+    { PC_SET_GROUP_CONTROLS, 21, "BINDINGS" },
+    { PC_SET_GROUP_CAMERA, 0, "CAMERA" },
+    { PC_SET_GROUP_CAMERA, 3, "CO-OP" },
+    { PC_SET_GROUP_GAMEPLAY, 0, "PIKMIN" },
+    { PC_SET_GROUP_GAMEPLAY, 5, "WORLD" },
+    { PC_SET_GROUP_GAMEPLAY, 6, "HUD" },
+#endif
     { PC_SET_GROUP_CHEATS, 0, "DAY & HEALTH" },
     { PC_SET_GROUP_CHEATS, 3, "PIKMIN" },
     { PC_SET_GROUP_CHEATS, 9, "OLIMAR" },

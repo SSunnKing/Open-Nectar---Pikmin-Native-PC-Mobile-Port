@@ -2,6 +2,7 @@
 #ifdef PIKI_PC_PORT
 extern "C" int pc_settings_get_infinite_day(void);
 extern "C" int pc_settings_get_day_minutes(void);
+extern "C" int pc_settings_get_eternal_night(void);
 #include "Game/GameSystem.h"
 
 // Mods "Infinite Day" y "Day Length" (luz natural): el reloj de la partida se
@@ -19,7 +20,7 @@ static bool pcVisualClockWanted(u32 dayCount)
 {
 	Game::GameSystem* gs = Game::gameSystem;
 	return gs && gs->isStoryMode() && gs->mSection && !gs->mIsInCave
-	    && (pcInfiniteDay(dayCount) || pc_settings_get_day_minutes() > 0);
+	    && (pcInfiniteDay(dayCount) || pc_settings_get_day_minutes() > 0 || pc_settings_get_eternal_night());
 }
 #endif
 #include "JSystem/JKernel/JKRDvdRipper.h"
@@ -108,6 +109,13 @@ void TimeMgr::updateSlot()
 	// La luz lee el reloj visual; se restaura al salir para que el resto del
 	// juego siga viendo la hora de la partida.
 	const f32 pcGameTime = mCurrentTimeOfDay;
+	// "Eternal Night" también en las cinemáticas con gráficos del juego: ahí el
+	// reloj se para o lo fija la propia escena (el aterrizaje pone las 7:00) y
+	// la luz se recalcula sin pasar por update().
+	if (pc_settings_get_eternal_night() && pcVisualClockWanted(mDayCount)) {
+		sPcVisualActive    = true;
+		sPcVisualTimeOfDay = 0.0f;
+	}
 	if (sPcVisualActive) {
 		mCurrentTimeOfDay = sPcVisualTimeOfDay;
 	}
@@ -209,7 +217,11 @@ void TimeMgr::update()
 		// ritmo, pero solo en la superficie de la partida (fuera, el titulo y
 		// los menus siguen con su tiempo propio).
 		sPcVisualActive = pcVisualClockWanted(mDayCount);
-		if (sPcVisualActive) {
+		if (sPcVisualActive && pc_settings_get_eternal_night()) {
+			// "Eternal Night": la luz se queda en medianoche; el reloj de la
+			// partida (y la barra del sol) sigue a su ritmo.
+			sPcVisualTimeOfDay = 0.0f;
+		} else if (sPcVisualActive) {
 			sPcVisualTimeOfDay += mSpeedFactor * sys->mDeltaTime * (TIMEMGR_DAY_HOURS / mParms.mParms.mDayLengthSeconds.mValue);
 			if (sPcVisualTimeOfDay >= TIMEMGR_DAY_HOURS) {
 				sPcVisualTimeOfDay -= TIMEMGR_DAY_HOURS;
@@ -265,6 +277,8 @@ f32 TimeMgr::pcGetLightSunRatio()
 	mCurrentTimeOfDay  = gameTime;
 	return ratio;
 }
+
+bool TimeMgr::pcVisualActive() { return sPcVisualActive; }
 
 /// Tecla F6 (Debug Keys): una hora más. Con "Infinite Day" solo avanza la luz,
 /// para no llegar al atardecer y terminar el día.

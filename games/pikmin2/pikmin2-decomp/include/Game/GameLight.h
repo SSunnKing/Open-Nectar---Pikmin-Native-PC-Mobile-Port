@@ -296,6 +296,9 @@ struct GameLightMgr : public LightMgr {
 	inline void resetFlag(u32 flag) { mFlags.typeView &= ~flag; }
 	inline bool isFlag(u32 flag) const { return mFlags.typeView & flag; }
 	inline LightObj* getMainLight() const { return mMainLight; }
+#ifdef PIKI_PC_PORT
+	void pcApplyMoonlight();
+#endif
 
 	// _00      = VTBL
 	// _00-_50  = LightMgr

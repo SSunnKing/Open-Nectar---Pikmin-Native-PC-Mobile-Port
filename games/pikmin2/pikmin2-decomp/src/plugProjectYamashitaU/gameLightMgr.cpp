@@ -620,6 +620,60 @@ void GameLightMgr::calcSetting(GameLightTimeSetting* time1, GameLightTimeSetting
 	}
 }
 
+#ifdef PIKI_PC_PORT
+/**
+ * @brief Noche jugable (Infinite Day, Day Length, Eternal Night): luz de luna.
+ *
+ * Pikmin 2 nunca se juega de noche y su ajuste SUNTIME_Night es el violeta
+ * claro del despegue al anochecer. Con el reloj visual del port la noche dura
+ * horas, así que sus colores se llevan hacia una paleta de luna: azul oscuro
+ * en luces, ambiente y niebla. Sin esos modos no se toca, y el atardecer del
+ * final del día sigue siendo el original.
+ */
+static void pcLerpColor(Color4& c, u8 r, u8 g, u8 b, f32 t)
+{
+	c.r = u8(c.r + (r - c.r) * t);
+	c.g = u8(c.g + (g - c.g) * t);
+	c.b = u8(c.b + (b - c.b) * t);
+}
+
+void GameLightMgr::pcApplyMoonlight()
+{
+	if (!mTimeMgr || !TimeMgr::pcVisualActive()) {
+		return;
+	}
+	// Cuánto es de noche: entero en la noche, y en rampa durante la última
+	// media hora de la tarde y la primera de la mañana.
+	f32 night = 0.0f;
+	const f32 ratio = mTimeMgr->mLightSettingRatio;
+	switch (mTimeMgr->mLightSetting) {
+	case SUNTIME_Night:
+		night = 1.0f;
+		break;
+	case SUNTIME_Evening:
+		night = ratio > 0.5f ? (ratio - 0.5f) * 2.0f : 0.0f;
+		break;
+	case SUNTIME_Morning:
+		night = ratio < 0.5f ? 1.0f - ratio * 2.0f : 0.0f;
+		break;
+	default:
+		break;
+	}
+	if (night <= 0.0f) {
+		return;
+	}
+	const f32 t = night * 0.85f;
+	pcLerpColor(mMainLight->mColor, 70, 90, 150, t);
+	pcLerpColor(mSubLight->mColor, 25, 32, 65, t);
+	pcLerpColor(mSpecLight->mColor, 50, 60, 100, t);
+	pcLerpColor(mAmbientLight.mColor, 28, 36, 70, t);
+	Color4 fog;
+	mFogMgr->getColor(fog);
+	pcLerpColor(fog, 8, 12, 28, t);
+	mFogMgr->setColor(fog);
+}
+#endif
+
 /**
  * @note Address: 0x801210D0
  * @note Size: 0x1F0
@@ -666,6 +720,9 @@ void GameLightMgr::updateSunType()
 			            &mSettings.mSunLight.mLightTimes[SUNTIME_Demo]);
 			break;
 		}
+#ifdef PIKI_PC_PORT
+		pcApplyMoonlight();
+#endif
 	}
 }
 
