@@ -1,8 +1,50 @@
 #include "JSystem/J2D/J2DScreen.h"
+#include "JSystem/J2D/J2DPicture.h"
 #include "JSystem/J2D/J2DGrafContext.h"
 #include "JSystem/JUtility/JUTResource.h"
 #ifdef PIKI_PC_PORT
 #include "p2_host_j2d_blo.h"
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+extern f32 gPcHudWideK;
+extern f32 gPcHudWideW;
+extern bool gPcHudAnchor;
+extern bool gPcBgStretch;
+extern "C" void pc_gfx_p2_2d_widen_noclip(int on);
+extern f32 gPcHudWideH;
+#endif
+#ifdef PIKI_PC_PORT
+// Extension horizontal (sin escala ni giro) de los paneles que dibujan algo.
+static void pcHudAccumBounds(J2DPane* pane, f32 offsetX, f32& minX, f32& maxX)
+{
+	JSUTreeIterator<J2DPane> iter;
+	for (iter = pane->getPaneTree()->getFirstChild(); iter != pane->getPaneTree()->getEndChild(); ++iter) {
+		J2DPane* child = iter.getObject();
+		if (!child || !child->isVisible() || !child->mBounds.isValid()) continue;
+		const f32 x = offsetX + child->mTranslateX;
+		if (child->getTypeID() != PANETYPE_Pane) {
+			minX = x + child->mBounds.i.x < minX ? x + child->mBounds.i.x : minX;
+			maxX = x + child->mBounds.f.x > maxX ? x + child->mBounds.f.x : maxX;
+		}
+		pcHudAccumBounds(child, x, minX, maxX);
+	}
+}
+
+// Izquierda si el contenido empieza en el primer cuarto y no pasa del centro,
+// derecha al reves; lo que cruza la pantalla (medidor de sol) queda centrado.
+static f32 pcHudScreenShift(J2DPane* root)
+{
+	const f32 W = gPcHudWideW;
+	f32 minX = 1e9f, maxX = -1e9f;
+	pcHudAccumBounds(root, root->mTranslateX, minX, maxX);
+	if (minX > maxX) return 0.0f;
+	const f32 shift = 0.5f * W * (gPcHudWideK - 1.0f);
+	if (minX < 0.25f * W && maxX < 0.6f * W) return -shift;
+	if (maxX > 0.75f * W && minX > 0.2f * W) return shift;
+	return 0.0f;
+}
 #endif
 
 JGeometry::TBox2f J2DPane::static_mBounds(0.0f, 0.0f, 0.0f, 0.0f);
@@ -405,6 +447,168 @@ void J2DPane::draw(f32 x, f32 y, const J2DGrafContext* grafContext, bool isOrtho
 			mColorAlpha = mAlpha;
 		}
 
+#ifdef PIKI_PC_PORT
+		// HUD ancho (ver J2DPerspGraph::setPort): cada pantalla del HUD se
+		// mueve entera hacia el borde donde cae su contenido; los hijos la
+		// siguen por mGlobalMtx.
+		if (!parent && gPcHudAnchor && gPcHudWideK > 1.0f && grafContext->getGrafType() != J2DGraf_Ortho) {
+			const f32 dx = pcHudScreenShift(this);
+			mGlobalMtx[0][3] += dx;
+			mGlobalBounds.addPos(dx, 0.0f);
+		}
+		// Fondo de pantalla completa (imagen tan ancha como la pantalla): se
+		// alarga hasta los bordes de la ventana sin deformarse, ampliando a la
+		// vez la superficie y las coordenadas de textura. Una textura que se
+		// repite continua; una con borde fijo alarga ese borde. Sin recorte a 4:3.
+		bool pcExtendBg = false;
+		{
+			// PIKMIN_WIDE_DEBUG=1: paneles anchos candidatos a fondo (una vez por etiqueta).
+			static const bool dbg = getenv("PIKMIN_WIDE_DEBUG") != nullptr;
+			static int dbgCount   = 0;
+			static u64 seen[512];
+			bool isNew = true;
+			for (int i = 0; i < dbgCount; i++) {
+				if (seen[i] == (u64)mTag) isNew = false;
+			}
+			if (dbg && isNew && dbgCount < 512 && parent && gPcHudWideK > 1.0f && grafContext->getGrafType() != J2DGraf_Ortho
+			    && fabsf(mGlobalMtx[0][0]) * mBounds.getWidth() >= 0.2f * gPcHudWideW) {
+				seen[dbgCount++] = (u64)mTag;
+				char tag[9] = {};
+				memcpy(tag, &mTag, 8);
+				printf("[WIDE] tag=%.8s type=0x%x w=%.1f m00=%.4f m01=%.4f m03=%.1f kids=%u W=%.0f\n", tag, getTypeID(),
+				       mBounds.getWidth(), mGlobalMtx[0][0], mGlobalMtx[0][1], mGlobalMtx[0][3], (unsigned)mTree.getNumChildren(),
+				       gPcHudWideW);
+				printf("[WIDE]   ang=%.1f,%.1f,%.1f scale=%.3f,%.3f b=(%.1f,%.1f)-(%.1f,%.1f) r0=%.3f,%.3f,%.3f,%.1f r1=%.3f,%.3f,%.3f,%.1f r2=%.3f,%.3f,%.3f,%.1f\n",
+				       mAngleX, mAngleY, mAngleZ, mScaleX, mScaleY, mBounds.i.x, mBounds.i.y, mBounds.f.x, mBounds.f.y,
+				       mGlobalMtx[0][0], mGlobalMtx[0][1], mGlobalMtx[0][2], mGlobalMtx[0][3], mGlobalMtx[1][0], mGlobalMtx[1][1],
+				       mGlobalMtx[1][2], mGlobalMtx[1][3], mGlobalMtx[2][0], mGlobalMtx[2][1], mGlobalMtx[2][2], mGlobalMtx[2][3]);
+			}
+		}
+		JGeometry::TBox2f pcSavedBounds;
+		JGeometry::TVec2<s16> pcSavedTc[4];
+		bool pcStretched   = false;
+		Mtx pcSavedMtx;
+		// PIKMIN_WIDE_DEBUG=1 en modo "estirar fondo": cada imagen dibujada con
+		// su extension en pantalla, una vez por etiqueta.
+		auto pcLogStretch = [&](const char* what, f32 l, f32 r) {
+			static const bool dbg = getenv("PIKMIN_WIDE_DEBUG") != nullptr;
+			static u64 seen[256];
+			static int seenCount = 0;
+			if (!dbg || !gPcBgStretch || seenCount >= 256) return;
+			for (int i = 0; i < seenCount; i++) {
+				if (seen[i] == (u64)mTag) return;
+			}
+			seen[seenCount++] = (u64)mTag;
+			char tag[9] = {};
+			memcpy(tag, &mTag, 8);
+			const f32 y0 = mGlobalMtx[1][1] * mBounds.i.y + mGlobalMtx[1][3], y1 = mGlobalMtx[1][1] * mBounds.f.y + mGlobalMtx[1][3];
+			printf("[WIDE] FS %s tag=%.8s type=0x%x scr=%.1f..%.1f y=%.1f..%.1f m01=%.3f kids=%u parent=%d\n", what, tag, getTypeID(), l, r,
+			       y0, y1, mGlobalMtx[0][1], (unsigned)mTree.getNumChildren(), parent ? 1 : 0);
+		};
+		const f32 pcA      = mGlobalMtx[0][0];
+		const f32 pcScrW   = fabsf(pcA) * mBounds.getWidth();
+		const f32 pcScrH   = fabsf(mGlobalMtx[1][1]) * mBounds.getHeight();
+		const f32 pcSx0    = pcA * mBounds.i.x + mGlobalMtx[0][3];
+		const f32 pcSx1    = pcA * mBounds.f.x + mGlobalMtx[0][3];
+		const f32 pcScrL   = pcSx0 < pcSx1 ? pcSx0 : pcSx1;
+		const f32 pcScrR   = pcSx0 < pcSx1 ? pcSx1 : pcSx0;
+		const bool pcFull  = pcScrW >= 0.95f * gPcHudWideW;
+		// Modo "estirar fondo": las rejillas hechas de losetas (Pgrid_u0..)
+		// se estiran aunque cada loseta sea estrecha.
+		bool pcGridTile = false;
+		bool pcKeep43   = false;
+		if (gPcBgStretch) {
+			char name[9] = {};
+			const u64 tagValue = (u64)mTag;
+			int n              = 0;
+			for (int i = 7; i >= 0; i--) {
+				const char c = (char)((tagValue >> (i * 8)) & 0xFF);
+				if (c) name[n++] = c;
+			}
+			pcGridTile = strstr(name, "grid") != nullptr;
+			// La cortina de entrada (Popen1/2) es mas ancha que la pantalla y su
+			// parte oscura y su brillo de la junta quedaban, estirados, en los
+			// laterales; PICT_010 (capa a pantalla completa) oscurecia los
+			// laterales igual. Se quedan en el 4:3 original.
+			pcKeep43 = strncmp(name, "Popen", 5) == 0;
+		}
+		// Pieza de fondo grande pegada a un borde (bandas hechas de trozos).
+		const bool pcPiece = pcScrW >= 0.25f * gPcHudWideW && pcScrH >= 0.25f * gPcHudWideH
+		                  && (pcScrL <= 0.02f * gPcHudWideW || pcScrR >= 0.98f * gPcHudWideW);
+		if (pcKeep43) {
+			pcLogStretch("keep43", pcScrL, pcScrR);
+		} else if (parent && gPcHudWideK > 1.0f && !gPcHudAnchor && grafContext->getGrafType() != J2DGraf_Ortho
+		    && getTypeID() == PANETYPE_Picture && pcA != 0.0f && fabsf(mGlobalMtx[0][1]) < 1e-3f * fabsf(pcA)
+		    && (pcFull || pcPiece || pcGridTile) && gPcBgStretch && (pcFull || pcGridTile)) {
+			// Modo "estirar fondo" (pantallas que lo piden): la imagen se
+			// escala a lo ancho centrada en la pantalla, sin tocar su textura.
+			pcExtendBg  = true;
+			pcStretched = true;
+			pcLogStretch("STRETCH", pcScrL, pcScrR);
+			static int pcGridLog = 0;
+			if (getenv("PIKMIN_WIDE_DEBUG") && pcGridTile && pcGridLog++ < 12) {
+				J2DPicture* pic = static_cast<J2DPicture*>(this);
+				printf("[WIDE] FS grid corners a=%u,%u,%u,%u alpha=%u colorAlpha=%u tc0=%d,%d tc1=%d,%d tc2=%d,%d\n", pic->mCornerColors[0].a,
+				       pic->mCornerColors[1].a, pic->mCornerColors[2].a, pic->mCornerColors[3].a, mAlpha, mColorAlpha, pic->mTexCoords[0].x,
+				       pic->mTexCoords[0].y, pic->mTexCoords[1].x, pic->mTexCoords[1].y, pic->mTexCoords[2].x, pic->mTexCoords[2].y);
+			}
+			PSMTXCopy(mGlobalMtx, pcSavedMtx);
+			const f32 mid = 0.5f * gPcHudWideW;
+			for (int i = 0; i < 3; i++) {
+				mGlobalMtx[0][i] *= gPcHudWideK;
+			}
+			mGlobalMtx[0][3] = mid + (mGlobalMtx[0][3] - mid) * gPcHudWideK;
+		} else if (gPcBgStretch && getTypeID() != PANETYPE_Pane && getTypeID() != PANETYPE_TextBox 
+		           && (pcLogStretch("keep", pcScrL, pcScrR), false)) {
+		} else if (parent && gPcHudWideK > 1.0f && !gPcHudAnchor && grafContext->getGrafType() != J2DGraf_Ortho
+		           && getTypeID() == PANETYPE_Picture && pcA != 0.0f && fabsf(mGlobalMtx[0][1]) < 1e-3f * fabsf(pcA)
+		           && (pcFull || pcPiece)) {
+			J2DPicture* pic   = static_cast<J2DPicture*>(this);
+			const f32 shift   = 0.5f * gPcHudWideW * (gPcHudWideK - 1.0f);
+			f32 extL          = (pcFull || pcScrL <= 0.02f * gPcHudWideW) ? pcScrL + shift : 0.0f;
+			f32 extR          = (pcFull || pcScrR >= 0.98f * gPcHudWideW) ? gPcHudWideW + shift - pcScrR : 0.0f;
+			extL              = extL > 0.0f ? extL : 0.0f;
+			extR              = extR > 0.0f ? extR : 0.0f;
+			// Con escala negativa (imagen girada) el lado local izquierdo cae a la derecha.
+			const f32 dl      = (pcA > 0.0f ? extL : extR) / fabsf(pcA);
+			const f32 dr      = (pcA > 0.0f ? extR : extL) / fabsf(pcA);
+			const f32 w       = mBounds.getWidth();
+			pcExtendBg        = true;
+			pcSavedBounds     = mBounds;
+			for (int i = 0; i < 4; i++) {
+				pcSavedTc[i] = pic->mTexCoords[i];
+			}
+			// Esquinas: 0 arriba-izq, 1 arriba-der, 2 abajo-izq, 3 abajo-der.
+			for (int row = 0; row < 4; row += 2) {
+				const f32 u0 = pcSavedTc[row].x, u1 = pcSavedTc[row + 1].x;
+				const f32 du = (u1 - u0) / w;
+				f32 nu0 = u0 - dl * du, nu1 = u1 + dr * du;
+				nu0 = nu0 < -32768.0f ? -32768.0f : (nu0 > 32767.0f ? 32767.0f : nu0);
+				nu1 = nu1 < -32768.0f ? -32768.0f : (nu1 > 32767.0f ? 32767.0f : nu1);
+				pic->mTexCoords[row].x     = (s16)nu0;
+				pic->mTexCoords[row + 1].x = (s16)nu1;
+			}
+			mBounds.i.x -= dl;
+			mBounds.f.x += dr;
+			static const bool dbgExt = getenv("PIKMIN_WIDE_DEBUG") != nullptr;
+			static u64 seenExt[256];
+			static int seenExtCount = 0;
+			bool isNewExt = true;
+			for (int i = 0; i < seenExtCount; i++) {
+				if (seenExt[i] == (u64)mTag) isNewExt = false;
+			}
+			if (dbgExt && isNewExt && seenExtCount < 256) {
+				seenExt[seenExtCount++] = (u64)mTag;
+				u32 scX, scY, scW, scH;
+				GXGetScissor(&scX, &scY, &scW, &scH);
+				char tag[9] = {};
+				memcpy(tag, &mTag, 8);
+				printf("[WIDE] EXT tag=%.8s dl=%.1f dr=%.1f tc0=%d,%d tc1=%d,%d scissor=%u,%u,%u,%u\n", tag, dl, dr,
+				       pcSavedTc[0].x, pcSavedTc[0].y, pcSavedTc[1].x, pcSavedTc[1].y, scX, scY, scW, scH);
+			}
+		}
+#endif
+
 		JGeometry::TBox2f scissorBounds(0.0f, 0.0f, 0.0f, 0.0f);
 		if (unkBool && isOrthoGraf) {
 			((J2DOrthoGraph*)grafContext)->scissorBounds(&scissorBounds, &mClipRect);
@@ -417,8 +621,29 @@ void J2DPane::draw(f32 x, f32 y, const J2DGrafContext* grafContext, bool isOrtho
 				tmpGraf.setScissor();
 			}
 			GXSetCullMode((GXCullMode)mCullMode);
+#ifdef PIKI_PC_PORT
+			if (pcExtendBg) {
+				pc_gfx_p2_2d_widen_noclip(1);
+			}
+#endif
 			drawSelf(x, y, &tmpGraf.mPosMtx);
+#ifdef PIKI_PC_PORT
+			if (pcExtendBg) {
+				pc_gfx_p2_2d_widen_noclip(0);
+			}
+#endif
 		}
+#ifdef PIKI_PC_PORT
+		if (pcStretched) {
+			PSMTXCopy(pcSavedMtx, mGlobalMtx);
+		} else if (pcExtendBg) {
+			J2DPicture* pic = static_cast<J2DPicture*>(this);
+			mBounds         = pcSavedBounds;
+			for (int i = 0; i < 4; i++) {
+				pic->mTexCoords[i] = pcSavedTc[i];
+			}
+		}
+#endif
 
 		JSUTreeIterator<J2DPane> iter;
 		for (iter = mTree.getFirstChild(); iter != mTree.getEndChild(); ++iter) {

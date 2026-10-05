@@ -17,8 +17,7 @@ enum class HubAction {
     Update,  // botón Actualizar (pide la carpeta de la instalación anterior)
 };
 
-// Juegos que muestra la pantalla principal. Pikmin 2 aparece, pero todavía no
-// se puede instalar.
+// Juegos que muestra la pantalla principal; los dos se instalan desde su disco.
 enum class HubGame { Pikmin1 = 0, Pikmin2 = 1 };
 
 constexpr int kHubGameCount = 2;
@@ -67,6 +66,16 @@ public:
     // true si, tras cancelar la instalación, el usuario pulsó la portada de un
     // juego ya instalado: quien llama debe arrancarlo.
     bool playRequested() const;
+    // Juego que instalan los modales de rutas y progreso. `suggestedDirectory`
+    // rellena la carpeta si todavía no hay ninguna elegida.
+    void setInstallGame(HubGame game, const std::string& suggestedDirectory = std::string());
+    // Marca un juego como instalado sin reabrir la ventana.
+    // Sustituye a runHome() cuando el modal de rutas vuelve a la pantalla
+    // principal: quien llama resuelve ahí jugar, actualizar e instalar
+    // Pikmin 2, y devuelve solo Quit o Install de Pikmin 1.
+    void setHomeLoop(std::function<HubResult()> loop);
+    void markInstalled(HubGame game, const std::string& directory, const std::string& executable,
+                       const std::string& discId);
     // true si la comprobación en segundo plano encontró un release más nuevo
     // en GitHub (y ya terminó); lo deja en `release`.
     bool newerRelease(ReleaseInfo& release) const;

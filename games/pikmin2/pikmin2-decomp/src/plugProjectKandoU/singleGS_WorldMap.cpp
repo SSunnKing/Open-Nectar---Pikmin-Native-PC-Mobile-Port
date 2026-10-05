@@ -1,5 +1,6 @@
 #include "Game/GameSystem.h"
 #ifdef PIKI_PC_PORT
+extern "C" void pc_gfx_p2_extend_edge_color(float gxY0, float gxY1, float stripW);
 extern "C" void pc_gfx_set_post_allowed(int allowed);
 #endif
 #include "Game/MoviePlayer.h"
@@ -296,6 +297,13 @@ void SelectState::draw(SingleGameSection* game, Graphics& gfx)
 
 		gfx.mPerspGraph.setPort();
 		particle2dMgr->draw(0, 0);
+#ifdef PIKI_PC_PORT
+		// Pantallas anchas: el marco y la foto del mapa solo existen en el
+		// 4:3 (alargados se estiran en lineas); los laterales toman el color
+		// del borde del marco, fila a fila.
+		gfx.mPerspGraph.setPort();
+		pc_gfx_p2_extend_edge_color(0.0f, 448.0f, 6.0f);
+#endif
 
 		if (sParentHeapFreeSize && sParentHeapFreeSize_Last && (sParentHeapFreeSize != sParentHeapFreeSize_Last)) {
 			gfx.mOrthoGraph.setPort();

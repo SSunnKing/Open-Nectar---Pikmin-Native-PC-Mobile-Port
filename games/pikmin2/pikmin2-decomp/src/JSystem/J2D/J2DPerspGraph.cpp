@@ -1,8 +1,36 @@
 #include "types.h"
+#ifdef PIKI_PC_PORT
+extern "C" void pc_gfx_p2_interface_begin(void);
+#endif
 #include "JSystem/J2D/J2DGrafContext.h"
 #include "fdlibm.h"
 #include "math.h"
 #include "Dolphin/gx.h"
+
+#ifdef PIKI_PC_PORT
+f32 gPcHudWideK    = 0.0f;   // >1: 2D en perspectiva sin deformar (aspecto ventana / 4:3)
+f32 gPcHudWideW    = 640.0f; // tamano del espacio de paneles
+f32 gPcHudWideH    = 480.0f;
+bool gPcHudAnchor  = false;  // ademas, cada pantalla va a su borde (HUD)
+bool gPcBgStretch  = false;  // fondos de pantalla completa estirados (no prolongados)
+extern "C" float pc_gfx_get_current_aspect_ratio(void);
+extern "C" void pc_gfx_p2_set_2d_widen(float k);
+extern "C" void pc_gfx_p2_2d_widen_noclip(int on);
+
+// HUD (ObjGround / ObjCave): ademas de lo anterior, anclado a los bordes.
+// Sin recorte a 4:3: el HUD anclado sale de esa zona.
+void pcHudWideBegin(J2DPerspGraph*)
+{
+	gPcHudAnchor = true;
+	pc_gfx_p2_2d_widen_noclip(1);
+}
+
+void pcHudWideEnd(J2DPerspGraph*)
+{
+	gPcHudAnchor = false;
+	pc_gfx_p2_2d_widen_noclip(0);
+}
+#endif
 
 /**
  * __ct
@@ -47,7 +75,27 @@ void J2DPerspGraph::setFovy(f32 fovY)
  */
 void J2DPerspGraph::setPort()
 {
+#ifdef PIKI_PC_PORT
+	pc_gfx_p2_interface_begin(); // postproceso antes de la interfaz
+#endif
 	J2DGrafContext::setPort();
+#ifdef PIKI_PC_PORT
+	// 2D sin deformar como en Pikmin 1: el renderer estira el 2D al ancho de
+	// la ventana, asi que la proyeccion se ensancha en la misma proporcion.
+	// Los menus quedan centrados; el HUD ademas se ancla (gPcHudAnchor).
+	{
+		const f32 k = pc_gfx_get_current_aspect_ratio() / (640.0f / 480.0f);
+		gPcHudWideK = k > 1.001f ? k : 0.0f;
+		gPcHudWideW = mBounds.getWidth();
+		gPcHudWideH = mBounds.getHeight();
+		if (gPcHudWideK > 1.0f) {
+			C_MTXPerspective(mMtx44, mFovY, mBounds.getWidth() / mBounds.getHeight() * gPcHudWideK, mNear, mFar);
+			GXSetProjection(mMtx44, GX_PERSPECTIVE);
+			pc_gfx_p2_set_2d_widen(gPcHudWideK);
+			return;
+		}
+	}
+#endif
 	C_MTXPerspective(mMtx44, mFovY, mBounds.getWidth() / mBounds.getHeight(), mNear, mFar);
 	GXSetProjection(mMtx44, GX_PERSPECTIVE);
 }

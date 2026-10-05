@@ -161,6 +161,7 @@ struct PcConfig {
     // Mod: show how many Pikmin are idle on the map (0=off, 1=on).
     int idleCounter = 0;
     int eternalNight = 0;       // siempre de noche (luz), el reloj del día sigue igual
+    int fireflies = 0;          // luciérnagas por el escenario (de día o de noche)
     // Mods: health as a percentage of the original. Applied as a divisor on
     // incoming damage rather than by resizing the health bar, so the life
     // gauge and every "below a quarter" check keep reading correctly.
@@ -276,6 +277,7 @@ struct PcConfig {
         bluesOnlyWater = 0;
         idleCounter = 0;
         eternalNight = 0;
+        fireflies = 0;
         naviHealthPct = 100;
         tekiHealthPct = 100;
         infiniteDay = 0;
@@ -1147,6 +1149,7 @@ void saveConfig() {
     out << "bluesOnlyWater = " << sConfig.bluesOnlyWater << "\n";
     out << "idleCounter = " << sConfig.idleCounter << "\n";
     out << "eternalNight = " << sConfig.eternalNight << "\n";
+    out << "fireflies = " << sConfig.fireflies << "\n";
     out << "naviHealthPct = " << sConfig.naviHealthPct << "\n";
     out << "tekiHealthPct = " << sConfig.tekiHealthPct << "\n";
     out << "infiniteDay = " << sConfig.infiniteDay << "\n";
@@ -1324,6 +1327,7 @@ void loadConfig() {
             sConfig.bluesOnlyWater = atoi(val.c_str()) ? 1 : 0;
         }
         else if (key == "eternalNight") sConfig.eternalNight = atoi(val.c_str()) ? 1 : 0;
+        else if (key == "fireflies") sConfig.fireflies = atoi(val.c_str()) ? 1 : 0;
         else if (key == "idleCounter") {
             sConfig.idleCounter = atoi(val.c_str()) ? 1 : 0;
         }
@@ -1375,7 +1379,7 @@ void loadConfig() {
         else if (key == "vsPikiLimit") sConfig.vsPikiLimit = std::clamp(atoi(val.c_str()), 0, 2);
         else if (key == "vsPellets") sConfig.vsPellets = std::clamp(atoi(val.c_str()), 0, 3);
         else if (key == "lockOn") {
-            sConfig.lockOn = atoi(val.c_str()) ? 1 : 0;
+            sConfig.lockOn = std::clamp(atoi(val.c_str()), 0, 2); // 0 off, 1 manual, 2 automatico
         }
         else if (key == "charge") {
             sConfig.charge = atoi(val.c_str()) ? 1 : 0;
@@ -2622,6 +2626,9 @@ void modsRowChange(int row, bool left, bool right) {
     else if (row == 40) {
         if (left || right) sPending.eternalNight = sPending.eternalNight ? 0 : 1;
     }
+    else if (row == 41) {
+        if (left || right) sPending.fireflies = sPending.fireflies ? 0 : 1;
+    }
     // Vida de Olimar, en porcentaje de la original.
     else if (row == 11) {
         if (pc_hardmode_active())
@@ -2646,7 +2653,8 @@ void modsRowChange(int row, bool left, bool right) {
     }
     // Fijar objetivo.
     else if (row == 15) {
-        if (left || right) sPending.lockOn = sPending.lockOn ? 0 : 1;
+        if (right) sPending.lockOn = (sPending.lockOn + 1) % 3;
+        if (left) sPending.lockOn = (sPending.lockOn + 2) % 3;
     }
     // Mandar el escuadrón contra el objetivo fijado.
     else if (row == 16) {
@@ -5518,6 +5526,8 @@ int pc_settings_get_idle_counter(void) {
     return sConfig.idleCounter;
 }
 
+int pc_settings_get_fireflies(void) { return sConfig.fireflies; }
+
 int pc_settings_get_eternal_night(void) {
     return sConfig.eternalNight;
 }
@@ -5825,6 +5835,7 @@ void modsRowValue(int i, char* value, size_t n) {
     case 9: snprintf(value, n, "%s", sPending.bluesOnlyWater ? "On" : "Off (original)"); break;
     case 10: snprintf(value, n, "%s", sPending.idleCounter ? "On" : "Off (original)"); break;
     case 40: snprintf(value, n, "%s", sPending.eternalNight ? "On" : "Off (original)"); break;
+    case 41: snprintf(value, n, "%s", sPending.fireflies ? "On" : "Off (original)"); break;
     case 11: healthPctLabel(sPending.naviHealthPct, "Infinite", value, n); break;
     case 12: healthPctLabel(sPending.tekiHealthPct, "Insta Kill", value, n); break;
     case 13:
@@ -5832,7 +5843,7 @@ void modsRowValue(int i, char* value, size_t n) {
         else snprintf(value, n, "%s", sPending.infiniteDay ? "On" : "Off (original)");
         break;
     case 14: snprintf(value, n, "%s", sPending.freeCamera ? "On" : "Off (original)"); break;
-    case 15: snprintf(value, n, "%s", sPending.lockOn ? "On" : "Off (original)"); break;
+    case 15: snprintf(value, n, "%s", sPending.lockOn == 2 ? "Automatic" : sPending.lockOn == 1 ? "Manual" : "Off (original)"); break;
     case 16:
         if (!sPending.lockOn) snprintf(value, n, "Needs Lock-On");
         else snprintf(value, n, "%s", sPending.charge ? "On" : "Off (original)");
@@ -5962,7 +5973,8 @@ const GroupRow kControlsRows[] = {
     { SRC_MODS, 22, "Cancel Throw With B", "While holding a Pikmin with A, press B to put it back in the squad." },
     { SRC_MODS, 33, "Quick Grab", "Any Pikmin in the squad goes straight to the captain's hand, however far behind it is." },
     { SRC_MODS, 24, "Onion: Y for Steps of 10", "In the Onion menu, hold Y while moving up or down to move 10 Pikmin at a time." },
-    { SRC_MODS, 15, "Lock-On", "Target the enemy under the cursor with the Lock-On button (R / R3). Press again to release." },
+    { SRC_MODS, 15, "Lock-On", "Automatic: locks onto the nearest enemy or object as you approach. Manual: lock with the Lock-On button (bindable in Controls)." },
+    { SRC_MODS, 16, "Charge", "With a target locked, send the whole squad at it." },
     { SRC_ADV, 1, "Stick Dead Zone", "Ignores small stick movements. Raise it if a worn stick drifts." },
     { SRC_ADV, 2, "Stick Invert (X/Y)", "Inverts the movement stick." },
     { SRC_ADV, 3, "C-Stick Invert (X/Y)", "Inverts the right stick (C-Stick)." },
@@ -6002,11 +6014,11 @@ const GroupRow kControlsRows[] = {
 
 const GroupRow kCameraRows[] = {
 #if PIKI_P2_HOST
-    { SRC_MODS, 14, "Free Camera", "Turn the camera with the mouse or right stick, as in Pikmin 3. Swarm gets its own button." },
+    { SRC_MODS, 14, "Free Camera", "Turn the camera freely, as in Pikmin 3. MOUSE: move the cursor to the edge of its circle and keep pushing left or right; the camera turns that way. CONTROLLER: right stick. L puts the camera behind the captain and the cursor in front. Swarm (moving the squad) moves to D-pad Down on a controller, or to its own Swarm binding." },
     { SRC_MODS, 38, "Free Camera Pad Sensitivity", "How fast the right stick turns the free camera on a controller. 100% is the default." },
     { SRC_MODS, 18, "First Person", "Allows a view from the captain's helmet. Switch in game with its button (V / L3)." },
 #else
-    { SRC_MODS, 14, "Free Camera", "Turn the camera as in Pikmin 3: hold Left Shift and move the mouse, or use the right stick on a controller. Swarm gets its own button." },
+    { SRC_MODS, 14, "Free Camera", "Turn the camera freely, as in Pikmin 3. MOUSE: move the cursor to the edge of its circle and keep pushing left or right; the camera turns that way. CONTROLLER: right stick. L puts the camera behind the captain and the cursor in front. Swarm (moving the squad) moves to D-pad Down on a controller, or to its own Swarm binding." },
     { SRC_MODS, 38, "Free Camera Pad Sensitivity", "How fast the right stick turns the free camera on a controller. 100% is the default." },
     { SRC_MODS, 18, "First Person", "Allows a view from Olimar's helmet. Switch in game with its button (V / L3)." },
     { SRC_MODS, 6, "Co-op Split Screen", "How the screen divides in two-player co-op." },
@@ -6018,7 +6030,8 @@ const GroupRow kGameplayRows[] = {
 #if PIKI_P2_HOST
     { SRC_MODS, 25, "Instant Whistle Response", "Whistled Pikmin join the squad at once, without stopping to turn and look first." },
     { SRC_MODS, 23, "No Tripping", "Pikmin running in the squad never trip and fall behind." },
-    { SRC_MODS, 40, "Eternal Night", "Always night above ground, whatever the day length. Fireflies fly around the field." },
+    { SRC_MODS, 40, "Eternal Night", "Always night above ground, whatever the day length." },
+    { SRC_MODS, 41, "Fireflies", "Fireflies drift around the field, by day or by night." },
     { SRC_MODS, 10, "Idle Pikmin Counter", "Shows how many Pikmin are standing idle." },
 #else
     { SRC_MODS, 25, "Instant Whistle Response", "Whistled Pikmin join the squad at once, without stopping to turn and look first." },

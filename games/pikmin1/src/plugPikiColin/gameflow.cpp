@@ -25,6 +25,7 @@
 #include "zen/ogTest.h"
 #if defined(PIKI_PC_PORT)
 #include "settings/pc_settings.h"
+extern "C" float pc_gfx_get_current_aspect_ratio(void);
 #endif
 
 /// Global game state.
@@ -129,8 +130,26 @@ void GameFlow::drawLoadLogo(Graphics& gfx, bool force60FPSSpin, Texture* logoTex
 		top -= 40;
 	}
 
+#if defined(PIKI_PC_PORT)
+	// El 2D a pantalla completa se estira al ancho de la ventana: el logo se
+	// dibuja mas estrecho en la misma proporcion para que quede sin deformar.
+	// El de Nintendo del arranque, ademas, centrado y 1.5x (en GC salia
+	// pequeno y 40 puntos por encima del centro).
+	const f32 pcK     = pc_gfx_get_current_aspect_ratio() / (640.0f / 480.0f);
+	const f32 pcScale = mIsNintendoLoadLogo ? 1.5f : 1.0f;
+	const int drawW   = int(logoTex->mWidth * pcScale / (pcK > 1.001f ? pcK : 1.0f) + 0.5f);
+	const int drawH   = int(logoTex->mHeight * pcScale + 0.5f);
+	left              = gfx.mScreenWidth / 2 - drawW / 2;
+	top               = gfx.mScreenHeight / 2 - drawH / 2;
+	if (!mIsNintendoLoadLogo) {
+		top = gfx.mScreenHeight / 2 - logoTex->mHeight / 2;
+	}
+	gfx.drawRectangle(RectArea(left, top, left + drawW, top + drawH),
+	                  RectArea(0, 0, logoTex->mWidth, logoTex->mHeight), nullptr);
+#else
 	gfx.drawRectangle(RectArea(left, top, left + logoTex->mWidth, top + logoTex->mHeight),
 	                  RectArea(0, 0, logoTex->mWidth, logoTex->mHeight), nullptr);
+#endif
 
 	STACK_PAD_VAR(1);
 }

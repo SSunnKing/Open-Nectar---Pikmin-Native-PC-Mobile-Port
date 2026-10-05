@@ -763,10 +763,9 @@ struct Hub {
     void drawCard(int index, ImVec2 origin, ImVec2 size, float dt, float t)
     {
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        // Pikmin 1 siempre se puede instalar desde este launcher. Pikmin 2 se
-        // habilita cuando Fusion le proporciona un ejecutable y sus datos.
-        const bool available = index == int(HubGame::Pikmin1) || state.games[index].installed;
-        const bool installed = available && state.games[index].installed;
+        // Los dos juegos se instalan desde este launcher con su propio disco.
+        const bool available = true;
+        const bool installed = state.games[index].installed;
 
         ImGui::SetCursorScreenPos(origin);
         ImGui::PushID(index);
@@ -841,7 +840,8 @@ struct Hub {
 
         if (clicked) {
             if (installed) choose(HubAction::Play, HubGame(index));
-            else if (available) notify("Install Pikmin first: use the Install button below its cover.");
+            else if (available) notify(index == 0 ? "Install Pikmin first: use the Install button below its cover."
+                                                  : "Install Pikmin 2 first: use the Install button below its cover.");
         }
     }
 
@@ -863,9 +863,9 @@ struct Hub {
             centredText(ImGui::GetWindowDrawList(), fonts.title, 28.0f, ImVec2(x + cardW * 0.5f, below + 14.0f),
                         col(kOrange), names[i]);
             const bool isPikmin2 = i == int(HubGame::Pikmin2);
-            const bool comingSoon = isPikmin2 && !state.games[i].installed;
+            const bool comingSoon = false;
             // Ya instalado solo tiene sentido actualizar: un botón a lo ancho.
-            const bool installed = !comingSoon && state.games[i].installed;
+            const bool installed = state.games[i].installed;
             const float buttonW = installed ? cardW : (cardW - 12.0f) * 0.5f;
             ImGui::PushID(i);
             ImGui::SetCursorScreenPos(ImVec2(x, below + 38.0f));
@@ -1532,6 +1532,8 @@ struct HubWindow::Impl {
     bool quitRequested = false;
     bool startAtHome = false;  // la próxima elección de rutas empieza en la pantalla principal
     bool playRequested = false;
+    HubGame installGame = HubGame::Pikmin1; // juego que instalan los modales de rutas y progreso
+    std::function<HubResult()> homeLoop;   // ver setHomeLoop
 
     enum class Modal { None, Paths, Progress, Message };
     Modal modal = Modal::None;
@@ -1616,10 +1618,12 @@ struct HubWindow::Impl {
         const ImVec2 panel(std::min(size.x - 80.0f, 700.0f), 430.0f);
         const ImVec2 at = beginModal(size, panel);
         const float width = panel.x - 68.0f;
-        title(at, "Install Pikmin");
+        const bool pikmin2 = installGame == HubGame::Pikmin2;
+        title(at, pikmin2 ? "Install Pikmin 2" : "Install Pikmin");
         ImDrawList* dl = ImGui::GetWindowDrawList();
         dl->AddText(hub->fonts.caption, 16.0f, ImVec2(at.x, at.y + 42.0f), col(kOrange, 0.75f),
-                    "Use your own disc: Pikmin USA (Rev 1) or Europe. ISO or GCM; RVZ, WIA and GCZ need Dolphin.");
+                    pikmin2 ? "Use your own disc: Pikmin 2 Europe (GPVP01). ISO or GCM; RVZ, WIA and GCZ need Dolphin."
+                            : "Use your own disc: Pikmin USA (Rev 1) or Europe. ISO or GCM; RVZ, WIA and GCZ need Dolphin.");
         if (pathField(ImVec2(at.x, at.y + 80.0f), width, "Disc image", rom, "No disc image chosen", "rom")) pathsAction = 1;
         if (pathField(ImVec2(at.x, at.y + 170.0f), width, "Install to", installDirectory, "No folder chosen", "dir")) pathsAction = 2;
         if (!pathsNote.empty()) {
@@ -1638,7 +1642,7 @@ struct HubWindow::Impl {
         const ImVec2 panel(std::min(size.x - 80.0f, 700.0f), 260.0f);
         const ImVec2 at = beginModal(size, panel);
         const float width = panel.x - 68.0f;
-        title(at, "Installing Pikmin");
+        title(at, installGame == HubGame::Pikmin2 ? "Installing Pikmin 2" : "Installing Pikmin");
         ImDrawList* dl = ImGui::GetWindowDrawList();
         const bool indeterminate = percent > 100;
         const std::string status = indeterminate ? phase + "..." : phase + "  " + std::to_string(percent) + "%";
@@ -1843,6 +1847,26 @@ HubResult HubWindow::runHome()
     return m.result;
 }
 
+void HubWindow::setInstallGame(HubGame game, const std::string& suggestedDirectory)
+{
+    Impl& m = *mImpl;
+    if (m.installGame != game) m.rom.clear();
+    m.installGame = game;
+    if (m.installDirectory.empty()) m.installDirectory = suggestedDirectory;
+}
+
+void HubWindow::setHomeLoop(std::function<HubResult()> loop) { mImpl->homeLoop = std::move(loop); }
+
+void HubWindow::markInstalled(HubGame game, const std::string& directory, const std::string& executable,
+                              const std::string& discId)
+{
+    GameInstall& install = mImpl->state.games[int(game)];
+    install.installed = true;
+    install.directory = directory;
+    install.executable = executable;
+    install.discId = discId;
+}
+
 bool HubWindow::playRequested() const { return mImpl->playRequested; }
 
 bool HubWindow::newerRelease(ReleaseInfo& release) const
@@ -1872,7 +1896,7 @@ bool HubWindow::choosePaths(const std::function<std::string()>& chooseRom,
             // Tras cancelar: de vuelta a la pantalla principal, y de ahí otra
             // vez al modal si pulsa Install.
             m.startAtHome = false;
-            const HubResult choice = runHome();
+            const HubResult choice = m.homeLoop ? m.homeLoop() : runHome();
             if (choice.action == HubAction::Quit) return false;
             if (choice.action == HubAction::Play) {
                 m.playRequested = true;
@@ -1900,6 +1924,12 @@ bool HubWindow::choosePaths(const std::function<std::string()>& chooseRom,
                 m.currentFile.clear();
                 return true;
             } else if (m.pathsAction == 4) {
+                // Pikmin 2 se instala desde el bucle de la pantalla principal:
+                // al cancelar se vuelve allí.
+                if (m.installGame == HubGame::Pikmin2) {
+                    m.modal = Impl::Modal::None;
+                    return false;
+                }
                 m.startAtHome = true;
                 break;
             }

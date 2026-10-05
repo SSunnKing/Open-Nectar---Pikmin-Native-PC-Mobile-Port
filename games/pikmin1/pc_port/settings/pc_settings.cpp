@@ -162,6 +162,7 @@ struct PcConfig {
     int breakableGates = 0;     // issue #70: los Pikmin rompen a golpes las compuertas reforzadas
     int freeCamPadPct = 100;    // issue #66: sensibilidad del stick derecho con la cámara libre
     int eternalNight = 0;       // siempre de noche (luz y luna), el reloj del día sigue igual
+    int fireflies = 0;          // luciérnagas por el escenario (de día o de noche)
     int p2Selection = 0;        // issue #67: cruceta como en Pikmin 2 (tipo fijo, arriba/abajo hoja/capullo/flor/bomba)
     // Reglas del modo VS (índices de las opciones del menú previo).
     int vsDuration = 2;  // 5 / 10 / 15 / 25 / 30 min
@@ -275,6 +276,7 @@ struct PcConfig {
         freeCamPadPct = 100;
         p2Selection = 0;
         eternalNight = 0;
+        fireflies = 0;
         allOnions = 0;
         vsDuration = 2;
         vsRocketWin = 1;
@@ -1095,6 +1097,7 @@ void saveConfig() {
     out << "freeCamPadPct = " << sConfig.freeCamPadPct << "\n";
     out << "p2Selection = " << sConfig.p2Selection << "\n";
     out << "eternalNight = " << sConfig.eternalNight << "\n";
+    out << "fireflies = " << sConfig.fireflies << "\n";
     out << "hideOlimarText = " << sConfig.hideOlimarText << "\n";
     out << "speedrunIntroHidden = " << sConfig.speedrunIntroHidden << "\n";
     out << "onionStep10 = " << sConfig.onionStep10 << "\n";
@@ -1294,6 +1297,7 @@ void loadConfig() {
             sConfig.breakableGates = atoi(val.c_str()) ? 1 : 0;
         }
         else if (key == "eternalNight") sConfig.eternalNight = atoi(val.c_str()) ? 1 : 0;
+        else if (key == "fireflies") sConfig.fireflies = atoi(val.c_str()) ? 1 : 0;
         else if (key == "p2Selection") {
             sConfig.p2Selection = atoi(val.c_str()) ? 1 : 0;
         }
@@ -2675,6 +2679,9 @@ void modsRowChange(int row, bool left, bool right) {
     }
     else if (row == 40) {
         if (left || right) sPending.eternalNight = sPending.eternalNight ? 0 : 1;
+    }
+    else if (row == 41) {
+        if (left || right) sPending.fireflies = sPending.fireflies ? 0 : 1;
     }
     else if (row == 39) {
         if (left || right) sPending.p2Selection = sPending.p2Selection ? 0 : 1;
@@ -5807,6 +5814,7 @@ int pc_settings_get_breakable_gates(void) { if (pc_speedrun_active()) return 0;
 }
 int pc_settings_get_p2_selection(void) { return sConfig.p2Selection; }
 int pc_settings_get_eternal_night(void) { return sConfig.eternalNight; }
+int pc_settings_get_fireflies(void) { return sConfig.fireflies; }
 float pc_settings_get_free_camera_pad_scale(void) { return sConfig.freeCamPadPct / 100.0f; }
 int pc_settings_get_bomb_control(void) { if (pc_speedrun_active()) return 0;
     return sConfig.bombControl;
@@ -5976,7 +5984,7 @@ const char* pc_settings_group_summary(int group) {
     case PC_SET_GROUP_GRAPHICS: return "Effects, colour, texture packs";
     case PC_SET_GROUP_CONTROLS: return "Actions, lock-on, sticks, gyro, bindings";
     case PC_SET_GROUP_CAMERA: return "Free camera, first person, co-op view";
-    case PC_SET_GROUP_GAMEPLAY: return "Pikmin behaviour, eternal night, HUD";
+    case PC_SET_GROUP_GAMEPLAY: return "Pikmin behaviour, night, fireflies, HUD";
     case PC_SET_GROUP_CHEATS: return "Day, health, Pikmin limit, whistle";
     case PC_SET_GROUP_DATA: return "Save transfer, reset settings";
     case PC_SET_GROUP_ACHIEVEMENTS: return "Unlocked achievements and how to get the rest";
@@ -6085,6 +6093,7 @@ void modsRowValue(int i, char* value, size_t n) {
         break;
     case 39: snprintf(value, n, "%s", sPending.p2Selection ? "On" : "Off"); break;
     case 40: snprintf(value, n, "%s", sPending.eternalNight ? "On" : "Off (original)"); break;
+    case 41: snprintf(value, n, "%s", sPending.fireflies ? "On" : "Off (original)"); break;
     case 38: snprintf(value, n, sPending.freeCamPadPct == 100 ? "%d%%  (original)" : "%d%%", sPending.freeCamPadPct); break;
     case 28: speedPctLabel(sPending.carrySpeedPct, value, n); break;
     case 29: speedPctLabel(sPending.naviSpeedPct, value, n); break;
@@ -6216,7 +6225,7 @@ const GroupRow kControlsRows[] = {
 };
 
 const GroupRow kCameraRows[] = {
-    { SRC_MODS, 14, "Free Camera", "Turn the camera as in Pikmin 3: hold Left Shift and move the mouse, or use the right stick on a controller. Swarm gets its own button." },
+    { SRC_MODS, 14, "Free Camera", "Turn the camera freely, as in Pikmin 3. MOUSE: move the cursor to the edge of its circle and keep pushing left or right; the camera turns that way. CONTROLLER: right stick. L puts the camera behind the captain and the cursor in front. Swarm (moving the squad) moves to D-pad Down on a controller, or to its own Swarm binding." },
     { SRC_MODS, 38, "Free Camera Pad Sensitivity", "How fast the right stick turns the free camera on a controller. 100% is the default." },
     { SRC_MODS, 18, "First Person", "Allows a view from Olimar's helmet. Switch in game with its button (V / L3)." },
     { SRC_MODS, 6, "Co-op Split Screen", "How the screen divides in two-player co-op." },
@@ -6230,6 +6239,7 @@ const GroupRow kGameplayRows[] = {
     { SRC_MODS, 9, "Blues Only In Water", "Only blue Pikmin walk into water on their own." },
     { SRC_MODS, 23, "No Tripping", "Pikmin running in the squad never trip and fall behind." },
     { SRC_MODS, 40, "Eternal Night", "Always night, whatever the day length: night lighting, and the moon crosses the day bar instead of the sun." },
+    { SRC_MODS, 41, "Fireflies", "Fireflies drift around the field, by day or by night." },
     { SRC_MODS, 10, "Idle Pikmin Counter", "Shows how many Pikmin are standing idle." },
     { SRC_MODS, 36, "Hide Olimar's Texts", "Skip the text boxes Olimar shows while you play: first Pikmin, ship parts, tips. The ending texts stay." },
 };
@@ -6354,7 +6364,7 @@ const GroupSection kSections[] = {
     { PC_SET_GROUP_CAMERA, 3, "CO-OP" },
     { PC_SET_GROUP_GAMEPLAY, 0, "PIKMIN" },
     { PC_SET_GROUP_GAMEPLAY, 5, "WORLD" },
-    { PC_SET_GROUP_GAMEPLAY, 6, "HUD" },
+    { PC_SET_GROUP_GAMEPLAY, 7, "HUD" },
     { PC_SET_GROUP_CHEATS, 0, "DAY & HEALTH" },
     { PC_SET_GROUP_CHEATS, 3, "PIKMIN" },
     { PC_SET_GROUP_CHEATS, 9, "OLIMAR" },

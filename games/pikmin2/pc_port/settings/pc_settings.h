@@ -70,6 +70,7 @@ int pc_settings_get_navi_health_pct(void);
 int pc_settings_get_teki_health_pct(void);
 int pc_settings_get_infinite_day(void);
 int pc_settings_get_eternal_night(void);
+int pc_settings_get_fireflies(void);
 int pc_settings_get_free_camera(void);
 float pc_settings_get_free_camera_pad_scale(void); ///< issue #66, 1 = default
 /// Radio máximo del silbato, % del original (100 = sin cambio).

@@ -438,7 +438,16 @@ void TSaveMenu::updateMsg_()
 			screen = mAnimScreen[2];
 			break;
 		}
+#ifdef PIKI_PC_PORT
+		// En GameCube la animación de cierre siempre dura más que el contador.
+		// En el port el contador sale del deltaTime adaptativo pero baja solo
+		// en los ticks originales: puede llegar a cero con la animación ya
+		// terminada y el menú se quedaba cerrándose para siempre (guardado
+		// colgado con el recuadro en negro). Basta con el contador.
+		if (!mTextCounter) {
+#else
 		if (screen->mIsUpdateSuccess && !mTextCounter) {
+#endif
 			startMsgState_(MSG_Kill);
 		}
 		break;

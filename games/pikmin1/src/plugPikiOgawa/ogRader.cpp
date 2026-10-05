@@ -8,6 +8,9 @@
 #include "PikiMgr.h"
 #include "PlayerState.h"
 #include "RadarInfo.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_window.h"
+#endif
 #include "SoundMgr.h"
 #include "UfoItem.h"
 #include "jaudio/verysimple.h"
@@ -629,6 +632,11 @@ void zen::ogRaderMgr::updateMenu(Controller* input)
 	}
 	f32 x  = mCurrentScale;
 	f32 y  = input->getSubStickY();
+#if defined(PIKI_PC_PORT)
+	if (y == 0.0f) {
+		y = pc_window_free_camera_sub_y();
+	}
+#endif
 	int se = 0;
 
 	if (y > 0.3f) {
@@ -746,6 +754,11 @@ void zen::ogRaderMgr::updateMenu(Controller* input)
 #endif
 	f32 x = mCurrentScale;
 	f32 y = input->getSubStickY();
+#if defined(PIKI_PC_PORT)
+	if (y == 0.0f) {
+		y = pc_window_free_camera_sub_y();
+	}
+#endif
 	if (y > 0.3f) {
 		x *= 1.1f;
 		if (x > 10.0f) {

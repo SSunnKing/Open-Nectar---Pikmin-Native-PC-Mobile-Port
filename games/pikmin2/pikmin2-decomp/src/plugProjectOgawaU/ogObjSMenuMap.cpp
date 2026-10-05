@@ -10,6 +10,10 @@
 #include "Radar.h"
 #include "nans.h"
 
+#ifdef PIKI_PC_PORT
+extern "C" float pc_window_free_camera_sub_y(void);
+#endif
+
 static const u32 padding[] = { 0, 0, 0 };
 
 namespace og {
@@ -527,6 +531,11 @@ void ObjSMenuMap::scaleMap()
 	bool isUp   = false;
 	bool isDown = false;
 	f32 cstick  = mController->getSubStickY();
+#ifdef PIKI_PC_PORT
+	if (cstick == 0.0f) {
+		cstick = pc_window_free_camera_sub_y();
+	}
+#endif
 	if (cstick > 0.4f) {
 		isUp = true;
 	}

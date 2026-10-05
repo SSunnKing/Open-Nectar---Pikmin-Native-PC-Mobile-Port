@@ -135,6 +135,13 @@ T TAtanTable<LENGTH, T>::atan2_(T y, T x) const
 	return (y >= 0.0f ? calc(y, x) : calcInverse(y, x));
 }
 
+#ifdef PIKI_PC_PORT
+// JMATrigonometric.cpp especializa esta instancia. Sin declararla aquí, cada
+// archivo que la usa instanciaba la genérica (regla de una definición rota):
+// el enlazador ELF se quedaba con una, el de Windows da definición duplicada.
+template <> f32 TAtanTable<1024, f32>::atan2_(f32 y, f32 x) const;
+#endif
+
 template <int LENGTH, typename T>
 struct TAsinAcosTable {
 	TAsinAcosTable() { init(); }

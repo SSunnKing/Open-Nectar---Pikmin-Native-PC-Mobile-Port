@@ -1,4 +1,7 @@
 #include "Game/IllustratedBook.h"
+#ifdef PIKI_PC_PORT
+extern "C" void pc_gfx_set_post_allowed(int allowed);
+#endif
 #include "Game/SingleGame.h"
 #include "Game/Entities/PelletOtakara.h"
 #include "Game/Entities/PelletItem.h"
@@ -513,6 +516,9 @@ ZukanState::ZukanState()
 void ZukanState::init(SingleGameSection* game, StateArg* arg)
 {
 	mBackupHeap = JKRGetCurrentHeap();
+#ifdef PIKI_PC_PORT
+	pc_gfx_set_post_allowed(0); // bloom/DOF caian sobre los textos de la Piklopedia
+#endif
 	gameSystem->setFlag(GAMESYS_IsGameWorldActive);
 	gameSystem->setPause(false, "zukan", 3);
 	gameSystem->setMoviePause(false, "zukan");
@@ -1951,6 +1957,9 @@ void ZukanState::clearHeaps()
  */
 void ZukanState::cleanup(SingleGameSection* game)
 {
+#ifdef PIKI_PC_PORT
+	pc_gfx_set_post_allowed(1); // de vuelta a la partida
+#endif
 	Screen::gGame2DMgr->mScreenMgr->reset();
 	gameSystem->resetFlag(GAMESYS_IsGameWorldActive);
 	particle2dMgr->killAll();

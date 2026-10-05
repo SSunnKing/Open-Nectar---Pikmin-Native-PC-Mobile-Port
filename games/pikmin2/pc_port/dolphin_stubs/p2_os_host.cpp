@@ -2,6 +2,9 @@
  * Fase 3: host Dolphin OS / DVD / PAD / VI / CARD / AI / AR / DSP / GBA / MTX.
  * Suficiente para enlazar pikmin2_pc. El renderer GX real es Fase 4.
  */
+#if defined(_WIN32)
+#include <malloc.h>
+#endif
 #include "System.h"
 #include "Dolphin/os.h"
 #include "gl/pc_gfx.h"
@@ -23,6 +26,7 @@
 #include "JSystem/JAudio/DSP.h"
 #include "JSystem/JKernel/JKRHeap.h"
 #include "THP/THPPlayer.h"
+#include "audio/pc_dsp_host.h"
 
 RenderModeInfo gPcRenderInfoStore = {};
 
@@ -329,7 +333,13 @@ void OSInit(void)
 {
 	sStart = std::chrono::steady_clock::now();
 	if (!sArenaLo) {
+#if defined(_WIN32)
+		// MinGW no tiene aligned_alloc. La arena no se libera nunca, así que
+		// no hace falta emparejarla con _aligned_free.
+		sArenaLo = _aligned_malloc(kArenaSize, 32);
+#else
 		sArenaLo = aligned_alloc(32, kArenaSize);
+#endif
 		if (!sArenaLo)
 			sArenaLo = malloc(kArenaSize);
 		sArenaHi = (u8*)sArenaLo + kArenaSize;
@@ -1301,6 +1311,12 @@ BOOL DVDOpen(char* filename, DVDFileInfo* fileInfo)
 	{
 		std::lock_guard<std::mutex> lock(sDvdMutex);
 		fileInfo->startAddr = pc_dvd_start_addr(pc_dvd_entry_for(path));
+		// Reabrir el mismo DVDFileInfo sin DVDClose perdía el FILE* anterior;
+		// en Windows el CRT solo admite 512 abiertos y al agotarlos fallan
+		// las cargas (sonidos que no suenan).
+		auto prev = sDvdFiles.find(fileInfo);
+		if (prev != sDvdFiles.end() && prev->second != f)
+			fclose(prev->second);
 		sDvdFiles[fileInfo] = f;
 	}
 	return TRUE;
@@ -1323,6 +1339,9 @@ BOOL DVDFastOpen(s32 entryNum, DVDFileInfo* fileInfo)
 	fileInfo->startAddr = pc_dvd_start_addr(entryNum);
 	fseek(f, 0, SEEK_SET);
 	std::lock_guard<std::mutex> lock(sDvdMutex);
+	auto prev = sDvdFiles.find(fileInfo);
+	if (prev != sDvdFiles.end() && prev->second != f)
+		fclose(prev->second);
 	sDvdFiles[fileInfo] = f;
 	return TRUE;
 }
@@ -1800,7 +1819,7 @@ void PSVECCrossProduct(const Vec* a, const Vec* b, Vec* o)
 
 void DSPReleaseHalt2(u32) {}
 void DsetupTable(u32, u32, u32, u32, u32) {}
-void DsetMixerLevel(f32) {}
+void DsetMixerLevel(f32 level) { pc_dsp_host_set_mixer_level(level); }
 void DspBoot(DSPCallback) {}
 void DspFinishWork(u16) {}
 void DsyncFrame2(u32, u32, u32) {}

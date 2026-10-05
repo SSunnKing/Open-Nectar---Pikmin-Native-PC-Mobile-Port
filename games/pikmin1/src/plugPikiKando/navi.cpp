@@ -669,6 +669,7 @@ void Navi::reset()
 #if defined(PIKI_PC_PORT)
 	mPcLockTarget = nullptr;
 	mPcLockIgnore = nullptr;
+	mPcChargeTime = 0.0f;
 	mPcAimOffset.set(0.0f, 0.0f, 0.0f);
 	mPcPinnedOffset.set(0.0f, 0.0f, 0.0f);
 #endif
@@ -1416,18 +1417,40 @@ void Navi::pcUpdateLockOn()
 	pc_settings_note_lock_on(mPcLockTarget != nullptr);
 
 	// Cargar solo tiene sentido contra lo que se ataca.
-	if (mPcLockTarget && chargePressed && pc_settings_get_charge() && (mPcLockTarget->isTeki() || mPcLockTarget->isBoss())) {
-		Iterator iterPiki(pikiMgr);
-		CI_LOOP(iterPiki)
-		{
-			Piki* piki = static_cast<Piki*>(*iterPiki);
-			if (piki->mNavi != this || !piki->isAlive()) {
-				continue;
-			}
-			// Solo los que están en formación: los que ya trabajan siguen a lo suyo.
-			if (piki->mActiveAction->mCurrActionIdx != PikiAction::Crowd) {
-				continue;
-			}
+	const bool chargeable = mPcLockTarget && pc_settings_get_charge() && (mPcLockTarget->isTeki() || mPcLockTarget->isBoss());
+	if (!chargeable) {
+		mPcChargeTime = 0.0f;
+		return;
+	}
+	if (chargePressed) {
+		mPcChargeTime = 2.5f;
+	}
+	if (mPcChargeTime <= 0.0f) {
+		return;
+	}
+
+	// El grupo entero corre hacia el objetivo (lo empuja el C-stick, ver
+	// updateCStick) y cada Pikmin pasa a atacar al llegar. Si ActAttack los
+	// lanzara desde la formación saldrían en fila y sin ruta, y muchos se
+	// quedarían por el camino. Al agotarse el tiempo van los que queden.
+	mPcChargeTime -= gsys->getFrameTime();
+	const bool last      = mPcChargeTime <= 0.0f;
+	const Vector3f goal  = mPcLockTarget->getCentre();
+	const f32 reach      = pc_lock_target_radius(mPcLockTarget) + 40.0f;
+	Iterator iterPiki(pikiMgr);
+	CI_LOOP(iterPiki)
+	{
+		Piki* piki = static_cast<Piki*>(*iterPiki);
+		if (piki->mNavi != this || !piki->isAlive()) {
+			continue;
+		}
+		// Solo los que están en formación: los que ya trabajan siguen a lo suyo.
+		if (piki->mActiveAction->mCurrActionIdx != PikiAction::Crowd) {
+			continue;
+		}
+		const f32 dx = piki->mSRT.t.x - goal.x;
+		const f32 dz = piki->mSRT.t.z - goal.z;
+		if (last || dx * dx + dz * dz < reach * reach) {
 			piki->pcChargeAt(mPcLockTarget);
 		}
 	}
@@ -1618,7 +1641,11 @@ bool pc_night_pellet_glow(Pellet* pel, GXColor* boost)
  */
 void Navi::pcDrawNightAmbience(Graphics& gfx)
 {
-	if (!pc_settings_get_eternal_night() || mNaviID != 0) {
+	// Luciérnagas: su propia opción (también de día). Brillo de las píldoras:
+	// Eternal Night.
+	const bool night = pc_settings_get_eternal_night() != 0;
+	const bool flies = pc_settings_get_fireflies() != 0;
+	if ((!night && !flies) || mNaviID != 0) {
 		return;
 	}
 	if (!mPcGlowTex) {
@@ -1697,7 +1724,7 @@ void Navi::pcDrawNightAmbience(Graphics& gfx)
 	}
 
 	const f32 dt = gsys->getFrameTime();
-	for (int i = 0; i < kFireflies; i++) {
+	for (int i = 0; flies && i < kFireflies; i++) {
 		Firefly& f = sFlies[i];
 		f.mAge += dt;
 		Vector3f away = f.mPos - centre;
@@ -1780,7 +1807,7 @@ void Navi::pcDrawNightAmbience(Graphics& gfx)
 	};
 
 	{
-		for (int i = 0; i < kFireflies; i++) {
+		for (int i = 0; flies && i < kFireflies; i++) {
 			Firefly& f = sFlies[i];
 			// Aparece y se apaga suave; entre medias late a su ritmo, con
 			// momentos casi apagada como una luciérnaga de verdad.
@@ -1812,7 +1839,7 @@ void Navi::pcDrawNightAmbience(Graphics& gfx)
 		if (sparkTime > 1000.0f) {
 			sparkTime -= 1000.0f;
 		}
-		if (pelletMgr) {
+		if (night && pelletMgr) {
 			Iterator iter(pelletMgr);
 			CI_LOOP(iter)
 			{
@@ -1853,7 +1880,7 @@ void Navi::pcDrawNightAmbience(Graphics& gfx)
 		// TEKI_Palm), no es un Pellet, así que solo se le pone el borde de luz
 		// y las chispitas en la cabeza. La cabeza es lo alto de su esfera
 		// envolvente.
-		if (tekiMgr) {
+		if (night && tekiMgr) {
 			Iterator iter(tekiMgr);
 			CI_LOOP(iter)
 			{
@@ -1889,6 +1916,49 @@ void Navi::pcDrawNightAmbience(Graphics& gfx)
 	gfx.setCullFront(prevCull);
 	gfx.setCBlending(prevBlend);
 	gfx.setLighting(prevLighting, nullptr);
+}
+
+/**
+ * @brief Pone el cursor delante del capitán, a la distancia que tenía.
+ */
+void Navi::pcCursorToFront()
+{
+	if (mPcLockTarget) {
+		return;
+	}
+	f32 dist = mCursorPosition.length();
+	if (dist < NAVI_PARM(mCursorMinRadius)) {
+		dist = (NAVI_PARM(mCursorMinRadius) + NAVI_PARM(mCursorMaxRadius)) * 0.5f;
+	}
+	mCursorPosition.set(dist * sinf(mFaceDirection), 0.0f, dist * cosf(mFaceDirection));
+	mCursorTargetPosition = mCursorPosition;
+	mCursorNaviDist       = dist;
+	mPcAimOffset          = mCursorPosition;
+	mPcPinnedOffset       = mCursorPosition;
+}
+
+/**
+ * @brief Gira el cursor `angle` radianes alrededor del capitán.
+ *
+ * Lo llama la cámara libre al girar, para que el cursor quede en el mismo
+ * sitio de la pantalla. Con un objetivo fijado (Lock-On) el cursor va pegado
+ * a él y no se toca.
+ */
+void Navi::pcRotateCursor(f32 angle)
+{
+	if (mPcLockTarget) {
+		return;
+	}
+	const f32 c = cosf(angle), s = sinf(angle);
+	auto rotate = [&](Vector3f& v) {
+		const f32 x = v.x, z = v.z;
+		v.x = x * c + z * s;
+		v.z = z * c - x * s;
+	};
+	rotate(mCursorPosition);
+	rotate(mCursorTargetPosition);
+	rotate(mPcAimOffset);
+	rotate(mPcPinnedOffset);
 }
 
 void Navi::pcPinCursorToLock()
@@ -3059,8 +3129,21 @@ void Navi::makeVelocity(bool isSunset)
 
 		// Enforce radial limit
 		if (targetPos.length() > NAVI_PARM(mCursorMaxRadius)) {
+			const Vector3f wanted = targetPos;
 			targetPos.normalise();
 			targetPos = targetPos * NAVI_PARM(mCursorMaxRadius);
+			// Mod "Free Camera": empujar el cursor más allá de su límite hacia
+			// un lado de la pantalla gira la cámara hacia ese lado (y el cursor
+			// gira con ella). Mismo sentido y acumulador que mantener Shift.
+			if (pc_settings_get_free_camera() && !pc_first_person_active_for(mNaviID) && !mPcLockTarget) {
+				const Vector3f excess = wanted - targetPos;
+				const f32 lateral     = excess.x * screenRight.x + excess.z * screenRight.z;
+				if (lateral != 0.0f) {
+					// Radianes de giro = arco que habría recorrido el cursor;
+					// la cámara gira 3,2 rad por unidad de arrastre.
+					pc_window_add_camera_drag(-(lateral / NAVI_PARM(mCursorMaxRadius)) / 3.2f);
+				}
+			}
 		}
 
 		// Update cursor positions - both position and target should be equal to avoid interpolation
@@ -3214,8 +3297,11 @@ void Navi::makeCStick(bool isSunset)
 	// objetivo fijado, así que aquí deja de dirigir al pelotón.
 	const bool swarmIsCharge = pc_settings_get_charge() != 0;
 	const bool swarmHeld     = mNaviID == 0 ? pc_window_swarm_held() : pc_window_swarm_held_p2();
-	if (!isSunset && !swarmIsCharge && swarmHeld && cStickInput.length() < 0.05f) {
-		NVector3f toCursor(mCursorWorldPos.x - mSRT.t.x, 0.0f, mCursorWorldPos.z - mSRT.t.z);
+	// Durante el Charge el empuje va al objetivo fijado en vez de al cursor.
+	const bool charging = mPcChargeTime > 0.0f && mPcLockTarget;
+	if (!isSunset && (charging || (!swarmIsCharge && swarmHeld)) && cStickInput.length() < 0.05f) {
+		const Vector3f goal = charging ? mPcLockTarget->getCentre() : mCursorWorldPos;
+		NVector3f toCursor(goal.x - mSRT.t.x, 0.0f, goal.z - mSRT.t.z);
 		if (toCursor.length() > 1.0f) {
 			toCursor.normalise();
 			NTransform3D NRef back = NTransform3D();

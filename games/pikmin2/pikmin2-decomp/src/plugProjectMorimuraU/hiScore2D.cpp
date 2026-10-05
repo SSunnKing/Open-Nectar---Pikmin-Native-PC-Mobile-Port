@@ -1,4 +1,7 @@
 #include "Morimura/HiScore.h"
+#ifdef PIKI_PC_PORT
+extern "C" void pc_gfx_p2_extend_edge_color(float gxY0, float gxY1, float stripW);
+#endif
 #include "Game/Data.h"
 #include "JSystem/JKernel/JKRArchive.h"
 #include "Morimura/mrUtil.h"
@@ -652,6 +655,11 @@ void THiScore::doDraw(Graphics& gfx)
 
 	mListScreen->draw(gfx, graf);
 	mMainScreen->draw(gfx, graf);
+#ifdef PIKI_PC_PORT
+	// Pantallas anchas: el fondo (mapa con vineta) solo existe en el 4:3; los
+	// laterales continuan el color del borde, fila a fila.
+	pc_gfx_p2_extend_edge_color(0.0f, 448.0f, 6.0f);
+#endif
 	JUtility::TColor color;
 	color = JUtility::TColor(0, 0, 0, 255 - mFadeAlpha);
 	drawFillScreen(graf, color);

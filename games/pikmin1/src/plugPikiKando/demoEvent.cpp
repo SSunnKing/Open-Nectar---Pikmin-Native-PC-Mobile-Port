@@ -2,6 +2,7 @@
 #include "Demo.h"
 #include "GameStat.h"
 #include "GoalItem.h"
+#include "SimpleAI.h"
 #include "ItemMgr.h"
 #include "NaviMgr.h"
 #include "Pcam/Camera.h"
@@ -342,6 +343,14 @@ void DemoEventMgr::act(int sender, int event)
 				PRINT("boot onion\n");
 				goal->startBoot();
 				playerState->setBootContainer(goalID);
+#if defined(PIKI_PC_PORT)
+				// La primera semilla sale en un momento de la animación de
+				// arranque (BootInit -> BootEmit). Al saltar la cinemática esa
+				// animación se corta y la semilla no salía: se lanza ya.
+				if (mPcSkipping) {
+					C_SAI(goal)->start(goal, GoalAI::GOAL_BootEmit);
+				}
+#endif
 				if (playerState->isTutorial() && playerState->mShipEffectPartFlag & 8) {
 					Navi* navi = naviMgr->getMovieNavi();
 					playerState->mShipEffectPartFlag &= ~8;

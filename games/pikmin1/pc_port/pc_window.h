@@ -82,6 +82,8 @@ static inline bool pc_bind_is_valid(int binding) { return binding >= 0 && bindin
 // Whether the swarm binding (keyboard, mouse or gamepad) is held right now.
 bool pc_window_swarm_held(void);
 bool pc_window_swarm_held_p2(void);
+/// Eje vertical del stick derecho con Free Camera activo (zoom del radar).
+float pc_window_free_camera_sub_y(void);
 /// Flanco de subida: true una sola vez por pulsación, y se consume al leerlo.
 bool pc_window_take_lockon_press(void);
 // Mod "Bomb Control": pulsación del botón Bomb de ese jugador (0/1), consumida.

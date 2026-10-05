@@ -1,4 +1,7 @@
 #include "Morimura/VsSelect.h"
+#ifdef PIKI_PC_PORT
+extern "C" void pc_gfx_p2_extend_shade(float gxY0, float gxY1, float stripW);
+#endif
 #include "og/newScreen/ogUtil.h"
 #include "og/Screen/ArrowAlphaBlink.h"
 #include "JSystem/JKernel/JKRArchive.h"
@@ -3074,6 +3077,12 @@ void TVsSelect::doDraw(Graphics& gfx)
 	GXSetScissor(0, 0, 640, 480);
 
 	mMainScreen->draw(gfx, graf);
+#ifdef PIKI_PC_PORT
+	// Pantallas anchas: la vineta (de mMainScreen) solo existe en el 4:3; su
+	// sombra se lleva a los laterales, que conservan su textura. La franja
+	// del borde interior es solo fondo.
+	pc_gfx_p2_extend_shade(0.0f, 448.0f, 6.0f);
+#endif
 
 	if (mZoomState) {
 		mRedPodScreen->draw(gfx, graf);

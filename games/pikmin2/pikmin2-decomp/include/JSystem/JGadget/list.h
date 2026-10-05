@@ -3,6 +3,10 @@
 
 #include "types.h"
 #include "stl/iterator.h"
+#ifdef PIKI_PC_PORT
+#include <iterator>
+#include <cstddef>
+#endif
 #include "JSystem/JGadget/allocator.h"
 
 namespace JGadget {
@@ -27,6 +31,15 @@ struct TList {
 	};
 
 	struct iterator {
+#ifdef PIKI_PC_PORT
+		// Tipos que la STL del sistema pide a un iterador (std::find,
+		// std::distance...). La de MinGW los exige; la de Linux no los pedía.
+		typedef std::bidirectional_iterator_tag iterator_category;
+		typedef Element value_type;
+		typedef ptrdiff_t difference_type;
+		typedef Element* pointer;
+		typedef Element& reference;
+#endif
 		iterator() { mNode = nullptr; }
 		iterator(TNode_* node) { mNode = node; }
 
@@ -48,6 +61,13 @@ struct TList {
 	};
 
 	struct const_iterator {
+#ifdef PIKI_PC_PORT
+		typedef std::bidirectional_iterator_tag iterator_category;
+		typedef Element value_type;
+		typedef ptrdiff_t difference_type;
+		typedef const Element* pointer;
+		typedef const Element& reference;
+#endif
 		const_iterator() { mNode = nullptr; }
 		const_iterator(const TNode_* node) { mNode = node; }
 

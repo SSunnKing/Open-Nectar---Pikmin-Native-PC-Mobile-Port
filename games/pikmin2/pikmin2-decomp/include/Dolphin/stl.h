@@ -65,14 +65,16 @@ typedef __builtin_va_list va_list;
 		printf(unit);                     \
 	}
 
+#if !defined(PIKI_PC_PORT)
+// En el port los declara <stdio.h> del sistema (MinGW los define inline y no
+// admite volver a declararlos con enlace C).
 int printf(const char*, ...);
 int vprintf(const char*, va_list);
-#if !defined(PIKI_PC_PORT)
 int sprintf(char*, char*, ...);
-#endif
 int snprintf(char*, size_t, const char*, ...);
 int vsnprintf(char*, size_t, const char*, va_list);
 int vsprintf(char* s, const char* format, va_list arg);
+#endif
 
 void* memcpy(void* dest, const void* src, size_t n);
 int memcmp(const void* a, const void* b, size_t n);

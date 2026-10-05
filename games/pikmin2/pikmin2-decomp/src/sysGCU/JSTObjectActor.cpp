@@ -1,5 +1,6 @@
 #include "Game/P2JST/ObjectActor.h"
 #include "Game/MoviePlayer.h"
+#include "Game/CameraMgr.h"
 #include "JSystem/J3D/J3DAnmLoader.h"
 #include "JSystem/J3D/J3DModelLoader.h"
 #include "Game/GameSystem.h"
@@ -8,6 +9,7 @@
 #include "nans.h"
 #include "System.h"
 #ifdef PIKI_PC_PORT
+extern "C" float pc_gfx_get_current_aspect_ratio(void);
 namespace JStudio {
 extern f64 gPcJStudioSubFrame;
 }
@@ -170,12 +172,20 @@ void ObjectActor::update()
 	}
 #ifdef PIKI_PC_PORT
 	{
+		// PIKMIN_MOVIE_DEBUG=1: una linea por actor (nombre) con su colocacion.
 		static const bool dbg = getenv("PIKMIN_MOVIE_DEBUG") != nullptr;
-		static int lines      = 0;
-		if (dbg && lines < 3000) {
-			++lines;
-			fprintf(stderr, "[MOVIEOBJ] %s pos=(%.1f %.1f %.1f) rot=(%.1f %.1f %.1f) frame=%.1f\n", mName, mTranslation.x,
-			        mTranslation.y, mTranslation.z, mRotation.x, mRotation.y, mRotation.z, mAnimFrame);
+		static char seen[512][32];
+		static int seenCount = 0;
+		bool isNew           = dbg && seenCount < 512;
+		for (int i = 0; isNew && i < seenCount; i++) {
+			if (strncmp(seen[i], mName, 31) == 0) isNew = false;
+		}
+		if (isNew) {
+			strncpy(seen[seenCount], mName, 31);
+			seen[seenCount++][31] = 0;
+			fprintf(stderr, "[MOVIEOBJ] %s pos=(%.1f %.1f %.1f) rot=(%.1f %.1f %.1f) scale=(%.2f %.2f %.2f) frame=%.1f\n", mName,
+			        mTranslation.x, mTranslation.y, mTranslation.z, mRotation.x, mRotation.y, mRotation.z, mScaling.x, mScaling.y,
+			        mScaling.z, mAnimFrame);
 		}
 	}
 #endif
@@ -224,6 +234,31 @@ void ObjectActor::update()
 	rot.y = TORADIANS(mRotation.y);
 	rot.z = TORADIANS(mRotation.z);
 	mtx3.makeTR(pos4, rot);
+#ifdef PIKI_PC_PORT
+	// Pantallas anchas: el decorado de fondo de las peliculas ("bg", p. ej.
+	// el cielo y los arboles del despegue) es un plano hecho a medida del 4:3
+	// y con la camara mas ancha se le ven los bordes. Se ensancha en la
+	// horizontal de la camara, centrado en ella: V^-1 * S * V * M.
+	if (strcmp(mName, "bg") == 0 && mMoviePlayer && mMoviePlayer->mViewport && mMoviePlayer->mViewport->mCamera) {
+		const f32 k = pc_gfx_get_current_aspect_ratio() / (640.0f / 480.0f);
+		// Camara de la pelicula (la del viewport), no la del jugador.
+		Matrixf* view = mMoviePlayer->mViewport->mCamera->getViewMatrix(false);
+		Mtx inv, scale, tmp;
+		static int dbgBg = 0;
+		if (getenv("PIKMIN_MOVIE_DEBUG") && dbgBg < 5) {
+			dbgBg++;
+			fprintf(stderr, "[MOVIEOBJ] bg-wide k=%.3f view=%p t=(%.1f %.1f %.1f)\n", k, (void*)view,
+			        view ? view->mMatrix.mtxView[0][3] : 0.0f, view ? view->mMatrix.mtxView[1][3] : 0.0f,
+			        view ? view->mMatrix.mtxView[2][3] : 0.0f);
+		}
+		if (k > 1.001f && view && PSMTXInverse(view->mMatrix.mtxView, inv)) {
+			PSMTXScale(scale, k, 1.0f, 1.0f);
+			PSMTXConcat(scale, view->mMatrix.mtxView, tmp);
+			PSMTXConcat(inv, tmp, tmp);
+			PSMTXConcat(tmp, mtx3.mMatrix.mtxView, mtx3.mMatrix.mtxView);
+		}
+	}
+#endif
 	PSMTXCopy(mtx3.mMatrix.mtxView, mModel->mPosMtx);
 
 	mModel->setBaseScale(Vector3f(1.0f));

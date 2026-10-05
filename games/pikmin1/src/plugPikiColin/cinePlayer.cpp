@@ -380,6 +380,47 @@ void CinematicPlayer::skipScene(int sceneSkipFlag)
 {
 	if (mCurrentScene) {
 		PRINT("skipping scene!\n");
+#if defined(PIKI_PC_PORT)
+		// Saltar avanza el tiempo hasta el final de golpe, y los eventos de
+		// fotograma que quedaban (en esta escena y en las siguientes) no se
+		// disparaban nunca. Algunos dejan el juego listo para seguir: al
+		// saltar la llegada de la cebolla ya no se podían sacar Pikmin
+		// (issue #73). Se disparan aquí, en orden, como si se hubiera visto.
+		if (sceneSkipFlag == SCENESKIP_Skip || sceneSkipFlag == SCENESKIP_SkipAll) {
+			if (demoEventMgr) {
+				demoEventMgr->mPcSkipping = true;
+			}
+			bool past = false;
+			FOREACH_NODE(SceneCut, mSceneList.mChild, scene)
+			{
+				const bool current = scene == mCurrentScene;
+				if (!past && !current) {
+					continue; // escenas ya vistas
+				}
+				const f32 lo = f32(scene->mStartFrame < scene->mEndFrame ? scene->mStartFrame : scene->mEndFrame);
+				const f32 hi = f32(scene->mStartFrame < scene->mEndFrame ? scene->mEndFrame : scene->mStartFrame);
+				const f32 from = current ? (mPreviousSceneFrame > lo ? mPreviousSceneFrame : lo) : lo;
+				for (AnimKey* key = scene->mKey.mNext; key != &scene->mKey; key = key->mNext) {
+					const f32 frame = f32(key->mFrameIndex);
+					if (frame < from || frame > hi) {
+						continue;
+					}
+					// Los textos de Olimar se saltan con la escena: abrirlos
+					// todos de golpe al saltar no tiene sentido.
+					if (mIsPlaying && gameflow.mGameInterface && key->mEventType == ANIMEVENT_Notify
+					    && key->mEventCmdID != MOVIECMD_TextDemo) {
+						gameflow.mGameInterface->message(key->mEventCmdID, key->mKeyType);
+					} else if (key->mEventType == ANIMEVENT_Action && demoEventMgr) {
+						demoEventMgr->act(key->mEventCmdID, key->mKeyType);
+					}
+				}
+				past = true;
+			}
+			if (demoEventMgr) {
+				demoEventMgr->mPcSkipping = false;
+			}
+		}
+#endif
 		// skip time ahead as if scene had finished playing
 		mCurrentPlaybackTime   = mCurrentSceneStartTime + abs(mCurrentScene->mEndFrame - mCurrentScene->mStartFrame);
 		mCurrentSceneStartTime = mCurrentPlaybackTime;
@@ -545,6 +586,38 @@ void CinematicPlayer::refresh(Graphics& gfx)
 		{
 #ifdef PIKI_PC_PORT
 			pc_gfx_perf_scope_begin(actor->mActiveActor ? actor->mActiveActor->mName : "cinematic/null");
+			{
+				// PIKMIN_MOVIE_DEBUG=1: una linea por modelo de actor de cinematica.
+				static const bool dbg = getenv("PIKMIN_MOVIE_DEBUG") != nullptr;
+				static char seen[256][64];
+				static int seenCount = 0;
+				const char* name     = actor->mActiveActor ? actor->mActiveActor->mName : nullptr;
+				bool isNew           = dbg && name && seenCount < 256;
+				for (int i = 0; isNew && i < seenCount; i++) {
+					if (strncmp(seen[i], name, 63) == 0) isNew = false;
+				}
+				if (isNew) {
+					strncpy(seen[seenCount], name, 63);
+					seen[seenCount++][63] = 0;
+					fprintf(stderr, "[MOVIEOBJ] %s flags=0x%x\n", name, (unsigned)actor->mFlags);
+				}
+			}
+#endif
+#ifdef PIKI_PC_PORT
+			// Pantallas anchas: los decorados de fondo de las cinematicas
+			// (p. ej. cinemas/demo36/resultbg.mod del despegue) son planos a
+			// medida del 4:3 y con la camara mas ancha se les ven los bordes.
+			// Se ensanchan en la horizontal de la camara: S(k,1,1) * vista.
+			const char* pcName = actor->mActiveActor ? actor->mActiveActor->mName : nullptr;
+			const size_t pcLen = pcName ? strlen(pcName) : 0;
+			const f32 pcK      = pc_gfx_get_current_aspect_ratio() / (640.0f / 480.0f);
+			if (pcLen >= 6 && strcmp(pcName + pcLen - 6, "bg.mod") == 0 && pcK > 1.001f) {
+				Matrix4f wide = mtx;
+				for (int i = 0; i < 4; i++) {
+					wide.mMtx[0][i] *= pcK;
+				}
+				actor->refresh(wide, gfx, !(actor->mFlags & CAF_NoSync) ? &mCurrentSceneFrame : nullptr);
+			} else
 #endif
 			actor->refresh(mtx, gfx, !(actor->mFlags & CAF_NoSync) ? &mCurrentSceneFrame : nullptr);
 #ifdef PIKI_PC_PORT

@@ -72,6 +72,52 @@ typedef unsigned int p2uint;
 #include <math.h>
 #endif
 
+/* ── Windows (MinGW): las guardas de glibc ──
+ * Las cabeceras del mini-STL del decomp (include/stl/stdio.h, string.h...) usan
+ * las MISMAS guardas que glibc (_STDIO_H, _STRING_H...). En Linux, como la
+ * cabecera real ya esta incluida, la del decomp se salta entera; con MinGW, que
+ * usa otras guardas (_INC_STDIO...), se procesaba y sus prototipos de GameCube
+ * chocaban con los del sistema. Se incluyen las reales y se definen las guardas
+ * que en Linux pone glibc: el decomp ve exactamente lo mismo que alli. */
+#if defined(_WIN32)
+#include <ctype.h>
+#include <errno.h>
+#include <limits.h>
+#include <locale.h>
+#include <signal.h>
+#include <wchar.h>
+#ifndef _STDIO_H
+#define _STDIO_H 1
+#endif
+#ifndef _STRING_H
+#define _STRING_H 1
+#endif
+#ifndef _STDLIB_H
+#define _STDLIB_H 1
+#endif
+#ifndef _MATH_H
+#define _MATH_H 1
+#endif
+#ifndef _CTYPE_H
+#define _CTYPE_H 1
+#endif
+#ifndef _LIMITS_H
+#define _LIMITS_H 1
+#endif
+#ifndef _ERRNO_H
+#define _ERRNO_H 1
+#endif
+#ifndef _WCHAR_H
+#define _WCHAR_H 1
+#endif
+#ifndef _LOCALE_H
+#define _LOCALE_H 1
+#endif
+#ifndef _SIGNAL_H
+#define _SIGNAL_H 1
+#endif
+#endif
+
 /* ── Square: macro habitual del decomp (no esta en types.h) ── */
 #ifndef SQUARE
 #define SQUARE(x) ((x) * (x))

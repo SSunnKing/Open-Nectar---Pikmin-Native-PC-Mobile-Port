@@ -135,6 +135,14 @@ add_compile_definitions(
 # despues; el include/stl original nunca se alcanza porque las rutas con
 # prefijo ya estan resueltas por los shims, y las inclusiones desnudas
 # (<utility>, <algorithm>...) caen al STL real del sistema.
+# Windows: sustitutos de cabeceras POSIX que el port usa para depurar
+# (execinfo.h, dlfcn.h). Solo en WIN32; en Linux se usan las del sistema.
+if(WIN32)
+    include_directories(BEFORE ${ADAPTER_DIR}/win32)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL2-mingw64/include")
+        include_directories("${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL2-mingw64/include")
+    endif()
+endif()
 include_directories(
     ${ADAPTER_DIR}
     ${PIKMIN2_DECOMP_DIR}/include
@@ -313,6 +321,35 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
         pkg_check_modules(SDL2 REQUIRED sdl2)
         set(P2_SDL_LIBS ${SDL2_LIBRARIES})
         set(P2_SDL_INCLUDES ${SDL2_INCLUDE_DIRS})
+    endif()
+
+    # Paquetes de release (como Pikmin 1): SDL2 y el runtime de C/C++ dentro
+    # del ejecutable, para que arranque en cualquier sistema sin DLL ni .so
+    # propias. En Linux se compila así en el contenedor de release.
+    if(WIN32)
+        set(_p2_static_default ON)
+    else()
+        set(_p2_static_default OFF)
+    endif()
+    option(PIKMIN_STATIC_RUNTIME "Link SDL2 and the C/C++ runtime into the executable" ${_p2_static_default})
+    if(PIKMIN_STATIC_RUNTIME AND NOT ANDROID)
+        if(TARGET SDL2::SDL2-static)
+            set(P2_SDL_LIBS SDL2::SDL2-static)
+        endif()
+        if(WIN32)
+            add_link_options(-static)
+        else()
+            # --exclude-libs: el libstdc++/SDL2 estáticos no se exportan (ver P1).
+            add_link_options(-static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL)
+        endif()
+    endif()
+    if(P2_SDL_LIBS)
+        list(FILTER P2_SDL_LIBS EXCLUDE REGEX "SDL2main")
+    endif()
+    # El paquete SDL2 de MinGW da include/SDL2 como ruta; el port incluye
+    # <SDL2/SDL.h>, así que hace falta también la carpeta de arriba.
+    if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL2-mingw64/include")
+        list(APPEND P2_SDL_INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL2-mingw64/include")
     endif()
 
     find_package(OpenGL REQUIRED)

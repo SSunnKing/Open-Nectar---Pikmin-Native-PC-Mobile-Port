@@ -31,7 +31,12 @@ static void fakeFunc(Item* item)
  */
 Weed::Weed()
 {
+#ifdef PIKI_PC_PORT
+	// El original asignaba a una copia temporal (con MWCC escribia en el objeto).
+	static_cast<Vector3f&>(*this) = Vector3f(0.0f);
+#else
 	(Vector3f)(*this) = Vector3f(0.0f);
+#endif
 	mFlockMgr         = nullptr;
 }
 
@@ -61,7 +66,12 @@ bool Weed::damaged(f32)
  */
 void Weed::setPosition(Vector3f& vec)
 {
+#ifdef PIKI_PC_PORT
+	// El original asignaba a una copia temporal (con MWCC escribia en el objeto).
+	static_cast<Vector3f&>(*this) = vec;
+#else
 	(Vector3f)(*this) = vec;
+#endif
 	makeMatrix();
 }
 

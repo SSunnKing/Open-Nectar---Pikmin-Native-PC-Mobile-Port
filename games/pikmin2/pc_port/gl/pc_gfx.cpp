@@ -197,8 +197,8 @@ static PCGLGETQUERYOBJECTIVPROC glGetQueryObjectiv_ptr = nullptr;
 static PCGLGETQUERYOBJECTUI64VPROC glGetQueryObjectui64v_ptr = nullptr;
 
 #include <unistd.h>
-#include <sys/syscall.h>
 #include <pthread.h>
+#include <execinfo.h> // Windows: sustituto vacío (pikmin2-decomp-adapter/win32)
 #include <SDL2/SDL.h>
 
 // Trazas de diagnostico del renderer: solo con PIKMIN_VERBOSE=1.
@@ -4783,6 +4783,25 @@ static void post_apply_before_interface()
 }
 
 // Pikmin 2: el juego llama aqui al terminar draw3D, antes de cualquier 2D.
+#if PIKI_P2_HOST
+static bool sP2FrameInterface = false;
+#endif
+extern "C" void pc_gfx_world_done(void);
+
+// Pikmin 2: la interfaz (J2D) empieza. Si ya hubo mundo 3D en el frame y el
+// postproceso no ha corrido (pantallas sin pc_gfx_world_done: dialogos,
+// menus sobre la escena), se aplica ahora, debajo de la interfaz.
+extern "C" void pc_gfx_p2_interface_begin(void)
+{
+#if PIKI_P2_HOST
+    // Solo en el primer setPort del frame: despues ya se han dibujado cosas
+    // 2D con perspectiva y contarian como "mundo".
+    if (sP2FrameInterface) return;
+    sP2FrameInterface = true;
+    if (!sPostRanThisFrame) pc_gfx_world_done();
+#endif
+}
+
 extern "C" void pc_gfx_world_done(void)
 {
     persp_account_draws();
@@ -4850,7 +4869,7 @@ void pc_gfx_present(void) {
             printf("[PC Port] present ok #%d drawable=%dx%d render=%dx%d dumpEnv=%s tid=%lu cur=%p\n",
                    okLog, sDrawableWidth, sDrawableHeight, sRenderWidth, sRenderHeight,
                    std::getenv("PIKMIN_FRAME_DUMP") ? std::getenv("PIKMIN_FRAME_DUMP") : "(null)",
-                   (unsigned long)syscall(SYS_gettid), SDL_GL_GetCurrentContext());
+                   (unsigned long)SDL_ThreadID(), SDL_GL_GetCurrentContext());
             fflush(stdout);
         }
         okLog++;
@@ -4873,7 +4892,15 @@ void pc_gfx_present(void) {
     if (sFileSelDebugReport && latePost) {
         filesel_debug_probe_now("present_before_post", sNativeFramebuffer);
     }
-    const GLuint sourceFramebuffer = sPostRanThisFrame ? sNativeFramebuffer : post_apply(false);
+#if PIKI_P2_HOST
+    // Con interfaz en el frame y sin postproceso aun (no hubo mundo 3D antes
+    // de ella), aplicarlo ahora lo pondria encima de los textos y el HUD.
+    const bool skipLatePost = sP2FrameInterface && !sPostRanThisFrame;
+    sP2FrameInterface = false;
+#else
+    const bool skipLatePost = false;
+#endif
+    const GLuint sourceFramebuffer = (sPostRanThisFrame || skipLatePost) ? sNativeFramebuffer : post_apply(false);
     if (sFileSelDebugReport) {
         filesel_debug_on_present(latePost, sourceFramebuffer);
     }
@@ -5005,6 +5032,7 @@ static float sCurProjNear = 1.0f, sCurProjFar = 10000.0f;
 #if PIKI_P2_HOST
 static bool sP2LastOrtho;
 static void p2_update_ui43();
+extern "C" void pc_gfx_p2_set_2d_widen(float k);
 #endif
 // Una primitiva inmediata ya completa pero sin GXEnd (el juego a veces lo
 // omite, p.ej. TRenderingProcessor::drawImage) debe dibujarse con la matriz y
@@ -5022,6 +5050,7 @@ void pc_gfx_set_projection(const Mtx44 mtx, GXProjectionType type) {
 #if PIKI_P2_HOST
     sP2LastOrtho = type != GX_PERSPECTIVE;
     p2_update_ui43();
+    pc_gfx_p2_set_2d_widen(0.0f); // J2DPerspGraph lo vuelve a poner tras esta llamada
 #endif
     // The orthographic ones matter as much as the perspective ones: the point
     // of this trace is to find where the world stops and the interface starts,
@@ -5180,10 +5209,294 @@ void pc_gfx_set_viewport(f32 xOrig, f32 yOrig, f32 wd, f32 ht, f32 nearZ, f32 fa
     glViewport(x, y, width, height);
 }
 
+#if PIKI_P2_HOST
+// 2D en perspectiva sin deformar (J2DPerspGraph ensancha su proyeccion k
+// veces): los recortes que el juego calcula en coordenadas de paneles se
+// llevan a donde quedan ahora esos paneles, y el recorte de pantalla completa
+// se limita a la zona 4:3 original para no destapar lo que estaba fuera de
+// pantalla. Los fondos ensanchados y el HUD anclado piden no recortar.
+static float sP2Widen = 0.0f;
+static int sP2WidenNoClip = 0;
+
+static void p2_widen_scissor(float& x, float& w) {
+    if (sP2Widen <= 1.0f || sUi43) return;
+    const float cx = sGxW * 0.5f;
+    // Casi toda la pantalla cuenta como pantalla completa (hay pantallas que
+    // recortan a 600 o 640 de ancho en vez de exactamente sGxW).
+    if (x <= 0.05f * sGxW && x + w >= 0.95f * sGxW) {
+        if (sP2WidenNoClip > 0) return;
+        x = cx - cx / sP2Widen;
+        w = sGxW / sP2Widen;
+        return;
+    }
+    x = cx + (x - cx) / sP2Widen;
+    w = w / sP2Widen;
+}
+
+static void p2_reapply_scissor() {
+    pc_gfx_flush_batch();
+    invalidate_gl_pipeline_guards();
+    pc_gfx_set_scissor(sGxSc[0], sGxSc[1], sGxSc[2], sGxSc[3]);
+}
+
+extern "C" void pc_gfx_p2_set_2d_widen(float k) {
+    if (k == sP2Widen) return;
+    sP2Widen = k;
+    p2_reapply_scissor();
+}
+
+extern "C" void pc_gfx_p2_2d_widen_noclip(int on) {
+    sP2WidenNoClip += on ? 1 : -1;
+    if (sP2WidenNoClip < 0) sP2WidenNoClip = 0;
+    if (sP2Widen > 1.0f) p2_reapply_scissor();
+}
+#endif
+
+#if PIKI_P2_HOST
+// Los vectores de estas funciones no deben salir del heap JKR del juego: se
+// llaman desde secciones con heaps distintos y un buffer reservado en una se
+// liberaria en otra (Bad Block). Mismo criterio que pc_gfx_present.
+struct P2HostAllocScope {
+    bool prev = pc_host_alloc_active();
+    P2HostAllocScope() { pc_host_alloc_set(true); }
+    ~P2HostAllocScope() { pc_host_alloc_set(prev); }
+};
+
+// Color medio de cada fila de una region del render target, suavizado en
+// vertical para quitar el dibujo de las texturas y quedarse con el degradado.
+static void p2_measure_rows(int x, int y, int w, int h, std::vector<float>& out) {
+    static std::vector<unsigned char> px;
+    px.resize(size_t(w) * size_t(h) * 4);
+    glReadPixels(x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    std::vector<float> rows(size_t(h) * 3, 0.0f);
+    for (int j = 0; j < h; j++)
+        for (int i = 0; i < w; i++)
+            for (int c = 0; c < 3; c++) rows[size_t(j) * 3 + c] += px[(size_t(j) * w + i) * 4 + c] / float(w);
+    const int win = h / 40 < 2 ? 2 : h / 40;
+    out.assign(size_t(h) * 3, 0.0f);
+    for (int j = 0; j < h; j++)
+        for (int c = 0; c < 3; c++) {
+            float sum = 0.0f;
+            int n = 0;
+            for (int k = j - win; k <= j + win; k++) {
+                if (k < 0 || k >= h) continue;
+                sum += rows[size_t(k) * 3 + c];
+                n++;
+            }
+            out[size_t(j) * 3 + c] = sum / float(n);
+        }
+}
+
+// Rectangulo del 4:3 original en el render target para [gxY0, gxY1].
+static bool p2_box_rows(float gxY0, float gxY1, GLint& bx, GLint& by, GLsizei& bw, GLsizei& bh) {
+    const float boxW = sGxW / sP2Widen, boxX = sGxW * 0.5f - boxW * 0.5f;
+    map_gx_rect(boxX, gxY0, boxW, gxY1 - gxY0, bx, by, bw, bh);
+    return bw > 0 && bh > 0 && bx > 0;
+}
+
+// Pinta los laterales fila a fila: dst = color (blend off) o dst *= color.
+static void p2_paint_sides(GLint bx, GLint by, GLsizei bw, GLsizei bh, const std::vector<float>* colors[2], bool multiply) {
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glEnable(GL_SCISSOR_TEST);
+    if (multiply) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+    } else {
+        glDisable(GL_BLEND);
+    }
+    glUseProgram_ptr(sDimProgram);
+    glBindVertexArray_ptr(sDimVAO);
+    const int right = bx + bw;
+    for (int side = 0; side < 2; side++) {
+        const std::vector<float>& c = *colors[side];
+        const int x0 = side == 0 ? 0 : right, w0 = side == 0 ? bx : sRenderWidth - right;
+        for (int j = 0; j < bh; j += 2) {
+            const int h = j + 2 <= bh ? 2 : 1;
+            glScissor(x0, by + j, w0, h);
+            glUniform4f_ptr(sDimColorLoc, c[size_t(j) * 3], c[size_t(j) * 3 + 1], c[size_t(j) * 3 + 2], 1.0f);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+        }
+    }
+    restore_stream_vao();
+    glUseProgram_ptr(0);
+    for (int i = 0; i < 8; i++) sBoundTextures[i] = 0;
+    gl_program_cache_invalidate();
+    invalidate_uniform_cache();
+    invalidate_gl_pipeline_guards();
+    // El recorte GL quedo en la ultima fila: se repone el del juego.
+    pc_gfx_set_scissor(sGxSc[0], sGxSc[1], sGxSc[2], sGxSc[3]);
+}
+#endif
+
+#if PIKI_P2_HOST
+// Fondos que solo existen en el 4:3 (la banda oscura de Opciones): se lleva
+// a los laterales su sombreado, no sus pixeles. Por cada fila de [gxY0, gxY1]
+// se divide el color medio de la franja interior del 4:3 (stripW de ancho)
+// por el de la franja igual justo fuera del borde. Ese factor multiplica el
+// lateral entero, que conserva su propia textura.
+extern "C" void pc_gfx_p2_extend_shade(float gxY0, float gxY1, float stripW) {
+    P2HostAllocScope hostAlloc;
+    if (sP2Widen <= 1.0f || !sNativeFramebufferReady || !glBindFramebuffer_ptr || !ensure_dim_program()
+        || !glUseProgram_ptr || !glBindVertexArray_ptr) return;
+    pc_gfx_flush_batch();
+    GLint bx, by;
+    GLsizei bw, bh;
+    if (!p2_box_rows(gxY0, gxY1, bx, by, bw, bh)) return;
+    const int s = int(lroundf(stripW * float(bw) / sGxW));
+    if (s < 1 || bx < s) return;
+    const int right = bx + bw;
+    pc_gfx_note_gl_state_change();
+    invalidate_gl_pipeline_guards();
+    glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
+    std::vector<float> factor[2];
+    for (int side = 0; side < 2; side++) {
+        const int inX = side == 0 ? bx : right - s, outX = side == 0 ? bx - s : right;
+        std::vector<float> inner, outer;
+        p2_measure_rows(inX, by, s, bh, inner);
+        p2_measure_rows(outX, by, s, bh, outer);
+        factor[side].resize(inner.size());
+        for (size_t i = 0; i < inner.size(); i++) {
+            const float f = outer[i] > 1.0f ? inner[i] / outer[i] : 1.0f;
+            factor[side][i] = f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f);
+        }
+    }
+    const std::vector<float>* colors[2] = { &factor[0], &factor[1] };
+    p2_paint_sides(bx, by, bw, bh, colors, true);
+}
+
+// Fondos periodicos (rejillas) que solo existen en el 4:3: se copia un periodo
+// pegado a cada borde interior y se repite hacia fuera, asi el dibujo
+// continua sin cortes. period y [gxY0, gxY1] en unidades de la pantalla.
+// maxLuma (0-1, <=0 sin limite): si la franja a copiar es mas clara (un
+// destello que pasa por el centro) no se copia. Devuelve 1 si se copio.
+extern "C" int pc_gfx_p2_tile_edges(float gxY0, float gxY1, float period, float maxLuma) {
+    if (sP2Widen <= 1.0f || !sNativeFramebufferReady || !glBlitFramebuffer_ptr || !glBindFramebuffer_ptr) return 0;
+    P2HostAllocScope hostAlloc;
+    pc_gfx_flush_batch();
+    GLint bx, by;
+    GLsizei bw, bh;
+    if (!p2_box_rows(gxY0, gxY1, bx, by, bw, bh)) return 0;
+    const float pp = period * float(bw) / sGxW; // periodo en pixeles
+    if (pp < 2.0f) return 0;
+    const int ps = int(lroundf(pp));
+    const int right = bx + bw;
+    if (maxLuma > 0.0f) {
+        glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
+        std::vector<float> rows[2];
+        p2_measure_rows(bx, by, ps, bh, rows[0]);
+        p2_measure_rows(right - ps, by, ps, bh, rows[1]);
+        float sum = 0.0f;
+        for (int side = 0; side < 2; side++)
+            for (size_t i = 0; i + 2 < rows[side].size(); i += 3)
+                sum += 0.299f * rows[side][i] + 0.587f * rows[side][i + 1] + 0.114f * rows[side][i + 2];
+        const float luma = sum / (2.0f * float(bh) * 255.0f);
+        if (luma > maxLuma) return 0;
+    }
+    pc_gfx_note_gl_state_change();
+    invalidate_gl_pipeline_guards();
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, sNativeFramebuffer);
+    glBindFramebuffer_ptr(GL_DRAW_FRAMEBUFFER, sNativeFramebuffer);
+    for (int n = 1; float(bx) - (n - 1) * pp > 0.0f; n++) {
+        const int d0 = int(lroundf(float(bx) - n * pp)), d1 = int(lroundf(float(bx) - (n - 1) * pp));
+        glBlitFramebuffer_ptr(bx, by, bx + ps, by + bh, d0, by, d1, by + bh, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    }
+    for (int n = 1; float(right) + (n - 1) * pp < float(sRenderWidth); n++) {
+        const int d0 = int(lroundf(float(right) + (n - 1) * pp)), d1 = int(lroundf(float(right) + n * pp));
+        glBlitFramebuffer_ptr(right - ps, by, right, by + bh, d0, by, d1, by + bh, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    }
+    glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
+    glEnable(GL_SCISSOR_TEST);
+    invalidate_gl_pipeline_guards();
+    pc_gfx_set_scissor(sGxSc[0], sGxSc[1], sGxSc[2], sGxSc[3]);
+    return 1;
+}
+
+// Laterales congelados: con capture=1 (o si no hay copia valida) se guardan
+// los dos laterales del frame actual; si no, se reponen los guardados. Para
+// pantallas cuyas transiciones solo existen en el 4:3.
+static GLuint sSidesFbo = 0, sSidesTex = 0;
+static int sSidesW = 0, sSidesH = 0;
+static bool sSidesValid = false;
+
+extern "C" void pc_gfx_p2_sides_static_reset(void) { sSidesValid = false; }
+
+extern "C" void pc_gfx_p2_sides_static(int capture) {
+    if (sP2Widen <= 1.0f || !sNativeFramebufferReady || !glBlitFramebuffer_ptr || !glBindFramebuffer_ptr
+        || !glGenFramebuffers_ptr || !glFramebufferTexture2D_ptr) return;
+    pc_gfx_flush_batch();
+    GLint bx, by;
+    GLsizei bw, bh;
+    if (!p2_box_rows(0.0f, sGxH, bx, by, bw, bh)) return;
+    const int W = sRenderWidth, H = sRenderHeight, right = bx + bw;
+    pc_gfx_note_gl_state_change();
+    invalidate_gl_pipeline_guards();
+    if (!sSidesFbo) glGenFramebuffers_ptr(1, &sSidesFbo);
+    if (!sSidesTex) glGenTextures(1, &sSidesTex);
+    if (sSidesW != W || sSidesH != H) {
+        glBindTexture(GL_TEXTURE_2D, sSidesTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glBindFramebuffer_ptr(GL_FRAMEBUFFER, sSidesFbo);
+        glFramebufferTexture2D_ptr(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sSidesTex, 0);
+        for (int i = 0; i < 8; i++) sBoundTextures[i] = 0;
+        sSidesW = W;
+        sSidesH = H;
+        sSidesValid = false;
+    }
+    glDisable(GL_SCISSOR_TEST);
+    const bool save = capture || !sSidesValid;
+    glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, save ? sNativeFramebuffer : sSidesFbo);
+    glBindFramebuffer_ptr(GL_DRAW_FRAMEBUFFER, save ? sSidesFbo : sNativeFramebuffer);
+    glBlitFramebuffer_ptr(0, 0, bx, H, 0, 0, bx, H, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBlitFramebuffer_ptr(right, 0, W, H, right, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    sSidesValid = true;
+    glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
+    glEnable(GL_SCISSOR_TEST);
+    invalidate_gl_pipeline_guards();
+    pc_gfx_set_scissor(sGxSc[0], sGxSc[1], sGxSc[2], sGxSc[3]);
+}
+
+// Fondos con vineta que oscurece hacia el borde del 4:3: los laterales se
+// rellenan, fila a fila, con el color medio de la franja interior del borde.
+extern "C" void pc_gfx_p2_extend_edge_color(float gxY0, float gxY1, float stripW) {
+    P2HostAllocScope hostAlloc;
+    if (sP2Widen <= 1.0f || !sNativeFramebufferReady || !glBindFramebuffer_ptr || !ensure_dim_program()
+        || !glUseProgram_ptr || !glBindVertexArray_ptr) return;
+    pc_gfx_flush_batch();
+    GLint bx, by;
+    GLsizei bw, bh;
+    if (!p2_box_rows(gxY0, gxY1, bx, by, bw, bh)) return;
+    const int s = int(lroundf(stripW * float(bw) / sGxW));
+    if (s < 1) return;
+    pc_gfx_note_gl_state_change();
+    invalidate_gl_pipeline_guards();
+    glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
+    std::vector<float> col[2];
+    p2_measure_rows(bx, by, s, bh, col[0]);
+    p2_measure_rows(bx + bw - s, by, s, bh, col[1]);
+    for (int side = 0; side < 2; side++)
+        for (float& v : col[side]) v /= 255.0f;
+    const std::vector<float>* colors[2] = { &col[0], &col[1] };
+    p2_paint_sides(bx, by, bw, bh, colors, false);
+}
+#endif
+
+extern "C" void pc_gfx_get_scissor(u32* l, u32* t, u32* w, u32* h) {
+    *l = sGxSc[0]; *t = sGxSc[1]; *w = sGxSc[2]; *h = sGxSc[3];
+}
+
 void pc_gfx_set_scissor(u32 xOrig, u32 yOrig, u32 wd, u32 ht) {
     sGxSc[0] = xOrig; sGxSc[1] = yOrig; sGxSc[2] = wd; sGxSc[3] = ht;
     GLint x, y; GLsizei width, height;
-    map_gx_rect((float)xOrig, (float)yOrig, (float)wd, (float)ht, x, y, width, height);
+    float scX = (float)xOrig, scW = (float)wd;
+#if PIKI_P2_HOST
+    p2_widen_scissor(scX, scW);
+#endif
+    map_gx_rect(scX, (float)yOrig, scW, (float)ht, x, y, width, height);
     static GLint lastX = -1, lastY = -1;
     static GLsizei lastWidth = -1, lastHeight = -1;
     static uint32_t seenSerial = 0;
@@ -6050,7 +6363,7 @@ static bool upload_regular_texture(GXTexObj* obj, PcTextureSource& sourceRecord)
         static u32 allGenLog = 0;
         if (pc_gfx_verbose() && allGenLog++ < 40) {
             printf("[PC TexGen] key=%p texId=%u cur=%p isTex=%u err=%u tid=%lu\n", (void*)key, (unsigned)texId,
-                   SDL_GL_GetCurrentContext(), (unsigned)glIsTexture(texId), (unsigned)glGetError(), (unsigned long)syscall(SYS_gettid));
+                   SDL_GL_GetCurrentContext(), (unsigned)glIsTexture(texId), (unsigned)glGetError(), (unsigned long)SDL_ThreadID());
             fflush(stdout);
         }
         if (texId == 0) {

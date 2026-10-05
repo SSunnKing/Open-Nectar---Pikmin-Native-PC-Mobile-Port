@@ -1,6 +1,11 @@
 #include "types.h"
 #include "JSystem/J2D/J2DGrafContext.h"
 #include "math.h"
+#ifdef PIKI_PC_PORT
+extern f32 gPcHudWideK;
+extern f32 gPcHudWideW;
+extern "C" void pc_gfx_p2_2d_widen_noclip(int on);
+#endif
 
 /**
  * @note Address: 0x80036074
@@ -199,17 +204,38 @@ void J2DGrafContext::fillBox(const JGeometry::TBox2f& box)
 	GXLoadPosMtxImm(mPosMtx, 0);
 	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_CLR_RGBA, GX_F32, 0);
 
+#ifdef PIKI_PC_PORT
+	// 2D en perspectiva sin deformar (J2DPerspGraph): un relleno que toca los
+	// bordes de la pantalla original (fondos, fundidos) llega a los de la ventana.
+	JGeometry::TBox2f pcBox = box;
+	bool pcWide             = false;
+	if (gPcHudWideK > 1.0f && getGrafType() != J2DGraf_Ortho && box.getWidth() >= 0.95f * gPcHudWideW) {
+		const f32 shift = 0.5f * gPcHudWideW * (gPcHudWideK - 1.0f);
+		if (pcBox.i.x <= 0.05f * gPcHudWideW) pcBox.i.x -= shift;
+		if (pcBox.f.x >= 0.95f * gPcHudWideW) pcBox.f.x += shift;
+		pcWide = true;
+		pc_gfx_p2_2d_widen_noclip(1);
+	}
+	const JGeometry::TBox2f& drawBox = pcBox;
+#else
+	const JGeometry::TBox2f& drawBox = box;
+#endif
 	GXBegin(GX_QUADS, GX_VTXFMT0, 4);
 	f32 z = 0.0f;
-	GXPosition3f32(box.i.x, box.i.y, z);
+	GXPosition3f32(drawBox.i.x, drawBox.i.y, z);
 	GXColor1u32(mColorTL);
-	GXPosition3f32(box.f.x, box.i.y, z);
+	GXPosition3f32(drawBox.f.x, drawBox.i.y, z);
 	GXColor1u32(mColorTR);
-	GXPosition3f32(box.f.x, box.f.y, z);
+	GXPosition3f32(drawBox.f.x, drawBox.f.y, z);
 	GXColor1u32(mColorBL);
-	GXPosition3f32(box.i.x, box.f.y, z);
+	GXPosition3f32(drawBox.i.x, drawBox.f.y, z);
 	GXColor1u32(mColorBR);
 	GXEnd();
+#ifdef PIKI_PC_PORT
+	if (pcWide) {
+		pc_gfx_p2_2d_widen_noclip(0);
+	}
+#endif
 
 	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_CLR_RGBA, GX_RGBA4, 0);
 }

@@ -14,7 +14,18 @@ struct Arg : Vector2f {
 		this->y = y;
 	}
 
+#ifdef PIKI_PC_PORT
+	// El original asigna a una copia temporal ((Vector2f)(*this) = vec): con
+	// MWCC escribia en el objeto, pero en C++ estandar x/y quedan sin
+	// inicializar y el efecto salia fuera de su sitio (elegir partida, etc.).
+	Arg(Vector2f vec)
+	{
+		this->x = vec.x;
+		this->y = vec.y;
+	}
+#else
 	Arg(Vector2f vec) { (Vector2f)(*this) = vec; }
+#endif
 
 	virtual const char* getName() // _08 (weak)
 	{

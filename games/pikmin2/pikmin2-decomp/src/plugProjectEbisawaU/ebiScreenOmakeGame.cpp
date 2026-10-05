@@ -1,4 +1,7 @@
 #include "ebi/Omake.h"
+#ifdef PIKI_PC_PORT
+extern "C" void pc_gfx_p2_extend_shade(float gxY0, float gxY1, float stripW);
+#endif
 #include "ebi/E2DGraph.h"
 #include "PSSystem/PSSystemIF.h"
 
@@ -193,6 +196,11 @@ void TOmakeGame::doDraw()
 
 	graf->setPort();
 	mScreenObj->draw(*gfx, *graf);
+#ifdef PIKI_PC_PORT
+	// Pantallas anchas: la vineta del fondo solo existe en el 4:3; su sombra
+	// se lleva a los laterales, que conservan su tela.
+	pc_gfx_p2_extend_shade(0.0f, 448.0f, 6.0f);
+#endif
 }
 
 /**

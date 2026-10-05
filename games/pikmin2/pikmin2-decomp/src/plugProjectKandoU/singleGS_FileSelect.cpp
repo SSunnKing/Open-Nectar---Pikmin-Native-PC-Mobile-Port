@@ -1,6 +1,13 @@
 #include "Game/MoviePlayer.h"
+#include "ebi/FileSelect.h"
+#include "ebi/FS.h"
 #ifdef PIKI_PC_PORT
 extern "C" void pc_gfx_set_post_allowed(int allowed);
+extern "C" float pc_gfx_get_current_aspect_ratio(void);
+extern "C" int pc_gfx_p2_tile_edges(float gxY0, float gxY1, float period, float maxLuma);
+extern "C" void pc_gfx_p2_sides_static(int capture);
+extern "C" void pc_gfx_p2_sides_static_reset(void);
+static int sPcSidesFrames = 0;
 #endif
 #include "Game/GameConfig.h"
 #include "Game/AIConstants.h"
@@ -49,6 +56,8 @@ void FileState::init(SingleGameSection* section, StateArg* arg)
 	sys->setFrameRate(1);
 #ifdef PIKI_PC_PORT
 	pc_gfx_set_post_allowed(0); // bloom/SSAO dejaban en negro esta pantalla 2D
+	sPcSidesFrames = 0; // laterales estaticos: se vuelven a capturar al entrar
+	pc_gfx_p2_sides_static_reset();
 #endif
 	playData->mDeadNaviID.typeView = 0;
 }
@@ -216,7 +225,32 @@ void FileState::draw(SingleGameSection* game, Graphics& gfx)
 		gfx.mPerspGraph.setPort();
 		mFSMgr->draw();
 		gfx.mPerspGraph.setPort();
+#ifdef PIKI_PC_PORT
+		// La rejilla de arriba (hasta la banda azul, y=75) se queda en el 4:3:
+		// se continua en los laterales repitiendo una celda (20 en 612 = 30.6).
+		// Mientras pasa el destello de los slots (franja clara) no se copia.
+		// Una vez guardados los laterales estaticos ya no hace falta.
+		bool pcTiled = false;
+		if (sPcSidesFrames <= 30) {
+			pcTiled = pc_gfx_p2_tile_edges(0.0f, 75.0f, 30.6f, 0.25f) != 0;
+		}
+#endif
 		particle2dMgr->draw(0, 0);
+#ifdef PIKI_PC_PORT
+		// Laterales estaticos: con la pantalla quieta (medio segundo seguido
+		// eligiendo partida, ya sin la entrada ni su destello) se guardan y
+		// desde entonces se reponen; los destellos y la cortina de las
+		// transiciones solo existen en el 4:3 y los descuadraban.
+		gfx.mPerspGraph.setPort();
+		if (sPcSidesFrames <= 30) {
+			// Quieta = eligiendo partida y sin destello en la franja de arriba.
+			const bool idle = mFSMgr->mMgrFS.getStateID() == ebi::FS::FSSTATE_SelectData && pcTiled;
+			sPcSidesFrames  = idle ? sPcSidesFrames + 1 : 0;
+			if (sPcSidesFrames > 30) pc_gfx_p2_sides_static(1);
+		} else {
+			pc_gfx_p2_sides_static(0);
+		}
+#endif
 		mFSMgr->showInfo();
 	}
 }

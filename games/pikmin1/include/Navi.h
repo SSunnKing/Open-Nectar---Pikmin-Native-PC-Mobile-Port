@@ -223,8 +223,11 @@ public:
 	void pcDrawLockRing(Graphics& gfx);
 	void pcDrawNightAmbience(Graphics& gfx);
 	void pcPinCursorFirstPerson();
+	void pcRotateCursor(f32 angle); ///< Gira el cursor alrededor del capitán (cámara libre).
+	void pcCursorToFront(); ///< Cursor delante del capitán, a la distancia que tenía.
 	Creature* mPcLockTarget = nullptr; ///< Mod "Lock-On": enemigo u objeto fijado.
 	Creature* mPcLockIgnore = nullptr; ///< Automático: soltado a mano, no se recoge hasta salir de él.
+	f32 mPcChargeTime       = 0.0f;    ///< Mod "Charge": segundos que el grupo sigue corriendo hacia el objetivo.
 	Vector3f mPcAimOffset;             ///< Cursor libre (lo que apunta el jugador) mientras el visible está clavado.
 	Vector3f mPcPinnedOffset;          ///< Último desplazamiento con el que se clavó el cursor.
 	Texture* mPcGlowTex = nullptr;     ///< Eternal Night: halo de luciérnagas y pellets (va con el heap del nivel).

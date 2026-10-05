@@ -104,14 +104,88 @@ static void pc_install_crash_handler()
 	sigaction(SIGFPE, &sa, nullptr);
 	sigaction(SIGILL, &sa, nullptr);
 }
+#elif defined(_WIN32)
+#include <io.h>
+#include <windows.h>
+
+// Equivalente al de Linux: excepción, dirección y pila (desenrollada con las
+// tablas de x64, sin dbghelp) en stderr y en pikmin2_crash.log, junto a los
+// datos del juego. rel = dirección - base del módulo, para addr2line/nm.
+static void pc_crash_frame(FILE* out, int index, DWORD64 pc)
+{
+	HMODULE module = nullptr;
+	wchar_t path[MAX_PATH] = L"?";
+	GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+	                   (LPCWSTR)(uintptr_t)pc, &module);
+	if (module) GetModuleFileNameW(module, path, MAX_PATH);
+	const wchar_t* name = wcsrchr(path, L'\\');
+	fprintf(out, "  #%-2d abs=0x%016llx rel=0x%010llx  %ls\n", index, (unsigned long long)pc,
+	        (unsigned long long)(pc - (DWORD64)(uintptr_t)module), name ? name + 1 : path);
+}
+
+static LONG WINAPI pc_crash_filter(EXCEPTION_POINTERS* ep)
+{
+	static volatile LONG entered = 0;
+	if (InterlockedExchange(&entered, 1)) return EXCEPTION_CONTINUE_SEARCH;
+
+	FILE* outs[2] = { stderr, fopen("pikmin2_crash.log", "w") };
+	for (FILE* out : outs) {
+		if (!out) continue;
+		const EXCEPTION_RECORD* rec = ep->ExceptionRecord;
+		fprintf(out, "\n=== [PC Port] CRASH: exception 0x%08lx at %p ===\n", (unsigned long)rec->ExceptionCode,
+		        rec->ExceptionAddress);
+		if (rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rec->NumberParameters >= 2) {
+			fprintf(out, "%s address = 0x%llx\n", rec->ExceptionInformation[0] ? "write" : "read",
+			        (unsigned long long)rec->ExceptionInformation[1]);
+		}
+		fprintf(out, "module base = %p  (rel: nm -C / addr2line -Cfe pikmin2_pc.exe sin strip)\n",
+		        (void*)GetModuleHandleW(nullptr));
+		CONTEXT ctx = *ep->ContextRecord;
+		for (int i = 0; i < 64 && ctx.Rip; ++i) {
+			pc_crash_frame(out, i, ctx.Rip);
+			DWORD64 imageBase = 0;
+			PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry(ctx.Rip, &imageBase, nullptr);
+			if (!fn) {
+				// Función hoja: la dirección de vuelta está en la cima de la pila.
+				ctx.Rip = *(DWORD64*)(uintptr_t)ctx.Rsp;
+				ctx.Rsp += 8;
+				continue;
+			}
+			void* handlerData = nullptr;
+			DWORD64 establisher = 0;
+			RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, ctx.Rip, fn, &ctx, &handlerData, &establisher, nullptr);
+		}
+		fprintf(out, "=== end backtrace ===\n");
+		fflush(out);
+	}
+	if (outs[1]) fclose(outs[1]);
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void pc_install_crash_handler()
+{
+	// Sin consola (abierto desde el launcher) la salida del juego se perdería:
+	// va a pikmin2.log, junto a los datos.
+	if (GetConsoleWindow() == nullptr || std::getenv("PIKMIN2_LOG_TO_FILE")) {
+		if (freopen("pikmin2.log", "w", stdout)) {
+			_dup2(_fileno(stdout), _fileno(stderr));
+			setvbuf(stderr, NULL, _IONBF, 0);
+		}
+	}
+	// El CRT de Windows limita a 512 FILE* abiertos (Linux deja ~1024 fd):
+	// el juego mantiene abiertos archivos de audio y DVD a la vez.
+	// 2048 es el máximo que acepta msvcrt (MinGW); la UCRT admite más.
+	_setmaxstdio(2048);
+	SetUnhandledExceptionFilter(pc_crash_filter);
+}
 #else
 static void pc_install_crash_handler() { }
 #endif
 
 int main(int argc, char* argv[])
 {
-	setvbuf(stdout, NULL, _IONBF, 0);
 	pc_install_crash_handler();
+	setvbuf(stdout, NULL, _IONBF, 0);
 	SDL_SetMainReady();
 
 	// El launcher Fusion consulta y modifica los ajustes sin crear la ventana

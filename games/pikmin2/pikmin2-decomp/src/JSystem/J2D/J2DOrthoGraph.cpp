@@ -1,4 +1,7 @@
 #include "types.h"
+#ifdef PIKI_PC_PORT
+extern "C" void pc_gfx_p2_interface_begin(void);
+#endif
 #include "JSystem/J2D/J2DGrafContext.h"
 
 /**
@@ -30,6 +33,9 @@ J2DOrthoGraph::J2DOrthoGraph(f32 left, f32 top, f32 right, f32 bottom, f32 nearP
  */
 void J2DOrthoGraph::setPort()
 {
+#ifdef PIKI_PC_PORT
+	pc_gfx_p2_interface_begin(); // postproceso antes de la interfaz
+#endif
 	J2DGrafContext::setPort();
 	C_MTXOrtho(mMtx44, mOrtho.i.y, mOrtho.f.y, mOrtho.i.x, mOrtho.f.x, mNear, mFar);
 	GXSetProjection(mMtx44, GX_ORTHOGRAPHIC);

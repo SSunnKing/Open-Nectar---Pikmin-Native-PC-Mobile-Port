@@ -649,7 +649,10 @@ std::string pc_post_build_fragment_shader(const PcPostEffects& fx)
 		src += "    c = clamp(c, 0.0, 1.0);\n";
 	}
 
-	src += "    oColour = vec4(c, 1.0);\n";
+	// El alfa de la escena se conserva: la interfaz de Pikmin 2 mezcla con el
+	// alfa de destino (DSTALPHA) y con 1.0 fijo un relleno negro que debía
+	// quedar invisible tapaba media pantalla (triángulo negro con Louie).
+	src += "    oColour = vec4(c, texture(uScene, vUV).a);\n";
 	src += "}\n";
 	return src;
 }

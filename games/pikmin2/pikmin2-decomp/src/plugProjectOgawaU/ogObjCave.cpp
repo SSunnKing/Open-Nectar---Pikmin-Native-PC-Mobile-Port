@@ -1,4 +1,8 @@
 #include "og/newScreen/Cave.h"
+#ifdef PIKI_PC_PORT
+void pcHudWideBegin(J2DPerspGraph*);
+void pcHudWideEnd(J2DPerspGraph*);
+#endif
 #include "og/Screen/DopingScreen.h"
 #include "og/Screen/NaviLifeGauge.h"
 #include "og/Screen/PikminCounter.h"
@@ -228,6 +232,9 @@ bool ObjCave::doUpdate()
  */
 void ObjCave::doDraw(Graphics& gfx)
 {
+#ifdef PIKI_PC_PORT
+	pcHudWideBegin(&gfx.mPerspGraph);
+#endif
 	if (mBloGroup) {
 		mBloGroup->draw(&gfx.mPerspGraph);
 	}
@@ -235,6 +242,9 @@ void ObjCave::doDraw(Graphics& gfx)
 	if (mDisp->mDrawSensor) {
 		mOtakara->draw(gfx.mPerspGraph);
 	}
+#ifdef PIKI_PC_PORT
+	pcHudWideEnd(&gfx.mPerspGraph);
+#endif
 }
 
 /**

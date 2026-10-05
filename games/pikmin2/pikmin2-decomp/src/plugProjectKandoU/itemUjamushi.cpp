@@ -151,7 +151,12 @@ Uja::Uja()
     : TFlock()
     , mUpdateContext()
 {
+#ifdef PIKI_PC_PORT
+	// El original asignaba a una copia temporal (con MWCC escribia en el objeto).
+	static_cast<Vector3f&>(*this)    = Vector3f(0.0f);
+#else
 	(Vector3f)(*this)    = Vector3f(0.0f);
+#endif
 	mVelocity            = 0.0f;
 	mFlockMgr            = nullptr;
 	mBufferSlotCount     = 4;

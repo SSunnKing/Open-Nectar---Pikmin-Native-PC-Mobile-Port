@@ -1,3 +1,5 @@
+#include <stdio.h>
+#include <stdlib.h>
 #include "JSystem/JParticle/JPAResource.h"
 #include "JSystem/JParticle/JPAEmitter.h"
 #include "JSystem/JParticle/JPAMath.h"
@@ -814,6 +816,26 @@ void JPAResource::drawP(JPAEmitterWorkData* work)
 
 	work->mpAlivePtcl = &work->mEmitter->mAlivePtclBase;
 	setPTev();
+#ifdef PIKI_PC_PORT
+	{
+		// PIKMIN_JPA_DEBUG=1: recursos 2 y 3 (efecto de elegir partida): forma
+		// y colocacion, unas pocas veces.
+		static const bool dbg = getenv("PIKMIN_JPA_DEBUG") != nullptr;
+		static int lines      = 0;
+		if (dbg && (mUsrIdx == 2 || mUsrIdx == 3) && lines < 24) {
+			lines++;
+			JPANode<JPABaseParticle>* n = work->mEmitter->mAlivePtclBase.getFirst();
+			const JGeometry::TVec3f* p0 = n != work->mEmitter->mAlivePtclBase.getEnd() ? &n->getObject()->mPosition : nullptr;
+			printf("[JPA] res=%u type=%d dir=%d rot=%d plane=%d prj=%d dl=%d glbTrs=(%.1f %.1f %.1f) p0=(%.1f %.1f %.1f) "
+			       "cam=(%.2f %.2f %.2f %.1f / %.2f %.2f %.2f %.1f / %.2f %.2f %.2f %.1f)\n",
+			       mUsrIdx, mBaseShape->getType(), work->mDirType, work->mRotType, work->mPlaneType, work->mProjectionType, work->mDLType,
+			       work->mEmitter->mGlobalTrs.x, work->mEmitter->mGlobalTrs.y, work->mEmitter->mGlobalTrs.z, p0 ? p0->x : 0.0f,
+			       p0 ? p0->y : 0.0f, p0 ? p0->z : 0.0f, work->mPosCamMtx[0][0], work->mPosCamMtx[0][1], work->mPosCamMtx[0][2],
+			       work->mPosCamMtx[0][3], work->mPosCamMtx[1][0], work->mPosCamMtx[1][1], work->mPosCamMtx[1][2], work->mPosCamMtx[1][3],
+			       work->mPosCamMtx[2][0], work->mPosCamMtx[2][1], work->mPosCamMtx[2][2], work->mPosCamMtx[2][3]);
+		}
+	}
+#endif
 
 	for (int i = mDrawEmitterFuncListNum - 1; i >= 0; i--) {
 		(*mDrawEmitterFuncList[i])(work);

@@ -1,4 +1,11 @@
 #include "Game/CameraMgr.h"
+#ifdef PIKI_PC_PORT
+namespace Game {
+struct Navi;
+void pcNaviRotateCursor(Navi* navi, float angle);
+void pcNaviCursorToFront(Navi* navi);
+} // namespace Game
+#endif
 #include "Game/Navi.h"
 #include "Game/Stickers.h"
 #include "Game/MapMgr.h"
@@ -453,6 +460,13 @@ u32 PlayCamera::updateCameraMode()
 
 			if (pad->getButtonDown() & Controller::PRESS_L) {
 				flags |= CAMFLAGS_CenterBehind;
+#ifdef PIKI_PC_PORT
+				// Cámara libre: L la pone detrás del capitán, y el cursor (que
+				// gira con ella) vuelve delante de él.
+				if (pc_settings_get_free_camera() && mTargetObj) {
+					pcNaviCursorToFront(mTargetObj);
+				}
+#endif
 			} else {
 				if (pad->mButton.mAnalogL > 0.1f) {
 					flags |= CAMFLAGS_SmoothFollow;
@@ -635,6 +649,12 @@ void PlayCamera::changeTargetTheta()
 			clampAngle(angle);
 			mCameraAngleTarget = angle;
 			mSmoothMoveSpeed   = 0.0f;
+			// El cursor gira con la cámara alrededor del capitán para seguir en
+			// el mismo sitio de la pantalla: su desplazamiento va en coordenadas
+			// del mundo y, con la cámara girada, apuntaba a otro lado (#74).
+			if (!fp) {
+				pcNaviRotateCursor(mTargetObj, drag * 3.2f);
+			}
 		}
 		if (fp) {
 			sPcPitch += pitch * 3.2f;

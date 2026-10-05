@@ -136,6 +136,12 @@ public:
 	immut char* getEventName(int, int);
 	immut char* getSenderName(int);
 
+#if defined(PIKI_PC_PORT)
+	/// Mientras se disparan los eventos de una cinemática saltada (ver
+	/// CinematicPlayer::skipScene), los que dependen de una animación que ya
+	/// no se va a ver se resuelven al momento.
+	bool mPcSkipping = false;
+#endif
 	int getEventMax() { return 6; }
 	int getSenderMax() { return 0x20; }
 

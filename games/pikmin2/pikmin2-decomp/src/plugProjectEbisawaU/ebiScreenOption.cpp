@@ -1,4 +1,7 @@
 #include "ebi/Screen/TOption.h"
+#ifdef PIKI_PC_PORT
+extern "C" void pc_gfx_p2_extend_shade(float gxY0, float gxY1, float stripW);
+#endif
 #include "ebi/E2DGraph.h"
 #include "Game/Data.h"
 #include "og/newScreen/ogUtil.h"
@@ -604,6 +607,12 @@ void TOption::doDraw()
 	graf          = &gfx->mPerspGraph;
 	graf->setPort();
 	mMainScreen->draw(*gfx, *graf);
+#ifdef PIKI_PC_PORT
+	// Pantallas anchas: la banda oscura de arriba solo existe en el 4:3; su
+	// sombreado, medido cada frame en el borde interior, se aplica a los
+	// laterales, que conservan su propia tela.
+	pc_gfx_p2_extend_shade(0.0f, 150.0f, 10.0f); // franja de 10: el marco de "Idioma" llega a ~14 del borde
+#endif
 
 	if (mState) {
 		f32 factor;

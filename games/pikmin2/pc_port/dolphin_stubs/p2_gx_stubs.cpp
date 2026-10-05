@@ -90,7 +90,8 @@ void GXSetScissor(u32 xOrig, u32 yOrig, u32 wd, u32 ht) {
     pc_gfx_set_scissor(xOrig, yOrig, wd, ht);
 }
 void GXSetScissorBoxOffset(s32 xOrig, s32 yOrig) { (void)xOrig; (void)yOrig; }
-void GXGetScissor(u32* l, u32* t, u32* w, u32* h) { *l=0; *t=0; *w=640; *h=480; }
+extern "C" void pc_gfx_get_scissor(u32* l, u32* t, u32* w, u32* h);
+void GXGetScissor(u32* l, u32* t, u32* w, u32* h) { pc_gfx_get_scissor(l, t, w, h); }
 void GXSetClipMode(GXClipMode mode) { (void)mode; }
 void GXLoadPosMtxIndx(u16 mtxIndx, u32 id) { (void)mtxIndx; (void)id; }
 void GXLoadNrmMtxImm3x3(Mtx33 mtx, u32 id) { (void)mtx; (void)id; }

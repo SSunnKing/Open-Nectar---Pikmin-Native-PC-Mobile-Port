@@ -2728,6 +2728,12 @@ public:
 			if (playerState->isTutorial() && !gameflow.mIsDayEndActive) {
 				isTimeMoving = false;
 			}
+#if defined(PIKI_PC_PORT)
+			// Eternal Night también en el día del tutorial, que fija su propia hora.
+			if (pc_settings_get_eternal_night()) {
+				isTimeMoving = true;
+			}
+#endif
 			mapMgr->mDayMgr->refresh(gfx, isTimeMoving ? PC_VISUAL_TOD() : TUTORIAL_TIME_OF_DAY, 8); // use 8 lights
 			mCameraFarClip = 10000.0f; // anything further than 10000 units isn't rendered
 

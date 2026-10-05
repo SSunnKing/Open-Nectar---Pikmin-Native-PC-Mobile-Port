@@ -296,6 +296,14 @@ void PcamCamera::control(Controller& controller)
 	if (controller.keyDown(KBBTN_X)) {
 		xSubY = controller.getSubStickY();
 	}
+#if defined(PIKI_PC_PORT)
+	// Cámara libre: L1 la devuelve detrás del capitán, y el cursor (que ha
+	// girado con ella) vuelve también delante de él (issue #74).
+	if (pc_settings_get_free_camera() && controller.keyClick(KBBTN_L) && mTargetCreature
+	    && mTargetCreature->mObjType == OBJTYPE_Navi) {
+		static_cast<Navi*>(mTargetCreature)->pcCursorToFront();
+	}
+#endif
 	PcamControlInfo info;
 	info.init(true, doRotate, controller.keyClick(KBBTN_L) != 0, controller.keyClick(KBBTN_R) && !controller.keyDown(KBBTN_X), isZClick,
 	          false, false, controller.getMainStickX(), xSubY, controller.getSubStickY());
@@ -308,6 +316,12 @@ void PcamCamera::control(Controller& controller)
 		// Aproximadamente media vuelta por una pasada de un ancho de pantalla.
 		mPolarDir.rotateAzimuth(cameraDrag * 3.2f);
 		mPolarDir.roundAzimuth();
+		// El cursor gira con la cámara alrededor del capitán, para seguir en el
+		// mismo sitio de la pantalla: si no, se quedaba fijo en el mundo y,
+		// con la cámara girada, apuntaba a otro lado (issue #74).
+		if (mTargetCreature && mTargetCreature->mObjType == OBJTYPE_Navi) {
+			static_cast<Navi*>(mTargetCreature)->pcRotateCursor(cameraDrag * 3.2f);
+		}
 	}
 }
 

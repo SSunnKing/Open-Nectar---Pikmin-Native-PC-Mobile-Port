@@ -516,6 +516,16 @@ zen::ogScrMessageMgr::ogScrMessageMgr(immut char* path)
 	mHasDrawOccurredThisFrame = false;
 	mCurrPageNum              = 0;
 	mCurrentMessageId         = 0;
+#if defined(PIKI_PC_PORT)
+	// Fondo de los textos (pane 'base', p2_lu_64.bti): la textura es blanca con
+	// alfa 175 y nada la tiñe, así que oscurecía la escena con un velo blanco.
+	// Con el blanco del pane en negro queda un velo negro translúcido.
+	if (P2DPane* base = mBaseScreen->search('base', false)) {
+		if (base->getTypeID() == PANETYPE_Picture) {
+			static_cast<P2DPicture*>(base)->setWhite(Colour(0, 0, 0, 255));
+		}
+	}
+#endif
 	mCursorPane               = static_cast<P2DPicture*>(mBaseScreen->search('curs', true));
 	mButtonPromptPane         = static_cast<P2DPicture*>(mBaseScreen->search('a_bt', true));
 	mCursorBlinker            = new setTenmetuAlpha(mCursorPane, 0.5f);

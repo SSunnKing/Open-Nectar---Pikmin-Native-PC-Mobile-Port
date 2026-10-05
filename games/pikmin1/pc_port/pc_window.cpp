@@ -901,6 +901,11 @@ bool pc_window_init(const char* title, int width, int height) {
 
 // Vuelca el estado de un mando SDL sobre un pad GC. Devuelve true si el mando
 // se está usando (para decidir entre iconos de teclado y de mando).
+// Free Camera se queda el stick derecho, pero el radar lo necesita para el
+// zoom (issue #76): se guarda aquí el eje vertical aunque no llegue al pad.
+static float sFreeCamSubY[2] = { 0.0f, 0.0f };
+float pc_window_free_camera_sub_y(void) { return sFreeCamSubY[0]; }
+
 static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& stickX, s8& stickY,
                                    s8& substickX, s8& substickY, u8& triggerL, u8& triggerR, bool& swarmHeld, int player = 0)
 {
@@ -958,7 +963,9 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     // Mod "Free Camera": the right stick orbits instead of pushing the squad,
     // the way Pikmin 3 rearranged it. The squad moves to the Swarm button,
     // which defaults to D-pad Down here because the mod frees it up.
+    sFreeCamSubY[player & 1] = 0.0f;
     if (pc_settings_get_free_camera()) {
+        if (abs(ry) > axisDeadZone) sFreeCamSubY[player & 1] = pc_pad_axis_from_sdl(-ry) / 74.0f;
         if (abs(rx) > axisDeadZone) {
             // Cada mando gira la cámara de su jugador (en cooperativo, J2 la suya).
             pc_window_add_camera_drag_player(player, -(float)rx / 32767.0f * 0.02f * pc_settings_get_free_camera_pad_scale());
@@ -1205,22 +1212,16 @@ void pc_window_poll_events(PADStatus* pad) {
     initKeyBindings();
 
     // ── Keyboard Mapping (configurable) ──
-    // Mod "Free Camera": while the B key is held the mouse orbits instead of
-    // aiming, so that key stops sending B for as long as it is down. The
-    // whistle is unaffected in practice -- right click is wired to B on its
-    // own, below -- and with the mod off nothing changes.
-    // Solo mientras se juega, y solo las teclas: en menús, pausa y pantallas B
-    // vuelve a ser B, y un clic asignado a B siempre manda B (antes del #68 el
-    // clic derecho iba aparte y no se anulaba).
+    // Mod "Free Camera": con ratón la cámara gira empujando el cursor más
+    // allá de su límite (Navi), así que B ya no se reserva para girar.
     const int bindB1 = sKeyBindings[PC_KEY_ACT_B], bindB2 = sKeyBindings2[PC_KEY_ACT_B];
     const bool bKeyHeld = (!pc_bind_is_mouse(bindB1) && pc_window_binding_held(bindB1, state, boundMouse))
                        || (!pc_bind_is_mouse(bindB2) && pc_window_binding_held(bindB2, state, boundMouse));
-    const bool freeCamHeld = pc_settings_get_free_camera() && pc_settings_in_gameplay() && bKeyHeld;
 
     if (held(PC_KEY_ACT_A))        button |= PAD_BUTTON_A;
     const bool bMouseHeld = (pc_bind_is_mouse(bindB1) && pc_window_binding_held(bindB1, state, boundMouse))
                          || (pc_bind_is_mouse(bindB2) && mouseSecondOk && pc_window_binding_held(bindB2, state, boundMouse));
-    if (bMouseHeld || (bKeyHeld && !freeCamHeld)) button |= PAD_BUTTON_B;
+    if (bMouseHeld || bKeyHeld) button |= PAD_BUTTON_B;
     if (held(PC_KEY_ACT_X))        button |= PAD_BUTTON_X;
     if (held(PC_KEY_ACT_Y))        button |= PAD_BUTTON_Y;
     if (held(PC_KEY_ACT_Z))        button |= PAD_TRIGGER_Z;
@@ -1343,12 +1344,10 @@ void pc_window_poll_events(PADStatus* pad) {
 
             const float sensitivity = sMouseSensitivity;
 
-            // Mod "Free Camera": while held, the motion orbits and the cursor
-            // stays where it was, so aiming resumes from the same spot.
             // Mod "First Person": the mouse always looks around (yaw and
             // pitch); the cursor is pinned in front of the view by Navi.
             const bool firstPerson = pc_first_person_active_for(sKeyboardOwner) != 0;
-            if (freeCamHeld || firstPerson) {
+            if (firstPerson) {
                 int winW = sWindowWidth;
                 int winH = sWindowHeight;
                 SDL_GetWindowSize(sWindow, &winW, &winH);

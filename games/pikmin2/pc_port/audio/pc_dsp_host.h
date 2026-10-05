@@ -87,6 +87,11 @@ void pc_dsp_host_render_frame(DSPchannel_* channels, u32 channelCount, s16* out,
 void pc_dsp_host_render_frame_planar(DSPchannel_* channels, u32 channelCount,
                                      s16* out, u32 frameSamples);
 
+/// Nivel de salida del DSP que fija el juego (DsetMixerLevel; 1.0 = unidad).
+/// En GameCube multiplica toda la mezcla: Pikmin 2 usa 1.2 y lo baja para
+/// fundir a silencio al parar el sonido.
+void pc_dsp_host_set_mixer_level(float level);
+
 /// True once pc_dsp_host_init has run.
 bool pc_dsp_host_ready(void);
 

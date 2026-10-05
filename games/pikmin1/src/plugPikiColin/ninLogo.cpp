@@ -83,6 +83,24 @@ struct NinLogoSetupSection : public Node {
 				return;
 			}
 		} else {
+#if defined(PIKI_PC_PORT)
+			// En GC el logo se ve mientras carga el disco; en PC la carga es
+			// instantanea y no llegaba a verse. Se mantiene 2.5 s: medio
+			// segundo de entrada, mantenido y medio segundo de salida.
+			static f32 pcLogoTime = 0.0f;
+			const f32 kLogoTime   = 2.5f, kFade = 0.5f;
+			if (pcLogoTime < kLogoTime) {
+				pcLogoTime += gsys->getFrameTime();
+				f32 fade = 1.0f;
+				if (pcLogoTime < kFade) {
+					fade = pcLogoTime / kFade;
+				} else if (pcLogoTime > kLogoTime - kFade) {
+					fade = (kLogoTime - pcLogoTime) / kFade;
+				}
+				gameflow.mLevelBannerFadeValue = fade < 0.0f ? 0.0f : (fade > 1.0f ? 1.0f : fade);
+				return;
+			}
+#endif
 			// transit to title once progressive mode window is complete
 			gameflow.mNextGameSectionID = SECTION_Titles;
 			gsys->softReset();

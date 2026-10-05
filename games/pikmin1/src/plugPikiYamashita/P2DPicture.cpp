@@ -511,7 +511,15 @@ void P2DPicture::setTevMode()
 		GXSetTevOrder((GXTevStageID)i, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR_NULL);
 		GXSetTevColor(GX_TEVREG0, reinterpret_cast<GXColor&>(mBlack));
 		GXSetTevColor(GX_TEVREG1, reinterpret_cast<GXColor&>(mWhite));
+#if defined(PIKI_PC_PORT)
+		// mBlack va en TEVREG0 (GX_CC_C0) y mWhite en TEVREG1 (GX_CC_C1).
+		// GX_CC_C2 leía TEVREG2, fijado a blanco más arriba, así que setWhite
+		// no teñía nada: el velo de los textos de Olimar salía blanco. Mismo
+		// error de registro que el arreglado en DGXGraphics para partículas.
+		GXSetTevColorIn((GXTevStageID)i, GX_CC_C0, GX_CC_C1, GX_CC_CPREV, GX_CC_ZERO);
+#else
 		GXSetTevColorIn((GXTevStageID)i, GX_CC_C0, GX_CC_C2, GX_CC_CPREV, GX_CC_ZERO);
+#endif
 		GXSetTevAlphaIn((GXTevStageID)i, GX_CA_A0, GX_CA_A1, GX_CA_APREV, GX_CA_ZERO);
 		GXSetTevColorOp((GXTevStageID)i, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
 		GXSetTevAlphaOp((GXTevStageID)i, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);

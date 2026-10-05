@@ -1448,11 +1448,13 @@ void BaseGameSection::draw3D(Graphics& gfx)
 }
 
 #ifdef PIKI_PC_PORT
-extern "C" int pc_settings_get_eternal_night(void);
+extern "C" int pc_settings_get_fireflies(void);
+void pcDrawLockOnRing(Graphics& gfx, Viewport* port); // navi.cpp
 
 namespace {
 /**
- * @brief Eternal Night: luciérnagas por lo que ve la cámara.
+ * @brief Fireflies: luciérnagas por lo que ve la cámara, de día o de noche
+ * (opción propia, separada de Eternal Night, como en Pikmin 1).
  *
  * Igual que en Pikmin 1, pero sin nada de P1: cada luciérnaga lleva su rumbo,
  * su altura y su parpadeo, y se dibuja como un halo aditivo con GX directo.
@@ -1544,7 +1546,7 @@ void pcBuildGlowTex()
 void pcDrawNightFireflies(Graphics& gfx, Viewport* port)
 {
 	Game::GameSystem* gs = Game::gameSystem;
-	if (!pc_settings_get_eternal_night() || !gs || !gs->isStoryMode() || gs->mIsInCave || !Game::naviMgr) {
+	if (!pc_settings_get_fireflies() || !gs || !gs->isStoryMode() || gs->mIsInCave || !Game::naviMgr) {
 		return;
 	}
 	Game::Navi* navi = Game::naviMgr->getActiveNavi();
@@ -1701,6 +1703,7 @@ void BaseGameSection::drawParticle(Graphics& gfx, int viewport)
 		particleMgr->draw(port, 2);
 #ifdef PIKI_PC_PORT
 		pcDrawNightFireflies(gfx, port);
+		pcDrawLockOnRing(gfx, port);
 #endif
 	}
 }

@@ -1,4 +1,8 @@
 #include "og/newScreen/Ground.h"
+#ifdef PIKI_PC_PORT
+void pcHudWideBegin(J2DPerspGraph*);
+void pcHudWideEnd(J2DPerspGraph*);
+#endif
 #include "og/newScreen/Cave.h"
 #include "og/newScreen/ogUtil.h"
 #include "og/Screen/SunMeter.h"
@@ -180,11 +184,17 @@ void ObjGround::doDraw(Graphics& gfx)
 		mSunMeter->hide();
 	}
 
+#ifdef PIKI_PC_PORT
+	pcHudWideBegin(&gfx.mPerspGraph);
+#endif
 	if (mBloGroup)
 		mBloGroup->draw(&gfx.mPerspGraph);
 
 	if (mDisp->mHasRadar)
 		mOtakara->draw(gfx.mPerspGraph);
+#ifdef PIKI_PC_PORT
+	pcHudWideEnd(&gfx.mPerspGraph);
+#endif
 }
 
 /**

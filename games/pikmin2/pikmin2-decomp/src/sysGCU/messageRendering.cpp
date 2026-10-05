@@ -28,6 +28,10 @@ doubleColorStruct cBtnIconColor[11] = {
 };
 } // namespace
 
+#ifdef PIKI_PC_PORT
+extern "C" void pc_window_key_prompt_label(char tag, char* buf, unsigned bufSize);
+#endif
+
 // Los argumentos de las etiquetas del mensaje van en big-endian (datos de
 // GameCube). Leidos con *(u16*) en PC, un tamano de 100 salia 25600 y la letra
 // ocupaba toda la pantalla con el color del texto (dialogo de la nave).
@@ -649,6 +653,44 @@ bool TRenderingProcessor::tagImage(u16 p1, const void* p2, u32 p3)
 		break;
 	}
 
+#ifdef PIKI_PC_PORT
+	// El icono del botón de GameCube se sustituye por lo que hay que pulsar en
+	// el dispositivo en uso (la tecla asignada en F1 o el botón asignado del
+	// mando), escrito con la fuente del mensaje en el color del botón. Pasa
+	// igual al medir (TProcFlag_Unk0) que al dibujar, así que se coloca bien.
+	if (p1 == 0 && firstByte < 11) {
+		static const char kTags[11] = { 'a', 'b', 'c', 'x', 'y', 'z', 'l', 'r', 's', 'p', 't' };
+		static const JUtility::TColor kKeyColor[11] = {
+			JUtility::TColor(90, 215, 90, 255),   JUtility::TColor(240, 80, 70, 255),   JUtility::TColor(245, 215, 40, 255),
+			JUtility::TColor(225, 225, 225, 255), JUtility::TColor(225, 225, 225, 255), JUtility::TColor(140, 140, 255, 255),
+			JUtility::TColor(225, 225, 225, 255), JUtility::TColor(225, 225, 225, 255), JUtility::TColor(225, 225, 225, 255),
+			JUtility::TColor(225, 225, 225, 255), JUtility::TColor(225, 225, 225, 255),
+		};
+		char label[48];
+		pc_window_key_prompt_label(kTags[firstByte], label, sizeof(label));
+		if (label[0]) {
+			const JUtility::TColor keep1 = mColorData1, keep2 = mColorData2;
+			mColorData1   = kKeyColor[firstByte];
+			mColorData2   = kKeyColor[firstByte];
+			mColorData1.a = f32(mColorData1.a) * mBaseAlphaModifier;
+			mColorData2.a = f32(mColorData2.a) * mBaseAlphaModifier;
+			const f32 xScale = mFontWidthAdjusted * (f32)mMainFont->getWidth();
+			const f32 yScale = mFontHeightAdjusted * (f32)mMainFont->getHeight();
+			for (const char* c = label; *c; ++c) {
+				if (mFlags.isSet(TProcFlag_Unk0)) {
+					mLocate.i.x += calcWidth(mMainFont, *c, xScale, true);
+				} else {
+					mLocate.i.x += doDrawLetter(mLocate.i.x + mXOffset, mLocate.i.y + mYOffset, xScale, yScale, *c, true);
+				}
+			}
+			mColorData1 = keep1;
+			mColorData2 = keep2;
+			mInfoIndex++;
+			mMainFont->setGX(mDefaultBlack, mDefaultWhite);
+			return true;
+		}
+	}
+#endif
 	if (gP2JMEMgr) {
 		JUTTexture* img = gP2JMEMgr->getImage(ImageGroup::ID0, firstByte);
 		if (img && !mFlags.isSet(TProcFlag_Unk0)) {

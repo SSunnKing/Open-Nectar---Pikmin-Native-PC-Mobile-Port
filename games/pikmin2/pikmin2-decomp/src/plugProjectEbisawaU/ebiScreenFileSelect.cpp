@@ -1,4 +1,7 @@
 #include "ebi/Screen/TMainScreen.h"
+#ifdef PIKI_PC_PORT
+extern bool gPcBgStretch;
+#endif
 #include "ebi/Screen/TScreenDataWindow.h"
 #include "ebi/Screen/TFileData.h"
 #include "ebi/E2DGraph.h"
@@ -644,6 +647,13 @@ void TMainScreen::doDraw()
 		J2DPerspGraph* graf = &gfx->mPerspGraph;
 
 		graf->setPort();
+#ifdef PIKI_PC_PORT
+		// Pantallas anchas: el fondo (rejilla, banda, reflejo, destello) se
+		// estira a lo ancho; sus texturas no se repiten y prolongadas dejaban
+		// los lados negros o con el borde alargado. Tambien en las pantallas
+		// de partida nueva / datos que se dibujan encima.
+		gPcBgStretch = true;
+#endif
 		mMainScreen->draw(*gfx, *graf);
 
 		if (mNewScreen.mIsActive) {
@@ -657,6 +667,9 @@ void TMainScreen::doDraw()
 			Graphics gfx2;
 			mDataScreen.mScreenObj->draw(gfx2, *graf2);
 		}
+#ifdef PIKI_PC_PORT
+		gPcBgStretch = false;
+#endif
 	}
 
 	// If no state is set, return
@@ -760,6 +773,13 @@ void TMainScreen::decideDataBall(s32 fileID)
 void TMainScreen::createFiledecide(s32 id)
 {
 	Vector2f pos = E2DPane_getGlbCenter(mPaneSel[0][id]);
+#ifdef PIKI_PC_PORT
+	{
+		const Mtx& m = mPaneSel[0][id]->mGlobalMtx;
+		printf("[PC Port] Filedecide id=%d pos=(%.1f, %.1f) m=(%.3f %.3f %.1f / %.3f %.3f %.1f)\n", (int)id, pos.x, pos.y, m[0][0], m[0][1],
+		       m[0][3], m[1][0], m[1][1], m[1][3]);
+	}
+#endif
 	efx2d::Arg arg(pos);
 	efx2d::FileSelect::T2DFiledecide efx;
 	efx.create(&arg);
