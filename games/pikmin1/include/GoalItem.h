@@ -99,6 +99,9 @@ public:
 	void startConeShrink();
 	void startConeEmit();
 	void startBoot();
+#if defined(PIKI_PC_PORT)
+	void pcSnapLanded();
+#endif
 	void emitPiki();
 
 	// unused/inlined:

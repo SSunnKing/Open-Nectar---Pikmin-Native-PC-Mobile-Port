@@ -549,6 +549,29 @@ void GoalItem::startLand()
 	mSpotModelEff->mSRT.s.set(0.0f, 0.0f, 0.0f);
 }
 
+#if defined(PIKI_PC_PORT)
+/**
+ * @brief Al saltar la cinemática, la cebolla queda ya aterrizada.
+ *
+ * El aterrizaje es una animación propia de la cebolla, no de la cinemática:
+ * saltar no la adelantaba y se seguía viendo caer hasta que el cono terminaba
+ * de salir y WaitInit la cortaba. Aquí se apagan los efectos de vuelo, el cono
+ * vuelve a su tamaño y pasa directamente a esperar en el suelo.
+ */
+void GoalItem::pcSnapLanded()
+{
+	int anim = mItemAnimator.getCurrentMotionIndex();
+	if (anim >= 9 && anim <= 11) {
+		setFlowEffect(false);
+		setFlightLight(false);
+		mSpotModelEff->mSRT.s = _3FC;
+	}
+	mIsClosing  = false;
+	mIsConeEmit = false;
+	C_SAI(this)->start(this, GoalAI::GOAL_Wait);
+}
+#endif
+
 /**
  * @todo: Documentation
  */

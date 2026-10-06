@@ -320,6 +320,12 @@ void DemoEventMgr::act(int sender, int event)
 			case DemoEventOnion::EmitCone:
 			{
 				if (playerState->hasBootContainer(goalID)) {
+#if defined(PIKI_PC_PORT)
+					if (mPcSkipping) {
+						goal->pcSnapLanded();
+						break;
+					}
+#endif
 					goal->startConeEmit();
 				}
 				break;
@@ -334,6 +340,12 @@ void DemoEventMgr::act(int sender, int event)
 			case DemoEventOnion::Land:
 			{
 				if (playerState->hasContainer(goalID)) {
+#if defined(PIKI_PC_PORT)
+					// Saltando: no se empieza a caer; EmitCone la deja en el suelo.
+					if (mPcSkipping && playerState->hasBootContainer(goalID)) {
+						break;
+					}
+#endif
 					goal->startLand();
 				}
 				break;

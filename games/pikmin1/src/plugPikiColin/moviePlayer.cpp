@@ -6,6 +6,11 @@
 #include "GoalItem.h"
 #include "Graphics.h"
 #include "Interface.h"
+#if defined(PIKI_PC_PORT)
+#include "Navi.h"
+#include "NaviMgr.h"
+#include "NaviState.h"
+#endif
 #include "ItemMgr.h"
 #include "Pellet.h"
 #include "PlayerState.h"
@@ -741,6 +746,16 @@ void MoviePlayer::skipScene(int sceneSkipFlag)
 #if defined(PIKI_PC_PORT)
 	if (sceneSkipFlag == SCENESKIP_Skip || sceneSkipFlag == SCENESKIP_SkipAll) {
 		Jac_NoteDemoSkipped();
+		// Al empezar el día el capitán sale de la nave (NaviStartingState) a la
+		// vez que aterrizan nave y cebollas, y startMovie lo deja seguir. Al
+		// saltar, esa salida (espera, paseo y animación de mirar) seguía
+		// reproduciéndose: se da por terminada y recupera el control ya.
+		for (int i = 0; i < naviMgr->getNaviCount(); i++) {
+			Navi* navi = naviMgr->getNavi(i);
+			if (navi && navi->mStateMachine->getCurrID(navi) == NAVISTATE_Starting) {
+				navi->mStateMachine->transit(navi, NAVISTATE_Walk);
+			}
+		}
 	}
 #endif
 	if (sceneSkipFlag == SCENESKIP_SkipAll) {
