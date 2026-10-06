@@ -2687,10 +2687,15 @@ static void program_binary_store(GLuint program, uint64_t key) {
 // ── Fase 5: GPU móvil ───────────────────────────────────────────────────────
 // PIKMIN_FB_INVALIDATE=0 keeps every attachment resolved to memory each
 // frame (the pre-phase-5 behaviour) for A/B comparison.
+// Solo en GLES (GPU de móvil por tiles, donde ahorra ancho de banda). En
+// escritorio no aporta nada y un fotograma sin dibujos (cargas, transiciones)
+// presentaba el framebuffer invalidado: memoria indefinida, que en NVIDIA son
+// restos de imágenes viejas troceados. PIKMIN_FB_INVALIDATE=1/0 lo fuerza.
 static bool fb_invalidate_enabled() {
     static const bool enabled = [] {
         const char* v = std::getenv("PIKMIN_FB_INVALIDATE");
-        return !(v && v[0] == '0');
+        if (v) return v[0] != '0';
+        return PIKI_USE_GLES != 0;
     }();
     return enabled;
 }

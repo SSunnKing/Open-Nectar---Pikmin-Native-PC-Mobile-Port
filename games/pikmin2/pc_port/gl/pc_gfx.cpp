@@ -3085,13 +3085,22 @@ static void program_binary_store(GLuint program, uint64_t key) {
 // ── Fase 5: GPU móvil ───────────────────────────────────────────────────────
 // PIKMIN_FB_INVALIDATE=0 keeps every attachment resolved to memory each
 // frame (the pre-phase-5 behaviour) for A/B comparison.
+// Solo en GLES (GPU de móvil por tiles, donde ahorra ancho de banda). En
+// escritorio no aporta nada y era dañino: un fotograma en el que el juego no
+// dibuja nada (cargando el vídeo de apertura) presentaba el framebuffer
+// invalidado, memoria indefinida que en NVIDIA son restos de imágenes viejas
+// troceados (la selección de partida con píxeles y colores raros).
+// PIKMIN_FB_INVALIDATE=1/0 lo fuerza.
 static bool fb_invalidate_enabled() {
     static const bool enabled = [] {
         const char* v = std::getenv("PIKMIN_FB_INVALIDATE");
-        return !(v && v[0] == '0');
+        if (v) return v[0] != '0';
+        return PIKI_USE_GLES != 0;
     }();
     return enabled;
 }
+// Algo escribió en el framebuffer nativo desde la última presentación.
+static bool sNativeWrittenThisFrame = false;
 // The port never touches the stencil buffer (no glStencil* anywhere), so on
 // GLES the depth attachment is plain 24-bit depth: less tile memory and
 // bandwidth than packed depth-stencil. PIKMIN_DEPTH_STENCIL=1 restores the
@@ -4831,6 +4840,18 @@ void pc_gfx_present(void) {
     } hostAllocScope;
     if (sInPrimitive) pc_gfx_end(); // the frame's last primitive, if GXEnd never came
     pc_gfx_flush_batch();
+    if (fb_invalidate_enabled() && !sNativeWrittenThisFrame && sNativeFramebufferReady && glBindFramebuffer_ptr) {
+        // El color se invalidó al presentar el anterior y nadie ha dibujado
+        // desde entonces: su contenido es indefinido. Negro, no basura.
+        glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
+        const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+        glDisable(GL_SCISSOR_TEST);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        if (scissor) glEnable(GL_SCISSOR_TEST);
+        invalidate_gl_pipeline_guards();
+    }
+    sNativeWrittenThisFrame = false;
     ++sFrameSerial;
 #ifdef GL_TIME_ELAPSED
     if (sPerfGpuSceneActive) {
@@ -6960,6 +6981,7 @@ static void fifo_imm_reset()
 // ── Drawing & FIFO Stream Parser ──
 static void bp_resolve_textures();
 void pc_gfx_begin(GXPrimitive type, GXVtxFmt vtxfmt, u16 nverts) {
+    sNativeWrittenThisFrame = true;
     if (sInPrimitive) {
         pc_gfx_end();
     }
@@ -10513,6 +10535,7 @@ static void draw_resident_mesh(ResidentMesh& mesh) {
 }
 
 void pc_gfx_call_display_list(const void* list, u32 nbytes) {
+    sNativeWrittenThisFrame = true;
     if (sInPrimitive) pc_gfx_end(); // an immediate primitive left open without GXEnd
     // Two clock reads per display list (~1000 a frame): cheap enough, and it
     // is the one cost of renderall that nothing else was attributing.
