@@ -694,6 +694,9 @@ struct EnemyBase : public Creature, public SysShape::MotionListener, virtual pub
 	                                            // PelletView: _2BC - _2C8
 #ifdef PIKI_PC_PORT
 	// Red de seguridad contra posiciones NaN (enemigos que "desaparecen").
+	f32 mPcGoodFaceDir  = 0.0f;
+	Vector3f mPcGoodScale;
+	f32 mPcGoodScaleMod = 1.0f;
 	Vector3f mPcGoodPos;
 	bool mPcHasGoodPos = false;
 	void pcGuardPosition();

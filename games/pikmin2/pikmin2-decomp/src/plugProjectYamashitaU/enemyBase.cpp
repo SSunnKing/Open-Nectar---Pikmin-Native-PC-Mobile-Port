@@ -1578,23 +1578,43 @@ void EnemyBase::pcGuardPosition()
 	if (!isAlive()) {
 		return;
 	}
-	if (!pcBadVec(mPosition) && !pcBadVec(mCurrentVelocity)) {
-		mPcGoodPos    = mPosition;
-		mPcHasGoodPos = true;
+	// Además de posición y velocidad, todo lo que entra en la matriz del modelo
+	// o en el siguiente paso de física: un NaN en el giro (mFaceDir) o en la
+	// escala también lo deja invisible. Pasaba con un Pikmin lanzado que cae
+	// justo encima de un Bulborb enano.
+	const bool badFace  = !(mFaceDir == mFaceDir);
+	const bool badScale = pcBadVec(mScale) || !(mScaleModifier == mScaleModifier);
+	const bool badPhys  = pcBadVec(mTargetVelocity) || pcBadVec(mAcceleration);
+	if (!pcBadVec(mPosition) && !pcBadVec(mCurrentVelocity) && !pcBadVec(mRotation) && !badFace && !badScale && !badPhys) {
+		mPcGoodPos      = mPosition;
+		mPcGoodFaceDir  = mFaceDir;
+		mPcGoodScale    = mScale;
+		mPcGoodScaleMod = mScaleModifier;
+		mPcHasGoodPos   = true;
 		return;
 	}
 	static int sReports = 0;
 	if (sReports < 30) {
 		sReports++;
-		fprintf(stderr, "[NAN] Enemy %s pos=(%f,%f,%f) vel=(%f,%f,%f) rot=(%f,%f,%f) health=%f stuckPikmin=%d\n", getCreatureName(),
-		        mPosition.x, mPosition.y, mPosition.z, mCurrentVelocity.x, mCurrentVelocity.y, mCurrentVelocity.z, mRotation.x,
-		        mRotation.y, mRotation.z, mHealth, (int)mStuckPikminCount);
+		fprintf(stderr,
+		        "[NAN] Enemy %s pos=(%f,%f,%f) vel=(%f,%f,%f) rot=(%f,%f,%f) face=%f scale=(%f,%f,%f)x%f health=%f stuckPikmin=%d\n",
+		        getCreatureName(), mPosition.x, mPosition.y, mPosition.z, mCurrentVelocity.x, mCurrentVelocity.y, mCurrentVelocity.z,
+		        mRotation.x, mRotation.y, mRotation.z, mFaceDir, mScale.x, mScale.y, mScale.z, mScaleModifier, mHealth,
+		        (int)mStuckPikminCount);
 		fflush(stderr);
 	}
 	mCurrentVelocity = Vector3f(0.0f);
 	mTargetVelocity  = Vector3f(0.0f);
+	mAcceleration    = Vector3f(0.0f);
+	if (badFace) {
+		mFaceDir = mPcHasGoodPos ? mPcGoodFaceDir : 0.0f;
+	}
 	if (pcBadVec(mRotation)) {
-		mRotation = Vector3f(0.0f);
+		mRotation = Vector3f(0.0f, mFaceDir, 0.0f);
+	}
+	if (badScale && mPcHasGoodPos) {
+		mScale         = mPcGoodScale;
+		mScaleModifier = mPcGoodScaleMod;
 	}
 	if (mPcHasGoodPos) {
 		onSetPosition(mPcGoodPos);
