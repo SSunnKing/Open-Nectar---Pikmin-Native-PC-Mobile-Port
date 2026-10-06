@@ -7080,8 +7080,20 @@ void pc_gfx_begin(GXPrimitive type, GXVtxFmt vtxfmt, u16 nverts) {
 }
 static int sAttrStep = 0;
 
+// En la consola todo va al mismo FIFO y el formato de vértice decide qué es
+// cada dato: código del juego que manda la coordenada de textura con
+// GXPosition2f32 (los números de carga de CarryInfo) funciona allí. Aquí las
+// funciones van por nombre, así que una "posición" que llega cuando el vértice
+// ya tiene la suya, el formato lleva TEX0 directa y aún no ha llegado, es la
+// coordenada de textura y no un vértice nuevo.
+static bool sCurVertexHasTex0 = false;
 void pc_gfx_position(f32 x, f32 y, f32 z) {
     if (!sInPrimitive) return;
+    if (sHaveVertex && !sCurVertexHasTex0 && sVtxDesc[GX_VA_TEX0] == GX_DIRECT) {
+        pc_gfx_texcoord(x, y);
+        return;
+    }
+    sCurVertexHasTex0 = false;
     if (sHaveVertex) sVertexStream.push_back(sCurVertex);
     sCurVertex.x = x;
     sCurVertex.y = y;
@@ -7105,6 +7117,7 @@ void pc_gfx_color(u8 r, u8 g, u8 b, u8 a) {
 void pc_gfx_texcoord(f32 u, f32 v) {
     sCurVertex.tex[0][0] = u;
     sCurVertex.tex[0][1] = v;
+    sCurVertexHasTex0 = true;
 }
 
 void pc_gfx_texcoord_fixed(s32 u, s32 v) {
@@ -9293,8 +9306,16 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
             else if (src == GX_TG_NRM) mode = 2;
             else if (src >= GX_TG_TEX0 && src <= GX_TG_TEX7)
                 mode = 3 + int(src - GX_TG_TEX0);
-            else if (src >= GX_TG_TEXCOORD0 && src <= GX_TG_TEXCOORD6)
-                mode = 11 + int(src - GX_TG_TEXCOORD0);
+            else if (src >= GX_TG_TEXCOORD0 && src <= GX_TG_TEXCOORD6) {
+                // Solo los tipos de relieve (BUMP0..7 = 2..9) encadenan la salida
+                // de una generación anterior. Con matriz (MTX2x4/MTX3x4) la SDK
+                // deja la fila de entrada en TEX0: la coordenada del vértice.
+                // Leerlo como encadenado daba (0,0) en la generación 0, y los
+                // números de carga y el borde del círculo de vida (los dos
+                // usan GX_TG_TEXCOORD0) salían transparentes.
+                const u32 type = sTexCoordGen[slot].type;
+                mode = (type >= 2 && type <= 9) ? 11 + int(src - GX_TG_TEXCOORD0) : 3;
+            }
         }
         if (sLoc.tcMode[slot] >= 0) glUniform1i_ptr(sLoc.tcMode[slot], mode);
         if (mode != 0 && sLoc.tcMtx[slot] >= 0) {
