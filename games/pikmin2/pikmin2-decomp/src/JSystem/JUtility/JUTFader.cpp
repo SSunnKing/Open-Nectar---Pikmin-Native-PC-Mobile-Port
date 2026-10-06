@@ -32,7 +32,12 @@ void JUTFader::control()
 {
 #ifdef PIKI_PC_PORT
 	// FPS Mode: el fundido cuenta frames; solo avanza en los ticks originales.
+	// Pero se dibuja en todos: saltarse draw() dejaba el velo negro solo en uno
+	// de cada 2 (o 4) frames, y en los otros asomaba la pantalla a medio cargar.
 	if (!gPcOrigTick) {
+		if (mStatus != Status_In) {
+			draw();
+		}
 		return;
 	}
 #endif
