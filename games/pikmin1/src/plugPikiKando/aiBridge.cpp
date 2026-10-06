@@ -50,7 +50,7 @@ void ActBridge::init(Creature* creature)
 	}
 
 	mState         = STATE_Approach;
-	mActionCounter = (4.0f * gsys->getRand(1.0f));
+	mActionCounter = int(4.0f * gsys->getRand(1.0f)) * PC_TICKS30;
 }
 
 /**

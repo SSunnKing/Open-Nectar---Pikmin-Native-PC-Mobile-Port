@@ -2051,7 +2051,7 @@ void Navi::update()
 		int state = mStateMachine->getCurrID(this);
 		if (state != NAVISTATE_Nuku && state != NAVISTATE_NukuAdjust) {
 			mNoPluckTimer++;
-			if (mNoPluckTimer > NAVI_PARM(mPostPluckZoomOutTime)) {
+			if (mNoPluckTimer > NAVI_PARM(mPostPluckZoomOutTime) * PC_TICKS30) {
 				mIsPlucking       = false;
 				mFastPluckKeyTaps = 0;
 				BUGPRINT("< camera FINISH MOTION");

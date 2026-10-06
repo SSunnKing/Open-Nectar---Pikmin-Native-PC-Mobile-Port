@@ -233,6 +233,14 @@ public:
 	{
 		mFrameRate = frameRate;
 	}
+#if defined(PIKI_PC_PORT)
+	/**
+	 * Ticks de lógica por cada fotograma de 30 Hz del juego original: 1 a
+	 * 30 FPS, 2 a 60 y 4 a 120 (clamp 0). Para lo que cuenta fotogramas en
+	 * vez de tiempo, que si no va el doble o el cuádruple de rápido.
+	 */
+	int pcTicksPer30Hz() { return mFrameRate == 0 ? 4 : (mFrameRate == 1 ? 2 : 1); }
+#endif
 	int getHeapNum() { return mActiveHeapIdx; }
 
 	void setActive(bool set)
@@ -505,6 +513,13 @@ public:
 };
 
 extern SYSCORE_API System* gsys;
+
+// Escala de los contadores por fotograma (ver System::pcTicksPer30Hz).
+#if defined(PIKI_PC_PORT)
+#define PC_TICKS30 (gsys->pcTicksPer30Hz())
+#else
+#define PC_TICKS30 1
+#endif
 
 #if defined(PIKI_PC_PORT) && defined(VERSION_GPIP01)
 /// The language chosen before the System object existed. See stdSystem.cpp.

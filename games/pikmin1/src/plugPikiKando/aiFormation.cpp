@@ -213,6 +213,7 @@ int ActFormation::exec()
 	if (!mIsIdling && !mIsOnFloorTripped && gsys->getRand(1.0f) > 0.99f && gsys->getRand(1.0f) > 0.99f
 #if defined(PIKI_PC_PORT)
 	    && !pc_settings_get_no_trip() // Mod "No Tripping"
+	    && gsys->getRand(1.0f) * PC_TICKS30 < 1.0f // misma probabilidad por segundo a 60/120 FPS
 #endif
 	    && mPiki->mVelocity.length() > mPiki->getSpeed(0.5f)) {
 		mPiki->mPikiAnimMgr.finishMotion(this);

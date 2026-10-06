@@ -278,7 +278,11 @@ public:
 	int mPreBlendLowerMotionID;           // _7E0
 	bool mIsPlucking;                     // _7E4
 	u8 mFastPluckKeyTaps;                 // _7E5, number of times A has been pressed to continue (fast) plucking
+#if defined(PIKI_PC_PORT)
+	u16 mNoPluckTimer; ///< u8 en el original: a 120 FPS el umbral escalado (PC_TICKS30) pasa de 255
+#else
 	u8 mNoPluckTimer;                     // _7E6, count after plucking stops to zoom out camera/stop fast pluck
+#endif
 	u8 _7E7[0x7F0 - 0x7E7];               // _7E7, TODO: work out members
 	int mLociCount;                       // _7F0
 	Locus* mLoci;                         // _7F4

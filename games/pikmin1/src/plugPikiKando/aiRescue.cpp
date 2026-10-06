@@ -66,7 +66,7 @@ int ActRescue::exec()
 	switch (mState) {
 	case STATE_Approach:
 	{
-		if (mTargetSurviveTimer > 20) {
+		if (mTargetSurviveTimer > 20 * PC_TICKS30) {
 			// target survived on their own for long enough
 			mPiki->mEmotion = PikiEmotion::Victorious;
 			return ACTOUT_Success;
@@ -75,7 +75,7 @@ int ActRescue::exec()
 	}
 	case STATE_Go:
 	{
-		if (mTargetSurviveTimer > 20) {
+		if (mTargetSurviveTimer > 20 * PC_TICKS30) {
 			// target survived on their own for long enough
 			mPiki->mEmotion = PikiEmotion::Victorious;
 			return ACTOUT_Success;

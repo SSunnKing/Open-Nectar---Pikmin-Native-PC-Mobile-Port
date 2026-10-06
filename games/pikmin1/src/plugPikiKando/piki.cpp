@@ -2862,8 +2862,9 @@ void Piki::realAI()
 
 		if (state != PIKISTATE_Swallowed && state != PIKISTATE_Dead && state != PIKISTATE_Dying && state != PIKISTATE_Pressed
 		    && state != PIKISTATE_Drown && state != PIKISTATE_Flying && mColor != Blue && isAlive() && !pc_settings_get_piki_invincible()) {
-			if (mInWaterTimer >= int(gsys->getRand(1.0f) * pikiMgr->mPikiParms->mPikiParms.mRandStartDrownFrames())
-			                         + pikiMgr->mPikiParms->mPikiParms.mMinStartDrownFrames()) {
+			if (mInWaterTimer >= (int(gsys->getRand(1.0f) * pikiMgr->mPikiParms->mPikiParms.mRandStartDrownFrames())
+			                      + pikiMgr->mPikiParms->mPikiParms.mMinStartDrownFrames())
+			                         * PC_TICKS30) {
 				startMotion(PaniMotionInfo(PIKIANIM_TYakusui, this), PaniMotionInfo(PIKIANIM_TYakusui));
 				mFSM->transit(this, PIKISTATE_Drown);
 			}

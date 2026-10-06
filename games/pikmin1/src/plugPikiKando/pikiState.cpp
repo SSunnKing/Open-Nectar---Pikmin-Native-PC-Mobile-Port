@@ -1944,7 +1944,7 @@ void PikiFlyingState::exec(Piki* piki)
 {
 	if (piki->isCreatureFlag(CF_IsOnGround)) {
 		mGroundTouchFrames++;
-		if (mGroundTouchFrames >= 10) {
+		if (mGroundTouchFrames >= 10 * PC_TICKS30) {
 			for (int i = 0; i < 10; i++) {
 				PRINT("** WARNING *** FLYING MIGHT LAST FOREVER !!!\n");
 			}

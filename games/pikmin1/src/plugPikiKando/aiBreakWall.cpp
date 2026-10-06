@@ -48,7 +48,7 @@ void ActBreakWall::init(Creature* creature)
 	mState              = STATE_GotoWall;
 	mIsAttackReady      = false;
 	mPiki->mWantToStick = false;
-	mWorkTimer          = (4.0f * gsys->getRand(1.0f));
+	mWorkTimer          = int(4.0f * gsys->getRand(1.0f)) * PC_TICKS30;
 #if defined(VERSION_PIKIDEMO)
 #else
 	mPiki->startMotion(PaniMotionInfo(PIKIANIM_Walk, this), PaniMotionInfo(PIKIANIM_Walk));
@@ -88,7 +88,7 @@ void ActBreakWall::animationKeyUpdated(immut PaniAnimKeyEvent& event)
 	}
 	case KEY_Finished:
 	{
-		mWorkTimer = (4.0f * gsys->getRand(1.0f));
+		mWorkTimer = int(4.0f * gsys->getRand(1.0f)) * PC_TICKS30;
 		startWorkMotion();
 		mIsAttackReady = false;
 		break;
@@ -157,7 +157,7 @@ int ActBreakWall::gotoWall()
  */
 void ActBreakWall::initBreakWall()
 {
-	mWorkTimer = (4.0f * gsys->getRand(1.0f));
+	mWorkTimer = int(4.0f * gsys->getRand(1.0f)) * PC_TICKS30;
 	startWorkMotion();
 	mState           = STATE_BreakWall;
 	mStartAttackTime = PC_WORK_MINUTE();

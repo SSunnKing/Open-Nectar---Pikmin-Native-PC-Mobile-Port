@@ -306,7 +306,12 @@ int ActCrowd::exec()
 			mIsTripping = false;
 			mPiki->startMotion(PaniMotionInfo(PIKIANIM_Walk), PaniMotionInfo(PIKIANIM_Walk));
 		}
+#if defined(PIKI_PC_PORT)
+		// Frenada por fotograma de 30 Hz, repartida entre los ticks.
+		mPiki->mTargetVelocity = mPiki->mTargetVelocity * powf(0.955f, 1.0f / PC_TICKS30);
+#else
 		mPiki->mTargetVelocity = mPiki->mTargetVelocity * 0.955f;
+#endif
 		return ACTOUT_Continue;
 	}
 
@@ -383,6 +388,9 @@ int ActCrowd::exec()
 		if (gsys->getRand(1.0f) >= 0.9999f && gsys->getRand(1.0f) > 0.7f
 #if defined(PIKI_PC_PORT)
 		    && !pc_settings_get_no_trip() // Mod "No Tripping"
+		    // Una tirada por tick: a 60/120 FPS se reparte la misma probabilidad
+		    // por segundo que a 30.
+		    && gsys->getRand(1.0f) * PC_TICKS30 < 1.0f
 #endif
 		) {
 			mIsTripping      = true;
@@ -476,14 +484,14 @@ int ActCrowd::exec()
 		if (mPrevMode == 2 && mPiki->mNavi->mNeutralTime > 0.1f) {
 			mNearSlotCounter = 0;
 		}
-		if (mNearSlotCounter >= 6) {
-			mNearSlotCounter = 6;
+		if (mNearSlotCounter >= 6 * PC_TICKS30) {
+			mNearSlotCounter = 6 * PC_TICKS30;
 		}
 	} else {
 		mNearSlotCounter = 0;
 	}
 
-	if (plateDist2D <= 7.0f || (mNearSlotCounter < 6 && plateDist2D <= 15.0f)) {
+	if (plateDist2D <= 7.0f || (mNearSlotCounter < 6 * PC_TICKS30 && plateDist2D <= 15.0f)) {
 		mMode = 2;
 		mOdometer.reset();
 		mPiki->mTargetVelocity.set(0.0f, 0.0f, 0.0f);

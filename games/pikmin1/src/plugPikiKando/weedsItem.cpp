@@ -517,10 +517,10 @@ void Weed::update()
 
 	if (mIsPulled == 1) {
 		mPulloutTimer++;
-		if (mPulloutTimer > 30) {
+		if (mPulloutTimer > 30 * PC_TICKS30) {
 			kill(false);
 		} else {
-			f32 s = (1.0f - mPulloutTimer / 30.0f);
+			f32 s = (1.0f - mPulloutTimer / (30.0f * PC_TICKS30));
 			s *= 0.1f;
 			mSRT.s.set(s, s, s);
 		}

@@ -433,7 +433,7 @@ int ActTransport::execJump()
 
 	if (mPiki->mGroundTriangle) {
 		mJumpRetryTimer++;
-		if (mJumpRetryTimer > 6) {
+		if (mJumpRetryTimer > 6 * PC_TICKS30) {
 			mPiki->mVelocity.y = 0.5f * AICONST.mGravity();
 			mJumpRetryTimer    = 0;
 		}
