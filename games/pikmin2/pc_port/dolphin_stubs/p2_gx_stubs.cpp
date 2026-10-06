@@ -172,7 +172,7 @@ void GXSetTevSwapMode(GXTevStageID stage, GXTevSwapSel rasSel, GXTevSwapSel texS
 void GXSetTevSwapModeTable(GXTevSwapSel sel, GXTevColorChan r, GXTevColorChan g, GXTevColorChan b, GXTevColorChan a) {
     pc_gfx_set_tev_swap_mode_table(sel, r, g, b, a);
 }
-void GXSetTevDirect(GXTevStageID stage) { (void)stage; }
+void GXSetTevDirect(GXTevStageID stage) { pc_gfx_set_tev_indirect(stage, 0, 0, 0, 0, 0, 0, 0); }
 void GXSetAlphaCompare(GXCompare comp0, u8 ref0, GXAlphaOp op, GXCompare comp1, u8 ref1) {
     pc_gfx_set_alpha_compare(comp0, ref0, op, comp1, ref1);
 }
@@ -368,26 +368,34 @@ void GXClearGPMetric() { }
 void GXSetTevIndirect(GXTevStageID stage, GXIndTexStageID indStage, GXIndTexFormat fmt,
                       GXIndTexBiasSel biasSel, GXIndTexMtxID mtxID, GXIndTexWrap wrapS,
                       GXIndTexWrap wrapT, GXBool addPrev, GXBool utcLod, GXIndTexAlphaSel alphaSel) {
-    (void)stage; (void)indStage; (void)fmt; (void)biasSel; (void)mtxID;
-    (void)wrapS; (void)wrapT; (void)addPrev; (void)utcLod; (void)alphaSel;
+    (void)utcLod; (void)alphaSel;
+    pc_gfx_set_tev_indirect(stage, indStage, fmt, biasSel, mtxID, wrapS, wrapT, addPrev);
 }
 void GXSetIndTexOrder(GXIndTexStageID indStage, GXTexCoordID texCoord, GXTexMapID texMap) {
-    (void)indStage; (void)texCoord; (void)texMap;
+    pc_gfx_set_ind_tex_order(indStage, texCoord, texMap);
 }
-void GXSetNumIndStages(u8 num) { (void)num; }
+void GXSetNumIndStages(u8 num) { pc_gfx_set_num_ind_stages(num); }
 void GXSetIndTexCoordScale(GXIndTexStageID indStage, GXIndTexScale scaleS, GXIndTexScale scaleT) {
-    (void)indStage; (void)scaleS; (void)scaleT;
+    pc_gfx_set_ind_tex_coord_scale(indStage, scaleS, scaleT);
 }
 void GXSetIndTexMtx(GXIndTexMtxID id, const Mtx23 offset, s8 scaleExp) {
-    (void)id; (void)offset; (void)scaleExp;
+    pc_gfx_set_ind_tex_mtx(id, offset, scaleExp);
 }
+// Ayudas del SDK, con el mismo GXSetTevIndirect que generan en la consola.
 void GXSetTevIndBumpST(GXTevStageID tevStage, GXIndTexStageID indStage, GXIndTexMtxID mtxID) {
-    (void)tevStage; (void)indStage; (void)mtxID;
+    // Matriz dinámica S (5..7) y T (9..11) correspondiente a GX_ITM_0..2.
+    const u32 base = (mtxID >= GX_ITM_0 && mtxID <= GX_ITM_2) ? u32(mtxID) : 0;
+    const u32 sMtx = base ? base + 4 : 0, tMtx = base ? base + 8 : 0;
+    pc_gfx_set_tev_indirect(tevStage, indStage, GX_ITF_8, GX_ITB_ST, sMtx, GX_ITW_0, GX_ITW_0, GX_FALSE);
+    pc_gfx_set_tev_indirect(tevStage + 1, indStage, GX_ITF_8, GX_ITB_ST, tMtx, GX_ITW_0, GX_ITW_0, GX_TRUE);
+    pc_gfx_set_tev_indirect(tevStage + 2, indStage, GX_ITF_8, GX_ITB_NONE, GX_ITM_OFF, GX_ITW_OFF, GX_ITW_OFF, GX_TRUE);
 }
 void GXSetTevIndBumpXYZ(GXTevStageID tevStage, GXIndTexStageID indStage, GXIndTexMtxID mtxID) {
-    (void)tevStage; (void)indStage; (void)mtxID;
+    pc_gfx_set_tev_indirect(tevStage, indStage, GX_ITF_8, GX_ITB_STU, mtxID, GX_ITW_OFF, GX_ITW_OFF, GX_FALSE);
 }
-void GXSetTevIndRepeat(GXTevStageID tevStage) { (void)tevStage; }
+void GXSetTevIndRepeat(GXTevStageID tevStage) {
+    pc_gfx_set_tev_indirect(tevStage, GX_IND_TEX_STAGE_0, GX_ITF_8, GX_ITB_NONE, GX_ITM_OFF, GX_ITW_0, GX_ITW_0, GX_TRUE);
+}
 
 /* ── Poke functions (from GXMisc.h) ── */
 void GXPokeAlphaMode(GXCompare func, u8 threshold) { (void)func; (void)threshold; }
@@ -443,6 +451,7 @@ void GXReadXfRasMetric(u32* a, u32* b, u32* c, u32* d) { if(a)*a=0; if(b)*b=0; i
 void GXSetZTexture(GXZTexOp op, GXTexFmt format, u32 bias) { (void)op; (void)format; (void)bias; }
 void __GXSetIndirectMask(u32 mask) { (void)mask; }
 void GXSetTevIndWarp(GXTevStageID tevStage, GXIndTexStageID indStage, GXBool isSignedOffset, GXBool isReplaceMode, GXIndTexMtxID mtx) {
-    (void)tevStage; (void)indStage; (void)isSignedOffset; (void)isReplaceMode; (void)mtx;
+    const GXIndTexWrap wrap = isReplaceMode ? GX_ITW_0 : GX_ITW_OFF;
+    pc_gfx_set_tev_indirect(tevStage, indStage, GX_ITF_8, isSignedOffset ? GX_ITB_STU : GX_ITB_NONE, mtx, wrap, wrap, GX_FALSE);
 }
 } // extern "C"

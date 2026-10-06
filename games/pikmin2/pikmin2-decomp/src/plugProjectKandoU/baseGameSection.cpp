@@ -1617,6 +1617,9 @@ void pcDrawNightFireflies(Graphics& gfx, Viewport* port)
 	GXLoadTexObj(&sPcGlowTexObj, GX_TEXMAP0);
 	GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
 	GXSetTevOp(GX_TEVSTAGE0, GX_MODULATE);
+	// Sin indirecto: la última partícula pudo dejarlo puesto.
+	GXSetNumIndStages(0);
+	GXSetTevDirect(GX_TEVSTAGE0);
 	GXSetChanCtrl(GX_COLOR0A0, GX_FALSE, GX_SRC_VTX, GX_SRC_VTX, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
 	GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
 	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);

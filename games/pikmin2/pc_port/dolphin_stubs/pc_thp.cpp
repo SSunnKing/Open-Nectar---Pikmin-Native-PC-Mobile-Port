@@ -545,6 +545,9 @@ int THPPlayerDrawCurrentFrame(GXRenderModeObj* rmode, int x, int y, int polyWidt
 	GXSetNumTevStages(1);
 	GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
 	GXSetTevOp(GX_TEVSTAGE0, GX_REPLACE);
+	// Sin indirecto: la última partícula pudo dejarlo puesto.
+	GXSetNumIndStages(0);
+	GXSetTevDirect(GX_TEVSTAGE0);
 	GXSetBlendMode(GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, GX_LO_CLEAR);
 	GXSetZMode(GX_FALSE, GX_ALWAYS, GX_FALSE);
 	GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);

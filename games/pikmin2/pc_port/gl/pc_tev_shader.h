@@ -59,6 +59,18 @@ struct PcTevStageKey {
 	int8_t rasChannel = 0;
 	uint8_t rasSwapSel = 0;
 	uint8_t texSwapSel = 0;
+	// Texturas indirectas (GXSetTevIndirect), con los valores de los enums GX.
+	// Todo a cero cuando la etapa no usa nada indirecto, para no partir la caché.
+	//   indMtx: 0 off, 1..3 matriz 0..2, 5..7 dinámica S, 9..11 dinámica T.
+	//   indWrap: 0 off, 1..5 = 256,128,64,32,16 texels, 6 = 0 (sustituye).
+	//   indFmt: 0 8 bits, 1 5, 2 4, 3 3.   indBias: bits S=1 T=2 U=4.
+	uint8_t indStage   = 0;
+	uint8_t indFmt     = 0;
+	uint8_t indBias    = 0;
+	uint8_t indMtx     = 0;
+	uint8_t indWrapS   = 0;
+	uint8_t indWrapT   = 0;
+	uint8_t indAddPrev = 0;
 };
 
 struct PcTevShaderKey {
@@ -80,7 +92,21 @@ struct PcTevShaderKey {
 	// uniform so a draw with fog off carries none of its cost -- the scene and
 	// the HUD are drawn with different settings, not different materials.
 	uint8_t fog = 0;
+	// Etapas indirectas (GXSetNumIndStages / GXSetIndTexOrder /
+	// GXSetIndTexCoordScale). Cero si ninguna etapa TEV las usa.
+	uint8_t numIndStages = 0;
+	uint8_t indTexCoord[4] = { 0, 0, 0, 0 };
+	uint8_t indTexMap[4]   = { 0, 0, 0, 0 };
+	uint8_t indScaleS[4]   = { 0, 0, 0, 0 }; // GXIndTexScale: divide entre 2^n
+	uint8_t indScaleT[4]   = { 0, 0, 0, 0 };
 };
+
+// True cuando la etapa usa algo del bloque indirecto (desplazamiento, wrap o
+// acumulación), y su coordenada hay que calcularla en el shader.
+inline bool pc_tev_stage_indirect(const PcTevStageKey& stage)
+{
+	return stage.indMtx != 0 || stage.indWrapS != 0 || stage.indWrapT != 0 || stage.indAddPrev != 0;
+}
 
 bool operator==(const PcTevShaderKey& a, const PcTevShaderKey& b);
 inline bool operator!=(const PcTevShaderKey& a, const PcTevShaderKey& b) { return !(a == b); }

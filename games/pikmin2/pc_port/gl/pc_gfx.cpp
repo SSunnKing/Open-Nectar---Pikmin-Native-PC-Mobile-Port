@@ -171,6 +171,8 @@ static PFNGLUNIFORM1FPROC glUniform1f_ptr = nullptr;
 static PFNGLUNIFORM4FPROC glUniform4f_ptr = nullptr;
 static PFNGLUNIFORM4FVPROC glUniform4fv_ptr = nullptr;
 static PFNGLUNIFORM3FPROC glUniform3f_ptr = nullptr;
+static PFNGLUNIFORM3FVPROC glUniform3fv_ptr = nullptr;
+static PFNGLUNIFORM1FVPROC glUniform1fv_ptr = nullptr;
 static PFNGLUNIFORM2FPROC glUniform2f_ptr = nullptr;
 static PFNGLUNIFORM2IPROC glUniform2i_ptr = nullptr;
 static PFNGLUNIFORM4IPROC glUniform4i_ptr = nullptr;
@@ -256,6 +258,8 @@ static void load_gl_functions() {
     glUniform4f_ptr = (PFNGLUNIFORM4FPROC)SDL_GL_GetProcAddress("glUniform4f");
     glUniform4fv_ptr = (PFNGLUNIFORM4FVPROC)SDL_GL_GetProcAddress("glUniform4fv");
     glUniform3f_ptr = (PFNGLUNIFORM3FPROC)SDL_GL_GetProcAddress("glUniform3f");
+    glUniform3fv_ptr = (PFNGLUNIFORM3FVPROC)SDL_GL_GetProcAddress("glUniform3fv");
+    glUniform1fv_ptr = (PFNGLUNIFORM1FVPROC)SDL_GL_GetProcAddress("glUniform1fv");
     glUniform2f_ptr = (PFNGLUNIFORM2FPROC)SDL_GL_GetProcAddress("glUniform2f");
     glUniform2i_ptr = (PFNGLUNIFORM2IPROC)SDL_GL_GetProcAddress("glUniform2i");
     glUniform4i_ptr = (PFNGLUNIFORM4IPROC)SDL_GL_GetProcAddress("glUniform4i");
@@ -342,6 +346,10 @@ static bool uniform_cache_disabled() {
     static const bool disabled = std::getenv("PIKMIN_NO_UNIFORM_CACHE") != nullptr;
     return disabled;
 }
+// Una textura creada con glTexImage2D(..., nullptr) trae lo que hubiera en esa
+// VRAM: en NVIDIA, restos de fotogramas anteriores troceados en los bloques de
+// la GPU (la selección de partida con píxeles y colores raros antes del vídeo
+// de apertura). Todo destino de render se deja en negro transparente al crearlo.
 static void invalidate_uniform_cache() {
     if (++sUniformGeneration == 0) sUniformGeneration = 1;
 }
@@ -787,6 +795,8 @@ struct ProgramLocations {
 	GLint tevReg2 = -1;
 	GLint konst[4] = {-1, -1, -1, -1};
 	GLint tevKonst[GX_MAXTEVSTAGE] = {};
+	GLint indMtx = -1;   // uIndMtx[0] (vec3[6])
+	GLint indScale = -1; // uIndScale[0] (float[3])
 	GLint tevCSel[GX_MAXTEVSTAGE] = {};
 	GLint tevASel[GX_MAXTEVSTAGE] = {};
 	GLint tevCOps[GX_MAXTEVSTAGE] = {};
@@ -1181,6 +1191,21 @@ static_assert(decode_tev_alpha_c(0x29CF) == GXTevAlphaArg(3));
 static_assert(decode_tev_alpha_d(0x29CF) == GXTevAlphaArg(4));
 
 static TevStageState sTevStages[GX_MAXTEVSTAGE];
+
+// Texturas indirectas (GXBump): estado por etapa TEV, etapas indirectas y las
+// tres matrices. Se alimenta igual desde la API GX y desde los registros BP de
+// las listas de display (IND_MTX, IND_CMD, RAS1_SS, RAS1_IREF, GEN_MODE).
+struct TevIndState {
+	u8 indStage = 0, fmt = 0, bias = 0, mtx = 0, wrapS = 0, wrapT = 0, addPrev = 0;
+};
+struct IndStageState {
+	u8 texCoord = 0, texMap = 0, scaleS = 0, scaleT = 0;
+};
+static TevIndState sTevInd[GX_MAXTEVSTAGE];
+static IndStageState sIndStages[4];
+static u8 sNumIndStages = 0;
+static float sIndMtx[3][2][3] = {};
+static int sIndMtxScale[3] = { 0, 0, 0 };
 static float sTevRegisters[4][4] = {
 	{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}
 };
@@ -2848,6 +2873,8 @@ static void query_program_locations(GLuint program, ProgramLocations& out) {
         snprintf(buf, sizeof(buf), "uTevKonst[%d]", i);
         out.tevKonst[i] = glGetUniformLocation_ptr(program, buf);
     }
+    out.indMtx   = glGetUniformLocation_ptr(program, "uIndMtx[0]");
+    out.indScale = glGetUniformLocation_ptr(program, "uIndScale[0]");
     for (int i = 0; i < 4; i++) {
         char buf[32];
         snprintf(buf, sizeof(buf), "uTevSwapTable[%d]", i);
@@ -6014,6 +6041,48 @@ void pc_gfx_set_num_tev_stages(u8 num) {
     sNumTevStages = std::min<u8>(num, GX_MAXTEVSTAGE);
 }
 
+void pc_gfx_set_tev_indirect(u32 stage, u32 indStage, u32 fmt, u32 bias, u32 mtx, u32 wrapS, u32 wrapT,
+                             u32 addPrev) {
+    state_touched();
+    if (stage >= GX_MAXTEVSTAGE) return;
+    TevIndState& st = sTevInd[stage];
+    st.indStage = u8(indStage & 3);
+    st.fmt      = u8(fmt & 3);
+    st.bias     = u8(bias & 7);
+    st.mtx      = u8(mtx & 15);
+    st.wrapS    = u8(std::min<u32>(wrapS, 6));
+    st.wrapT    = u8(std::min<u32>(wrapT, 6));
+    st.addPrev  = u8(addPrev ? 1 : 0);
+}
+
+void pc_gfx_set_ind_tex_order(u32 indStage, u32 texCoord, u32 texMap) {
+    state_touched();
+    if (indStage >= 4) return;
+    sIndStages[indStage].texCoord = u8(texCoord & 7);
+    sIndStages[indStage].texMap   = u8(texMap & 7);
+}
+
+void pc_gfx_set_num_ind_stages(u32 num) {
+    state_touched();
+    sNumIndStages = u8(std::min<u32>(num, 4));
+}
+
+void pc_gfx_set_ind_tex_coord_scale(u32 indStage, u32 scaleS, u32 scaleT) {
+    state_touched();
+    if (indStage >= 4) return;
+    sIndStages[indStage].scaleS = u8(std::min<u32>(scaleS, 8));
+    sIndStages[indStage].scaleT = u8(std::min<u32>(scaleT, 8));
+}
+
+void pc_gfx_set_ind_tex_mtx(u32 id, const f32 mtx[2][3], s32 scaleExp) {
+    state_touched();
+    // GXIndTexMtxID: GX_ITM_0..2 = 1..3.
+    if (id < 1 || id > 3 || !mtx) return;
+    for (int r = 0; r < 2; ++r)
+        for (int c = 0; c < 3; ++c) sIndMtx[id - 1][r][c] = mtx[r][c];
+    sIndMtxScale[id - 1] = scaleExp;
+}
+
 void pc_gfx_set_tev_color_in(GXTevStageID stage, GXTevColorArg a, GXTevColorArg b,
                              GXTevColorArg c, GXTevColorArg d) {
     state_touched();
@@ -7582,6 +7651,28 @@ static void build_tev_shader_key(PcTevShaderKey& key) {
         out.rasChannel = int8_t(st.rasChannel);
         out.rasSwapSel = uint8_t(sTevRasSwapSel[i] & 3);
         out.texSwapSel = uint8_t(sTevTexSwapSel[i] & 3);
+        const TevIndState& ind = sTevInd[i];
+        out.indMtx     = ind.mtx;
+        out.indWrapS   = ind.wrapS;
+        out.indWrapT   = ind.wrapT;
+        out.indAddPrev = ind.addPrev;
+        if (out.indMtx != 0) {
+            out.indStage = ind.indStage;
+            out.indFmt   = ind.fmt;
+            out.indBias  = ind.bias;
+        }
+    }
+    // Las etapas indirectas solo entran en la clave si alguna etapa TEV las lee.
+    bool anyIndirect = false;
+    for (int i = 0; i < stages; ++i) anyIndirect |= key.stages[i].indMtx != 0;
+    if (anyIndirect) {
+        key.numIndStages = uint8_t(std::min<int>(sNumIndStages, 4));
+        for (int n = 0; n < key.numIndStages; ++n) {
+            key.indTexCoord[n] = uint8_t(std::min<int>(sIndStages[n].texCoord, 3));
+            key.indTexMap[n]   = uint8_t(sIndStages[n].texMap & 7);
+            key.indScaleS[n]   = sIndStages[n].scaleS;
+            key.indScaleT[n]   = sIndStages[n].scaleT;
+        }
     }
     for (int t = 0; t < 4; ++t) {
         key.swapTable[t][0] = uint8_t(sTevSwapModes[t].red);
@@ -8977,6 +9068,19 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
             }
         }
     }
+    if (sLoc.indMtx >= 0 && glUniform3fv_ptr) {
+        // Filas de las matrices indirectas ya escaladas por 2^escala: el
+        // shader suma el desplazamiento en texels con un dot por eje.
+        float rows[6][3];
+        float scales[3];
+        for (int m = 0; m < 3; ++m) {
+            scales[m] = std::ldexp(1.0f, sIndMtxScale[m]);
+            for (int r = 0; r < 2; ++r)
+                for (int c = 0; c < 3; ++c) rows[m * 2 + r][c] = sIndMtx[m][r][c] * scales[m];
+        }
+        glUniform3fv_ptr(sLoc.indMtx, 6, &rows[0][0]);
+        if (sLoc.indScale >= 0 && glUniform1fv_ptr) glUniform1fv_ptr(sLoc.indScale, 3, scales);
+    }
     for (u8 stage = 0; stage < sNumTevStages && stage < GX_MAXTEVSTAGE; ++stage) {
         const TevStageState& st = sTevStages[stage];
         float konst[4];
@@ -9988,6 +10092,7 @@ static void handle_bp_reg(u32 hex) {
     switch (reg) {
     case 0x00: { // GEN_MODE
         pc_gfx_set_num_tev_stages(u8(((hex >> 10) & 0xF) + 1));
+        pc_gfx_set_num_ind_stages((hex >> 16) & 0x7);
         static const GXCullMode hw2gx[4] = { GX_CULL_NONE, GX_CULL_BACK, GX_CULL_FRONT, GX_CULL_ALL };
         pc_gfx_set_cull_mode(hw2gx[(hex >> 14) & 3]);
         break;
@@ -10145,10 +10250,34 @@ static void handle_bp_reg(u32 hex) {
         }
         break;
     }
-    case 0x06 ... 0x0E: // indirect matrices
+    case 0x06 ... 0x0E: { // IND_MTXA/B/C: una columna (s1.10) por registro
+        const u32 m = (reg - 0x06) / 3, col = (reg - 0x06) % 3;
+        auto s11 = [](u32 v) { return f32(s32(v << 21) >> 21) / 1024.0f; };
+        state_touched();
+        sIndMtx[m][0][col] = s11(hex & 0x7FF);
+        sIndMtx[m][1][col] = s11((hex >> 11) & 0x7FF);
+        // Los 6 bits de escala van repartidos en las tres columnas, sesgo 17.
+        const u32 scaleBits = (sBpRegs[0x06 + m * 3] >> 22 & 3) | ((sBpRegs[0x07 + m * 3] >> 22 & 3) << 2)
+                            | ((sBpRegs[0x08 + m * 3] >> 22 & 3) << 4);
+        sIndMtxScale[m] = int(scaleBits) - 17;
+        break;
+    }
+    case 0x10 ... 0x1F: // IND_CMD: indirecto de cada etapa TEV
+        pc_gfx_set_tev_indirect(reg - 0x10, hex & 3, (hex >> 2) & 3, (hex >> 4) & 7, (hex >> 9) & 0xF,
+                                (hex >> 13) & 7, (hex >> 16) & 7, (hex >> 20) & 1);
+        break;
+    case 0x25: case 0x26: { // RAS1_SS0/1: escala de coordenada, dos etapas por registro
+        const u32 base = (reg - 0x25) * 2;
+        pc_gfx_set_ind_tex_coord_scale(base, hex & 0xF, (hex >> 4) & 0xF);
+        pc_gfx_set_ind_tex_coord_scale(base + 1, (hex >> 8) & 0xF, (hex >> 12) & 0xF);
+        break;
+    }
+    case 0x27: // RAS1_IREF: textura y coordenada de cada etapa indirecta
+        for (u32 n = 0; n < 4; ++n) {
+            pc_gfx_set_ind_tex_order(n, (hex >> (6 * n + 3)) & 7, (hex >> (6 * n)) & 7);
+        }
+        break;
     case 0x0F:          // indirect mask
-    case 0x10 ... 0x1F: // indirect TEV stages
-    case 0x25 ... 0x27: // indirect coord scale / order
     case 0x30 ... 0x3F: // texcoord scale (SU): the shader works in normalised coordinates
     case 0x20 ... 0x22: // scissor / line size: driven by the GX API on this port
     case 0x45 ... 0x5F: // PE control, copy, clear: driven by the GX API on this port

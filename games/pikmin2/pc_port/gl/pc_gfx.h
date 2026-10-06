@@ -167,6 +167,12 @@ void pc_gfx_load_light(void* ltObj, u32 lightMask);
 void pc_gfx_set_tev_order(GXTevStageID stage, GXTexCoordID coord, GXTexMapID map, GXChannelID chan);
 void pc_gfx_set_tev_op(GXTevStageID stage, GXTevMode mode);
 void pc_gfx_set_num_tev_stages(u8 num);
+// Texturas indirectas (GXBump). Valores con la codificación de los enums GX.
+void pc_gfx_set_tev_indirect(u32 stage, u32 indStage, u32 fmt, u32 bias, u32 mtx, u32 wrapS, u32 wrapT, u32 addPrev);
+void pc_gfx_set_ind_tex_order(u32 indStage, u32 texCoord, u32 texMap);
+void pc_gfx_set_num_ind_stages(u32 num);
+void pc_gfx_set_ind_tex_coord_scale(u32 indStage, u32 scaleS, u32 scaleT);
+void pc_gfx_set_ind_tex_mtx(u32 id, const f32 mtx[2][3], s32 scaleExp);
 void pc_gfx_set_tev_color_in(GXTevStageID stage, GXTevColorArg a, GXTevColorArg b, GXTevColorArg c, GXTevColorArg d);
 void pc_gfx_set_tev_alpha_in(GXTevStageID stage, GXTevAlphaArg a, GXTevAlphaArg b, GXTevAlphaArg c, GXTevAlphaArg d);
 void pc_gfx_set_tev_color_op(GXTevStageID stage, GXTevOp op, GXTevBias bias, GXTevScale scale, GXBool clamp, GXTevRegID outReg);
