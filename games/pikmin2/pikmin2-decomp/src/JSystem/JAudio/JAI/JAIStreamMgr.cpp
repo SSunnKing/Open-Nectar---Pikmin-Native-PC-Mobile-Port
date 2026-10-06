@@ -10,6 +10,7 @@
 #include "JSystem/JAudio/JAI/JAInter/MoveParaSet.h"
 #include "JSystem/JAudio/JAI/JAInter/StreamMgr.h"
 #include "JSystem/JAudio/JAS/JASAramStream.h"
+#include "JSystem/JAudio/JAS/JASDriver.h"
 #include "JSystem/JAudio/JAS/JASHeap.h"
 #include "JSystem/JAudio/JAS/JASKernel.h"
 #include "JSystem/JAudio/JAS/JASMutexLock.h"
@@ -567,8 +568,13 @@ void processGFrameStream()
 	// Port: el stream AST suena en el host (pc_ast_stream). Se le pasa el
 	// volumen que calcula el juego y se notifica el final de los que no hacen bucle.
 	if (streamSystem) {
-		pc_ast_set_gain(streamSystem->mVolume * streamSystem->mChannelVolume[0],
-		                streamSystem->mVolume * streamSystem->mChannelVolume[1]);
+		// En la consola el stream no va por la salida de AI: JASAramStream lo
+		// toca con voces del DSP en auto-mixer, así que lleva su nivel
+		// (getAutoLevel, >> 16 al sumar la voz) y el maestro del DSP. Sumado
+		// tal cual sonaba ~4,5 veces más fuerte y tapaba los efectos.
+		const f32 dspScale = (JASDriver::getAutoLevel() / 65536.0f) * JASDriver::getDSPLevel_f32();
+		pc_ast_set_gain(streamSystem->mVolume * streamSystem->mChannelVolume[0] * dspScale,
+		                streamSystem->mVolume * streamSystem->mChannelVolume[1] * dspScale);
 		if (controlStatus == 5 && pc_ast_finished()) {
 			streamSystem->stop(0);
 		}

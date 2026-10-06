@@ -406,13 +406,18 @@ void pc_dsp_host_render_frame(DSPchannel_* channels, u32 channelCount, s16* out,
 				// dead, and the channel is done once the fade lands.
 				s32 mixer  = static_cast<u16>(channel.dolbyVolumeCurrent);
 				s32 target = channel.endRequested ? 0 : static_cast<u16>(channel.dolbyVolumeTarget);
-				const s32 fromGain = mixer << 1; // Q14 -> Q15
+				// Escala del microcódigo real (Dolphin, ZeldaAudioRenderer con
+				// MAKE_DOLBY_LOUDER para Pikmin 2): cuadrante = (pan * mixer) >> 15
+				// y la voz se suma con (vol * muestra) >> 16. Aquí se suma con
+				// >> 15, así que la ganancia es mixer / 2. Antes iba mixer * 2:
+				// cuatro veces más fuerte, saturaba y sonaba distorsionado.
+				const s32 fromGain = mixer >> 1;
 				mixer += (target - mixer) >> 5;
 				if (((target - mixer) >> 5) == 0) {
 					mixer = target; // Converge exactly instead of crawling.
 				}
 				channel.dolbyVolumeCurrent = static_cast<s16>(mixer);
-				const s32 toGain = mixer << 1;
+				const s32 toGain = mixer >> 1;
 				startL = (leftPan * fromGain) >> 15;
 				endL   = (leftPan * toGain) >> 15;
 				startR = (rightPan * fromGain) >> 15;
@@ -426,8 +431,10 @@ void pc_dsp_host_render_frame(DSPchannel_* channels, u32 channelCount, s16* out,
 			} else {
 				for (int m = 0; m < 6; ++m) {
 					const DSPMixerChannel& mix = channel.mixChannels[m];
-					const s32 from = static_cast<s16>(mix.currentVolume);
-					const s32 to   = static_cast<s16>(mix.targetVolume);
+					// El DSP suma cada bus con (vol * muestra) >> 16 (Dolphin,
+					// AddBuffersWithVolumeRamp); aquí se suma con >> 15.
+					const s32 from = static_cast<s16>(mix.currentVolume) >> 1;
+					const s32 to   = static_cast<s16>(mix.targetVolume) >> 1;
 					switch (mix.id) {
 				case kBusDryLeft:
 					startL += from;
