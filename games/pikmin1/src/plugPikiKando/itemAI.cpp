@@ -261,6 +261,16 @@ void PikiHeadAI::BuryExec2::act(AICreature* item)
 void PikiHeadAI::BuryInit::act(AICreature* item)
 {
 	PikiHeadItem* obj = (PikiHeadItem*)item;
+#if defined(PIKI_PC_PORT)
+	// startFix congela la semilla donde esté. Tras el rebote del aterrizaje
+	// puede seguir en el aire, y a más de 30 FPS el rebote cambia lo bastante
+	// como para que se plantara flotando: se baja al suelo antes de fijarla.
+	f32 groundY = mapMgr->getMinY(obj->mSRT.t.x, obj->mSRT.t.z, true);
+	if (obj->mSRT.t.y > groundY) {
+		obj->mSRT.t.y = groundY;
+	}
+	obj->mVelocity.set(0.0f, 0.0f, 0.0f);
+#endif
 	obj->startFix();
 	obj->mFlowerStage               = Leaf;
 	obj->mSAICtx.mCurrentItemHealth = pikiMgr->mPikiParms->mPikiParms.mSeedUpTime() + gsys->getRand(1.0f) * 2.0f;
