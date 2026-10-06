@@ -1798,6 +1798,9 @@ bool Piki::mayIstick()
  * golpeado dentro (Flick, Flown) se sigue ahogando, así que el agua no deja
  * de ser un peligro. Devuelve true si lo ha reubicado.
  */
+static const f32 kPcShoreMargin     = 40.0f; ///< distancia a la orilla al sacarlo del agua
+static const int kPcShoreHoldFrames = 20;   ///< frames en seco antes de soltar el ancla
+
 bool Piki::pcStepOutOfWater()
 {
 	if (!pc_settings_get_blues_only_water()) {
@@ -1833,11 +1836,28 @@ bool Piki::pcStepOutOfWater()
 	// al otro lado del agua, y el Pikmin aparecía lejos y volvía corriendo.
 	// Issue #69: si el sitio guardado lo devuelve al agua una y otra vez (orilla
 	// junto a una pendiente), se descarta y se usa el waypoint más cercano.
-	mPcDryFrames = 0;
-	if (++mPcRescueStreak >= 5) {
+	// Siguiendo a un capitán que nada, el Pikmin vuelve a pisar el agua cada
+	// pocos frames: eso no es el caso de la pendiente, y contarlo como racha
+	// lo teletransportaba al waypoint, detrás del grupo.
+	bool followingSwimmer = mMode == PikiMode::FormationMode && mNavi && mNavi->mGroundTriangle
+	                     && MapCode::getAttribute(mNavi->mGroundTriangle) == ATTR_Water;
+	if (!followingSwimmer && ++mPcRescueStreak >= 5) {
 		mPcHasDryPos    = false;
 		mPcRescueStreak = 0;
 	}
+	// Entrada nueva al agua: el sitio seco guardado es el borde mismo. Se
+	// retrasa un poco, alejándolo del agua, y se queda fijo como ancla hasta
+	// que el Pikmin pase un rato en seco (ver kPcShoreHoldFrames), para que no
+	// retroceda un poco más en cada intento.
+	if (mPcHasDryPos && mPcDryFrames > kPcShoreHoldFrames) {
+		Vector3f away = mPcLastDryPos - mSRT.t;
+		away.y        = 0.0f;
+		f32 len       = away.length();
+		if (len > 0.001f) {
+			mPcLastDryPos = mPcLastDryPos + away * (kPcShoreMargin / len);
+		}
+	}
+	mPcDryFrames = 0;
 	if (mPcHasDryPos) {
 		mSRT.t = mPcLastDryPos;
 	} else {
@@ -1848,9 +1868,10 @@ bool Piki::pcStepOutOfWater()
 		mSRT.t = dryWP->mPosition;
 	}
 
-	mVelocity     = Vector3f(0.0f, 0.0f, 0.0f);
-	mInWaterTimer = 0;
-	mIsPanicked   = false;
+	mVelocity       = Vector3f(0.0f, 0.0f, 0.0f);
+	mTargetVelocity = Vector3f(0.0f, 0.0f, 0.0f);
+	mInWaterTimer   = 0;
+	mIsPanicked     = false;
 
 	// No se le cambia el modo. Echarlo del escuadrón aquí creaba un bucle:
 	// al silbarlo volvía a entrar, tocaba el agua en el mismo frame y salía
@@ -2843,9 +2864,13 @@ void Piki::realAI()
 		// Suelo seco: lo recordamos por si hay que devolverlo aquí.
 		// Solo suelo llano: desde una pendiente fuerte el Pikmin resbala de
 		// vuelta al agua y se quedaba atrapado para siempre (issue #69).
+		// Recién rescatado se conserva el ancla de la orilla (ver
+		// pcStepOutOfWater) en vez de pisarla con la posición actual.
 		if (mGroundTriangle && mGroundTriangle->mTriangle.mNormal.y >= 0.7f) {
-			mPcLastDryPos = mSRT.t;
-			mPcHasDryPos  = true;
+			if (!mPcHasDryPos || mPcDryFrames >= kPcShoreHoldFrames) {
+				mPcLastDryPos = mSRT.t;
+				mPcHasDryPos  = true;
+			}
 			if (++mPcDryFrames > 60) {
 				mPcRescueStreak = 0;
 			}

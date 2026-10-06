@@ -10,6 +10,11 @@
 #include "PlayerState.h"
 #include "ViewPiki.h"
 #include "gameflow.h"
+#if defined(PIKI_PC_PORT)
+#include "MapCode.h"
+#include "MapMgr.h"
+#include "settings/pc_settings.h"
+#endif
 #include <stdlib.h>
 #if defined(PIKI_PC_PORT)
 #include "settings/pc_settings.h"
@@ -236,6 +241,45 @@ void ActCrowd::cleanup()
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+/**
+ * @brief ¿Hay agua cerca, entre el Pikmin y su capitán?
+ *
+ * Sondea el suelo en línea recta hacia el capitán hasta kShoreDistance: así
+ * solo se paran los que ya están junto a la orilla, no los que vienen de
+ * lejos.
+ */
+bool ActCrowd::pcWaterAhead()
+{
+	const f32 kShoreDistance = 60.0f;
+	const int kProbes        = 4;
+
+	Vector3f dir = mPiki->mNavi->mSRT.t - mPiki->mSRT.t;
+	dir.y        = 0.0f;
+	f32 len      = dir.length();
+	if (len < 0.001f) {
+		return true;
+	}
+	dir = dir * (1.0f / len);
+
+	for (int i = 1; i <= kProbes; i++) {
+		f32 d = kShoreDistance * i / kProbes;
+		if (d > len) {
+			d = len;
+		}
+		Vector3f p      = mPiki->mSRT.t + dir * d;
+		CollTriInfo* tri = mapMgr->getCurrTri(p.x, p.z, true);
+		if (tri && MapCode::getAttribute(tri) == ATTR_Water) {
+			return true;
+		}
+		if (d >= len) {
+			break;
+		}
+	}
+	return false;
+}
+#endif
+
 int ActCrowd::exec()
 {
 	mPrevMode = mMode;
@@ -265,6 +309,26 @@ int ActCrowd::exec()
 		mPiki->mTargetVelocity = mPiki->mTargetVelocity * 0.955f;
 		return ACTOUT_Continue;
 	}
+
+#if defined(PIKI_PC_PORT)
+	// Mod "Blues Only In Water": mientras el capitán está en el agua, los que
+	// no son azules siguen andando hasta acercarse a la orilla y ahí se paran,
+	// mirándolo, en vez de meterse. En cuanto sale vuelven a seguirlo.
+	if (pc_settings_get_blues_only_water() && mPiki->mColor != Blue && mPiki->mNavi->mIsInWater
+	    && (mPcWaitAshore || pcWaterAhead())) {
+		mPiki->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+		mPiki->mFaceDirection += 2.5f * (angDist(mPiki->mNavi->mFaceDirection, mPiki->mFaceDirection) * gsys->getFrameTime());
+		if (!mPcWaitAshore) {
+			mPcWaitAshore = true;
+			mPiki->startMotion(PaniMotionInfo(PIKIANIM_Wait), PaniMotionInfo(PIKIANIM_Wait));
+		}
+		return ACTOUT_Continue;
+	}
+	if (mPcWaitAshore) {
+		mPcWaitAshore = false;
+		mPiki->startMotion(PaniMotionInfo(PIKIANIM_Walk), PaniMotionInfo(PIKIANIM_Walk));
+	}
+#endif
 
 	if (mIsWaiting && !mPiki->hasBomb()) {
 		int boreRes = mSelectAction->exec();

@@ -837,6 +837,10 @@ protected:
 	bool mWasWaiting;             // _7E
 	bool mHasRoute;               // _7F
 	                              // _80-_88 = SlotChangeListner
+#if defined(PIKI_PC_PORT)
+	bool pcWaterAhead();
+	bool mPcWaitAshore = false; ///< mod "Blues Only In Water": esperando a que el capitán salga del agua
+#endif
 };
 
 /**
