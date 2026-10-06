@@ -6235,7 +6235,7 @@ const GroupRow kCameraRows[] = {
 const GroupRow kGameplayRows[] = {
     { SRC_MODS, 25, "Instant Whistle Response", "Whistled Pikmin join the squad at once, without stopping to turn and look first." },
     { SRC_MODS, 1, "Chain Pikmin Actions", "Pikmin that finish a task go on to the next one nearby." },
-    { SRC_MODS, 8, "Better Pathfinding", "Gets Pikmin moving again when they stall on their route." },
+    { SRC_MODS, 8, "Better Pathfinding", "Smarter Pikmin: they get moving again when stuck on their route, thrown Pikmin with nothing to do run back to the squad, and the squad no longer stops to pull nectar grass it brushes past (swarm at it instead)." },
     { SRC_MODS, 9, "Blues Only In Water", "Only blue Pikmin walk into water on their own." },
     { SRC_MODS, 23, "No Tripping", "Pikmin running in the squad never trip and fall behind." },
     { SRC_MODS, 40, "Eternal Night", "Always night, whatever the day length: night lighting, and the moon crosses the day bar instead of the sun." },

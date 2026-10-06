@@ -2239,6 +2239,19 @@ void PikiFlyingState::procBounceMsg(Piki* piki, MsgBounce*)
 
 		piki->changeMode(PikiMode::PutbombMode, piki->mNavi);
 	} else {
+#if defined(PIKI_PC_PORT)
+		// Mod "Better Pathfinding": lanzado a un sitio sin nada que hacer, en
+		// el original se queda plantado hasta que se le silba. Aquí vuelve al
+		// grupo por su cuenta, igual que cuando rebota antes de aterrizar.
+		Creature* target = nullptr;
+		if (pc_settings_get_better_pathfinding() && piki->mNavi && !playerState->inDayEnd()
+		    && piki->graspSituation(&target) == PIKISITCH_Unk0) {
+			piki->mActiveAction->mCurrActionIdx = PikiAction::Crowd;
+			piki->mActiveAction->mChildActions[PikiAction::Crowd].initialise(piki->mNavi);
+			piki->mMode = PikiMode::FormationMode;
+			return;
+		}
+#endif
 		piki->actOnSituaton();
 	}
 }

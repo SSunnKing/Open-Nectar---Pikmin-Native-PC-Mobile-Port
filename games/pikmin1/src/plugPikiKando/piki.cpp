@@ -2282,8 +2282,17 @@ void Piki::collisionCallback(immut CollEvent& event)
 		return;
 	}
 
+#if defined(PIKI_PC_PORT)
+	// Mod "Better Pathfinding": en el original la hierba de néctar es lo único
+	// que no mira distCheck, y un Pikmin que solo seguía al capitán se ponía a
+	// arrancarla con rozarla. Como pellets, bombas y palos, solo al mover el
+	// grupo hacia ella.
+	if ((distCheck || !pc_settings_get_better_pathfinding()) && collider->isAlive() && collider->mObjType == OBJTYPE_GrassGen && mMode == PikiMode::FormationMode
+	    && !isHolding()) {
+#else
 	if (collider->isAlive() && collider->mObjType == OBJTYPE_GrassGen && collider->isAlive() && mMode == PikiMode::FormationMode
 	    && !isHolding()) {
+#endif
 		GrassGen* grass = static_cast<GrassGen*>(collider);
 		if (grass->workable()) {
 			ActCrowd* crowd = static_cast<ActCrowd*>(mActiveAction->getCurrAction());
