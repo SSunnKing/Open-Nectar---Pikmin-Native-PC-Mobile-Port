@@ -643,6 +643,9 @@ void Piki::inWaterCallback(WaterBox* wbox)
 }
 
 #ifdef PIKI_PC_PORT
+static const f32 kPcShoreMargin     = 40.0f; ///< distancia a la orilla al sacarlo del agua
+static const int kPcShoreHoldFrames = 20;    ///< frames en seco antes de soltar el ancla
+
 /**
  * @brief Mod "Blues Only In Water": recuerda el último suelo seco y llano.
  *
@@ -651,9 +654,13 @@ void Piki::inWaterCallback(WaterBox* wbox)
  */
 void Piki::pcNoteDryGround()
 {
+	// Recién rescatado se conserva el ancla de la orilla (ver
+	// pcStepOutOfWater) en vez de pisarla con la posición actual.
 	if (mFloorTriangle && mFloorTriangle->mTrianglePlane.mNormal.y >= 0.7f) {
-		mPcLastDryPos = mPosition;
-		mPcHasDryPos  = true;
+		if (!mPcHasDryPos || mPcDryFrames >= kPcShoreHoldFrames) {
+			mPcLastDryPos = mPosition;
+			mPcHasDryPos  = true;
+		}
 		if (++mPcDryFrames > 60) {
 			mPcRescueStreak = 0;
 		}
@@ -697,15 +704,29 @@ bool Piki::pcStepOutOfWater()
 
 	// Si el sitio guardado lo devuelve al agua una y otra vez (orilla junto a
 	// una pendiente), se descarta y va junto a su capitán, como al silbarlo.
-	mPcDryFrames = 0;
-	if (++mPcRescueStreak >= 5) {
+	// Siguiendo a un capitán que nada eso no es la pendiente, y mandarlo junto
+	// a él lo metía otra vez en el agua.
+	const bool followingSwimmer = mNavi && mNavi->mWaterBox;
+	if (!followingSwimmer && ++mPcRescueStreak >= 5) {
 		mPcHasDryPos    = false;
 		mPcRescueStreak = 0;
 	}
+	// Entrada nueva al agua: el sitio seco guardado es el borde mismo. Se
+	// retrasa un poco, alejándolo del agua, y queda fijo como ancla hasta que
+	// el Pikmin pase un rato en seco, para que no retroceda en cada intento.
+	if (mPcHasDryPos && mPcDryFrames > kPcShoreHoldFrames) {
+		Vector3f away = mPcLastDryPos - mPosition;
+		away.y        = 0.0f;
+		f32 len       = away.length();
+		if (len > 0.001f) {
+			mPcLastDryPos = mPcLastDryPos + away * (kPcShoreMargin / len);
+		}
+	}
+	mPcDryFrames = 0;
 	Vector3f pos;
 	if (mPcHasDryPos) {
 		pos = mPcLastDryPos;
-	} else if (mNavi) {
+	} else if (mNavi && !followingSwimmer) {
 		pos = mNavi->getPosition();
 	} else {
 		return false;

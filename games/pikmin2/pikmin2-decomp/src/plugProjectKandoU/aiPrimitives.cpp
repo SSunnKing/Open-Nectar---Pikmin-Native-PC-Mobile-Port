@@ -1,6 +1,7 @@
 #include "Dolphin/rand.h"
 #ifdef PIKI_PC_PORT
 extern "C" float pc_settings_get_carry_speed_scale(void);
+extern "C" int pc_settings_get_better_pathfinding(void);
 #endif
 #include "Game/Interaction.h"
 #include "efx/PikiDamage.h"
@@ -956,7 +957,38 @@ int ActPathMove::execMove()
 		Vector3f pelletPos = pellet->getPosition();
 		f32 dist           = pelletPos.distance(mPrevPosition); // f30
 		mPrevPosition      = pelletPos;
+#ifdef PIKI_PC_PORT
+		// Mod "Better Pathfinding". El juego ya rehace la ruta si el pellet
+		// lleva un rato contra una pared sin moverse; atascado sin tocar pared
+		// (un saliente, un hueco entre piezas del mapa) empujaba al mismo punto
+		// para siempre. Si en unos segundos no avanza, se rehace igual.
+		bool pcStalled = false;
+		if (pc_settings_get_better_pathfinding()) {
+			const f32 kStallSeconds = 3.0f;
+			const f32 kStallDistSq  = 100.0f; // 10 unidades ya cuenta como avanzar
+			if (!mPcStallArmed) {
+				mPcStallCheckPos = pelletPos;
+				mPcStallTimer    = 0.0f;
+				mPcStallArmed    = true;
+			} else {
+				mPcStallTimer += sys->mDeltaTime;
+				Vector3f delta = pelletPos - mPcStallCheckPos;
+				if (delta.x * delta.x + delta.z * delta.z > kStallDistSq) {
+					mPcStallCheckPos = pelletPos;
+					mPcStallTimer    = 0.0f;
+				} else if (mPcStallTimer > kStallSeconds) {
+					mPcStallCheckPos = pelletPos;
+					mPcStallTimer    = 0.0f;
+					pcStalled        = true;
+				}
+			}
+		} else {
+			mPcStallArmed = false;
+		}
+		if ((pellet->getWallTimer() > 99 && dist < 1.0f) || pcStalled) {
+#else
 		if (pellet->getWallTimer() > 99 && dist < 1.0f) {
+#endif
 			pellet->mWallTimer = 0;
 			mOnyon             = nullptr;
 			if (mContextHandle) {

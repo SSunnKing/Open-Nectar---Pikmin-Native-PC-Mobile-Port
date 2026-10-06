@@ -823,6 +823,10 @@ struct ActFormation : public Action, virtual Game::SlotChangeListener, virtual S
 	bool mHadNumbnessLastFrame;    // _61, what the above value was previously
 	                               // _64 = SlotChangeListener
 	                               // _6C = MotionListener
+#ifdef PIKI_PC_PORT
+	bool pcWaterAhead();
+	bool mPcWaitAshore = false; ///< mod "Blues Only In Water": esperando a que el capitán salga del agua
+#endif
 };
 
 struct ActFreeArg : public ActionArg {
@@ -1073,6 +1077,12 @@ struct ActPathMove : public Action {
 	Vector3f mCRControls[CRMOVE_Count]; // _74, num 4 - indexed by CRMoveID (prev, curr, next, nextnext)
 	Vector3f mStartPosition;            // _A4, starting pellet position
 	Vector3f mNewVelocity;              // _B0, velocity to update pellet carry with on next execMove call
+#ifdef PIKI_PC_PORT
+	// Mod "Better Pathfinding": detección de atasco sin pared (ver execMove).
+	Vector3f mPcStallCheckPos;
+	f32 mPcStallTimer  = 0.0f;
+	bool mPcStallArmed = false;
+#endif
 };
 
 struct ActRescueArg : public ActionArg {
