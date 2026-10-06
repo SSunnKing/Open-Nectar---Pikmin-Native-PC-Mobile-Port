@@ -1758,6 +1758,10 @@ void Navi::pcDrawNightAmbience(Graphics& gfx)
 	gfx.useTexture(mPcGlowTex, GX_TEXMAP0);
 	const int prevBlend = gfx.setCBlending(BLEND_Additive);
 	const int prevCull  = gfx.setCullFront(2);
+	// Sin niebla: con la neblina densa del amanecer, la niebla tiñe el quad
+	// entero (también los texels transparentes) de su color, y las luciérnagas
+	// salían como cuadrados blancos hasta que la neblina se disipaba.
+	gfx.setFog(false);
 
 	// Billboard a mano con drawOneTri: drawParticle pasa por initParticle,
 	// que declara la coordenada de textura como XYZ y en el PC descuadra los
@@ -1913,6 +1917,7 @@ void Navi::pcDrawNightAmbience(Graphics& gfx)
 		}
 	}
 
+	gfx.setFog(true);
 	gfx.setCullFront(prevCull);
 	gfx.setCBlending(prevBlend);
 	gfx.setLighting(prevLighting, nullptr);
