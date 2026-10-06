@@ -2153,7 +2153,15 @@ J3DTexMtx* J3DMaterialFactory::newTexMtx(int matID, int texID) const
 u8 J3DMaterialFactory::newCullMode(int matID) const
 {
 	if (getMaterialInitData(matID).mCullModeIndex != 0xFF) {
+#ifdef PIKI_PC_PORT
+		// La tabla del BMD guarda cada modo como u32 big-endian (00 00 00 02).
+		// Leído nativo en el PC, el byte bajo era 0: todos los modelos J3D
+		// salían sin recorte de caras (el cristal del casco, pintado por las
+		// dos caras, duplicaba su velo azul).
+		return (GXCullMode)(__builtin_bswap32(u32(mCullModeInfo[getMaterialInitData(matID).mCullModeIndex])) & 0xFF);
+#else
 		return (GXCullMode)(mCullModeInfo[getMaterialInitData(matID).mCullModeIndex] & 0xFF);
+#endif
 	}
 	return (GXCullMode)0xFF;
 }

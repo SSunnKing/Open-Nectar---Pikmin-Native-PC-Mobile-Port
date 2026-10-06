@@ -284,7 +284,12 @@ u8 J3DMaterialFactory_v21::newCullMode(int matID) const
 {
 	u8 cullIndex = getMaterialInitData(matID).mCullModeIndex;
 	if (cullIndex != 0xFF) {
+#ifdef PIKI_PC_PORT
+		// u32 big-endian en el BMD (ver J3DMaterialFactory::newCullMode).
+		return __builtin_bswap32(u32(mCullModeInfo[cullIndex])) & 0xFF;
+#else
 		return mCullModeInfo[cullIndex];
+#endif
 	}
 	return 0xFF;
 }

@@ -459,6 +459,7 @@ std::string pc_tev_build_fragment_source(const PcTevShaderKey& key)
 	out += kGlslVersion;
 	out += kGlslPrecision;
 	out += "in vec3 vLit0;\n";
+	out += "in float vLitA0;\n";
 	if (usesChannel1) out += "in vec3 vLit1;\n";
 	// Iluminación GX compartida + selector por píxel (uPerPixel).
 	out += kGxLightingGlsl;
@@ -514,6 +515,10 @@ std::string pc_tev_build_fragment_source(const PcTevShaderKey& key)
 	out += line;
 	out += "\tvec3 lit0 = gxPixelLit0(vLit0);\n";
 	out += "\tvec4 rast0 = (lit0.x < -0.5) ? base0 : vec4(clamp(base0.rgb * lit0, 0.0, 1.0), base0.a);\n";
+	// Canal de alfa iluminado (GX_ALPHA0 con luces), como el ubershader. Sin
+	// esto el alfa era el del material: el cristal del casco de los capitanes,
+	// que es casi transparente salvo en los bordes, salía azul y opaco.
+	out += "\tif (vLitA0 >= 0.0) rast0.a = clamp(base0.a * vLitA0, 0.0, 1.0);\n";
 	if (usesChannel1) {
 		snprintf(line, sizeof(line), "\tvec4 base1 = vec4(%s, base0.a);\n",
 		         key.useMaterialRgb1 ? "uMaterialColor1.rgb" : "vColor.rgb");

@@ -124,6 +124,9 @@ void pc_gfx_set_current_mtx(u32 id);
 void pc_gfx_load_nrm_mtx(const Mtx mtx, u32 id);
 void pc_gfx_load_tex_mtx(const Mtx mtx, u32 id);
 void pc_gfx_set_tex_coord_gen(GXTexCoordID coord, GXTexGenType type, GXTexGenSrc src, u32 matrixIdx);
+// Dual tex: matriz de post-transformación (GX_PTTEXMTXn / GX_PTIDENTITY) y normalizar.
+void pc_gfx_set_tex_coord_post(u32 coord, u32 postIdx, u32 normalize);
+void pc_gfx_load_post_tex_mtx(const f32 mtx[3][4], u32 id);
 
 // State Settings
 void pc_gfx_set_z_mode(GXBool compareEnable, GXCompare func, GXBool updateEnable);

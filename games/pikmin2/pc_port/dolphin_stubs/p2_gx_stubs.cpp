@@ -76,7 +76,11 @@ void GXSetProjectionv(const f32* ptr) { (void)ptr; }
 void GXLoadPosMtxImm(Mtx mtx, u32 id)  { pc_gfx_load_pos_mtx(mtx, id); }
 void GXLoadNrmMtxImm(Mtx mtx, u32 id)  { pc_gfx_load_nrm_mtx(mtx, id); }
 void GXSetCurrentMtx(u32 id)        { pc_gfx_set_current_mtx(id); }
-void GXLoadTexMtxImm(const Mtx mtx, u32 id, GXTexMtxType type) { pc_gfx_load_tex_mtx(mtx, id); }
+void GXLoadTexMtxImm(const Mtx mtx, u32 id, GXTexMtxType type) {
+    // GX_PTTEXMTX0..19 (64+) son las matrices de post-transformación.
+    if (id >= 64) pc_gfx_load_post_tex_mtx(mtx, id);
+    else pc_gfx_load_tex_mtx(mtx, id);
+}
 void __GXSetMatrixIndex(GXAttr index) { (void)index; }
 
 void __GXSetViewport()              { }
@@ -195,8 +199,8 @@ void GXLoadTexObj(GXTexObj* obj, GXTexMapID id)     { pc_gfx_load_tex_obj(obj, i
 void GXInvalidateTexAll()                           { }
 void GXSetTexCoordGen2(GXTexCoordID dstCoord, GXTexGenType func, GXTexGenSrc srcParam,
                        u32 mtx, GXBool normalize, u32 postMtx) {
-    (void)normalize; (void)postMtx;
     pc_gfx_set_tex_coord_gen(dstCoord, func, srcParam, mtx);
+    pc_gfx_set_tex_coord_post(dstCoord, postMtx, normalize);
 }
 void GXInitTlutObj(GXTlutObj* obj, void* lut, GXTlutFmt fmt, u16 nEntries) {
     pc_gfx_init_tlut_obj(obj, lut, fmt, nEntries);

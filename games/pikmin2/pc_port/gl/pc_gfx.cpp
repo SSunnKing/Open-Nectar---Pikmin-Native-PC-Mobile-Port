@@ -511,8 +511,11 @@ struct Vertex {
     // them in every streamed vertex only inflated the upload by 32 bytes.
     float tex[4][2];
     float matrixSlot;
+    // TEXnMTXIDX de las generaciones 0-2: (idx0+1) + (idx1+1)*128 + (idx2+1)*16384,
+    // 0 = el vértice no elige matriz de textura.
+    float texMtxPacked;
 };
-static_assert(sizeof(Vertex) == 76, "Keep the streamed GX vertex compact");
+static_assert(sizeof(Vertex) == 80, "Keep the streamed GX vertex compact");
 
 // Decoded display-list geometry is immutable for the model paths that use a
 // PNMTXIDX palette. Keep raw vertices so repeated draws can skip GX parsing.
@@ -537,9 +540,29 @@ struct TexCoordGen {
     int type = 1;      // GX_TG_MTX3X4
     int src = 4;       // GX_TG_TEX0
     u32 mtxIdx = 0;
+    // Segunda transformación (dual tex): GX_PTTEXMTX0..19 = 64..121,
+    // GX_PTIDENTITY = 125. normalize: normaliza antes de aplicarla.
+    u32 postIdx = 125;
+    bool normalize = false;
 };
 static TexCoordGen sTexCoordGen[8];
 static float sTexMatrices[64][16];
+// Memoria de matrices de post-transformación: 64 filas de 4 floats (XF
+// 0x500-0x5FF). La matriz con id N ocupa las filas N-64..N-62; las filas
+// 61-63 (GX_PTIDENTITY) son identidad.
+static float sPostRows[64][4];
+static uint32_t sPostMtxGen = 0;
+static bool sPostRowsInit = [] {
+    for (int r = 61; r < 64; ++r)
+        for (int c = 0; c < 4; ++c) sPostRows[r][c] = (c == r - 61) ? 1.0f : 0.0f;
+    return true;
+}();
+// Revisión conjunta de las matrices de textura 30..59, que los vértices pueden
+// elegir uno a uno con TEXnMTXIDX (reflejos de modelos con esqueleto).
+static uint32_t sTexPaletteGen = 0;
+// Generaciones (0-3) cuya coordenada con fuente NRM ya calculó el decodificador
+// de listas de display en la CPU (ver bake_nrm_texgen): el shader la usa tal cual.
+static int sTexBakedMask = 0;
 // Matrix contents change far less often than they are drawn with, so the batch
 // key hashes a revision number per slot rather than the floats themselves.
 // That removes ~600 of the ~2 KB the key used to walk on every primitive.
@@ -844,6 +867,11 @@ struct ProgramLocations {
 	GLint tcMode[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 	GLint tcMtx[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 	GLint tcProj = -1;
+	GLint tcPost = -1;     // uTcPost[0] (vec4[12])
+	GLint tcPostOn = -1;
+	GLint tcNorm = -1;
+	GLint tc2x4 = -1;
+	GLint texPalette = -1; // uTexPalette[0] (vec4[30])
 };
 
 static ProgramLocations sLoc;
@@ -855,6 +883,7 @@ enum : GLuint {
     kAttrNormalIndex    = 2,
     kAttrTexCoord0Index = 3, // through 6; the Vertex carries four of them
     kAttrMatrixSlotIndex = 7,
+    kAttrTexMtxIndex     = 8,
 };
 static constexpr int kVertexTexCoordCount = 4;
 static GLint sAttrNormal = GLint(kAttrNormalIndex);
@@ -2309,6 +2338,9 @@ static const char* vShaderHead =
     "in vec2 aTexCoord2;\n"
     "in vec2 aTexCoord3;\n"
     "in float aMatrixSlot;\n"
+    // Índices de matriz de textura por vértice (TEXnMTXIDX) de las
+    // generaciones 0-2, empaquetados: (idx0+1) + (idx1+1)*128 + (idx2+1)*16384.
+    "in float aTexMtxPacked;\n"
     "uniform mat4 uProjMtx;\n"
     "uniform mat4 uPosMtx;\n"
     "uniform mat3 uNrmMtx;\n"
@@ -2324,6 +2356,20 @@ static const char* vShaderHead =
     "uniform int uTcMode[8];\n"      // 0=direct uv, 1=position, 2=normal
     "uniform mat4 uTcMtx[8];\n"
     "uniform int uTcProj;\n"        // bit per slot: MTX3x4 texgen (STQ, divide by q)
+    // Dual tex: matriz de post-transformación (filas) de las generaciones
+    // 0-3, y por bits: si se aplica, si se normaliza antes, y si la primera
+    // matriz es 2x4 (entonces entra (s, t, 1)).
+    "uniform vec4 uTcPost[12];\n"
+    "uniform int uTcPostOn;\n"
+    "uniform int uTcNorm;\n"
+    "uniform int uTc2x4;\n"
+#if !PIKI_USE_GLES
+    // Matrices de textura 30..59 (TEXMTX0..9) por filas, para TEXnMTXIDX por
+    // vértice con geometría en espacio de modelo (paleta). En GLES no cabe en
+    // el presupuesto de uniforms; allí solo hay la ruta de CPU.
+    "#define PC_TEX_PALETTE 1\n"
+    "uniform vec4 uTexPalette[30];\n"
+#endif
     "out vec4 vTcQ;\n"
     "out vec3 vLit0;\n"
     "out vec3 vLit1;\n"
@@ -2352,7 +2398,7 @@ static const char* vShaderTail =
     // useMatrixQuick). Passing the transformed normal rotates it twice and
     // pushes the sphere-map coordinates off the useful range, which is what
     // made the gloss on Olimar, the pellets and the ship disappear.
-    "vec3 genTc(int slot, vec4 viewPos, vec3 nrm, vec2 uvIn, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3) {\n"
+    "vec3 genTc(int slot, vec4 viewPos, vec3 nrm, vec2 uvIn, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, int vIdx) {\n"
     "    int mode = uTcMode[slot];\n"
     "    if (mode == 0) return vec3(uvIn, 1.0);\n"
     "    vec4 src = (mode == 1) ? viewPos\n"
@@ -2360,6 +2406,23 @@ static const char* vShaderTail =
     "             : (mode >= 11) ? vec4((mode == 11) ? tc0 : (mode == 12) ? tc1 : (mode == 13) ? tc2 : tc3, 0.0, 1.0)\n"
     "             : vec4(rawTc(mode - 3), 0.0, 1.0);\n"
     "    vec4 r = uTcMtx[slot] * src;\n"
+    // Matriz de textura elegida por el vértice. En la ruta de CPU la posición y
+    // la normal ya vienen transformadas por la matriz de su hueso, que es la
+    // que J3D carga como matriz de textura del reflejo (sTexMtxLoadType 0x2000).
+    "    if (vIdx >= 30 && vIdx <= 57) {\n"
+    "        if (uUsePalette == 0 && (mode == 1 || mode == 2)) r = vec4(src.xyz, 1.0);\n"
+    "#ifdef PC_TEX_PALETTE\n"
+    "        else { int b = vIdx - 30; r = vec4(dot(uTexPalette[b], src), dot(uTexPalette[b + 1], src), dot(uTexPalette[b + 2], src), 1.0); }\n"
+    "#endif\n"
+    "    }\n"
+    // Dual tex: normalizar (si toca) y la matriz de post-transformación.
+    "    if (slot < 4 && ((uTcPostOn >> slot) & 1) != 0) {\n"
+    "        vec3 x = r.xyz;\n"
+    "        if (((uTc2x4 >> slot) & 1) != 0) x.z = 1.0;\n"
+    "        if (((uTcNorm >> slot) & 1) != 0) x = normalize(x);\n"
+    "        vec4 x4 = vec4(x, 1.0);\n"
+    "        r.xyz = vec3(dot(uTcPost[slot * 3], x4), dot(uTcPost[slot * 3 + 1], x4), dot(uTcPost[slot * 3 + 2], x4));\n"
+    "    }\n"
     // GX interpolates S, T and Q and divides per pixel (the water's screen
     // projection); the fragment shader does the divide with vTcQ.
     "    return vec3(r.xy, ((uTcProj >> slot) & 1) != 0 && abs(r.z) > 1e-6 ? r.z : 1.0);\n"
@@ -2383,10 +2446,13 @@ static const char* vShaderTail =
     // GX permits later texgens to use the output of an earlier texgen as
     // their source (GX_TG_TEXCOORD0..6). Evaluate in hardware order instead
     // of falling back to the usually absent raw attribute for that slot.
-    "    vec3 g0 = genTc(0, aPos4, aNormal, aTexCoord0, vec2(0.0), vec2(0.0), vec2(0.0), vec2(0.0));\n"
-    "    vec3 g1 = genTc(1, aPos4, aNormal, aTexCoord1, g0.xy, vec2(0.0), vec2(0.0), vec2(0.0));\n"
-    "    vec3 g2 = genTc(2, aPos4, aNormal, aTexCoord2, g0.xy, g1.xy, vec2(0.0), vec2(0.0));\n"
-    "    vec3 g3 = genTc(3, aPos4, aNormal, aTexCoord3, g0.xy, g1.xy, g2.xy, vec2(0.0));\n"
+    "    int ti0 = int(mod(aTexMtxPacked, 128.0) + 0.5) - 1;\n"
+    "    int ti1 = int(mod(floor(aTexMtxPacked / 128.0), 128.0) + 0.5) - 1;\n"
+    "    int ti2 = int(floor(aTexMtxPacked / 16384.0) + 0.5) - 1;\n"
+    "    vec3 g0 = genTc(0, aPos4, aNormal, aTexCoord0, vec2(0.0), vec2(0.0), vec2(0.0), vec2(0.0), ti0);\n"
+    "    vec3 g1 = genTc(1, aPos4, aNormal, aTexCoord1, g0.xy, vec2(0.0), vec2(0.0), vec2(0.0), ti1);\n"
+    "    vec3 g2 = genTc(2, aPos4, aNormal, aTexCoord2, g0.xy, g1.xy, vec2(0.0), vec2(0.0), ti2);\n"
+    "    vec3 g3 = genTc(3, aPos4, aNormal, aTexCoord3, g0.xy, g1.xy, g2.xy, vec2(0.0), -1);\n"
     "    vec2 tc0 = g0.xy, tc1 = g1.xy, tc2 = g2.xy, tc3 = g3.xy;\n"
     "    vTcQ = vec4(g0.z, g1.z, g2.z, g3.z);\n"
     "    vTexCoord0 = tc0;\n"
@@ -2818,6 +2884,7 @@ static void bind_fixed_attrib_locations(GLuint program) {
     glBindAttribLocation_ptr(program, kAttrColorIndex, "aColor");
     glBindAttribLocation_ptr(program, kAttrNormalIndex, "aNormal");
     glBindAttribLocation_ptr(program, kAttrMatrixSlotIndex, "aMatrixSlot");
+    glBindAttribLocation_ptr(program, kAttrTexMtxIndex, "aTexMtxPacked");
     for (int i = 0; i < kVertexTexCoordCount; ++i) {
         char name[32];
         snprintf(name, sizeof(name), "aTexCoord%d", i);
@@ -2905,6 +2972,11 @@ static void query_program_locations(GLuint program, ProgramLocations& out) {
         out.tcMtx[i] = glGetUniformLocation_ptr(program, name);
     }
     out.tcProj = glGetUniformLocation_ptr(program, "uTcProj");
+    out.tcPost = glGetUniformLocation_ptr(program, "uTcPost[0]");
+    out.tcPostOn = glGetUniformLocation_ptr(program, "uTcPostOn");
+    out.tcNorm = glGetUniformLocation_ptr(program, "uTcNorm");
+    out.tc2x4 = glGetUniformLocation_ptr(program, "uTc2x4");
+    out.texPalette = glGetUniformLocation_ptr(program, "uTexPalette[0]");
     out.nrmMtx = glGetUniformLocation_ptr(program, "uNrmMtx");
     out.numLights = glGetUniformLocation_ptr(program, "uNumLights");
     out.ambColor = glGetUniformLocation_ptr(program, "uAmbColor");
@@ -3164,6 +3236,9 @@ static void setup_vertex_attribs() {
     glEnableVertexAttribArray_ptr(kAttrMatrixSlotIndex);
     glVertexAttribPointer_ptr(kAttrMatrixSlotIndex, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex),
                               (void*)offsetof(Vertex, matrixSlot));
+    glEnableVertexAttribArray_ptr(kAttrTexMtxIndex);
+    glVertexAttribPointer_ptr(kAttrTexMtxIndex, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+                              (void*)offsetof(Vertex, texMtxPacked));
     for (int i = 0; i < 8; ++i) {
         if (sAttrTexCoord[i] >= 0) {
             glEnableVertexAttribArray_ptr(sAttrTexCoord[i]);
@@ -3261,12 +3336,15 @@ void pc_gfx_init(void) {
             sPosMatrix[m][i] = (i % 5 == 0) ? 1.0f : 0.0f;
             sTexMatrices[m][i] = (i % 5 == 0) ? 1.0f : 0.0f;
         }
+        for (int c = 0; c < 4; c++) sPostRows[m][c] = (m >= 61 && c == m - 61) ? 1.0f : 0.0f;
         sTexMtxLoaded[m] = false;
         for (int c = 0; c < 8; c++) {
             sTexCoordGen[c].active = false;
             sTexCoordGen[c].type = 1;
             sTexCoordGen[c].src = 4;
             sTexCoordGen[c].mtxIdx = 0;
+            sTexCoordGen[c].postIdx = 125;
+            sTexCoordGen[c].normalize = false;
         }
     }
 
@@ -5622,6 +5700,7 @@ void pc_gfx_load_tex_mtx(const Mtx mtx, u32 id) {
     d[12] = mtx[0][3]; d[13] = mtx[1][3]; d[14] = mtx[2][3]; d[15] = 1.0f;
     sTexMtxLoaded[id] = true;
     ++sTexMtxGen[id];
+    if (id >= 30 && id < 60) ++sTexPaletteGen;
 }
 
 // ── Texture coordinate generation ──
@@ -5633,6 +5712,22 @@ void pc_gfx_set_tex_coord_gen(GXTexCoordID coord, GXTexGenType type, GXTexGenSrc
     sTexCoordGen[coord].type = type;
     sTexCoordGen[coord].src = src;
     sTexCoordGen[coord].mtxIdx = matrixIdx;
+}
+
+void pc_gfx_set_tex_coord_post(u32 coord, u32 postIdx, u32 normalize) {
+    state_touched();
+    if (coord >= 8) return;
+    sTexCoordGen[coord].postIdx = (postIdx >= 64 && postIdx <= 127) ? postIdx : 125;
+    sTexCoordGen[coord].normalize = normalize != 0;
+}
+
+void pc_gfx_load_post_tex_mtx(const f32 mtx[3][4], u32 id) {
+    state_touched();
+    if (id < 64 || id > 125 || !mtx) return;
+    const u32 row = id - 64;
+    for (u32 r = 0; r < 3 && row + r < 64; ++r)
+        for (u32 c = 0; c < 4; ++c) sPostRows[row + r][c] = mtx[r][c];
+    ++sPostMtxGen;
 }
 
 // Last values handed to the z/blend/cull setters, for pc_gfx_get_pipeline_state.
@@ -7051,6 +7146,7 @@ static void fifo_imm_reset()
 static void bp_resolve_textures();
 void pc_gfx_begin(GXPrimitive type, GXVtxFmt vtxfmt, u16 nverts) {
     sNativeWrittenThisFrame = true;
+    sTexBakedMask = 0;
     if (sInPrimitive) {
         pc_gfx_end();
     }
@@ -8157,6 +8253,9 @@ static uint64_t compute_batch_state_key_full() {
             h = hash_bytes(h, &texRevision, sizeof(texRevision));
         }
     }
+    h = hash_bytes(h, &sPostMtxGen, sizeof(sPostMtxGen));
+    h = hash_bytes(h, &sTexBakedMask, sizeof(sTexBakedMask));
+    h = hash_bytes(h, &sTexPaletteGen, sizeof(sTexPaletteGen));
     h = hash_bytes(h, sActiveGLTextures, sizeof(sActiveGLTextures));
     h = hash_bytes(h, sHasActiveTextures, sizeof(sHasActiveTextures));
     // Triangles, strips, fans and quads can all become GL_TRIANGLES and so may
@@ -9317,6 +9416,7 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
                 mode = (type >= 2 && type <= 9) ? 11 + int(src - GX_TG_TEXCOORD0) : 3;
             }
         }
+        if (slot < 4 && (sTexBakedMask & (1 << slot))) mode = 0; // ya calculada en la CPU
         if (sLoc.tcMode[slot] >= 0) glUniform1i_ptr(sLoc.tcMode[slot], mode);
         if (mode != 0 && sLoc.tcMtx[slot] >= 0) {
             u32 mtxIdx = (slot < 8) ? sTexCoordGen[slot].mtxIdx : 0;
@@ -9325,6 +9425,34 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
         }
     }
     if (sLoc.tcProj >= 0) glUniform1i_ptr(sLoc.tcProj, tcProj);
+    if (sLoc.tcPostOn >= 0) {
+        // Dual tex de las generaciones 0-3 (las que lleva el shader).
+        int postOn = 0, norm = 0, is2x4 = 0;
+        float post[12][4];
+        for (int slot = 0; slot < 4; ++slot) {
+            const TexCoordGen& tg = sTexCoordGen[slot];
+            const u32 row = (tg.postIdx >= 64 && tg.postIdx <= 125) ? tg.postIdx - 64 : 61;
+            for (int r = 0; r < 3; ++r)
+                for (int c = 0; c < 4; ++c) post[slot * 3 + r][c] = sPostRows[std::min<u32>(row + r, 63)][c];
+            if (!tg.active || tg.type >= GX_TG_BUMP0 || (sTexBakedMask & (1 << slot))) continue;
+            if (tg.postIdx != 125 || tg.normalize) postOn |= 1 << slot;
+            if (tg.normalize) norm |= 1 << slot;
+            if (tg.type == GX_TG_MTX3X4) is2x4 |= 1 << slot; // este enum: MTX3X4 = 1 = 2x4 del hardware
+        }
+        glUniform1i_ptr(sLoc.tcPostOn, postOn);
+        if (sLoc.tcNorm >= 0) glUniform1i_ptr(sLoc.tcNorm, norm);
+        if (sLoc.tc2x4 >= 0) glUniform1i_ptr(sLoc.tc2x4, is2x4);
+        if (postOn && sLoc.tcPost >= 0) glUniform4fv_ptr(sLoc.tcPost, 12, &post[0][0]);
+    }
+    if (sLoc.texPalette >= 0) {
+        float rows[30][4];
+        for (int m = 0; m < 10; ++m) {
+            const float* d = sTexMatrices[30 + m * 3];
+            for (int r = 0; r < 3; ++r)
+                for (int c = 0; c < 4; ++c) rows[m * 3 + r][c] = d[c * 4 + r];
+        }
+        glUniform4fv_ptr(sLoc.texPalette, 30, &rows[0][0]);
+    }
 
 }
 
@@ -10382,8 +10510,16 @@ static void handle_xf_regs(u32 addrBase, u32 numWords, const u32* words) {
         pc_gfx_load_nrm_mtx(m, off / 3);
         return;
     }
-    if (addrBase < 0x600) { // post-transform texture matrices
-        gx_regs_report_once("XF post-tex matrix", addrBase);
+    if (addrBase < 0x600) { // post-transform texture matrices: filas de 4 floats
+        const u32 row = (addrBase - 0x500) / 4;
+        if ((addrBase % 4) != 0 || (numWords % 4) != 0 || row + numWords / 4 > 64) {
+            gx_regs_report_once("XF post-tex matrix", addrBase);
+            return;
+        }
+        state_touched();
+        for (u32 r = 0; r < numWords / 4; ++r)
+            for (u32 c = 0; c < 4; ++c) sPostRows[row + r][c] = bits_to_float(words[r * 4 + c]);
+        ++sPostMtxGen;
         return;
     }
     if (addrBase < 0x680) { // lights: 16 words each
@@ -10459,7 +10595,8 @@ static void handle_xf_regs(u32 addrBase, u32 numWords, const u32* words) {
             break;
         }
         case 0x1012: // DUALTEXTRANS
-        case 0x1050 ... 0x1057: // POSTMTXINFO: post-transform texgen not modelled
+        case 0x1050 ... 0x1057: // POSTMTXINFO: matriz de post-transformación y normalizar
+            pc_gfx_set_tex_coord_post(addr - 0x1050, (hex & 0x3F) + 64, (hex >> 8) & 1);
             break;
         case 0x1040 ... 0x1047:
             xf_apply_texgen(addr - 0x1040, hex);
@@ -10686,6 +10823,7 @@ static void draw_resident_mesh(ResidentMesh& mesh) {
 
 void pc_gfx_call_display_list(const void* list, u32 nbytes) {
     sNativeWrittenThisFrame = true;
+    sTexBakedMask = 0;
     if (sInPrimitive) pc_gfx_end(); // an immediate primitive left open without GXEnd
     // Two clock reads per display list (~1000 a frame): cheap enough, and it
     // is the one cost of renderall that nothing else was attributing.
@@ -10925,6 +11063,7 @@ static void pc_gfx_call_display_list_impl(const void* list, u32 nbytes) {
             v.nx = 0.0f; v.ny = 0.0f; v.nz = 1.0f;
             v.r = 1.0f; v.g = 1.0f; v.b = 1.0f; v.a = 1.0f;
             v.matrixSlot = 0.0f;
+            v.texMtxPacked = 0.0f;
             for (int tc = 0; tc < 4; ++tc) {
                 v.tex[tc][0] = 0.0f;
                 v.tex[tc][1] = 0.0f;
@@ -10948,6 +11087,12 @@ static void pc_gfx_call_display_list_impl(const void* list, u32 nbytes) {
                 if (attr <= GX_VA_TEX7MTXIDX) {
                     if (desc != GX_DIRECT || cursor >= end) { malformed = true; break; }
                     const u8 value = *cursor++;
+                    if (attr >= GX_VA_TEX0MTXIDX && attr <= GX_VA_TEX2MTXIDX && value < 64) {
+                        // Matriz de textura elegida por el vértice (reflejo de
+                        // los modelos con esqueleto, p. ej. el casco).
+                        static const float kPack[3] = { 1.0f, 128.0f, 16384.0f };
+                        v.texMtxPacked += float(value + 1) * kPack[attr - GX_VA_TEX0MTXIDX];
+                    }
                     if (attr == GX_VA_PNMTXIDX) {
                         matrixId = value;
                         v.matrixSlot = float(matrixId / 3);
@@ -11141,6 +11286,36 @@ static void pc_gfx_call_display_list_impl(const void* list, u32 nbytes) {
                 }
             }
             if (!sVertexUsesPalette) {
+                // Reflejos (fuente NRM): en la consola la generación recibe la
+                // normal original y la multiplica una vez por su matriz de
+                // textura. Aquí la normal se transforma a vista justo debajo, y
+                // multiplicarla otra vez en el shader la rotaba dos veces (el
+                // casco de los capitanes, con franjas en vez de un brillo).
+                for (int slot = 0; slot < 4; ++slot) {
+                    const TexCoordGen& tg = sTexCoordGen[slot];
+                    if (!tg.active || tg.src != GX_TG_NRM || tg.type >= GX_TG_BUMP0) continue;
+                    const int packed = int(v.texMtxPacked);
+                    const int perVertex = slot < 3 ? ((packed >> (7 * slot)) & 0x7F) - 1 : -1;
+                    const u32 mid = (perVertex >= 0 && perVertex < 64) ? u32(perVertex) : tg.mtxIdx;
+                    const float* m = sTexMatrices[mid < 64 ? mid : 0];
+                    float r[3];
+                    for (int row = 0; row < 3; ++row)
+                        r[row] = m[row] * v.nx + m[4 + row] * v.ny + m[8 + row] * v.nz + m[12 + row];
+                    if (tg.type == GX_TG_MTX3X4) r[2] = 1.0f; // este enum: MTX3X4 = 2x4 del hardware
+                    if (tg.normalize) {
+                        const float len = std::sqrt(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]);
+                        if (len > 1e-6f) { r[0] /= len; r[1] /= len; r[2] /= len; }
+                    }
+                    const u32 prow = (tg.postIdx >= 64 && tg.postIdx <= 125) ? tg.postIdx - 64 : 61;
+                    float out[2];
+                    for (int k = 0; k < 2; ++k) {
+                        const float* pr = sPostRows[std::min<u32>(prow + k, 63)];
+                        out[k] = pr[0] * r[0] + pr[1] * r[1] + pr[2] * r[2] + pr[3];
+                    }
+                    v.tex[slot][0] = out[0];
+                    v.tex[slot][1] = out[1];
+                    sTexBakedMask |= 1 << slot;
+                }
                 float nx, ny, nz;
                 transform_normal(matrixId, v.nx, v.ny, v.nz, nx, ny, nz);
                 v.nx = nx; v.ny = ny; v.nz = nz;
