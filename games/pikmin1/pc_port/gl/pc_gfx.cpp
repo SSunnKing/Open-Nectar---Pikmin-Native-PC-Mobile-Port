@@ -7625,11 +7625,12 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
     int numLights = 0;
     float ambR = 1.0f, ambG = 1.0f, ambB = 1.0f, ambA = 1.0f;
     if (sShadowProjPerspective && !sPostRanThisFrame) sun_capture_from_channel0();
-    // Iluminación del canal GX_ALPHA0: desactivada. Se probó para el agua y
-    // el casco, pero volvía semitransparente a Olimar (sus materiales se
-    // mezclan con alfa y la luz del port no da el alfa que da la consola).
-    // El agua la arregló el recorte a 8 bits de las entradas TEV (tevU8).
-    const bool alphaLit0 = false;
+    // Iluminación del canal GX_ALPHA0, solo en los materiales que la activan
+    // (como la consola): el cristal del casco de Olimar es casi transparente
+    // gracias a ella. Antes se forzaba apagada para todo porque volvía
+    // semitransparente al Olimar HD, que es quien la encendía sin quererlo
+    // (setLighting sin material activa GX_COLOR0A0); ahora la apaga él.
+    const bool alphaLit0 = sChannels[0].alphaEnabled;
     if (sChannels[0].enabled || alphaLit0) {
         // Only lit channels contribute lighting; a disabled channel must pass
         // rasterized colors through untouched (matches GX hardware behavior).
@@ -7642,7 +7643,7 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
             ambG = std::min(1.0f, ambG + sAmbBoost[1]);
             ambB = std::min(1.0f, ambB + sAmbBoost[2]);
         }
-        u32 mask = sChannels[0].lightMask;
+        u32 mask = sChannels[0].enabled ? sChannels[0].lightMask : sChannels[0].alphaLightMask;
         for (int i = 0; i < 8 && numLights < 4; i++) {
             if (mask & (1u << i)) {
                 glUniform4f_ptr(sLoc.lightPos[numLights], sLights[i].pos[0], sLights[i].pos[1], sLights[i].pos[2], 0.0f);
@@ -7650,7 +7651,8 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
                 // Distance attenuation applies when the channel's attention
                 // function requests it (game uses GX_AF_SPOT with lights).
                 const float* k = sLights[i].k;
-                bool attnOn = (sChannels[0].attnFn != GX_AF_NONE);
+                bool attnOn = sChannels[0].enabled ? (sChannels[0].attnFn != GX_AF_NONE)
+                                                   : (sChannels[0].alphaAttnFn != GX_AF_NONE);
                 glUniform4f_ptr(sLoc.lightK[numLights], k[0], k[1], k[2], attnOn ? 1.0f : 0.0f);
                 numLights++;
             }

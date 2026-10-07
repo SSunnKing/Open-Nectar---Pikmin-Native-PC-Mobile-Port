@@ -47,7 +47,22 @@ struct Part {
 	unsigned flags = 0;
 	std::vector<unsigned char> rgba;
 	GXTexObj texture{};
+	// -1 sin calcular; 1 si la textura tiene alfa parcial en una parte
+	// apreciable (el visor), que se dibuja después y sin escribir profundidad.
+	mutable int translucent = -1;
 };
+
+bool partIsTranslucent(const Part& part)
+{
+	if (part.translucent < 0) {
+		size_t partial = 0, total = part.rgba.size() / 4;
+		for (size_t i = 3; i < part.rgba.size(); i += 4) {
+			if (part.rgba[i] < 240) ++partial;
+		}
+		part.translucent = (total > 0 && partial * 20 > total) ? 1 : 0; // más del 5 %
+	}
+	return part.translucent == 1;
+}
 
 // How HD vertices are attached to the engine's animated joints.
 enum BindMode {
@@ -312,6 +327,10 @@ void drawModel(Graphics& gfx, const Model& model, const Entry& entry, const std:
 	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
 	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
 	const bool prevLighting = gfx.setLighting(true, nullptr);
+	// setLighting sin material ilumina GX_COLOR0A0: el alfa del paquete HD es el
+	// de su textura, sin luz (con ella el modelo salía semitransparente).
+	// setLighting(prevLighting) de abajo vuelve a dejar el canal como estaba.
+	GXSetChanCtrl(GX_ALPHA0, GX_FALSE, GX_SRC_REG, GX_SRC_REG, 0, GX_DF_NONE, GX_AF_NONE);
 	const PcGfxPipelineState prevPipeline = pc_gfx_get_pipeline_state();
 	GXSetChanMatColor(GX_COLOR0A0, tint);
 	GXSetNumTexGens(1);
@@ -334,9 +353,16 @@ void drawModel(Graphics& gfx, const Model& model, const Entry& entry, const std:
 	GXSetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
 	GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_COPY);
 	static const GXColor kWhite = { 255, 255, 255, 255 };
-	for (const Part& part : model.parts) {
-		GXSetChanMatColor(GX_COLOR0A0, (part.flags & kPartFlagNoTint) ? kWhite : tint);
-		drawPart(model, entry, part, matrices);
+	// Primero lo opaco y luego lo translúcido sin escribir profundidad: si el
+	// visor se pintaba antes que la cabeza, su profundidad la tapaba y el cristal
+	// se veía como un azul casi opaco.
+	for (int pass = 0; pass < 2; ++pass) {
+		if (pass == 1) GXSetZMode(GX_TRUE, GX_LEQUAL, GX_FALSE);
+		for (const Part& part : model.parts) {
+			if (partIsTranslucent(part) != (pass == 1)) continue;
+			GXSetChanMatColor(GX_COLOR0A0, (part.flags & kPartFlagNoTint) ? kWhite : tint);
+			drawPart(model, entry, part, matrices);
+		}
 	}
 	gfx.setLighting(prevLighting, nullptr);
 	// Put back what the engine had: its materials are display lists that do
