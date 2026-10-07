@@ -399,9 +399,18 @@ bool BaseGameSection::doUpdate()
  * @note Address: 0x8014BC28
  * @note Size: 0x170
  */
+#ifdef PIKI_PC_PORT
+extern "C" bool gPcMovieInterpFrame; // pcMovieInterp.cpp
+#endif
 void BaseGameSection::doDraw(Graphics& gfx)
 {
 	captureRadarmap(gfx);
+#ifdef PIKI_PC_PORT
+	// Frame interpolado de un cinematico: la camara ya trae la vista mezclada
+	// y no debe avanzar (su update va un dibujo por detras de la escena).
+	if (gPcMovieInterpFrame) {
+	} else
+#endif
 	if (gameSystem->paused()) {
 		if (cameraMgr) {
 			cameraMgr->controllerLock(CAMNAVI_Both);

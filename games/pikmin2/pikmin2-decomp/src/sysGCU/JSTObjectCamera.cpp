@@ -5,6 +5,10 @@
 namespace Game {
 namespace P2JST {
 static f32 sFovBackup;
+#ifdef PIKI_PC_PORT
+// Fov que tomara la camara en el siguiente dibujo (mViewAngle va un dibujo atras).
+f32 pcObjectCameraNextFov() { return sFovBackup; }
+#endif
 
 /**
  * @note Address: 0x8042F6E4

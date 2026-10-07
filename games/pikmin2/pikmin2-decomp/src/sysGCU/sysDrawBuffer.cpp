@@ -120,8 +120,14 @@ DrawBuffer* DrawBuffers::get(int index)
  * @note Address: 0x80455B50
  * @note Size: 0xE0
  */
+#ifdef PIKI_PC_PORT
+extern "C" void pc_movie_interp_note_clear(void);
+#endif
 void DrawBuffers::frameInitAll()
 {
+#ifdef PIKI_PC_PORT
+	pc_movie_interp_note_clear(); // lo inscrito hasta aqui ya no se dibuja
+#endif
 	for (int i = 0; i < mCount; i++) {
 		get(i)->frameInit();
 	}

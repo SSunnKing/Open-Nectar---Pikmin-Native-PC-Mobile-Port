@@ -631,8 +631,14 @@ void J3DModel::calc()
  * @note Size: 0xF4
  * entry__8J3DModelFv
  */
+#ifdef PIKI_PC_PORT
+extern "C" void pc_movie_interp_note_entry(J3DModel*);
+#endif
 void J3DModel::entry()
 {
+#ifdef PIKI_PC_PORT
+	pc_movie_interp_note_entry(this); // cinematicos: modelos a interpolar
+#endif
 	j3dSys.mModel = this;
 	if (mFlags & J3DMODEL_SkinPosCpu) {
 		j3dSys.mFlags |= 0x4;

@@ -1356,6 +1356,13 @@ extern "C" void pc_orig_tick_begin(void)
 }
 
 extern "C" float pc_orig_period(void) { return sPcRequestedFrameRate / 60.0f; }
+// Fraccion del periodo original transcurrida desde el ultimo tick (0..1):
+// posicion de un frame intermedio entre dos ticks.
+extern "C" float pc_orig_tick_fraction(void)
+{
+	const f32 f = sPcOrigTickAcc / (sPcRequestedFrameRate / 60.0f);
+	return f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f);
+}
 
 // Frecuencia del retrace del host (p2_os_host): 120 solo en el modo de 120 FPS.
 extern "C" int pc_p2_retrace_hz(void) { return pc_settings_get_fps_mode() == 2 ? 120 : 60; }

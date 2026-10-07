@@ -422,6 +422,9 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
         pikmin2_add_host_test(p2_gx_vertex_decode_test
             ${PC_PORT_DIR}/gl/pc_gx_vertex_decode_test.cpp
         )
+        pikmin2_add_host_test(p2_mtx_interp_test
+            ${PC_PORT_DIR}/timing/pc_mtx_interp_test.cpp
+        )
         pikmin2_add_host_test(p2_menu_repeat_test
             ${PC_PORT_DIR}/pc_menu_repeat_test.cpp
             ${PC_PORT_DIR}/pc_menu_repeat.cpp
