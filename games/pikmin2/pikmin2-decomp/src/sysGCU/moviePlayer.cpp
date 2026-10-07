@@ -697,18 +697,17 @@ bool MoviePlayer::update(Controller* input1, Controller* input2)
 		}
 #ifdef PIKI_PC_PORT
 		} else if (mObjectSystem) {
-			// Ticks intermedios: como el cinePlayer de Pikmin 1 (tiempo decimal),
-			// las curvas de JStudio se evaluan en la fraccion de frame transcurrida
-			// y se aplican a actores, camara y luces; el guion stb solo avanza en
-			// los ticks originales. Los objetos se registran para el dibujo en
-			// cada frame (sin esto el fondo parpadeaba).
-			JStudio::gPcJStudioSubFrame += PC_ORIG_DT_SCALE();
-			if (JStudio::gPcJStudioSubFrame > 0.999) {
-				JStudio::gPcJStudioSubFrame = 0.999;
-			}
-			if (mStudioControl && (int)mStudioControl->mSuspend <= 0) {
-				mStudioControl->forward_value(0);
-			}
+			// Ticks intermedios (frames de presentacion, no ticks de la escena):
+			// JStudio solo se evalua en los ticks originales de 30 Hz. Evaluar
+			// sus curvas en edades fraccionarias interpolaba como escalares
+			// angulos Euler, escalas y SRT relativos a un hueso padre, y producia
+			// poses que el original nunca genera (capitanes fuera de la cabina,
+			// decorado estirado). Aqui se mantiene el ultimo estado: update()
+			// sin PC_ORIG_TICK reconstruye la misma pose (no avanza animaciones
+			// y los comandos ya se consumieron) y vuelve a fijar a los actores
+			// del juego frente a su fisica. Los objetos se registran para el
+			// dibujo en cada frame (sin esto el fondo parpadeaba).
+			JStudio::gPcJStudioSubFrame = 0.0;
 			mObjectSystem->update();
 			mObjectSystem->entry();
 		}

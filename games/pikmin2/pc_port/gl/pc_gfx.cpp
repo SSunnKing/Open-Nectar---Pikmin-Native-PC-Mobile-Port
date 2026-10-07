@@ -1,4 +1,5 @@
 #include "pc_gfx.h"
+#include "pc_gx_vertex_decode.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -4935,6 +4936,66 @@ extern "C" int pc_gfx_trace_j3d(void) {
     return f && sFrameSerial == f;
 }
 
+// Cinematicos a 30 Hz con presentacion a 60/120: el frame intermedio no se
+// vuelve a dibujar, se presenta otra vez la imagen exacta del ultimo tick.
+// Volver a dibujar la escena desde el estado guardado no daba la misma imagen
+// (Louie y la nave alternaban entre dos poses cada frame).
+static GLuint sHeldFrameFbo = 0, sHeldFrameTex = 0;
+static int sHeldFrameW = 0, sHeldFrameH = 0;
+static bool sHeldFrameValid = false;
+
+bool pc_gfx_held_frame_capture(void)
+{
+    sHeldFrameValid = false;
+    if (!sNativeFramebufferReady || !glBlitFramebuffer_ptr || !glBindFramebuffer_ptr || !glGenFramebuffers_ptr
+        || !glFramebufferTexture2D_ptr)
+        return false;
+    if (sInPrimitive) pc_gfx_end();
+    pc_gfx_flush_batch();
+    if (!sHeldFrameFbo) glGenFramebuffers_ptr(1, &sHeldFrameFbo);
+    if (!sHeldFrameTex) glGenTextures(1, &sHeldFrameTex);
+    if (sHeldFrameW != sRenderWidth || sHeldFrameH != sRenderHeight) {
+        glBindTexture(GL_TEXTURE_2D, sHeldFrameTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, sRenderWidth, sRenderHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glBindFramebuffer_ptr(GL_FRAMEBUFFER, sHeldFrameFbo);
+        glFramebufferTexture2D_ptr(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sHeldFrameTex, 0);
+        sHeldFrameW = sRenderWidth;
+        sHeldFrameH = sRenderHeight;
+    }
+    pc_gfx_note_gl_state_change();
+    invalidate_gl_pipeline_guards();
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, sNativeFramebuffer);
+    glBindFramebuffer_ptr(GL_DRAW_FRAMEBUFFER, sHeldFrameFbo);
+    glBlitFramebuffer_ptr(0, 0, sRenderWidth, sRenderHeight, 0, 0, sRenderWidth, sRenderHeight, GL_COLOR_BUFFER_BIT,
+                          GL_NEAREST);
+    glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
+    glEnable(GL_SCISSOR_TEST);
+    sHeldFrameValid = true;
+    return true;
+}
+
+bool pc_gfx_held_frame_restore(void)
+{
+    if (!sHeldFrameValid || sHeldFrameW != sRenderWidth || sHeldFrameH != sRenderHeight || !sNativeFramebufferReady)
+        return false;
+    if (sInPrimitive) pc_gfx_end();
+    pc_gfx_flush_batch();
+    pc_gfx_note_gl_state_change();
+    invalidate_gl_pipeline_guards();
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, sHeldFrameFbo);
+    glBindFramebuffer_ptr(GL_DRAW_FRAMEBUFFER, sNativeFramebuffer);
+    glBlitFramebuffer_ptr(0, 0, sRenderWidth, sRenderHeight, 0, 0, sRenderWidth, sRenderHeight, GL_COLOR_BUFFER_BIT,
+                          GL_NEAREST);
+    glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
+    glEnable(GL_SCISSOR_TEST);
+    sNativeWrittenThisFrame = true; // contenido valido: no limpiarlo a negro al presentar
+    return true;
+}
+
 void pc_gfx_present(void) {
     // El post-proceso crea shaders con std::string: que no tire del heap JKR
     // actual (la Piklopedia lo deja sin memoria libre -> Memory Alloc Error).
@@ -5166,8 +5227,7 @@ extern "C" void pc_gfx_p2_set_2d_widen(float k);
 // siguiente cambio de estado la dibujaba gigante (iconos de los mensajes).
 static void close_complete_immediate() {
     if (!sInPrimitive) return;
-    const size_t have = sVertexStream.size() + (sHaveVertex ? 1 : 0);
-    if (have >= sExpectedVerts && have > 0) pc_gfx_end();
+    if (pc_gx_imm_primitive_complete(u32(sVertexStream.size()), sHaveVertex, sExpectedVerts)) pc_gfx_end();
 }
 
 void pc_gfx_set_projection(const Mtx44 mtx, GXProjectionType type) {
@@ -7082,14 +7142,19 @@ void pc_gfx_dump_vtx_desc_history(const char* why) {
 }
 
 void pc_gfx_clear_vtx_desc(void) {
+    // GX code may omit GXEnd (a no-op on GameCube); a vertex-layout change
+    // must not reinterpret or extend the primitive that was just written.
+    close_complete_immediate();
     for (int i = 0; i < GX_VA_MAX_ATTR; ++i) sVtxDesc[i] = GX_NONE;
     log_vtx_desc(0, 0, true);
 }
 void pc_gfx_set_vtx_desc(GXAttr attr, GXAttrType type) {
+    close_complete_immediate();
     if (attr >= 0 && attr < GX_VA_MAX_ATTR) sVtxDesc[attr] = type;
     log_vtx_desc(int(attr), int(type), false);
 }
 void pc_gfx_set_vtx_attr_fmt(GXVtxFmt fmt, GXAttr attr, GXCompCnt cnt, GXCompType type, u8 frac) {
+    close_complete_immediate();
     if (fmt >= 0 && fmt < GX_MAX_VTXFMT && attr >= 0 && attr < GX_VA_MAX_ATTR) {
         // GX ignores the caller's shift for normals: it is fixed at 6 bits for
         // s8 and 14 for s16 (the VAT does not even carry one). Lighting
@@ -7217,9 +7282,9 @@ void pc_gfx_texcoord(f32 u, f32 v) {
 }
 
 void pc_gfx_texcoord_fixed(s32 u, s32 v) {
-    const u8 frac = sVtxFormats[sImmVtxFmt][GX_VA_TEX0].frac;
-    const f32 scale = 1.0f / static_cast<f32>(1u << (frac & 31));
-    pc_gfx_texcoord(static_cast<f32>(u) * scale, static_cast<f32>(v) * scale);
+    const VertexFormatState& format = sVtxFormats[sImmVtxFmt][GX_VA_TEX0];
+    pc_gfx_texcoord(pc_gx_decode_fixed_component(u, format.type, format.frac),
+                    pc_gx_decode_fixed_component(v, format.type, format.frac));
 }
 
 void pc_gfx_push_f32(f32 val) {

@@ -13,6 +13,10 @@ extern "C" {
 void pc_gfx_init(void);
 void pc_gfx_begin_frame(void);
 void pc_gfx_present(void);
+// Cinematicos a 30 Hz: copia del frame terminado / restaurarlo en el frame
+// intermedio (devuelve false si no hay copia valida).
+bool pc_gfx_held_frame_capture(void);
+bool pc_gfx_held_frame_restore(void);
 void pc_gfx_perf_scope_begin(const char* name);
 void pc_gfx_perf_scope_end(void);
 
@@ -225,9 +229,9 @@ void pc_gfx_push_f32(f32 val);
 void pc_gfx_position(f32 x, f32 y, f32 z);
 void pc_gfx_color(u8 r, u8 g, u8 b, u8 a);
 void pc_gfx_texcoord(f32 u, f32 v);
-// Fixed-point immediate texcoord (GXTexCoord2s8/u8/s16/u16): scaled by the
-// fractional-bit count that GXSetVtxAttrFmt set for GX_VA_TEX0 in the vertex
-// format of the current GXBegin.
+// Fixed-point immediate texcoord (GXTexCoord2s8/u8/s16/u16): interpreted with
+// both the component type and fractional-bit count that GXSetVtxAttrFmt set
+// for GX_VA_TEX0.  The FIFO helper's C++ signedness does not define GX's VAT.
 void pc_gfx_texcoord_fixed(s32 u, s32 v);
 void pc_gfx_normal(f32 x, f32 y, f32 z);
 // GXInitTexObjLOD: min/mag filter for a texture object (applied on load).

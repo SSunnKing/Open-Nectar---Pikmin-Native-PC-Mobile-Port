@@ -419,6 +419,9 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
             ${PC_PORT_DIR}/gl/pc_tev_shader_test.cpp
             ${PC_PORT_DIR}/gl/pc_tev_shader.cpp
         )
+        pikmin2_add_host_test(p2_gx_vertex_decode_test
+            ${PC_PORT_DIR}/gl/pc_gx_vertex_decode_test.cpp
+        )
         pikmin2_add_host_test(p2_menu_repeat_test
             ${PC_PORT_DIR}/pc_menu_repeat_test.cpp
             ${PC_PORT_DIR}/pc_menu_repeat.cpp

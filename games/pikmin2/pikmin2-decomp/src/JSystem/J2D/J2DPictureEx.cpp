@@ -284,6 +284,12 @@ void J2DPictureEx::drawTexCoord(f32 x, f32 y, f32 width, f32 height, s16 xTex0, 
 	GXPosition3f32(x, y2, z);
 	GXColor1u32(color2);
 	GXTexCoord2s16(xTex2, yTex2);
+#ifdef PIKI_PC_PORT
+	// GXEnd is empty on GameCube, so the original could omit it.  In the PC
+	// backend it closes the immediate primitive: without it the quad stays
+	// open across the state changes below.
+	GXEnd();
+#endif
 
 	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_POS_XYZ, GX_U16, 15);
 	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_TEX_ST, GX_S16, 0);
@@ -611,6 +617,10 @@ void J2DPictureEx::draw(f32 x, f32 y, f32 width, f32 height, bool p5, bool p6, b
 	}
 
 	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+	// This immediate draw uses 0x0000/0x8000 as unsigned 1.15 texture
+	// coordinates.  Do not inherit TEX0's VAT from the preceding custom draw
+	// (the HUD life gauge leaves it as signed 8-fraction coordinates).
+	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_U16, 15);
 	GXBegin(GX_QUADS, GX_VTXFMT0, 4);
 	f32 z = 0.0f;
 	GXPosition3f32(z, z, z);
@@ -648,6 +658,12 @@ void J2DPictureEx::draw(f32 x, f32 y, f32 width, f32 height, bool p5, bool p6, b
 	} else {
 		GXTexCoord2s16(p5 ? 0 : 0x8000, p6 ? 0 : 0x8000);
 	}
+#ifdef PIKI_PC_PORT
+	// GXEnd is empty on GameCube, so the original could omit it.  In the PC
+	// backend it closes the immediate primitive: without it the quad stays
+	// open across the state changes below.
+	GXEnd();
+#endif
 
 	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_S16, 0);
 	GXSetNumTexGens(0);
@@ -752,6 +768,12 @@ void J2DPictureEx::drawOut(const JGeometry::TBox2<f32>& boundBox, const JGeometr
 	GXPosition3f32(boundBox.i.x, boundBox.f.y, z);
 	GXColor1u32(colors.mColor2);
 	GXPosition2f32(texX0, texY1);
+#ifdef PIKI_PC_PORT
+	// GXEnd is empty on GameCube, so the original could omit it.  In the PC
+	// backend it closes the immediate primitive: without it the quad stays
+	// open across the state changes below.
+	GXEnd();
+#endif
 
 	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_S16, 0);
 	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_POS_XYZ, GX_U16, 15);
