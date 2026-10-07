@@ -3715,9 +3715,8 @@ int  sSrSel  = 0;      // opción marcada en el menú del modo
 bool sErasedNoticeQueued = false;
 bool sErasedNoticeOpen   = false;
 bool sNewGamePromptOpen = false;
-int  sNewGamePromptStep = 0;     // 0 = normal/permadeath, 1 = difficulty
-int  sNewGamePromptChoice = 0;   // current step: 0 = left option, 1 = right
-int  sNewGamePromptRules = 0;    // 0 = normal file, 1 = permadeath
+int  sNewGamePromptRow = 0;      // fila con foco: 0 = Difficulty, 1 = Game mode
+int  sNewGamePromptRules = 0;    // 0 = standard file, 1 = permadeath
 int  sNewGamePromptResult = PC_NEWGAME_PENDING;
 bool sNewGamePromptHard = false;
 }
@@ -3978,8 +3977,7 @@ void pc_erased_notice_draw(void) {
 
 void pc_newgame_prompt_open(void) {
     sNewGamePromptOpen   = true;
-    sNewGamePromptStep   = 0;
-    sNewGamePromptChoice = 0;
+    sNewGamePromptRow    = 0;
     sNewGamePromptRules  = 0;
     sNewGamePromptResult = PC_NEWGAME_PENDING;
     sNewGamePromptHard   = false;
@@ -3993,16 +3991,38 @@ int pc_newgame_prompt_result(void) { return sNewGamePromptResult; }
 bool pc_newgame_prompt_chose_hard(void) { return sNewGamePromptHard; }
 
 namespace {
+// Geometría compartida por el dibujo y los toques: panel de 620x310 centrado
+// en 480 de alto, dos filas (Difficulty / Game mode) de dos opciones.
+const int kNgPanelW = 620;
+const int kNgPanelH = 310;
+const int kNgBoxW   = 230;
+const int kNgBoxH   = 44;
+int ngRowY(int panelY, int row) { return panelY + 82 + row * 82; }
+int ngBoxX(int panelX, int i) { return panelX + 40 + i * (kNgBoxW + 40); }
+
+int ngRowValue(int row) {
+    return row == 0 ? (sNewGamePromptHard ? 1 : 0) : sNewGamePromptRules;
+}
+
+void ngSetRowValue(int row, int v) {
+    if (row == 0) sNewGamePromptHard = v != 0;
+    else          sNewGamePromptRules = v;
+}
+
 void pcNewGamePromptInput() {
     if (!sNewGamePromptOpen) return;
 
     bool left   = keyWentDown(SDL_SCANCODE_LEFT)  || keyWentDown(SDL_SCANCODE_A);
     bool right  = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
+    bool up     = keyWentDown(SDL_SCANCODE_UP)    || keyWentDown(SDL_SCANCODE_W);
+    bool down   = keyWentDown(SDL_SCANCODE_DOWN)  || keyWentDown(SDL_SCANCODE_S);
     bool accept = menuOkKey();
     bool cancel = menuCancelKey();
 
     left |= (sTouchFrameButtons & PAD_BUTTON_LEFT) != 0;
     right |= (sTouchFrameButtons & PAD_BUTTON_RIGHT) != 0;
+    up |= (sTouchFrameButtons & PAD_BUTTON_UP) != 0;
+    down |= (sTouchFrameButtons & PAD_BUTTON_DOWN) != 0;
     accept |= (sTouchFrameButtons & PAD_BUTTON_A) != 0;
     cancel |= (sTouchFrameButtons & PAD_BUTTON_B) != 0;
 
@@ -4014,15 +4034,18 @@ void pcNewGamePromptInput() {
         const float screenW = aspect * 480.0f;
         const float x = sTouchTapX * screenW;
         const float y = sTouchTapY * 480.0f;
-        const float panelX = screenW * 0.5f - 310.0f;
-        const float panelY = 110.0f;
-        const float optY = panelY + 108.0f;
-        for (int i = 0; i < 2; ++i) {
-            const float boxX = panelX + 40.0f + i * 270.0f;
-            if (x >= boxX && x <= boxX + 230.0f && y >= optY - 8.0f && y <= optY + 52.0f) {
-                sNewGamePromptChoice = i;
-                accept = true;
-                break;
+        const int panelX = int(screenW * 0.5f) - kNgPanelW / 2;
+        const int panelY = 240 - kNgPanelH / 2;
+        // Un toque elige la opción; tocar la que ya está elegida empieza.
+        for (int row = 0; row < 2; ++row) {
+            const float optY = float(ngRowY(panelY, row));
+            for (int i = 0; i < 2; ++i) {
+                const float boxX = float(ngBoxX(panelX, i));
+                if (x >= boxX && x <= boxX + kNgBoxW && y >= optY - 8.0f && y <= optY + kNgBoxH + 8.0f) {
+                    if (sNewGamePromptRow == row && ngRowValue(row) == i) accept = true;
+                    sNewGamePromptRow = row;
+                    ngSetRowValue(row, i);
+                }
             }
         }
     }
@@ -4031,35 +4054,20 @@ void pcNewGamePromptInput() {
     if (ctl) {
         if (padNavLeft(ctl))  left   = true;
         if (padNavRight(ctl)) right  = true;
+        if (padNavUp(ctl))    up     = true;
+        if (padNavDown(ctl))  down   = true;
         if (promptPadA(ctl))  accept = true;
         if (promptPadB(ctl))  cancel = true;
     }
 
-    if (left || right) sNewGamePromptChoice = sNewGamePromptChoice ? 0 : 1;
+    if (up || down) sNewGamePromptRow = sNewGamePromptRow ? 0 : 1;
+    if (left || right) ngSetRowValue(sNewGamePromptRow, ngRowValue(sNewGamePromptRow) ? 0 : 1);
 
     if (accept) {
-        if (sNewGamePromptStep == 0) {
-            sNewGamePromptRules  = sNewGamePromptChoice;
-            sNewGamePromptStep   = 1;
-            sNewGamePromptChoice = 0;
-            pc_menu_edge_reset();
-            // El reset olvida que A/B siguen pulsados y el frame siguiente
-            // los tomaría como pulsación nueva (autoaceptaba la dificultad).
-            if (ctl) { promptPadA(ctl); promptPadB(ctl); }
-            return;
-        }
-        sNewGamePromptHard   = sNewGamePromptChoice != 0;
         sNewGamePromptResult = sNewGamePromptRules ? PC_NEWGAME_PERMADEATH
                                                    : PC_NEWGAME_NORMAL;
         sNewGamePromptOpen   = false;
     } else if (cancel) {
-        if (sNewGamePromptStep == 1) {
-            sNewGamePromptStep   = 0;
-            sNewGamePromptChoice = sNewGamePromptRules;
-            pc_menu_edge_reset();
-            if (ctl) { promptPadA(ctl); promptPadB(ctl); }
-            return;
-        }
         sNewGamePromptResult = PC_NEWGAME_CANCELLED;
         sNewGamePromptOpen   = false;
     }
@@ -4082,59 +4090,58 @@ void pc_newgame_prompt_draw(void) {
     Matrix4f ortho;
     gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
 
-
-    const int panelW = 620;
-    const int panelH = 260;
+    const int panelW = kNgPanelW;
+    const int panelH = kNgPanelH;
     const int panelX = screenW / 2 - panelW / 2;
     const int panelY = screenH / 2 - panelH / 2;
 
     drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
     drawPikminHeader(gfx, panelX, panelY, panelW, "New Game");
 
-    const bool difficultyStep = sNewGamePromptStep != 0;
-    const char* line1 = difficultyStep ? "How hard should this file be?"
-                                       : "How should this file play?";
-    drawTextOutline(panelX + panelW / 2 - menuTextWidth(line1) / 2, panelY + 62,
-                    "%s", Colour(214, 224, 245, 255), Colour(8, 12, 28, 255), line1);
-
-    const char* options[2] = { "Normal", difficultyStep ? "Hard" : "Permadeath" };
-    const int optY = panelY + 108;
-    for (int i = 0; i < 2; i++) {
-        const bool sel = (i == sNewGamePromptChoice);
-        const int boxW = 230;
-        const int boxX = panelX + 40 + i * (boxW + 40);
-        if (drawGlassOption(boxX, optY, boxW, 44, options[i], sel, 20, 29)) continue;
-        gfx->setColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220), true);
-        gfx->setAuxColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220));
-        gfx->fillRectangle(RectArea(boxX, optY, boxX + boxW, optY + 40));
-        const int tw = menuTextWidth(options[i]);
-        drawTextOutline(boxX + boxW / 2 - tw / 2, optY + 12, "%s",
-                        sel ? Colour(255, 229, 120, 255) : Colour(170, 180, 200, 255),
-                        Colour(8, 12, 28, 255), options[i]);
+    const char* titles[2]     = { "Difficulty", "Game mode" };
+    const char* options[2][2] = { { "Normal", "Hard" }, { "Standard", "Permadeath" } };
+    for (int row = 0; row < 2; row++) {
+        const bool rowFocus = (row == sNewGamePromptRow);
+        const int optY = ngRowY(panelY, row);
+        drawTextOutline(ngBoxX(panelX, 0), optY - 24, "%s",
+                        rowFocus ? Colour(255, 229, 120, 255) : Colour(170, 180, 200, 255),
+                        Colour(8, 12, 28, 255), titles[row]);
+        for (int i = 0; i < 2; i++) {
+            const bool chosen = (i == ngRowValue(row));
+            const bool sel    = chosen && rowFocus;
+            const int boxX = ngBoxX(panelX, i);
+            if (drawGlassOption(boxX, optY, kNgBoxW, kNgBoxH, options[row][i], sel, 20, 29)) continue;
+            const Colour fill = sel      ? Colour(70, 92, 150, 240)
+                              : chosen   ? Colour(48, 60, 96, 230)
+                                         : Colour(26, 30, 48, 220);
+            gfx->setColour(fill, true);
+            gfx->setAuxColour(fill);
+            gfx->fillRectangle(RectArea(boxX, optY, boxX + kNgBoxW, optY + 40));
+            const int tw = menuTextWidth(options[row][i]);
+            drawTextOutline(boxX + kNgBoxW / 2 - tw / 2, optY + 12, "%s",
+                            chosen ? Colour(255, 229, 120, 255) : Colour(170, 180, 200, 255),
+                            Colour(8, 12, 28, 255), options[row][i]);
+        }
     }
 
-    // Say plainly what the current option does. The first screen is the only
-    // place permadeath is explained; the second is the only place Hard is.
+    // Describe la opción elegida en la fila con foco: es el único sitio donde
+    // se explican Hard y Permadeath.
+    const int value = ngRowValue(sNewGamePromptRow);
     const char* detail;
-    if (!difficultyStep) {
-        detail = sNewGamePromptChoice
-                     ? "If Olimar loses all his health, this file is erased."
-                     : "Losing Olimar ends the day. The original rules.";
+    if (sNewGamePromptRow == 0) {
+        detail = value ? "Tougher enemies, Olimar takes more damage. 8-minute days, 80 Pikmin."
+                       : "Original enemy health, day length and field limit.";
     } else {
-        detail = sNewGamePromptChoice
-                     ? "Tougher enemies, Olimar takes more damage. 8-minute days, 80 Pikmin."
-                     : "Original enemy health, day length and field limit.";
+        detail = value ? "If Olimar loses all his health, this file is erased."
+                       : "Losing Olimar ends the day. The original rules.";
     }
-    drawTextOutline(panelX + panelW / 2 - menuTextWidth(detail) / 2, panelY + 172,
+    drawTextOutline(panelX + panelW / 2 - menuTextWidth(detail) / 2, panelY + 236,
                     "%s",
-                    sNewGamePromptChoice ? Colour(255, 150, 150, 255)
-                                         : Colour(190, 200, 220, 255),
+                    value ? Colour(255, 150, 150, 255) : Colour(190, 200, 220, 255),
                     Colour(8, 12, 28, 255), detail);
 
-    const char* help = difficultyStep
-                           ? "Left/Right: choose    A / Enter: start    B / Esc: back"
-                           : "Left/Right: choose    A / Enter: next    B / Esc: back";
-    drawHelpLine(panelX + panelW / 2, panelY + 212, help, Colour(150, 165, 195, 255));
+    const char* help = "Arrows: choose    A / Enter: start    B / Esc: back";
+    drawHelpLine(panelX + panelW / 2, panelY + 272, help, Colour(150, 165, 195, 255));
 }
 
 
