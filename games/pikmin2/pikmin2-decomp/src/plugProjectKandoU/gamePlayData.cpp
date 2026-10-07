@@ -1,3 +1,6 @@
+#ifdef PIKI_PC_PORT
+extern "C" int pc_p2_hard_dope_count(int base);
+#endif
 #include "Game/AIConstants.h"
 #include "Game/BirthMgr.h"
 #include "Game/DeathMgr.h"
@@ -1124,7 +1127,11 @@ bool PlayData::addDopeFruit(int sprayIndex)
 
 	mBerryCount[sprayIndex]++;
 	// once enough berries are collected for a spray, reset the berry count and increase the spray count
+#ifdef PIKI_PC_PORT
+	if (mBerryCount[sprayIndex] >= pc_p2_hard_dope_count(_aiConstants->mDopeCount.mData)) {
+#else
 	if (mBerryCount[sprayIndex] >= _aiConstants->mDopeCount.mData) {
+#endif
 		mBerryCount[sprayIndex] = 0;
 		mSprayCount[sprayIndex]++;
 		return true;

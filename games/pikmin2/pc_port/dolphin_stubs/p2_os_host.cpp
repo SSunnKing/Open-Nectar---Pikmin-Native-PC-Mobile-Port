@@ -1037,6 +1037,8 @@ void VIWaitForRetrace()
 	// frame terminado y antes de presentarlo.
 	pc_settings_draw_lock_on();
 	pc_settings_draw_idle_counter();
+	pc_newgame_prompt_draw();
+	pc_erased_notice_draw();
 	pc_settings_draw();
 	pc_settings_draw_achievement_toast();
 	pc_settings_p2_flush();

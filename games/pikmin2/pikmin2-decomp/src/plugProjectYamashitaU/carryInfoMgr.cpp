@@ -328,6 +328,11 @@ void CarryInfo::drawNumberPrim(Graphics& gfx, f32 x, f32 y, int digit, Color4& c
 	GXPosition3f32(xMax, yMax, zero);
 	GXColor4u8(color.r, color.g, color.b, color.a);
 	GXPosition2f32(digitEnd, zero);
+#ifdef PIKI_PC_PORT
+	// En el FIFO de la consola no hace falta; aquí la última cifra quedaba
+	// abierta y salía con la matriz de lo siguiente (o no salía).
+	GXEnd();
+#endif
 }
 
 /**

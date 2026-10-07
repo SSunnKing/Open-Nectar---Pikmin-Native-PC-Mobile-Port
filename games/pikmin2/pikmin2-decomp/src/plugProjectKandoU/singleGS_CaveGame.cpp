@@ -1,3 +1,9 @@
+#ifdef PIKI_PC_PORT
+extern "C" {
+int pc_p2_permadeath_active(void);
+void pc_p2_rules_erase_current_save(void);
+}
+#endif
 #include "Game/Entities/BlackMan.h"
 #include "Game/GameConfig.h"
 #include "Game/GameSystem.h"
@@ -637,6 +643,16 @@ void CaveState::onMovieDone(Game::SingleGameSection* game, Game::MovieConfig* co
 				gameSystem->mSection->setPlayerMode(NAVIID_Olimar);
 			}
 		} else {
+#ifdef PIKI_PC_PORT
+			// Permadeath: caen los dos capitanes, se borra la partida y se
+			// vuelve al título sin pasar por el guardado del final del día.
+			if (pc_p2_permadeath_active()) {
+				pc_p2_rules_erase_current_save();
+				gameSystem->resetFlag(GAMESYS_IsGameWorldActive);
+				game->flow_goto_title();
+				return;
+			}
+#endif
 #if defined(VERSION_JP)
 			if (gGameConfig.mParms.mE3version.mData) {
 				sys->forceFinishSection();

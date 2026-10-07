@@ -1,3 +1,9 @@
+#ifdef PIKI_PC_PORT
+extern "C" {
+int pc_p2_permadeath_active(void);
+void pc_p2_rules_erase_current_save(void);
+}
+#endif
 #include "Game/DeathMgr.h"
 #include "Game/GameConfig.h"
 #include "Game/Entities/ItemOnyon.h"
@@ -922,6 +928,16 @@ void GameState::onMovieDone(SingleGameSection* game, MovieConfig* config, u32, u
 				gameSystem->mSection->setPlayerMode(NAVIID_Olimar);
 			}
 		} else {
+#ifdef PIKI_PC_PORT
+			// Permadeath: caen los dos capitanes, se borra la partida y se
+			// vuelve al título sin pasar por el guardado del final del día.
+			if (pc_p2_permadeath_active()) {
+				pc_p2_rules_erase_current_save();
+				gameSystem->resetFlag(GAMESYS_IsGameWorldActive);
+				game->flow_goto_title();
+				return;
+			}
+#endif
 			gameSystem->resetFlag(GAMESYS_IsGameWorldActive);
 			DayEndArg arg(DayEndState::DETYPE_CaptainsDown);
 			transit(game, SGS_DayEnd, &arg);

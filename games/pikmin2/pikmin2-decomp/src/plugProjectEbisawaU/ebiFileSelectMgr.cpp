@@ -2,6 +2,12 @@
 #include "System.h"
 #include "Game/MemoryCard/Mgr.h"
 #include "MemoryCardMgr.h"
+#ifdef PIKI_PC_PORT
+#include "settings/pc_settings.h"
+extern "C" void pc_p2_rules_set_pending(int permadeath, int hard);
+// Port: ventana "New Game" (Difficulty + Game mode) antes de crear el fichero.
+static bool sPcAwaitingNewGame = false;
+#endif
 
 static const char name[] = "ebiFileSelectMgr";
 
@@ -338,6 +344,23 @@ void FSMState_ScreenFileSelect::do_init(TMgr* mgr, Game::StateArg* arg)
  */
 void FSMState_ScreenFileSelect::do_exec(TMgr* mgr)
 {
+#ifdef PIKI_PC_PORT
+	if (sPcAwaitingNewGame) {
+		const int choice = pc_newgame_prompt_result();
+		if (choice == PC_NEWGAME_PENDING) {
+			return;
+		}
+		sPcAwaitingNewGame = false;
+		if (choice == PC_NEWGAME_CANCELLED) {
+			// Atrás: de vuelta al selector, sin nada elegido.
+			transit(mgr, FSState_ScreenFileSelect, nullptr);
+			return;
+		}
+		pc_p2_rules_set_pending(choice == PC_NEWGAME_PERMADEATH, pc_newgame_prompt_chose_hard());
+		mgr->goEnd_(TMgr::End_StartNewGame);
+		return;
+	}
+#endif
 	if (mgr->mMgrFS.isFinish()) {
 		switch (mgr->mMgrFS.mEndStat) {
 		case FS::TMgr::END_StartNoCard:
@@ -348,7 +371,12 @@ void FSMState_ScreenFileSelect::do_exec(TMgr* mgr)
 			mgr->goEnd_(TMgr::End_StartGame);
 			break;
 		case FS::TMgr::END_StartNewFile:
+#ifdef PIKI_PC_PORT
+			pc_newgame_prompt_open();
+			sPcAwaitingNewGame = true;
+#else
 			mgr->goEnd_(TMgr::End_StartNewGame);
+#endif
 			break;
 		case FS::TMgr::END_Cancel:
 			mgr->goEnd_(TMgr::End_ReturnToTitle);

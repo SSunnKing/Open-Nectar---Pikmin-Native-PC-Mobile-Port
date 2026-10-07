@@ -520,6 +520,7 @@ struct DayOverModeState : public ModeState {
 		STATE_PhaseTwo   = 2, ///< 2, either quick transit to quitter, or next ending cutscene (happy:onyons, neutral:space, bad:olimin).
 		STATE_PhaseThree = 3, ///< 3, only endings - neutral/bad: quick transit to quitter; happy: space cutscene/final results.
 		STATE_PhaseFour  = 4, ///< 4, done in every situation! finish processing any logic and quit out of gameplay mode state.
+		STATE_PcTutorialSkip = 5, ///< PC: tutorial state committed; leave directly for the world map.
 	};
 
 	/**
@@ -537,6 +538,20 @@ struct DayOverModeState : public ModeState {
 		// Speedrun: un split por día, con la zona que se acaba de jugar.
 		if (flowCont.mCurrentStage) {
 			pc_speedrun_on_day_end(flowCont.mCurrentStage->mStageID, gameflow.mWorldClock.mCurrentDay);
+		}
+
+		// The tutorial skip has already granted its canonical inventory and
+		// progression. Commit the same bookkeeping as a real Day 1 ending, but
+		// do not construct any march, take-off, night or results presentation.
+		if (pc_tutorial_skip_pending()) {
+			gamecore->cleanupDayEnd();
+			gamecore->exitDayEnd();
+			if (gameflow.mWorldClock.mCurrentDay < 2) {
+				gameflow.mWorldClock.mCurrentDay = 2;
+			}
+			pc_tutorial_skip_clear_pending();
+			mState = STATE_PcTutorialSkip;
+			return;
 		}
 #endif
 
@@ -1500,6 +1515,14 @@ ModeState* DayOverModeState::update(u32& result)
 
 	result = UPDATE_AI; // we need animations to play, but we don't need in-game time to pass
 
+#if defined(PIKI_PC_PORT)
+	if (mState == STATE_PcTutorialSkip) {
+		mParentSection->mPendingOnePlayerSectionID = ONEPLAYER_MapSelect;
+		gsys->setFade(0.0f);
+		return new QuittingGameModeState(mParentSection);
+	}
+#endif
+
 	// handle any text windows we might have open, such as during endings
 	handleTutorialWindow(result, mParentSection->mController);
 
@@ -2264,7 +2287,16 @@ public:
 
 		if (playerState->isTutorial()) {
 			// start our wake-up post-crash-landing cutscene for Day 1
+		#if defined(PIKI_PC_PORT)
+			// A requested tutorial skip must not create a movie only to tear it
+			// down from inside the gameplay update; that is re-entrant and leaves
+			// the movie renderer holding objects which the skip just released.
+			if (!pc_tutorial_skip_pending()) {
+				gameflow.mMoviePlayer->startMovie(DEMOID_OlimarWakeUp, 0, nullptr, nullptr, nullptr, CAF_AllVisibleMask, true);
+			}
+		#else
 			gameflow.mMoviePlayer->startMovie(DEMOID_OlimarWakeUp, 0, nullptr, nullptr, nullptr, CAF_AllVisibleMask, true);
+		#endif
 		} else if (flowCont.mCurrentStage->mStageID < STAGE_COUNT
 #if defined(PIKI_PC_PORT)
 		           && !pc_vs_active() // VS: directo al mapa, todo ya colocado

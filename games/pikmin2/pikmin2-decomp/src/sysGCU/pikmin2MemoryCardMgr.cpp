@@ -9,6 +9,11 @@
 #include "JSystem/JKernel/JKRArchive.h"
 #include "JSystem/JKernel/JKRHeap.h"
 #include "System.h"
+#ifdef PIKI_PC_PORT
+extern "C" int pc_p2_rules_save_bits(void);
+extern "C" void pc_p2_rules_adopt(int headerByte);
+extern "C" void pc_p2_rules_note_slot(int slot, int headerByte);
+#endif
 
 namespace Game {
 namespace MemoryCard {
@@ -601,6 +606,13 @@ bool Mgr::commandUpdatePlayerHeader(PlayerFileInfo* playerInfo)
 	for (s8 i = 0; i < 3; i++) {
 		playerInfo->getPlayer(i);
 	}
+#ifdef PIKI_PC_PORT
+	// Etiquetas HARD / PERMADEATH del selector (una rota no lleva ninguna).
+	for (s8 i = 0; i < 3; i++) {
+		Player* player = playerInfo->getPlayer(i);
+		pc_p2_rules_note_slot(i, player->mFlag ? 0 : player->_01);
+	}
+#endif
 
 	if (!isErrorOccured()) {
 		result = true;
@@ -981,7 +993,13 @@ bool Mgr::commandLoadGameOption()
 		delete (infoBuffers[1]);
 
 		// check we successfully deleted the buffers
-#if defined(VERSION_PAL)
+#if defined(PIKI_PC_PORT)
+		// Solo detecta fugas; con los allocators del host el libre varía (ver doCardProc).
+		if (freeSize != (int)JKRHeap::getCurrentHeap()->getTotalFreeSize()) {
+			printf("[PC Port] MemoryCard save: heap free size changed by %d bytes\n",
+			       (int)JKRHeap::getCurrentHeap()->getTotalFreeSize() - freeSize);
+		}
+#elif defined(VERSION_PAL)
 		P2ASSERTLINE(1733, freeSize == (int)JKRHeap::getCurrentHeap()->getTotalFreeSize());
 #elif defined(VERSION_JP)
 		P2ASSERTLINE(1701, freeSize == (int)JKRHeap::getCurrentHeap()->getTotalFreeSize());
@@ -1084,6 +1102,10 @@ bool Mgr::commandSavePlayerNoCheckSerialNo(s8 fileIndex, bool param_2)
 		playerInfo->mSaveSlotIndex     = fileIndex; // File Index
 		playerInfo->mPlayer.mFlag      = 0;
 		playerInfo->mPlayer._01        = param_2;
+#ifdef PIKI_PC_PORT
+		// Port: Hard/Permadeath en los bits altos (ver pc_p2_rules.h).
+		playerInfo->mPlayer._01 = (u8)(playerInfo->mPlayer._01 | pc_p2_rules_save_bits());
+#endif
 		playerInfo->mPlayer._02        = sys->mPlayData->_22;
 
 		if (gameSystem) {
@@ -1153,7 +1175,13 @@ bool Mgr::commandSavePlayerNoCheckSerialNo(s8 fileIndex, bool param_2)
 		}
 	}
 
-#if defined(VERSION_PAL)
+#if defined(PIKI_PC_PORT)
+	// Solo detecta fugas; con los allocators del host el libre varía (ver doCardProc).
+	if (freeSize != (int)JKRHeap::getCurrentHeap()->getTotalFreeSize()) {
+		printf("[PC Port] MemoryCard save: heap free size changed by %d bytes\n",
+		       (int)JKRHeap::getCurrentHeap()->getTotalFreeSize() - freeSize);
+	}
+#elif defined(VERSION_PAL)
 	P2ASSERTLINE(2108, freeSize == (int)JKRHeap::getCurrentHeap()->getTotalFreeSize());
 #elif defined(VERSION_JP)
 	P2ASSERTLINE(2073, freeSize == (int)JKRHeap::getCurrentHeap()->getTotalFreeSize());
@@ -1286,6 +1314,9 @@ bool Mgr::commandLoadPlayer(s8 fileIndex)
 				saveMgr->mSaveCount          = info->mPlayer.mSaveCount;
 				saveMgr->mTime               = info->mPlayer.mPlayTime;
 				saveMgr->_22                 = info->mPlayer._02; // hmm.
+#ifdef PIKI_PC_PORT
+				pc_p2_rules_adopt(info->mPlayer._01);
+#endif
 			}
 
 			delete (buffer);

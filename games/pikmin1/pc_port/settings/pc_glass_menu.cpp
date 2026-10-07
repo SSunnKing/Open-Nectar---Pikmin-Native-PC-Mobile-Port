@@ -297,6 +297,11 @@ void inputList(const PcNavEdges& e)
 	if (picker && picker != PC_SET_PICKER_RESOLUTION && (ok || right)) { openPicker(picker); return; }
 	// Las filas desactivadas no cambian (la ayuda dice qué activar antes).
 	if (!pc_settings_row_enabled(sGroup, sRowSel)) return;
+	// Modelos HD: izquierda/derecha los activa o desactiva; A instala un zip.
+	if (sGroup == PC_SET_PICKER_HDMODELS && (left || right)) {
+		pc_settings_row_change(sGroup, sRowSel, left ? -1 : +1, false);
+		return;
+	}
 	// Las acciones (packs, modelos, exportar, calibrar...) solo responden a A.
 	if (pc_settings_row_is_action(sGroup, sRowSel)) {
 		if (ok) pc_settings_row_change(sGroup, sRowSel, 0, true);
@@ -460,6 +465,7 @@ void drawFooter()
 	const bool bindings = sGroup == PC_SET_PICKER_KEYBOARD || sGroup == PC_SET_PICKER_GAMEPAD;
 	const char* help = sOptFocus ? "Up/Down: choose    A: apply    Left/B: back"
 	                 : bindings ? "A: rebind    Left/Right: default    B/Esc: back"
+	                 : sGroup == PC_SET_PICKER_HDMODELS ? "Left/Right: on/off    A: install zip    B/Esc: back"
 	                 : inPicker() ? "A: select    Up/Down: move    B/Esc: back"
 	                 : pc_settings_row_is_action(sGroup, sRowSel)
 	                     ? "A: select    Up/Down: move    B/Esc: back"

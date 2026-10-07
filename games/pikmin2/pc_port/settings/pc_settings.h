@@ -166,6 +166,13 @@ int pc_settings_get_day_minutes(void);
    640x480 space the game's BLO screens use. */
 void pc_permadeath_draw_slot_badge(int vx, int vy, int vw);
 
+/* Aviso "Expedition Lost": se pone en cola al borrar una partida Permadeath y
+   se abre en el siguiente selector de ficheros, que espera debajo. */
+void pc_erased_notice_queue(void);
+bool pc_erased_notice_open_if_queued(void);
+bool pc_erased_notice_active(void);
+void pc_erased_notice_draw(void);
+
 void pc_newgame_prompt_open(void);
 bool pc_newgame_prompt_active(void);
 void pc_newgame_prompt_draw(void);

@@ -2081,6 +2081,86 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 #endif
 }
 
+#if defined(PIKI_PC_PORT)
+// Complete the playable first-day tutorial through the normal day-end path.
+// File select can only request this: the Onion, part registry and generator
+// cache needed for a valid result do not exist until initStage has finished.
+static void pcApplyPendingTutorialSkip()
+{
+	if (!pc_tutorial_skip_pending()) {
+		return;
+	}
+	if (gameflow.mIsChallengeMode || !playerState->isTutorial()) {
+		pc_tutorial_skip_clear_pending();
+		return;
+	}
+	if (!flowCont.mCurrentStage || flowCont.mCurrentStage->mStageID != STAGE_Practice
+	    || gameflow.mMoviePlayer->mIsActive || gameflow.mIsTutorialTextActive
+	    || gameflow.mIsDayEndActive || gameflow.mIsDayEndTriggered) {
+		return;
+	}
+
+	GoalItem* onion = itemMgr ? itemMgr->getContainer(Red) : nullptr;
+	if (!onion) {
+		return; // Stage objects are not ready yet; retry on the next frame.
+	}
+
+	// Stop the tutorial boot animation before it emits its first seed; the
+	// canonical post-tutorial inventory is supplied below instead.
+	playerState->setContainer(Red);
+	playerState->setDisplayPikiCount(Red);
+	playerState->setBootContainer(Red);
+	onion->pcSnapLanded();
+	onion->setSpotActive(true);
+
+	const int tutorialFlags[] = {
+		DEMOFLAG_DiscoverRedOnyon,
+		DEMOFLAG_ApproachSeed,
+		DEMOFLAG_PluckRedPikmin,
+		DEMOFLAG_NoPikminTimeout,
+		DEMOFLAG_CameraInfo,
+		DEMOFLAG_Unk9,
+		DEMOFLAG_CollectFirstPellet,
+		DEMOFLAG_ApproachEngine,
+		DEMOFLAG_CollectEngine,
+		DEMOFLAG_StartBoxPush,
+		DEMOFLAG_FinishBoxPush,
+		DEMOFLAG_Pluck15thPikmin,
+	};
+	for (int flag : tutorialFlags) {
+		playerState->mDemoFlags.setFlagOnly(flag);
+	}
+
+	if (!playerState->hasUfoParts(UFOID_MainEngine)) {
+		playerState->getUfoParts(UFOID_MainEngine, true);
+	}
+
+	// Top up instead of replacing so this remains safe if startup ordering is
+	// changed later and a seed already exists when the request is applied.
+	const int redTotal = GameStat::allPikis[Red];
+	int added = 20 - redTotal;
+	const int limit = pc_settings_get_piki_limit();
+	if (redTotal + added > limit) {
+		added = limit - redTotal;
+	}
+	if (added > 0) {
+		pikiInfMgr.mPikiCounts[Red][Leaf] += added;
+		onion->mHeldPikis[Leaf] += added;
+		GameStat::containerPikis.add(Red, added);
+		GameStat::bornPikis.add(Red, added);
+		playerState->mTotalPluckedPikiCount += added;
+		GameStat::update();
+	}
+
+	// Keep the one-shot flag until DayOverModeState has committed the normal
+	// cleanup and consumed it for its direct-to-map exit.
+	gameflow.mIsDayEndTriggered = TRUE;
+	fprintf(stderr, "[PC] tutorial skipped: Main Engine recovered, %d red Pikmin, ending Day 1\n",
+	        int(GameStat::allPikis[Red]));
+	fflush(stderr);
+}
+#endif
+
 /**
  * @todo: Documentation
  */
@@ -2250,6 +2330,7 @@ void GameCoreSection::update()
 {
 	STACK_PAD_VAR(2);
 #if defined(PIKI_PC_PORT)
+	pcApplyPendingTutorialSkip();
 	if (pc_vs_active()) {
 		pcVsUpdate(mMapMgr);
 	}

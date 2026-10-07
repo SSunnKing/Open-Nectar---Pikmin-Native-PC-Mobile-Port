@@ -5678,11 +5678,18 @@ extern "C" void pc_gfx_get_scissor(u32* l, u32* t, u32* w, u32* h) {
 void pc_gfx_set_scissor(u32 xOrig, u32 yOrig, u32 wd, u32 ht) {
     sGxSc[0] = xOrig; sGxSc[1] = yOrig; sGxSc[2] = wd; sGxSc[3] = ht;
     GLint x, y; GLsizei width, height;
-    float scX = (float)xOrig, scW = (float)wd;
+    // El hardware enmascara el origen, así que un origen negativo (llega como
+    // u32 enorme) recorta el rectángulo por arriba o a la izquierda. Tal cual
+    // dejaba el scissor fuera de pantalla: la ventana del tesoro (y = -47) no
+    // dibujaba nada.
+    float scX = (float)(s32)xOrig, scW = (float)wd;
+    float scY = (float)(s32)yOrig, scH = (float)ht;
+    if (scX < 0.0f) { scW = std::max(0.0f, scW + scX); scX = 0.0f; }
+    if (scY < 0.0f) { scH = std::max(0.0f, scH + scY); scY = 0.0f; }
 #if PIKI_P2_HOST
     p2_widen_scissor(scX, scW);
 #endif
-    map_gx_rect(scX, (float)yOrig, scW, (float)ht, x, y, width, height);
+    map_gx_rect(scX, scY, scW, scH, x, y, width, height);
     static GLint lastX = -1, lastY = -1;
     static GLsizei lastWidth = -1, lastHeight = -1;
     static uint32_t seenSerial = 0;
@@ -11351,6 +11358,39 @@ static void pc_gfx_call_display_list_impl(const void* list, u32 nbytes) {
                 }
             }
             if (!sVertexUsesPalette) {
+                // POS texgen must see the original vertex, just like the GX
+                // transform unit does.  This CPU path has already replaced
+                // v.xyz with position-matrix (view-space) coordinates; leaving
+                // POS generation to the vertex shader therefore applies the
+                // particle matrix a second time.  Projected JPA effects then
+                // sample an unrelated part of the EFB copy, exposing the
+                // camera image as a disc instead of a local distortion.
+                //
+                // Bake S/T here only for the screen projection used by JPA.
+                // Its Q is -view-Z, the same value as clip W, so dividing at
+                // the vertex is equivalent to GX's interpolated S/T/Q.  Other
+                // POS texgens remain in the shader because their Q need not
+                // have that property.
+                for (int slot = 0; slot < 4; ++slot) {
+                    const TexCoordGen& tg = sTexCoordGen[slot];
+                    if (!tg.active || tg.src != GX_TG_POS || tg.type != GX_TG_MTX2X4
+                        || tg.normalize || tg.postIdx != 125) continue;
+                    const u32 mid = tg.mtxIdx < 64 ? tg.mtxIdx : 0;
+                    const float* m = sTexMatrices[mid];
+                    const float* pm = sPosMatrix[matrixId < 64 ? matrixId : 0];
+                    const auto same = [](float a, float b) {
+                        return std::fabs(a - b) <= 1e-5f * std::max(1.0f, std::max(std::fabs(a), std::fabs(b)));
+                    };
+                    if (!same(m[2], -pm[2]) || !same(m[6], -pm[6])
+                        || !same(m[10], -pm[10]) || !same(m[14], -pm[14])) continue;
+                    float r[3];
+                    for (int row = 0; row < 3; ++row)
+                        r[row] = m[row] * rawX + m[4 + row] * rawY + m[8 + row] * rawZ + m[12 + row];
+                    const float q = std::fabs(r[2]) > 1e-6f ? r[2] : 1.0f;
+                    v.tex[slot][0] = r[0] / q;
+                    v.tex[slot][1] = r[1] / q;
+                    sTexBakedMask |= 1 << slot;
+                }
                 // Reflejos (fuente NRM): en la consola la generación recibe la
                 // normal original y la multiplica una vez por su matriz de
                 // textura. Aquí la normal se transforma a vista justo debajo, y

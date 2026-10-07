@@ -192,8 +192,16 @@ void pc_newgame_prompt_open(void);
 bool pc_newgame_prompt_active(void);
 void pc_newgame_prompt_draw(void);
 int  pc_newgame_prompt_result(void);
-/// True after accept on the second prompt if Hard was chosen.
+/// True after accepting the new-game prompt with Hard selected.
 bool pc_newgame_prompt_chose_hard(void);
+/// True after accepting the new-game prompt with "Skip tutorial: Yes".
+bool pc_newgame_prompt_chose_skip_tutorial(void);
+
+/* One-shot request carried from file select to the first playable tutorial
+   stage. It is not a saved rule: the resulting day-2 save is a normal save. */
+void pc_tutorial_skip_set_pending(bool on);
+bool pc_tutorial_skip_pending(void);
+void pc_tutorial_skip_clear_pending(void);
 
 /* Selector 1 jugador / 2 jugadores (PLAN_COOP fase 0b). Lo abre la sección de
    selección de slot justo al entrar desde "Empezar". Si se eligen 2 jugadores

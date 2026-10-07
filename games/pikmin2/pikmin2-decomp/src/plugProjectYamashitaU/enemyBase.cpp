@@ -1,3 +1,6 @@
+#ifdef PIKI_PC_PORT
+extern "C" float pc_p2_hard_teki_life(float base);
+#endif
 // Enemies
 #include "Game/generalEnemyMgr.h"
 #ifdef PIKI_PC_PORT
@@ -1541,6 +1544,10 @@ void EnemyBase::setParameters()
 {
 	mHealth    = getParms().mHealth.mValue;
 	mMaxHealth = getParms().mHealth.mValue;
+#ifdef PIKI_PC_PORT
+	mHealth    = pc_p2_hard_teki_life(mHealth);
+	mMaxHealth = pc_p2_hard_teki_life(mMaxHealth);
+#endif
 	mMass      = getParms().mMass.mValue;
 	mFriction  = mMass;
 

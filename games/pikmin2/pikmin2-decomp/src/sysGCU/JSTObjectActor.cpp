@@ -268,6 +268,18 @@ void ObjectActor::update()
 	mModel->viewCalc();
 }
 
+#ifdef PIKI_PC_PORT
+void ObjectActor::pcHoldPose()
+{
+	// The second JStudio relation pass can change this actor's SRT after the
+	// first update has already built its model matrices.  On an intermediate
+	// host frame update() is pose-only: PC_ORIG_TICK() is false, so the animation
+	// clock is not advanced.  Calling the base implementation deliberately also
+	// avoids replaying commands owned by the specialised actor subclasses.
+	ObjectActor::update();
+}
+#endif
+
 /**
  * @note Address: 0x8042EE98
  * @note Size: 0x68

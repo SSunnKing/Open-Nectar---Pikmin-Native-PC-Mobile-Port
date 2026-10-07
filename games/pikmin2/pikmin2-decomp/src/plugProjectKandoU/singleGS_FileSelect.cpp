@@ -1,3 +1,7 @@
+#ifdef PIKI_PC_PORT
+extern "C" void pc_p2_rules_begin_new_run(void);
+#include "settings/pc_settings.h"
+#endif
 #include "Game/MoviePlayer.h"
 #include "ebi/FileSelect.h"
 #include "ebi/FS.h"
@@ -56,6 +60,9 @@ void FileState::init(SingleGameSection* section, StateArg* arg)
 	sys->setFrameRate(1);
 #ifdef PIKI_PC_PORT
 	pc_gfx_set_post_allowed(0); // bloom/SSAO dejaban en negro esta pantalla 2D
+	// Venimos de perder una partida Permadeath: el aviso va primero y el
+	// selector espera debajo hasta que se cierra.
+	pc_erased_notice_open_if_queued();
 	sPcSidesFrames = 0; // laterales estaticos: se vuelven a capturar al entrar
 	pc_gfx_p2_sides_static_reset();
 #endif
@@ -117,6 +124,11 @@ void FileState::exec(SingleGameSection* game)
 		}
 
 		game->BaseHIOSection::doUpdate();
+#ifdef PIKI_PC_PORT
+		if (pc_erased_notice_active()) {
+			return;
+		}
+#endif
 		mFSMgr->update();
 
 		if (mFSMgr->isFinish()) {
@@ -127,6 +139,9 @@ void FileState::exec(SingleGameSection* game)
 
 			case ebi::FileSelect::TMgr::End_StartNewGame:
 				gameSystem->mTimeMgr->mDayCount = 0;
+#ifdef PIKI_PC_PORT
+				pc_p2_rules_begin_new_run();
+#endif
 				startGame(game);
 				break;
 

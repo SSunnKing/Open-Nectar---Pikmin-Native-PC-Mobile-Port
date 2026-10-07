@@ -7,6 +7,7 @@ extern "C" int pc_window_get_control_mode(void);
 extern "C" int pc_settings_get_free_camera(void);
 extern "C" void pc_window_add_camera_drag(float normalizedDx);
 extern "C" int pc_settings_get_navi_health_pct(void);
+extern "C" float pc_p2_hard_navi_damage(float base);
 extern "C" float pc_settings_get_navi_speed_scale(void);
 extern "C" int pc_gyro_take_recenter_cursor(void);
 extern "C" bool pc_window_take_lockon_press(void);
@@ -37,6 +38,7 @@ static void pcDebugKeys()
 // honestos la barra y el aviso de vida baja, que leen el maximo original.
 static f32 pcNaviHurt(f32 damage)
 {
+	damage          = pc_p2_hard_navi_damage(damage); // Hard: más daño
 	const int pct = pc_settings_get_navi_health_pct();
 	if (pct < 0) {
 		return 0.0f; // Infinite
@@ -410,11 +412,11 @@ static bool pcPinCursorToLock(Navi* navi)
 /**
  * @brief Camara libre: gira el cursor `angle` radianes alrededor del capitan
  * para que siga en el mismo sitio de la pantalla. Con objetivo fijado el
- * cursor va pegado a el y no se toca (como en Pikmin 1).
+ * cursor visible va pegado a el; gira solo el libre (como en Pikmin 1).
  */
 void pcNaviRotateCursor(Navi* navi, f32 angle)
 {
-	if (!navi || !navi->mWhistle || (sPcLockTarget && sPcLockNavi == navi)) {
+	if (!navi || !navi->mWhistle) {
 		return;
 	}
 	const f32 c = cosf(angle), s = sinf(angle);
@@ -423,6 +425,10 @@ void pcNaviRotateCursor(Navi* navi, f32 angle)
 		v.x         = x * c + z * s;
 		v.z         = z * c - x * s;
 	};
+	if (sPcLockTarget && sPcLockNavi == navi) {
+		rotate(sPcAimOffset);
+		return;
+	}
 	rotate(navi->mWhistle->mNaviOffsetVec);
 	rotate(sPcAimOffset);
 	rotate(sPcPinnedOffset);
@@ -2150,6 +2156,22 @@ void Navi::makeVelocity()
 					const Vector3f excess = wanted - ofs;
 					// side2D apunta a la izquierda de la pantalla (el ratón a la
 					// derecha resta side2D).
+					const f32 lateralRight = -(excess.x * side2D.x + excess.z * side2D.z);
+					if (lateralRight != 0.0f) {
+						pc_window_add_camera_drag(-(lateralRight / maxRad) / 3.2f);
+					}
+				}
+			}
+			// Lock-On + Free Camera: el cursor visible está clavado en el
+			// objetivo, pero el libre (sPcAimOffset) sigue al ratón. Empujarlo
+			// contra su límite gira la cámara igual que sin objetivo, y el
+			// bloqueo se queda.
+			if (sPcLockTarget && sPcLockNavi == this && pc_settings_get_free_camera() && !pc_first_person_active()) {
+				const Vector3f delta  = (side2D * (mdx * kUnitsPerCount) + front2D * (mdy * kUnitsPerCount)) * -1.0f;
+				const Vector3f wanted = sPcAimOffset + delta;
+				const f32 len         = wanted.length();
+				if (len > maxRad) {
+					const Vector3f excess    = wanted - wanted * (maxRad / len);
 					const f32 lateralRight = -(excess.x * side2D.x + excess.z * side2D.z);
 					if (lateralRight != 0.0f) {
 						pc_window_add_camera_drag(-(lateralRight / maxRad) / 3.2f);

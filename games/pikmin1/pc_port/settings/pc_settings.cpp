@@ -71,6 +71,8 @@
 // Configuration
 // ---------------------------------------------------------------------------
 
+std::string pc_card_save_dir(); // card_stubs.cpp
+
 namespace {
 
 constexpr const char* kConfigFilename = "pikmin_settings.conf";
@@ -887,6 +889,8 @@ void modsRowChange(int row, bool left, bool right);
 void saveDataRowAction(int row);
 void texturePacksRowAction(int row, const std::vector<std::string>& packs);
 void hdModelsRowAction(int row);
+void hdModelsToggle(int row);
+bool hdModelInstalled(int row);
 void pollKeyCapture(SDL_GameController* ctl);
 bool pollButtonCapture(SDL_GameController* ctl);
 void pcCaptainPromptInput();
@@ -2110,10 +2114,14 @@ void pollMenuInput() {
             if (padNavA(ctl)) ok = true;
             if (padNavB(ctl)) cancel = true;
         }
+        bool toggle = keyWentDown(SDL_SCANCODE_LEFT) || keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_A)
+                   || keyWentDown(SDL_SCANCODE_D);
+        if (ctl && (padNavLeft(ctl) || padNavRight(ctl))) toggle = true;
         const int rowCount = 6;
         if (up) { sHdModelsSelection = (sHdModelsSelection + rowCount - 1) % rowCount; return; }
         if (down) { sHdModelsSelection = (sHdModelsSelection + 1) % rowCount; return; }
         if (cancel) { sInHdModelsSubmenu = false; return; }
+        if (toggle) { hdModelsToggle(sHdModelsSelection); return; }
         if (ok) hdModelsRowAction(sHdModelsSelection);
         return;
     }
@@ -2715,9 +2723,11 @@ void saveDataRowAction(int row) {
         else pc_save_android_open_restore();
     }
 #else
-    texturePackNotice(false,
-        "Desktop saves live in the game's 'save' folder (card0 / card1). "
-        "Copy that folder to transfer.");
+    (void)row;
+    const std::string dir = pc_card_save_dir();
+    if (SDL_OpenURL(("file://" + dir).c_str()) != 0) {
+        texturePackNotice(true, ("Could not open the folder: " + dir).c_str());
+    }
 #endif
 }
 
@@ -2798,6 +2808,15 @@ void hdModelsRowAction(int row) {
     }
 #endif
         
+}
+
+// Activa o desactiva un modelo HD instalado (lo mismo que el launcher). Se
+// aplica al momento: el juego consulta el ajuste en cada dibujo.
+void hdModelsToggle(int row) {
+    if (row < 0 || row >= 6 || !hdModelInstalled(row)) return;
+    sConfig.hdModelsDisabled ^= 1 << row;
+    sPending.hdModelsDisabled = sConfig.hdModelsDisabled;
+    saveConfig();
 }
 
 // Texto del valor de una fila de la página principal (compartido con
@@ -3715,10 +3734,13 @@ int  sSrSel  = 0;      // opción marcada en el menú del modo
 bool sErasedNoticeQueued = false;
 bool sErasedNoticeOpen   = false;
 bool sNewGamePromptOpen = false;
-int  sNewGamePromptRow = 0;      // fila con foco: 0 = Difficulty, 1 = Game mode
+int  sNewGamePromptRow = 0;      // 0 = Difficulty, 1 = Game mode, 2 = Skip tutorial, 3 = Start
+int  sNewGamePromptCol = 0;      // opción bajo el cursor en la fila con foco
 int  sNewGamePromptRules = 0;    // 0 = standard file, 1 = permadeath
 int  sNewGamePromptResult = PC_NEWGAME_PENDING;
 bool sNewGamePromptHard = false;
+bool sNewGamePromptSkipTutorial = false;
+bool sTutorialSkipPending = false;
 }
 
 // Menú del modo Speedrun: Start Run / Best Times / How It Works. La
@@ -3978,9 +4000,11 @@ void pc_erased_notice_draw(void) {
 void pc_newgame_prompt_open(void) {
     sNewGamePromptOpen   = true;
     sNewGamePromptRow    = 0;
+    sNewGamePromptCol    = 0;
     sNewGamePromptRules  = 0;
     sNewGamePromptResult = PC_NEWGAME_PENDING;
     sNewGamePromptHard   = false;
+    sNewGamePromptSkipTutorial = false;
     pc_menu_edge_reset();
 }
 
@@ -3990,23 +4014,36 @@ int pc_newgame_prompt_result(void) { return sNewGamePromptResult; }
 
 bool pc_newgame_prompt_chose_hard(void) { return sNewGamePromptHard; }
 
+bool pc_newgame_prompt_chose_skip_tutorial(void) { return sNewGamePromptSkipTutorial; }
+
+void pc_tutorial_skip_set_pending(bool on) { sTutorialSkipPending = on; }
+bool pc_tutorial_skip_pending(void) { return sTutorialSkipPending; }
+void pc_tutorial_skip_clear_pending(void) { sTutorialSkipPending = false; }
+
 namespace {
-// Geometría compartida por el dibujo y los toques: panel de 620x310 centrado
-// en 480 de alto, dos filas (Difficulty / Game mode) de dos opciones.
+// Geometría compartida por el dibujo y los toques: tres filas de dos
+// opciones (Difficulty / Game mode / Skip tutorial) y, debajo, el botón Start.
+// Las flechas mueven el cursor, A elige la opción bajo él y solo Start empieza.
 const int kNgPanelW = 620;
-const int kNgPanelH = 310;
+const int kNgPanelH = 420;
 const int kNgBoxW   = 230;
 const int kNgBoxH   = 44;
-int ngRowY(int panelY, int row) { return panelY + 82 + row * 82; }
+const int kNgRowCount = 3;
+const int kNgStartRow = kNgRowCount; // fila del botón Start
+int ngRowY(int panelY, int row) { return panelY + 72 + row * 70; }
+int ngStartX(int panelX) { return panelX + kNgPanelW / 2 - kNgBoxW / 2; }
 int ngBoxX(int panelX, int i) { return panelX + 40 + i * (kNgBoxW + 40); }
 
 int ngRowValue(int row) {
-    return row == 0 ? (sNewGamePromptHard ? 1 : 0) : sNewGamePromptRules;
+    if (row == 0) return sNewGamePromptHard ? 1 : 0;
+    if (row == 1) return sNewGamePromptRules;
+    return sNewGamePromptSkipTutorial ? 1 : 0;
 }
 
 void ngSetRowValue(int row, int v) {
     if (row == 0) sNewGamePromptHard = v != 0;
-    else          sNewGamePromptRules = v;
+    else if (row == 1) sNewGamePromptRules = v;
+    else               sNewGamePromptSkipTutorial = v != 0;
 }
 
 void pcNewGamePromptInput() {
@@ -4036,17 +4073,23 @@ void pcNewGamePromptInput() {
         const float y = sTouchTapY * 480.0f;
         const int panelX = int(screenW * 0.5f) - kNgPanelW / 2;
         const int panelY = 240 - kNgPanelH / 2;
-        // Un toque elige la opción; tocar la que ya está elegida empieza.
-        for (int row = 0; row < 2; ++row) {
+        // Un toque elige la opción; el de Start empieza.
+        for (int row = 0; row < kNgRowCount; ++row) {
             const float optY = float(ngRowY(panelY, row));
             for (int i = 0; i < 2; ++i) {
                 const float boxX = float(ngBoxX(panelX, i));
                 if (x >= boxX && x <= boxX + kNgBoxW && y >= optY - 8.0f && y <= optY + kNgBoxH + 8.0f) {
-                    if (sNewGamePromptRow == row && ngRowValue(row) == i) accept = true;
                     sNewGamePromptRow = row;
+                    sNewGamePromptCol = i;
                     ngSetRowValue(row, i);
                 }
             }
+        }
+        const float startY = float(ngRowY(panelY, kNgStartRow));
+        const float startX = float(ngStartX(panelX));
+        if (x >= startX && x <= startX + kNgBoxW && y >= startY - 8.0f && y <= startY + kNgBoxH + 8.0f) {
+            sNewGamePromptRow = kNgStartRow;
+            accept            = true;
         }
     }
 
@@ -4060,13 +4103,22 @@ void pcNewGamePromptInput() {
         if (promptPadB(ctl))  cancel = true;
     }
 
-    if (up || down) sNewGamePromptRow = sNewGamePromptRow ? 0 : 1;
-    if (left || right) ngSetRowValue(sNewGamePromptRow, ngRowValue(sNewGamePromptRow) ? 0 : 1);
+    const int rows = kNgRowCount + 1; // opciones + Start
+    if (up || down) {
+        sNewGamePromptRow = (sNewGamePromptRow + (up ? rows - 1 : 1)) % rows;
+        // El cursor entra en la fila sobre la opción ya elegida.
+        if (sNewGamePromptRow < kNgRowCount) sNewGamePromptCol = ngRowValue(sNewGamePromptRow);
+    }
+    if ((left || right) && sNewGamePromptRow < kNgRowCount) sNewGamePromptCol = sNewGamePromptCol ? 0 : 1;
 
     if (accept) {
-        sNewGamePromptResult = sNewGamePromptRules ? PC_NEWGAME_PERMADEATH
-                                                   : PC_NEWGAME_NORMAL;
-        sNewGamePromptOpen   = false;
+        if (sNewGamePromptRow < kNgRowCount) {
+            ngSetRowValue(sNewGamePromptRow, sNewGamePromptCol); // A elige
+        } else {
+            sNewGamePromptResult = sNewGamePromptRules ? PC_NEWGAME_PERMADEATH
+                                                       : PC_NEWGAME_NORMAL;
+            sNewGamePromptOpen   = false;
+        }
     } else if (cancel) {
         sNewGamePromptResult = PC_NEWGAME_CANCELLED;
         sNewGamePromptOpen   = false;
@@ -4098,9 +4150,13 @@ void pc_newgame_prompt_draw(void) {
     drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
     drawPikminHeader(gfx, panelX, panelY, panelW, "New Game");
 
-    const char* titles[2]     = { "Difficulty", "Game mode" };
-    const char* options[2][2] = { { "Normal", "Hard" }, { "Standard", "Permadeath" } };
-    for (int row = 0; row < 2; row++) {
+    const char* titles[kNgRowCount] = { "Difficulty", "Game mode", "Skip tutorial" };
+    const char* options[kNgRowCount][2] = {
+        { "Normal", "Hard" },
+        { "Standard", "Permadeath" },
+        { "No", "Yes" },
+    };
+    for (int row = 0; row < kNgRowCount; row++) {
         const bool rowFocus = (row == sNewGamePromptRow);
         const int optY = ngRowY(panelY, row);
         drawTextOutline(ngBoxX(panelX, 0), optY - 24, "%s",
@@ -4108,8 +4164,12 @@ void pc_newgame_prompt_draw(void) {
                         Colour(8, 12, 28, 255), titles[row]);
         for (int i = 0; i < 2; i++) {
             const bool chosen = (i == ngRowValue(row));
-            const bool sel    = chosen && rowFocus;
+            const bool cursor = rowFocus && i == sNewGamePromptCol;
+            const bool sel    = chosen;
             const int boxX = ngBoxX(panelX, i);
+            // Cursor: marcador a la izquierda de la opción (la elegida va resaltada).
+            if (cursor)
+                drawTextOutline(boxX - 18, optY + 12, ">", Colour(255, 229, 120, 255), Colour(8, 12, 28, 255));
             if (drawGlassOption(boxX, optY, kNgBoxW, kNgBoxH, options[row][i], sel, 20, 29)) continue;
             const Colour fill = sel      ? Colour(70, 92, 150, 240)
                               : chosen   ? Colour(48, 60, 96, 230)
@@ -4124,24 +4184,46 @@ void pc_newgame_prompt_draw(void) {
         }
     }
 
-    // Describe la opción elegida en la fila con foco: es el único sitio donde
-    // se explican Hard y Permadeath.
-    const int value = ngRowValue(sNewGamePromptRow);
+    // Botón Start: el único que empieza la partida.
+    {
+        const bool focus = sNewGamePromptRow == kNgStartRow;
+        const int bx = ngStartX(panelX), by = ngRowY(panelY, kNgStartRow);
+        if (focus)
+            drawTextOutline(bx - 18, by + 12, ">", Colour(255, 229, 120, 255), Colour(8, 12, 28, 255));
+        if (!drawGlassOption(bx, by, kNgBoxW, kNgBoxH, "Start", focus, 20, 29)) {
+            const Colour fill = focus ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220);
+            gfx->setColour(fill, true);
+            gfx->setAuxColour(fill);
+            gfx->fillRectangle(RectArea(bx, by, bx + kNgBoxW, by + 40));
+            drawTextOutline(bx + kNgBoxW / 2 - menuTextWidth("Start") / 2, by + 12, "%s",
+                            focus ? Colour(255, 229, 120, 255) : Colour(170, 180, 200, 255), Colour(8, 12, 28, 255),
+                            "Start");
+        }
+    }
+
+    // Describe la opción bajo el cursor: es el único sitio donde se explican
+    // Hard y Permadeath.
+    const int value = sNewGamePromptRow < kNgRowCount ? sNewGamePromptCol : 0;
     const char* detail;
-    if (sNewGamePromptRow == 0) {
+    if (sNewGamePromptRow == kNgStartRow) {
+        detail = "Begin the expedition with these settings.";
+    } else if (sNewGamePromptRow == 0) {
         detail = value ? "Tougher enemies, Olimar takes more damage. 8-minute days, 80 Pikmin."
                        : "Original enemy health, day length and field limit.";
-    } else {
+    } else if (sNewGamePromptRow == 1) {
         detail = value ? "If Olimar loses all his health, this file is erased."
                        : "Losing Olimar ends the day. The original rules.";
+    } else {
+        detail = value ? "Begin on Day 2 with the Main Engine and 20 red Pikmin."
+                       : "Play The Impact Site tutorial normally.";
     }
-    drawTextOutline(panelX + panelW / 2 - menuTextWidth(detail) / 2, panelY + 236,
+    drawTextOutline(panelX + panelW / 2 - menuTextWidth(detail) / 2, panelY + 344,
                     "%s",
                     value ? Colour(255, 150, 150, 255) : Colour(190, 200, 220, 255),
                     Colour(8, 12, 28, 255), detail);
 
-    const char* help = "Arrows: choose    A / Enter: start    B / Esc: back";
-    drawHelpLine(panelX + panelW / 2, panelY + 272, help, Colour(150, 165, 195, 255));
+    const char* help = "Arrows: move    A / Enter: select    B / Esc: back";
+    drawHelpLine(panelX + panelW / 2, panelY + 382, help, Colour(150, 165, 195, 255));
 }
 
 
@@ -5576,8 +5658,8 @@ void pc_settings_draw(void) {
         const int subX = px1 + 18, subY = py1 + 44;
         const int subW = panelW - 36, subH = panelH - 58;
         drawSubmenuSurface(gfx, subX, subY, subW, subH, "HD Models",
-                           "Up/Down: model   A: install",
-                           "Esc/B: back   Restart required");
+                           "Up/Down: model   Left/Right: on/off   A: install zip",
+                           "Esc/B: back   A new install needs a restart");
 
         std::error_code modelEc;
         const bool olimarInstalled = std::filesystem::is_regular_file(pc_hd_model_path(PC_HD_MODEL_OLIMAR), modelEc);
@@ -5600,7 +5682,8 @@ void pc_settings_draw(void) {
             else if (busy)
                 snprintf(value, sizeof(value), "Selecting file...");
             else
-                snprintf(value, sizeof(value), "%s", installed[row] ? "Installed" : "Not installed");
+                snprintf(value, sizeof(value), "%s",
+                         !installed[row] ? "Not installed" : (pc_settings_get_hd_model_enabled(row) ? "On" : "Off"));
             drawSubmenuRow(gfx, subX + 20, subY + 70 + row * 28, subW - 40,
                            labels[row], value, row == sHdModelsSelection);
         }
@@ -5988,12 +6071,12 @@ const char* pc_settings_group_name(int group) {
 const char* pc_settings_group_summary(int group) {
     switch (group) {
     case PC_SET_GROUP_DISPLAY: return "Window, resolution, frame rate";
-    case PC_SET_GROUP_GRAPHICS: return "Effects, colour, texture packs";
+    case PC_SET_GROUP_GRAPHICS: return "Effects, colour, texture packs, HD models";
     case PC_SET_GROUP_CONTROLS: return "Actions, lock-on, sticks, gyro, bindings";
     case PC_SET_GROUP_CAMERA: return "Free camera, first person, co-op view";
     case PC_SET_GROUP_GAMEPLAY: return "Pikmin behaviour, night, fireflies, HUD";
     case PC_SET_GROUP_CHEATS: return "Day, health, Pikmin limit, whistle";
-    case PC_SET_GROUP_DATA: return "Save transfer, reset settings";
+    case PC_SET_GROUP_DATA: return "Saves, reset settings";
     case PC_SET_GROUP_ACHIEVEMENTS: return "Unlocked achievements and how to get the rest";
     default: return "";
     }
@@ -6008,14 +6091,14 @@ void graphicsRowValue(int i, char* value, size_t n) {
     const char* levels[4] = { "Off", "Subtle", "Normal", "Strong" };
     auto level = [&](int v) { return levels[(v >= 0 && v <= 3) ? v : 0]; };
     switch (i) {
-    case 0: snprintf(value, n, "%s", sPending.antialiasing ? "FXAA" : "Off"); break;
+    case 0: snprintf(value, n, "%s", sPending.antialiasing ? "On" : "Off"); break;
     case 1: snprintf(value, n, "%s", sPending.fog ? "On  (original)" : "Off"); break;
     case 2: snprintf(value, n, "%s", level(sPending.bloom)); break;
     case 3: snprintf(value, n, "%s", level(sPending.ssao)); break;
     case 4: snprintf(value, n, "%s", level(sPending.dof)); break;
     case 5:
-        if (sPending.anisotropy <= 1) snprintf(value, n, "Trilinear");
-        else snprintf(value, n, "Anisotropic %dx", sPending.anisotropy);
+        if (sPending.anisotropy <= 1) snprintf(value, n, "Standard");
+        else snprintf(value, n, "Sharp %dx", sPending.anisotropy);
         break;
     case 6: snprintf(value, n, "%s", gradingOn ? "On" : "Off"); break;
     case 7: if (!gradingOn) snprintf(value, n, "--"); else snprintf(value, n, sPending.gamma == 1.0f ? "%.2f  (neutral)" : "%.2f", sPending.gamma); break;
@@ -6035,7 +6118,7 @@ void graphicsRowValue(int i, char* value, size_t n) {
         snprintf(value, n, "%d / %d files  >", installed, (int)PC_HD_MODEL_COUNT);
         break;
     }
-    case 12: snprintf(value, n, "%s", sPending.perPixelLighting ? "Per-pixel" : "Per-vertex (original)"); break;
+    case 12: snprintf(value, n, "%s", sPending.perPixelLighting ? "Smooth" : "Original"); break;
     case 13: {
         const char* names[4] = { "Off (original)", "Soft", "Normal", "Strong" };
         snprintf(value, n, "%s", names[(sPending.shadows >= 0 && sPending.shadows <= 3) ? sPending.shadows : 0]);
@@ -6176,65 +6259,65 @@ struct GroupRow {
 };
 
 const GroupRow kDisplayRows[] = {
-    { SRC_MAIN, ROW_DISPLAY_MODE, "Display Mode", "Windowed, exclusive fullscreen, or a borderless window at desktop size." },
-    { SRC_MAIN, ROW_RESOLUTION, "Resolution", "Window or fullscreen size. A opens the full list; Left/Right steps through it." },
-    { SRC_MAIN, ROW_ASPECT_RATIO, "Aspect Ratio", "Auto fills the window. The others keep that shape and add bars." },
-    { SRC_MAIN, ROW_RENDER_SCALE, "3D Resolution", "Detail of the 3D scene. Higher is sharper, lower is faster." },
-    { SRC_MAIN, ROW_REFRESH_RATE, "Refresh Rate", "Fullscreen refresh rate. Auto keeps the monitor's current rate." },
-    { SRC_MAIN, ROW_VSYNC, "Frame Sync (VSync)", "Waits for the monitor between frames. Stops tearing, adds a little lag." },
-    { SRC_MAIN, ROW_FPS_MODE, "FPS Mode", "30 is the original and the most stable. 60 and 120 are smoother but experimental." },
+    { SRC_MAIN, ROW_DISPLAY_MODE, "Display Mode", "Windowed, fullscreen, or a borderless window that fills the screen." },
+    { SRC_MAIN, ROW_RESOLUTION, "Resolution", "Size of the window or the fullscreen picture. A: full list. Left/Right: next size." },
+    { SRC_MAIN, ROW_ASPECT_RATIO, "Aspect Ratio", "Auto fills the window. The others keep that shape and add black bars." },
+    { SRC_MAIN, ROW_RENDER_SCALE, "3D Resolution", "Detail of the 3D world. Higher looks sharper, lower runs faster." },
+    { SRC_MAIN, ROW_REFRESH_RATE, "Refresh Rate", "How often the screen updates in fullscreen. Auto keeps your monitor's setting." },
+    { SRC_MAIN, ROW_VSYNC, "Frame Sync (VSync)", "Waits for the screen before showing each frame. Stops tearing (a picture split in two), adds a little input delay." },
+    { SRC_MAIN, ROW_FPS_MODE, "FPS Mode", "Frames per second. 30 is the original and the most stable. 60 and 120 are smoother but experimental." },
 #if defined(VERSION_GPIP01)
     { SRC_MAIN, ROW_LANGUAGE, "Language", "Language of the game's text. Takes effect after a restart." },
 #endif
 };
 
 const GroupRow kGraphicsRows[] = {
-    { SRC_GFX, 0, "Antialiasing", "Smooths jagged edges (FXAA). Small performance cost." },
-    { SRC_GFX, 5, "Texture Filtering", "Keeps textures sharp at steep angles. Anisotropic costs a little GPU." },
-    { SRC_GFX, 12, "Lighting", "Per-pixel gives smoother light on models than the original per-vertex." },
+    { SRC_GFX, 0, "Antialiasing", "Smooths jagged edges on characters and scenery. Small performance cost." },
+    { SRC_GFX, 5, "Texture Filtering", "Keeps the ground and walls sharp when seen at an angle. Higher costs a little performance." },
+    { SRC_GFX, 12, "Lighting", "Smooth: softer, more detailed light on characters. Original: as on GameCube." },
     { SRC_GFX, 13, "Shadows", "Real-time shadows cast by characters and objects." },
     { SRC_GFX, 1, "Fog", "The game's own distance fog. On is how the original looks." },
-    { SRC_GFX, 2, "Bloom", "Soft glow around bright areas." },
-    { SRC_GFX, 3, "Ambient Occlusion", "Contact shadows in corners and under objects." },
-    { SRC_GFX, 4, "Depth of Field", "Blurs the far distance so the action stands out." },
-    { SRC_GFX, 6, "Colour Grading", "Turns on the Gamma, Brightness and Saturation controls below." },
-    { SRC_GFX, 7, "Gamma", "Brightness of the mid-tones. 1.00 is neutral." },
-    { SRC_GFX, 8, "Brightness", "Lifts or darkens the whole image. 0.00 is neutral." },
-    { SRC_GFX, 9, "Saturation", "Colour intensity. 1.00 is neutral, 0.00 is black and white." },
-    { SRC_GFX, 10, "Texture Packs", "Install or switch replacement texture packs. Needs a restart." },
-    { SRC_GFX, 11, "HD Models", "Install HD character models from their zips. Needs a restart." },
+    { SRC_GFX, 2, "Bloom", "Soft glow around bright lights and bright areas." },
+    { SRC_GFX, 3, "Ambient Occlusion", "Soft shadows in corners and where objects meet the ground." },
+    { SRC_GFX, 4, "Depth of Field", "Blurs the far distance so what is close to you stands out." },
+    { SRC_GFX, 6, "Colour Adjustments", "Turns on the Gamma, Brightness and Saturation sliders below. Off shows the original colours." },
+    { SRC_GFX, 7, "Gamma", "Lightens or darkens the middle shades, leaving the darkest and brightest parts alone. 1.00 is neutral." },
+    { SRC_GFX, 8, "Brightness", "Makes the whole picture lighter or darker. 0.00 is neutral." },
+    { SRC_GFX, 9, "Saturation", "Colour strength. 1.00 is neutral, 0.00 is black and white." },
+    { SRC_GFX, 10, "Texture Packs", "Replacement textures made by the community. Install one from its zip or switch between them. Changes need a restart." },
+    { SRC_GFX, 11, "HD Models", "High-detail character models. Install each one from its zip, then turn it On or Off." },
 };
 
 const GroupRow kControlsRows[] = {
-    { SRC_MODS, 0, "Control Scheme", "Classic: the stick moves the cursor, as on GameCube. Mouse Cursor: aim with the mouse." },
-    { SRC_ADV, 0, "Mouse Sensitivity", "How far the cursor moves for each movement of the mouse." },
-    { SRC_MODS, 3, "Mouse Wheel", "What the wheel does: change the Pikmin colour to throw, or zoom the camera." },
-    { SRC_MODS, 2, "Hold to Pluck", "Keep the button held to pluck sprouts one after another." },
+    { SRC_MODS, 0, "Control Scheme", "Classic: the stick moves the cursor, as on GameCube. Mouse Cursor: aim the cursor with the mouse." },
+    { SRC_ADV, 0, "Mouse Sensitivity", "How far the cursor moves when you move the mouse." },
+    { SRC_MODS, 3, "Mouse Wheel", "What the mouse wheel does: choose the Pikmin colour to throw, or zoom the camera." },
+    { SRC_MODS, 2, "Hold to Pluck", "Hold the pluck button to pull up sprouts one after another." },
     { SRC_MODS, 34, "Whistle Pluck", "Hold the whistle over sprouts to pluck them one after another." },
     { SRC_MODS, 17, "Throw While Moving", "Throw Pikmin while running, instead of Olimar stopping first." },
-    { SRC_MODS, 22, "Cancel Throw With B", "While holding a Pikmin with A, press B to put it back in the squad." },
-    { SRC_MODS, 33, "Quick Grab", "The Pikmin to throw appears in Olimar's hand at once, so throwing is just as fast with the squad behind him." },
-    { SRC_MODS, 39, "Pikmin 2 Selection", "D-pad as in Pikmin 2: Left/Right keeps the chosen colour for every throw, and with A held Up/Down picks leaf, bud, flower or a Yellow with a bomb rock. Off: Left/Right only picks the next throw." },
-    { SRC_MODS, 24, "Onion: Y for Steps of 10", "In the Onion menu, hold Y while moving up or down to move 10 Pikmin at a time." },
-    { SRC_MODS, 35, "Bomb Control", "Bomb button (B / assign on a pad): a Yellow with a bomb rock throws it at the cursor, or drops it lit at its feet if the cursor is too close. Ones already thrown go first." },
-    { SRC_MODS, 15, "Lock-On", "Automatic: locks onto the nearest enemy or object as you approach. Manual: lock with the Lock-On button (bindable in Controls)." },
+    { SRC_MODS, 22, "Cancel a Throw", "While holding a Pikmin ready to throw, press B (the cancel button) to put it back in the squad." },
+    { SRC_MODS, 33, "Quick Grab", "The next Pikmin jumps straight into Olimar's hand, so throwing stays fast even with the squad behind him." },
+    { SRC_MODS, 39, "Pikmin 2 Selection", "D-pad as in Pikmin 2. Left/Right chooses the colour for every throw. Hold A and press Up/Down to pick leaf, bud, flower or a Yellow with a bomb rock. Off: Left/Right only picks the next throw." },
+    { SRC_MODS, 24, "Onion: Move 10 at a Time", "In the Onion menu, hold Y while pressing up or down to move 10 Pikmin at a time." },
+    { SRC_MODS, 35, "Bomb Control", "Bomb button (B on keyboard, set a controller button in Controls): a Yellow with a bomb rock throws it at the cursor, or drops it at its feet if the cursor is too close. Yellows already thrown go first." },
+    { SRC_MODS, 15, "Lock-On", "Automatic: locks onto the nearest enemy or object as you approach. Manual: press the Lock-On button (set it in Controls)." },
     { SRC_MODS, 16, "Charge", "With a target locked, send the whole squad at it." },
-    { SRC_ADV, 1, "Stick Dead Zone", "Ignores small stick movements. Raise it if a worn stick drifts." },
-    { SRC_ADV, 2, "Stick Invert (X/Y)", "Inverts the movement stick." },
-    { SRC_ADV, 3, "C-Stick Invert (X/Y)", "Inverts the right stick (C-Stick)." },
-    { SRC_ADV, 4, "Gyro Aiming", "Aim the cursor by turning a gyro pad or the phone. In first person it looks around." },
-    { SRC_ADV, 5, "Gyro Sensitivity", "How far the cursor moves when you turn the pad." },
-    { SRC_ADV, 6, "Gyro Invert (X/Y)", "Inverts gyro aiming: none, horizontal, vertical or both." },
-    { SRC_ADV, 7, "Gyro Calibrate", "Put the pad or phone down, keep it still and press A. Fixes a drifting cursor." },
-    { SRC_RECENTER, 0, "Gyro Recenter Button", "Button that brings the cursor back in front of Olimar. A: assign it." },
-    { SRC_KEYS, 0, "Keyboard Bindings", "Two keys or mouse buttons per action. A: main key, Right: second key, Left: defaults. While waiting, Del clears the slot. Shift, Ctrl and Alt can be bound." },
-    { SRC_PADS, 0, "Gamepad Bindings", "Choose the pad button for each action." },
+    { SRC_ADV, 1, "Stick Dead Zone", "Ignores tiny stick movements. Raise it if the cursor or Olimar moves on its own (stick drift)." },
+    { SRC_ADV, 2, "Stick Invert", "Flips the movement stick: horizontal, vertical or both." },
+    { SRC_ADV, 3, "Camera Stick Invert", "Flips the right stick (the GameCube C-Stick): horizontal, vertical or both." },
+    { SRC_ADV, 4, "Gyro Aiming", "Aim the cursor by tilting a controller with motion sensors, or your phone. In first person it looks around." },
+    { SRC_ADV, 5, "Gyro Sensitivity", "How far the cursor moves when you tilt the controller." },
+    { SRC_ADV, 6, "Gyro Invert", "Flips gyro aiming: none, horizontal, vertical or both." },
+    { SRC_ADV, 7, "Gyro Calibrate", "Put the controller or phone down, keep it still and press A. Fixes a cursor that drifts on its own." },
+    { SRC_RECENTER, 0, "Gyro Recenter Button", "Button that brings the cursor back in front of Olimar. A: choose the button." },
+    { SRC_KEYS, 0, "Keyboard Bindings", "Two keys or mouse buttons per action. A: main key. Right: second key. Left: back to default. While waiting, Delete clears it. Shift, Ctrl and Alt can be used." },
+    { SRC_PADS, 0, "Controller Bindings", "Choose the controller button for each action." },
 };
 
 const GroupRow kCameraRows[] = {
-    { SRC_MODS, 14, "Free Camera", "Turn the camera freely, as in Pikmin 3. MOUSE: move the cursor to the edge of its circle and keep pushing left or right; the camera turns that way. CONTROLLER: right stick. L puts the camera behind the captain and the cursor in front. Swarm (moving the squad) moves to D-pad Down on a controller, or to its own Swarm binding." },
-    { SRC_MODS, 38, "Free Camera Pad Sensitivity", "How fast the right stick turns the free camera on a controller. 100% is the default." },
-    { SRC_MODS, 18, "First Person", "Allows a view from Olimar's helmet. Switch in game with its button (V / L3)." },
+    { SRC_MODS, 14, "Free Camera", "Turn the camera freely, as in Pikmin 3. Mouse: push the cursor against the edge of its circle. Controller: right stick. L puts the camera back behind Olimar. Swarming moves to D-pad Down, or to its own Swarm button." },
+    { SRC_MODS, 38, "Free Camera Speed", "How fast the right stick turns the free camera. 100% is the default." },
+    { SRC_MODS, 18, "First Person", "Look at the world from inside Olimar's helmet. Switch in game with the First Person button (V on keyboard, L3 on a controller)." },
     { SRC_MODS, 6, "Co-op Split Screen", "How the screen divides in two-player co-op." },
     { SRC_MODS, 7, "Co-op Merged Camera", "Joins both halves into one view while the captains are close." },
 };
@@ -6242,13 +6325,13 @@ const GroupRow kCameraRows[] = {
 const GroupRow kGameplayRows[] = {
     { SRC_MODS, 25, "Instant Whistle Response", "Whistled Pikmin join the squad at once, without stopping to turn and look first." },
     { SRC_MODS, 1, "Chain Pikmin Actions", "Pikmin that finish a task go on to the next one nearby." },
-    { SRC_MODS, 8, "Better Pathfinding", "Smarter Pikmin: they get moving again when stuck on their route, thrown Pikmin with nothing to do run back to the squad, and the squad no longer stops to pull nectar grass it brushes past (swarm at it instead)." },
+    { SRC_MODS, 8, "Better Pathfinding", "Smarter Pikmin: they get unstuck on their way, run back to the squad when thrown with nothing to do, and no longer stop to pull nectar grass they walk past (swarm them at it instead)." },
     { SRC_MODS, 9, "Blues Only In Water", "Only blue Pikmin walk into water on their own." },
     { SRC_MODS, 23, "No Tripping", "Pikmin running in the squad never trip and fall behind." },
     { SRC_MODS, 40, "Eternal Night", "Always night, whatever the day length: night lighting, and the moon crosses the day bar instead of the sun." },
     { SRC_MODS, 41, "Fireflies", "Fireflies drift around the field, by day or by night." },
-    { SRC_MODS, 10, "Idle Pikmin Counter", "Shows how many Pikmin are standing idle." },
-    { SRC_MODS, 36, "Hide Olimar's Texts", "Skip the text boxes Olimar shows while you play: first Pikmin, ship parts, tips. The ending texts stay." },
+    { SRC_MODS, 10, "Idle Pikmin Counter", "Shows how many Pikmin are standing around with nothing to do." },
+    { SRC_MODS, 36, "Hide Olimar's Messages", "Skips the messages Olimar shows while you play (first Pikmin, ship parts, tips). The ending messages still appear." },
 };
 
 // Infinite Day (fila 13) vive dentro de Day Length como su última opción.
@@ -6257,7 +6340,7 @@ const GroupRow kCheatsRows[] = {
     { SRC_MODS, 11, "Olimar Health", "Olimar's toughness, as a share of the original. Infinite takes no damage." },
     { SRC_MODS, 12, "Enemy Health", "Enemy toughness, as a share of the original. Insta Kill drops them in one hit." },
     { SRC_MODS, 4, "Pikmin Limit", "Most Pikmin on the field at once. 100 is the original; more costs performance." },
-    { SRC_MODS, 21, "Throw Speed", "Speed of Olimar's grab and throw, so how fast you can throw. 100% is the original." },
+    { SRC_MODS, 21, "Throw Speed", "How fast Olimar grabs and throws Pikmin. 100% is the original." },
     { SRC_MODS, 20, "Whistle Radius", "Size of the whistle circle at full charge. 100% is the original." },
     { SRC_MODS, 26, "Invincible Pikmin", "Pikmin never die: no attacks, fire, water, gas or crushing." },
     { SRC_MODS, 27, "All Flowers", "Every Pikmin grows a flower as soon as it is plucked or born." },
@@ -6281,8 +6364,7 @@ const GroupRow kDataRows[] = {
     { SRC_DATA, 0, "Export save to ZIP", "Copies your memory card to a ZIP file you choose." },
     { SRC_DATA, 1, "Import save from ZIP", "Replaces your memory card with one from a ZIP file." },
 #else
-    { SRC_DATA, 0, "Export save to ZIP", "Desktop saves are plain files in the 'save' folder. Copy it to back up." },
-    { SRC_DATA, 1, "Import save from ZIP", "Desktop saves are plain files in the 'save' folder. Replace it to restore." },
+    { SRC_DATA, 0, "Open Save Folder", "Opens the folder with your saves (card0, card1). Copy it to back up your progress or move it to another computer." },
 #endif
     { SRC_DATA, 2, "Reset all settings to defaults", "Puts every setting back to its default. Saves are not touched." },
 };
@@ -6440,7 +6522,7 @@ const char* disabledReason(const GroupRow& r) {
         if (!sPending.gyroEnabled) return "Turn on Gyro Aiming first.";
         break;
     case SRC_GFX:
-        if (r.idx >= 7 && r.idx <= 9 && !sPending.colourGrading) return "Turn on Colour Grading first.";
+        if (r.idx >= 7 && r.idx <= 9 && !sPending.colourGrading) return "Turn on Colour Adjustments first.";
         break;
     case SRC_MODS:
         if (r.idx == 16 && !sPending.lockOn) return "Turn on Lock-On first.";
@@ -6614,7 +6696,7 @@ void pc_settings_row_value(int group, int row, char* out, unsigned long n) {
 #ifdef __ANDROID__
             if (r->idx < 2) snprintf(out, n, "%s", sSaveTransferActive ? "Opening picker..." : "A: choose file");
 #else
-            if (r->idx < 2) snprintf(out, n, "save / card0, card1");
+            if (r->idx < 2) snprintf(out, n, "A: open");
 #endif
             else snprintf(out, n, "A: reset");
             break;
@@ -6655,7 +6737,7 @@ void pc_settings_row_value(int group, int row, char* out, unsigned long n) {
     }
     if (group == PC_SET_PICKER_HDMODELS) {
         if (sTexturePackPickerActive && sHdModelsSelection == row) snprintf(out, n, "Installing...");
-        else snprintf(out, n, "%s", hdModelInstalled(row) ? "Installed" : "Not installed");
+        else snprintf(out, n, "%s", !hdModelInstalled(row) ? "Not installed" : (pc_settings_get_hd_model_enabled(row) ? "On" : "Off"));
     }
     if (group == PC_SET_PICKER_RESOLUTION) {
         std::vector<int> c = pickerResolutionChoices();
@@ -6714,6 +6796,9 @@ void pc_settings_row_change(int group, int row, int dir, bool ok) {
         else if (dir) pendingPadBinds()[row] = -1;
     } else if (group == PC_SET_PICKER_TEXPACKS && ok) {
         texturePacksRowAction(row, pc_texpack_list_packs());
+    } else if (group == PC_SET_PICKER_HDMODELS && dir) {
+        sHdModelsSelection = row;
+        hdModelsToggle(row);
     } else if (group == PC_SET_PICKER_HDMODELS && ok) {
         sHdModelsSelection = row;
         hdModelsRowAction(row);

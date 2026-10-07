@@ -317,6 +317,13 @@ bool resolve(const CARDFileInfo* info, std::string& name)
 }
 } // namespace
 
+// Carpeta de las tarjetas (F1 > Data > Open Save Folder).
+std::string pc_card_save_dir()
+{
+	std::error_code error;
+	return fs::absolute(saveRoot(), error).string();
+}
+
 extern "C" {
 
 void CARDInit(void)

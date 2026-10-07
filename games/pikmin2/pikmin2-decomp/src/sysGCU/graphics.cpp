@@ -249,7 +249,13 @@ void Viewport::setViewport()
 
 	u32 x = mBounds2.getWidth();
 	u32 y = mBounds2.getHeight();
+#ifdef PIKI_PC_PORT
+	// Origen negativo (ventana del tesoro: y = -47): float -> u32 directo es
+	// indefinido en C++; por s32 queda el mismo patrón de bits que la consola.
+	GXSetScissor((u32)(s32)mBounds2.p1.x, (u32)(s32)mBounds2.p1.y, x, gScissorOffset + y);
+#else
 	GXSetScissor(mBounds2.p1.x, mBounds2.p1.y, x, gScissorOffset + y);
+#endif
 }
 
 /**
@@ -779,6 +785,12 @@ void Graphics::fillZBuffer(Rectf& bounds, f32 z)
 
 	GXPosition3f32(bounds.p2.x, bounds.p1.y, z);
 	GXColor4u8(10, 70, 10, 255);
+#ifdef PIKI_PC_PORT
+	// Sin GXEnd el puerto enviaba el quad con el estado siguiente (color
+	// activado, Z LESS): pintaba de verde (10,70,10) todo lo que no tenía
+	// geometría, como el cielo de la cinemática del tesoro.
+	GXEnd();
+#endif
 
 	GXSetZMode(GX_TRUE, GX_LESS, GX_TRUE);
 	GXSetColorUpdate(GX_TRUE);

@@ -1,3 +1,6 @@
+#ifdef PIKI_PC_PORT
+extern "C" int pc_p2_hard_single_nectar(void);
+#endif
 #include "Game/Entities/Egg.h"
 #include "Game/MapMgr.h"
 #include "Game/EnemyAnimKeyEvent.h"
@@ -287,6 +290,13 @@ void Obj::genItem()
 			dropType = EGGDROP_SingleNectar;
 		}
 	}
+
+#ifdef PIKI_PC_PORT
+	// Hard: el huevo de néctar doble suelta una sola gota.
+	if (dropType == EGGDROP_DoubleNectar && pc_p2_hard_single_nectar()) {
+		dropType = EGGDROP_SingleNectar;
+	}
+#endif
 
 	mititeGroup = nullptr;
 	Pellet* pellet;

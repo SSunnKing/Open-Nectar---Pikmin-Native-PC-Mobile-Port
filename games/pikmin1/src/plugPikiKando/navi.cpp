@@ -1946,20 +1946,21 @@ void Navi::pcCursorToFront()
  * @brief Gira el cursor `angle` radianes alrededor del capitán.
  *
  * Lo llama la cámara libre al girar, para que el cursor quede en el mismo
- * sitio de la pantalla. Con un objetivo fijado (Lock-On) el cursor va pegado
- * a él y no se toca.
+ * sitio de la pantalla. Con un objetivo fijado (Lock-On) el cursor visible va
+ * pegado a él y no se toca; gira solo el libre (adonde apunta el jugador).
  */
 void Navi::pcRotateCursor(f32 angle)
 {
-	if (mPcLockTarget) {
-		return;
-	}
 	const f32 c = cosf(angle), s = sinf(angle);
 	auto rotate = [&](Vector3f& v) {
 		const f32 x = v.x, z = v.z;
 		v.x = x * c + z * s;
 		v.z = z * c - x * s;
 	};
+	if (mPcLockTarget) {
+		rotate(mPcAimOffset);
+		return;
+	}
 	rotate(mCursorPosition);
 	rotate(mCursorTargetPosition);
 	rotate(mPcAimOffset);
@@ -3140,6 +3141,7 @@ void Navi::makeVelocity(bool isSunset)
 			// Mod "Free Camera": empujar el cursor más allá de su límite hacia
 			// un lado de la pantalla gira la cámara hacia ese lado (y el cursor
 			// gira con ella). Mismo sentido y acumulador que mantener Shift.
+			// Con objetivo fijado lo hace el cursor libre (más abajo).
 			if (pc_settings_get_free_camera() && !pc_first_person_active_for(mNaviID) && !mPcLockTarget) {
 				const Vector3f excess = wanted - targetPos;
 				const f32 lateral     = excess.x * screenRight.x + excess.z * screenRight.z;
@@ -3147,6 +3149,22 @@ void Navi::makeVelocity(bool isSunset)
 					// Radianes de giro = arco que habría recorrido el cursor;
 					// la cámara gira 3,2 rad por unidad de arrastre.
 					pc_window_add_camera_drag(-(lateral / NAVI_PARM(mCursorMaxRadius)) / 3.2f);
+				}
+			}
+		}
+
+		// Lock-On + Free Camera: el cursor visible está clavado en el objetivo,
+		// pero el libre (mPcAimOffset) sigue al ratón. Empujarlo contra su
+		// límite gira la cámara igual que sin objetivo, y el bloqueo se queda.
+		if (mPcLockTarget && pc_settings_get_free_camera() && !pc_first_person_active_for(mNaviID)) {
+			const Vector3f wanted = mPcAimOffset + mouseDelta;
+			const f32 maxRadius   = NAVI_PARM(mCursorMaxRadius);
+			const f32 len         = wanted.length();
+			if (len > maxRadius) {
+				const Vector3f excess = wanted - wanted * (maxRadius / len);
+				const f32 lateral     = excess.x * screenRight.x + excess.z * screenRight.z;
+				if (lateral != 0.0f) {
+					pc_window_add_camera_drag(-(lateral / maxRadius) / 3.2f);
 				}
 			}
 		}

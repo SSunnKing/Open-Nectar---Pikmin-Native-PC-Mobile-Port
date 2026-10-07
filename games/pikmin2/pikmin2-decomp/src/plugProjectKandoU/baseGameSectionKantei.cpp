@@ -1,3 +1,5 @@
+#include <cstdio>
+#include <cstdlib>
 #include "Game/pelletMgr.h"
 #include "og/Screen/DispMember.h"
 #include "Screen/Game2DMgr.h"
@@ -360,6 +362,33 @@ void BaseGameSection::do_drawOtakaraWindow(Graphics& gfx)
 
 	vp->setViewport();
 	vp->setProjection();
+#ifdef PIKI_PC_PORT
+	{
+		// PIKMIN_OTAKARA_DEBUG=1: estado de la ventana del tesoro (cada 30 dibujos).
+		static const bool dbg = getenv("PIKMIN_OTAKARA_DEBUG") != nullptr;
+		static int n          = 0;
+		if (dbg && (n++ % 30) == 0) {
+			auto heads = [](Sys::DrawBuffer* db) {
+				int c           = 0;
+				J3DDrawBuffer* b = db->mBuffer;
+				for (u32 i = 0; b && i < b->mBufferSize; i++)
+					if (b->mBuffer[i])
+						c++;
+				return c;
+			};
+			Camera* cam = mTreasureZoomCamera;
+			Vector3f eye = cam->getPosition();
+			fprintf(stderr,
+			        "[OTAKARA] state=%d scale=%.3f creature=%p vis=%d vp=(%.0f,%.0f)-(%.0f,%.0f) eye=(%.1f %.1f %.1f) dist=%.1f near=%.1f far=%.1f "
+			        "dt=%.4f opaque=%d xlu=%d\n",
+			        mTreasureGetState, mDraw2DCreatureScale, mDraw2DCreature,
+			        mDraw2DCreature ? (int)mDraw2DCreature->mLod.isFlag(AILOD_IsVisible) : -1, vp->mBounds.p1.x, vp->mBounds.p1.y,
+			        vp->mBounds.p2.x, vp->mBounds.p2.y, eye.x, eye.y, eye.z, mTreasureZoomCamera->mTargetDistance, cam->getNear(),
+			        cam->getFar(), sys->mDeltaTime, heads(mOpaqueDrawBuffer->get(DB_2DLayer)),
+			        heads(mTransparentDrawBuffer->get(DB_2DLayer)));
+		}
+	}
+#endif
 
 	mOpaqueDrawBuffer->get(DB_2DLayer)->draw();
 	mTransparentDrawBuffer->get(DB_2DLayer)->draw();

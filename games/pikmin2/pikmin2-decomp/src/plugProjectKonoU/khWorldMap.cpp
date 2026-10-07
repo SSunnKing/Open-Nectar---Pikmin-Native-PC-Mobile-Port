@@ -23,6 +23,43 @@ namespace kh {
 
 namespace Screen {
 
+#ifdef PIKI_PC_PORT
+// getGlbVtx() reflects the last J2D draw. The world-map rocket changes its
+// parent pane during update and immediately asks a child pane for the exhaust
+// position, so the emitter otherwise follows the previous rotation. Rebuild
+// the current branch from its local matrices. The world-map screens remain
+// centred in widescreen, so their root has no HUD-anchor translation.
+static void pcGetCurrentPaneMtx(J2DPane* pane, Mtx out)
+{
+	J2DPane* parent = pane->getParentPane();
+	if (!parent) {
+		PSMTXCopy(pane->mPositionMtx, out);
+		return;
+	}
+
+	Mtx parentMtx;
+	if (parent->getParentPane()) {
+		pcGetCurrentPaneMtx(parent, parentMtx);
+	} else {
+		PSMTXCopy(parent->mPositionMtx, parentMtx);
+	}
+	PSMTXConcat(parentMtx, pane->mPositionMtx, out);
+}
+
+static JGeometry::TVec3f pcGetCurrentPaneVtx(J2DPane* pane, u8 idx)
+{
+	Mtx mtx;
+	pcGetCurrentPaneMtx(pane, mtx);
+	f32 x = (idx & 1) ? pane->mBounds.f.x : pane->mBounds.i.x;
+	f32 y = (idx & 2) ? pane->mBounds.f.y : pane->mBounds.i.y;
+	JGeometry::TVec3f out;
+	out.x = x * mtx[0][0] + y * mtx[0][1] + mtx[0][3];
+	out.y = x * mtx[1][0] + y * mtx[1][1] + mtx[1][3];
+	out.z = x * mtx[2][0] + y * mtx[2][1] + mtx[2][3];
+	return out;
+}
+#endif
+
 // these control the camera zoom during new level unlocked animations
 const f32 cOpenMinFrm[4] = { 0.0f, 300.0f, 600.0f, 900.0f };
 const f32 cOpenMaxFrm[4] = { 300.0f, 600.0f, 900.0f, 1100.0f };
@@ -630,7 +667,12 @@ void WorldMap::update(Game::WorldMap::UpdateArg& arg)
 	}
 
 	case WMAP_RocketMoving2: {
-		if (PC_ORIG_TICK()) mRocketMoveCounter++;
+		if (!PC_ORIG_TICK()) {
+			rocketUpdate(cWaitPane);
+			onyonUpdate();
+			break;
+		}
+		mRocketMoveCounter++;
 		f32 x, y;
 		if (mRocketAngleMode == ROT_Unk1) {
 			x = pikmin2_cosf(0.1f);
@@ -844,6 +886,11 @@ void WorldMap::update(Game::WorldMap::UpdateArg& arg)
 	}
 
 	case WMAP_BeginShipAppear: {
+		if (!PC_ORIG_TICK()) {
+			rocketUpdate(cWaitPane);
+			onyonUpdate();
+			break;
+		}
 		f32 angle = pikmin2_atan2f(mRocketAngle.x, -mRocketAngle.y);
 
 		if (mRocketAngleMode == ROT_Unk1 && angle > 0.0f) {
@@ -1099,12 +1146,18 @@ void WorldMap::draw4th(Graphics& gfx)
  */
 f32 WorldMap::rocketMove(J2DPane* pane, bool flag)
 {
-	if (PC_ORIG_TICK()) mRocketMoveCounter++;
+	JGeometry::TVec2f target(getPaneCenterX(pane) - mRocketPosition.x, getPaneCenterY(pane) - mRocketPosition.y);
+	f32 currentDist = target.x * target.x + target.y * target.y;
+	if (!PC_ORIG_TICK()) {
+		return currentDist;
+	}
+
+	mRocketMoveCounter++;
 	JGeometry::TVec2f angle;
 	angle.x = mRocketAngle.x;
 	angle.y = mRocketAngle.y;
-	JGeometry::TVec2f pos(getPaneCenterX(pane) - mRocketPosition.x, getPaneCenterY(pane) - mRocketPosition.y);
-	f32 dist        = pos.x * pos.x + pos.y * pos.y;
+	JGeometry::TVec2f pos(target);
+	f32 dist        = currentDist;
 	f32 factor      = msVal._08;
 	f32 otherFactor = msVal._4C;
 
@@ -1170,18 +1223,27 @@ void WorldMap::rocketUpdate(J2DPane* pane)
 	shipPane->setOffset(mRocketPosition.x, mRocketPosition.y);
 	shipPane->setAngle(JMAAtan2Radian(-mRocketAngle.x, -mRocketAngle.y) * JMath::TAngleConstant_<f32>::RADIAN_TO_DEGREE_FACTOR());
 
-	mRocketScale = mRocketScale * msVal._08 + (1.0f - msVal._08) * tag2num(pane->mMessageID);
+	if (PC_ORIG_TICK()) {
+		mRocketScale = mRocketScale * msVal._08 + (1.0f - msVal._08) * tag2num(pane->mMessageID);
+	}
 
 	f32 scale2 = msVal._20[mOpenCourses - 1] * mRocketScale;
 	shipPane->updateScale(scale2);
 
+	J2DPane* shipPane2     = mScreenRocket->search(MC8("Procket"));
+#ifdef PIKI_PC_PORT
+	JGeometry::TVec3f pos1 = pcGetCurrentPaneVtx(shipPane2, GLBVTX_BtmLeft);
+	JGeometry::TVec3f pos2 = pcGetCurrentPaneVtx(shipPane2, GLBVTX_BtmRight);
+	JGeometry::TVec3f pos3 = pcGetCurrentPaneVtx(shipPane2, GLBVTX_TopLeft);
+	JGeometry::TVec3f pos4 = pcGetCurrentPaneVtx(shipPane2, GLBVTX_TopRight);
+#else
 	Vector2f sep = mRocketPosition;
 	sep -= mRocketPosition2;
-	J2DPane* shipPane2     = mScreenRocket->search(MC8("Procket"));
 	JGeometry::TVec3f pos1 = shipPane2->getGlbVtx(GLBVTX_BtmLeft);
 	JGeometry::TVec3f pos2 = shipPane2->getGlbVtx(GLBVTX_BtmRight);
 	JGeometry::TVec3f pos3 = shipPane2->getGlbVtx(GLBVTX_TopLeft);
 	JGeometry::TVec3f pos4 = shipPane2->getGlbVtx(GLBVTX_TopRight);
+#endif
 
 	Vec vec  = { 0.0f, 0.0f, 0.0f };
 	vec.x    = 0.5f * (pos1.x + pos2.x);
@@ -1190,15 +1252,21 @@ void WorldMap::rocketUpdate(J2DPane* pane)
 	vec2.x   = 0.5f * (pos4.x + pos3.x);
 	vec2.y   = 0.5f * (pos4.y + pos3.y);
 
-	f32 efxX   = sep.x + (vec.x * (1.0f - msVal._1C) + vec2.x * msVal._1C);
-	f32 efxY   = sep.y + (vec.y * (1.0f - msVal._1C) + vec2.y * msVal._1C);
+	f32 efxX = vec.x * (1.0f - msVal._1C) + vec2.x * msVal._1C;
+	f32 efxY = vec.y * (1.0f - msVal._1C) + vec2.y * msVal._1C;
+#ifndef PIKI_PC_PORT
+	efxX += sep.x;
+	efxY += sep.y;
+#endif
 	mEffectPos = Vector2f(efxX, efxY);
 	mEffectDir = Vector2f(-mRocketAngle.x, -mRocketAngle.y);
 
 	efx2d::WorldMap::ArgDirScale arg(mEffectPos, mEffectDir, scale2);
 
-	efx2d::WorldMap::T2DRocketA efx;
-	efx.create(&arg);
+	if (PC_ORIG_TICK()) {
+		efx2d::WorldMap::T2DRocketA efx;
+		efx.create(&arg);
+	}
 	mEfxRocketSparks->setGlobalParticleScale(scale2);
 	mEfxRocketGlow->setGlobalParticleScale(scale2);
 }
@@ -1236,6 +1304,11 @@ void WorldMap::onyonUpdate()
  */
 void WorldMap::postureControl(J2DPane* pane)
 {
+	if (!PC_ORIG_TICK()) {
+		rocketUpdate(pane);
+		return;
+	}
+
 	f32 angle1, angle2, angle3;
 	angle1 = pikmin2_atan2f(mRocketAngle.x, -mRocketAngle.y);
 	angle2 = pikmin2_atan2f(0.0f, 1.0f);
@@ -1740,6 +1813,11 @@ void WorldMap::OnyonDynamics::initPtcl()
  */
 Vector2f WorldMap::OnyonDynamics::move(WorldMap* wmap, const JGeometry::TVec2f& pos)
 {
+	if (!PC_ORIG_TICK()) {
+		update(wmap);
+		return mOffset;
+	}
+
 	// unused pane
 	u64 tags[4] = { MC8("Nwait0"), MC8("Nwait1"), MC8("Nwait2"), MC8("Nwait3") };
 	int id      = wmap->mCurrentCourseIndex;
@@ -1820,7 +1898,13 @@ void WorldMap::OnyonDynamics::update(WorldMap* map)
 	angle *= 57.295776f;
 	mOnyonPane->setAngle(angle);
 	mOnyonPane->updateScale(scale);
+#ifdef PIKI_PC_PORT
+	Mtx currentMtx;
+	pcGetCurrentPaneMtx(mOnyonPane, currentMtx);
+	mEfxPosition.set(currentMtx[0][3], currentMtx[1][3]);
+#else
 	mEfxPosition.set(mOnyonPane->mGlobalMtx[0][3], mOnyonPane->mGlobalMtx[1][3]);
+#endif
 	_28 = Vector2f(0.0f, 1.0f);
 	mOnyonKira->setGlobalParticleScale(scale);
 }

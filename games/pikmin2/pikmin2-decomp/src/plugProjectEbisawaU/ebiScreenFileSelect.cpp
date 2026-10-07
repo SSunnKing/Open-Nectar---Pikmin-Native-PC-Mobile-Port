@@ -12,6 +12,74 @@ extern bool gPcBgStretch;
 #include "PSSystem/PSSystemIF.h"
 #include "og/Screen/ogScreen.h"
 #include "JSystem/JKernel/JKRDvdRipper.h"
+#ifdef PIKI_PC_PORT
+#include "JSystem/J2D/J2DTextBox.h"
+#include "P2JME/P2JME.h"
+extern "C" int pc_p2_rules_slot_bits(int slot);
+
+namespace {
+// Etiqueta HARD / PERMADEATH de una partida, como la de Pikmin 1. Es hija de
+// la pelota del fichero: posición, animación de selección y visibilidad son
+// las de la ranura. Placa w08_160.bti teñida de rojo y la fuente de los
+// mensajes de esta misma pantalla, ambas de Pikmin 2.
+class PcRulesBadge : public J2DPicture {
+public:
+	PcRulesBadge(int slot, J2DPane* parent, JUTFont* font)
+	    : J2DPicture("w08_160.bti")
+	    , mSlot(slot)
+	    , mText(nullptr)
+	{
+		const f32 w  = 150.0f;
+		const f32 h  = 40.0f;
+		const f32 cx = parent->getWidth() * 0.5f;
+		const f32 y  = parent->getHeight() * 0.92f;
+		place(JGeometry::TBox2f(cx - w * 0.5f, y, cx + w * 0.5f, y + h));
+		// Tinte por color de vértice: setBlackWhite escribe GX_TEVREG0/1, que
+		// son globales, y el brillo y las partículas de las burbujas los
+		// heredaban (cuadrados rojos).
+		setCornerColor(JUtility::TColor(255, 110, 100, 255));
+
+		// El texto, como los del juego: un J2DTextBox hijo con la fuente del
+		// gestor de mensajes (los textos del BLO no traen fuente: FNT1 vacío).
+		const ResFONT* res = font ? font->getResFont() : nullptr;
+		if (res) {
+			mText = new J2DTextBox('PcRB', JGeometry::TBox2f(0.0f, 0.0f, w, h), res, "PERMADEATH", 32, J2DHBIND_Center,
+			                       J2DVBIND_Center);
+			mText->setFontSize(15.0f, 20.0f);
+			mText->setCharColor(JUtility::TColor(255, 255, 255, 255));
+			mText->setGradColor(JUtility::TColor(255, 230, 180, 255));
+			appendChild(mText);
+		}
+	}
+
+	virtual void drawSelf(f32 x, f32 y, Mtx* mtx)
+	{
+		const int bits = pc_p2_rules_slot_bits(mSlot);
+		if (mText) {
+			if (bits & 0x30) {
+				const char* label = "HARD";
+				if ((bits & 0x10) && (bits & 0x20))
+					label = "HARD + PERMA";
+				else if (bits & 0x10)
+					label = "PERMADEATH";
+				mText->setString(label);
+				mText->show();
+			} else {
+				mText->hide();
+			}
+		}
+		if (!(bits & 0x30)) {
+			return;
+		}
+		J2DPicture::drawSelf(x, y, mtx);
+	}
+
+private:
+	int mSlot;
+	J2DTextBox* mText;
+};
+} // namespace
+#endif
 
 namespace ebi {
 namespace Screen {
@@ -241,6 +309,14 @@ void TMainScreen::doSetArchive(JKRArchive* archive)
 	mPaneND[0]      = static_cast<J2DPictureEx*>(E2DScreen_searchAssert(mMainScreen, 'ND1'));
 	mPaneND[1]      = static_cast<J2DPictureEx*>(E2DScreen_searchAssert(mMainScreen, 'ND2'));
 	mPaneND[2]      = static_cast<J2DPictureEx*>(E2DScreen_searchAssert(mMainScreen, 'ND3'));
+#ifdef PIKI_PC_PORT
+	// PIKMIN_NO_RULE_BADGE=1: sin etiquetas (para aislar fallos de dibujo).
+	if (!getenv("PIKMIN_NO_RULE_BADGE")) {
+		for (int i = 0; i < 3; i++) {
+			mPaneND[i]->appendChild(new PcRulesBadge(i, mPaneND[i], gP2JMEMgr ? gP2JMEMgr->mFont : nullptr));
+		}
+	}
+#endif
 	mPaneDataWindow = E2DScreen_searchAssert(mMainScreen, MC8("Ndataw"));
 
 	mPaneSelE0[0] = static_cast<J2DPicture*>(E2DScreen_searchAssert(mMainScreen, MC8("Pd1selE0")));

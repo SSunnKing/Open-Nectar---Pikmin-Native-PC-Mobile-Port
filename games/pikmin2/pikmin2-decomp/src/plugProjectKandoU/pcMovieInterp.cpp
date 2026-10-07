@@ -38,6 +38,19 @@ f32 pcObjectCameraNextFov();
 } // namespace Game
 
 extern "C" bool gPcMovieInterpFrame;
+
+bool pc_host_alloc_active();
+void pc_host_alloc_set(bool active);
+namespace {
+// Las listas de este archivo duran más que el heap de la sección (al entrar
+// en una cueva se rehace): con el new global iban a ese heap y luego se
+// liberaban contra uno que ya no existía ("Bad Block"). Van al de sistema.
+struct PcHostAlloc {
+	bool mPrev = pc_host_alloc_active();
+	PcHostAlloc() { pc_host_alloc_set(true); }
+	~PcHostAlloc() { pc_host_alloc_set(mPrev); }
+};
+} // namespace
 bool gPcMovieInterpFrame = false;
 
 namespace {
@@ -162,6 +175,7 @@ void interpolateCamera(Camera* cam, f32 alpha, Matrixf& outView, bool& ok)
 
 extern "C" void pc_movie_interp_note_entry(J3DModel* model)
 {
+	PcHostAlloc pcHostAlloc;
 	if (sRecording && model && sEnteredSet.insert(model).second) {
 		sEntered.push_back(model);
 	}
@@ -171,6 +185,7 @@ extern "C" void pc_movie_interp_note_entry(J3DModel* model)
 // modelos) invalida lo inscrito hasta entonces: solo cuenta lo posterior.
 extern "C" void pc_movie_interp_note_clear(void)
 {
+	PcHostAlloc pcHostAlloc;
 	if (sRecording) {
 		sEntered.clear();
 		sEnteredSet.clear();
@@ -179,6 +194,7 @@ extern "C" void pc_movie_interp_note_clear(void)
 
 extern "C" void pc_movie_interp_begin_tick(void)
 {
+	PcHostAlloc pcHostAlloc;
 	sRecording = true;
 	sEntered.clear();
 	sEnteredSet.clear();
@@ -186,6 +202,7 @@ extern "C" void pc_movie_interp_begin_tick(void)
 
 extern "C" void pc_movie_interp_end_tick(void)
 {
+	PcHostAlloc pcHostAlloc;
 	sRecording = false;
 	sPrev.swap(sCur);
 	sCur.clear();
@@ -196,6 +213,7 @@ extern "C" void pc_movie_interp_end_tick(void)
 
 extern "C" void pc_movie_interp_reset(void)
 {
+	PcHostAlloc pcHostAlloc;
 	sRecording = false;
 	sEntered.clear();
 	sEnteredSet.clear();
@@ -226,6 +244,7 @@ static void noteResult(int reason, size_t models, size_t viewOnly)
 
 extern "C" bool pc_movie_interp_begin_frame(float alpha)
 {
+	PcHostAlloc pcHostAlloc;
 	static const bool disabled = std::getenv("PIKMIN_MOVIE_NO_INTERP") != nullptr;
 	if (disabled || sActive) {
 		return false;
@@ -346,6 +365,7 @@ extern "C" bool pc_movie_interp_begin_frame(float alpha)
 
 extern "C" void pc_movie_interp_end_frame(void)
 {
+	PcHostAlloc pcHostAlloc;
 	if (!sActive) {
 		return;
 	}

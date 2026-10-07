@@ -93,11 +93,12 @@ void pc_p2_text(int x, int y, const char* text, Colour main, Colour shadow, int 
 // Envia al renderer lo acumulado por el menu en este frame (llamar tras pc_settings_draw).
 void pc_settings_p2_flush(void);
 
-// pc_permadeath.h es de Pikmin 1 (formato de guardado propio). Pikmin 2 no
-// tiene modo dificil: los valores de las opciones se muestran tal cual.
+// pc_permadeath.h es de Pikmin 1 (formato de guardado propio). En Pikmin 2
+// Hard y Permadeath van en la cabecera de la partida (pc_p2_rules.h).
+#include "pc_p2_rules.h"
 #define PC_HARDMODE_PIKI_LIMIT  (80)
 #define PC_HARDMODE_DAY_MINUTES (8)
-inline bool pc_hardmode_active(void) { return false; }
+inline bool pc_hardmode_active(void) { return pc_hardmode_active_c() != 0; }
 
 // Contadores de Pikmin 1 que lee el menu (contador de ociosos). En P2 aun no
 // hay enganche: 0 hace que no se dibuje nada.

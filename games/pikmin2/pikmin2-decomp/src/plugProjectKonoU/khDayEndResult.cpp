@@ -702,6 +702,29 @@ void ObjDayEndResultItem::doDraw(Graphics& gfx)
 	J2DPane* pane2               = mScreenMain->search('N_3d');
 
 	J2DPane* panes[2] = { mScreenMain->search(MC8("Nsetp00")), mScreenMain->search(MC8("Nsetp01")) };
+#ifdef PIKI_PC_PORT
+	// El dibujo mueve las filas con add() y solo la animación del update las
+	// devuelve a su sitio. Con 2 dibujos por update (60 FPS) el segundo partía
+	// desplazado y la lista vibraba entre dos posiciones: se restauran al salir.
+	struct PcRowRestore {
+		J2DPane* mPanes[2];
+		f32 mX[2], mY[2];
+		PcRowRestore(J2DPane** p)
+		{
+			for (int i = 0; i < 2; i++) {
+				mPanes[i] = p[i];
+				mX[i]     = p[i]->getTranslateX();
+				mY[i]     = p[i]->getTranslateY();
+			}
+		}
+		~PcRowRestore()
+		{
+			for (int i = 0; i < 2; i++) {
+				mPanes[i]->setOffset(mX[i], mY[i]);
+			}
+		}
+	} pcRowRestore(panes);
+#endif
 
 	u64 icons[2] = { MC8("iPicon00"), MC8("iPicon01") };
 	u64 names[2] = { MC8("Piname00"), MC8("Piname01") };

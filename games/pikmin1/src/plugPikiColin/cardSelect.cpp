@@ -84,6 +84,9 @@ struct CardSelectSetupSection : public Node {
 		// reset the window pointer
 		memcardWindow = nullptr;
 #if defined(PIKI_PC_PORT)
+		// El salto es una petición de una sola partida nueva. Una visita nueva a
+		// esta pantalla nunca debe heredar una selección anterior o cancelada.
+		pc_tutorial_skip_set_pending(false);
 		// Venimos de perder una partida Permadeath: el aviso va primero y el
 		// resto del flujo espera debajo hasta que se cierra.
 		pc_erased_notice_open_if_queued();
@@ -206,6 +209,7 @@ struct CardSelectSetupSection : public Node {
 		}
 		pc_permadeath_set_pending(false);
 		pc_hardmode_set_pending(false);
+		pc_tutorial_skip_set_pending(false);
 		commitSelectedFile(infos[0], 0);
 		pc_speedrun_start_timer();
 		mNextSectionsFlag = 0; // sin destino: la salida carga la partida nueva
@@ -354,6 +358,7 @@ struct CardSelectSetupSection : public Node {
 			}
 			pc_permadeath_set_pending(choice == PC_NEWGAME_PERMADEATH);
 			pc_hardmode_set_pending(pc_newgame_prompt_chose_hard());
+			pc_tutorial_skip_set_pending(pc_newgame_prompt_chose_skip_tutorial());
 			commitSelectedFile(mPendingCard, mPendingSlot);
 			mState = Exit;
 			gsys->setFade(0.0f);
@@ -427,7 +432,15 @@ struct CardSelectSetupSection : public Node {
 						sprintf(flowCont.mDoorStageFilePath, "%s", stage->mFileName);
 						// day one is locked at 2:48pm
 						gameflow.mWorldClock.setTime(TUTORIAL_TIME_OF_DAY);
+					#if defined(PIKI_PC_PORT)
+						// Skip tutorial enters the stage directly. IntroGame is only the
+						// two-part crash movie and has no progression state to preserve.
+						gameflow.mNextOnePlayerSectionID = pc_tutorial_skip_pending()
+						                                       ? ONEPLAYER_NewPikiGame
+						                                       : ONEPLAYER_IntroGame;
+					#else
 						gameflow.mNextOnePlayerSectionID = ONEPLAYER_IntroGame;
+					#endif
 					}
 				} else {
 					PRINT("CHALLENGE MODE!!!\n");
@@ -605,6 +618,7 @@ struct CardSelectSetupSection : public Node {
 					// speedrun.com: al seleccionar la partida nueva.
 					pc_permadeath_set_pending(false);
 					pc_hardmode_set_pending(false);
+					pc_tutorial_skip_set_pending(false);
 					commitSelectedFile(card, returnCode - zen::ogScrFileChkSelMgr::FILECHKSEL_SlotOffset);
 					pc_speedrun_start_timer();
 					mState = Exit;
