@@ -1,0 +1,729 @@
+#include "DebugLog.h"
+#include "GameStat.h"
+#include "P2D/Graph.h"
+#include "P2D/Picture.h"
+#include "P2D/Screen.h"
+#include "PlayerState.h"
+#include "SoundMgr.h"
+#include "jaudio/verysimple.h"
+#include "zen/DrawCM.h"
+#include "zen/ogMessage.h"
+#include "zen/ogResult.h"
+#include "pc_gfx.h"
+#if PIKI_PC_TOUCH
+#include "touch/pc_touch.h"
+#endif
+#include "zen/ogSave.h"
+#include "zen/ogSub.h"
+
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(__LINE__) // Never used in the DLL
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F4
+ */
+DEFINE_PRINT("OgResultSection")
+
+namespace zen {
+
+/// Table of all end of day diary entries, indexed by `zen::EnumResult`. Entries ending in _01.blo are a second page
+/// of the preceding entry.
+immut char* bloFile_Res_Table[] = {
+	"END",
+	"screen/blo/re_a_00.blo", // 1 Day Since Impact - I have somehow managed to lauch the Dolphin, but was surprised...
+	"screen/blo/re_a_01.blo", // The Dolphin is missing 29 parts. If I can't recover them all, I may never...
+	"screen/blo/re_b_00.blo", // [X] Day(s) Since Impact - It appears that many of my ship's parts have landed in...
+	"screen/blo/re_b_01.blo",
+	"screen/blo/re_c_00.blo",
+	"screen/blo/re_d_00.blo",
+	"screen/blo/re_e_00.blo",
+	"screen/blo/re_f_00.blo",
+	"screen/blo/re_f_01.blo",
+	"screen/blo/re_g_00.blo",
+	"screen/blo/re_h_00.blo",
+	"screen/blo/re_i_00.blo",
+	"screen/blo/re_j_00.blo",
+	"screen/blo/re_k_00.blo",
+	"screen/blo/re_j2_00.blo",
+	"screen/blo/re_j2_01.blo",
+	"screen/blo/re_k2_00.blo",
+	"screen/blo/re_s1_00.blo",
+	"screen/blo/re_t1_00.blo",
+	"screen/blo/re_u1_00.blo",
+	"screen/blo/re_v1_00.blo",
+	"screen/blo/re_v1_01.blo",
+	"screen/blo/re_p2_00.blo",
+	"screen/blo/re_q2_00.blo",
+	"screen/blo/re_q2_01.blo",
+	"screen/blo/re_r2_00.blo",
+	"screen/blo/re_l_00.blo",
+	"screen/blo/re_l_01.blo",
+	"screen/blo/re_m_00.blo",
+	"screen/blo/re_m_01.blo",
+	"screen/blo/re_n_00.blo",
+	"screen/blo/re_o_00.blo",
+	"screen/blo/re_p_00.blo",
+	"screen/blo/re_p_01.blo",
+	"screen/blo/re_q_00.blo",
+	"screen/blo/re_r_00.blo",
+	"screen/blo/re_s_00.blo",
+	"screen/blo/re_t_00.blo",
+	"screen/blo/re_u_00.blo",
+	"screen/blo/re_v_00.blo",
+	"screen/blo/re_w_00.blo",
+	"screen/blo/re_x_00.blo",
+	"screen/blo/re_y_00.blo",
+	"screen/blo/re_z_00.blo",
+	"screen/blo/re_a1_00.blo", // [X] Day(s) Since Impact - Candypop Bud. When I throw Pikmin into this flower, ...
+	"screen/blo/re_b1_00.blo",
+	"screen/blo/re_c1_00.blo",
+	"screen/blo/re_d1_00.blo",
+	"screen/blo/re_e1_00.blo",
+	"screen/blo/re_f1_00.blo",
+	"screen/blo/re_g1_00.blo",
+	"screen/blo/re_h1_00.blo",
+	"screen/blo/re_i1_00.blo",
+	"screen/blo/re_j1_00.blo",
+	"screen/blo/re_k1_00.blo",
+	"screen/blo/re_l1_00.blo",
+	"screen/blo/re_m1_00.blo",
+	"screen/blo/re_n1_00.blo",
+	"screen/blo/re_o1_00.blo",
+	"screen/blo/re_p1_00.blo",
+	"screen/blo/re_q1_00.blo",
+	"screen/blo/re_r1_00.blo",
+	"screen/blo/re_w1_00.blo",
+	"screen/blo/re_x1_00.blo",
+	"screen/blo/re_y1_00.blo",
+	"screen/blo/re_z1_00.blo",
+	"screen/blo/re_a2_00.blo", // [X] Day(s) Since Impact - At times, these seemingly emotionless Pikmin act with...
+	"screen/blo/re_b2_00.blo",
+	"screen/blo/re_c2_00.blo",
+	"screen/blo/re_d2_00.blo",
+	"screen/blo/re_e2_00.blo",
+	"screen/blo/re_f2_00.blo",
+	"screen/blo/re_g2_00.blo",
+	"screen/blo/re_h2_00.blo",
+	"screen/blo/re_i2_00.blo",
+	"screen/blo/re_l2_00.blo",
+	"screen/blo/re_m2_00.blo",
+	"screen/blo/re_n2_00.blo",
+	"screen/blo/re_o2_00.blo",
+	"screen/blo/re_s2_00.blo",
+	"screen/blo/re_t2_00.blo",
+	"screen/blo/re_u2_00.blo",
+	"screen/blo/re_v2_00.blo",
+	"screen/blo/re_w2_00.blo",
+	"screen/blo/ufo_a_0.blo",
+	"screen/blo/ufo_b_0.blo",
+	"screen/blo/ufo_c_0.blo",
+	"screen/blo/ufo_d_0.blo",
+	"screen/blo/ufo_e_0.blo",
+	"screen/blo/ufo_f_0.blo",
+	"screen/blo/ufo_g_0.blo",
+	"screen/blo/ufo_h_0.blo",
+	"screen/blo/ufo_i_0.blo",
+	"screen/blo/ufo_j_0.blo",
+	"screen/blo/ufo_k_0.blo",
+	"screen/blo/ufo_l_0.blo",
+	"screen/blo/ufo_m_0.blo",
+	"screen/blo/ufo_n_0.blo",
+	"screen/blo/ufo_o_0.blo",
+	"screen/blo/ufo_p_0.blo",
+	"screen/blo/ufo_q_0.blo",
+	"screen/blo/ufo_r_0.blo",
+	"screen/blo/ufo_s_0.blo",
+	"screen/blo/ufo_t_0.blo",
+	"screen/blo/ufo_u_0.blo",
+	"screen/blo/ufo_v_0.blo",
+	"screen/blo/ufo_w_0.blo",
+	"screen/blo/ufo_x_0.blo",
+	"screen/blo/ufo_y_0.blo",
+	"screen/blo/ufo_z_0.blo",
+	"screen/blo/ufo_a1_0.blo",
+	"screen/blo/ufo_b1_0.blo",
+	"screen/blo/ufo_c1_0.blo",
+	"screen/blo/auf_a_0.blo",
+	"screen/blo/auf_b_0.blo",
+	"screen/blo/auf_c_0.blo",
+	"screen/blo/auf_d_0.blo",
+	"screen/blo/auf_e_0.blo",
+	"screen/blo/auf_f_0.blo",
+	"screen/blo/auf_g_0.blo",
+	"screen/blo/auf_h_0.blo",
+	"screen/blo/auf_i_0.blo",
+	"screen/blo/auf_j_0.blo",
+	"screen/blo/auf_k_0.blo",
+	"screen/blo/auf_l_0.blo",
+	"screen/blo/auf_m_0.blo",
+	"screen/blo/auf_n_0.blo",
+	"screen/blo/auf_o_0.blo",
+	"screen/blo/auf_p_0.blo",
+	"screen/blo/auf_q_0.blo",
+	"screen/blo/auf_r_0.blo",
+	"screen/blo/auf_s_0.blo",
+	"screen/blo/auf_t_0.blo",
+	"screen/blo/auf_u_0.blo",
+	"screen/blo/auf_v_0.blo",
+	"screen/blo/auf_w_0.blo",
+	"screen/blo/auf_x_0.blo",
+	"screen/blo/auf_y_0.blo",
+	"screen/blo/auf_z_0.blo",
+	"screen/blo/auf_a1_0.blo",
+	"screen/blo/auf_b1_0.blo",
+	"screen/blo/auf_c1_0.blo",
+	"screen/blo/auf_d1_0.blo",
+	"END",
+	"screen/blo/re_a_00.blo",
+	"screen/blo/re_a_00.blo",
+	"screen/blo/re_a_00.blo",
+	"END",
+};
+
+EnumResult dummy_blo_num_table[] = { (EnumResult)0x91, (EnumResult)0 };
+} // namespace zen
+
+/**
+ * @todo: Documentation
+ */
+void zen::ogScrResultMgr::ogScrResultMgrSub()
+{
+	mBlackScreen = new P2DScreen;
+	mBlackScreen->set("screen/blo/black.blo", false, false, true);
+	mBlackPane = static_cast<P2DPicture*>(mBlackScreen->search('blck', true));
+	mBlackPane->setAlpha(0);
+
+	mMainScreen = new P2DScreen;
+	mMainScreen->set("screen/blo/account2.blo", false, false, true);
+
+	mCMBestData = new DrawCMbest;
+	mCMBestData->init(mMainScreen);
+
+	mPaneRoot        = mMainScreen->search('root', true);
+	_38              = mMainScreen->search('po_1', true);
+	_3C              = mMainScreen->search('po2u', true);
+	_40              = mMainScreen->search('po2d', true);
+	_44              = mMainScreen->search('po3u', true);
+	_48              = mMainScreen->search('po3c', true);
+	_4C              = mMainScreen->search('po3d', true);
+	mPaneRedPikis    = mMainScreen->search('p_rc', true);
+	mPaneBluePikis   = mMainScreen->search('p_bc', true);
+	mPaneYellowPikis = mMainScreen->search('p_yc', true);
+	_5C              = mMainScreen->search('g_sp', true);
+	mPaneData        = mMainScreen->search('data', true);
+	mPaneFileNum1    = mMainScreen->search('da_1', true);
+	mPaneFileNum2    = mMainScreen->search('da_2', true);
+	mPaneFileNum3    = mMainScreen->search('da_3', true);
+
+	mPaneData->show();
+	mPaneFileNum1->hide();
+	mPaneFileNum2->hide();
+	mPaneFileNum3->hide();
+
+	switch (gameflow.mGamePrefs.mMostRecentFileSlot) {
+	case 0:
+	{
+		mPaneFileNum1->show();
+		break;
+	}
+	case 1:
+	{
+		mPaneFileNum2->show();
+		break;
+	}
+	case 2:
+	{
+		mPaneFileNum3->show();
+		break;
+	}
+	}
+
+	mDiaryTemplateTextBox = (P2DTextBox*)mMainScreen->search('getp', true);
+	mPaneRedPikis->hide();
+	mPaneBluePikis->hide();
+	mPaneYellowPikis->hide();
+
+	P2DScreen* screen = mMainScreen;
+	setNumberTag(screen, '4_rc', &mRedPikis, 1000);
+	setNumberTag(screen, 'rc_l', &mRedPikis, 100);
+	setNumberTag(screen, 'rc_c', &mRedPikis, 10);
+	setNumberTag(screen, 'rc_r', &mRedPikis, 1);
+
+	setNumberTag(screen, '4_bc', &mBluePikis, 1000);
+	setNumberTag(screen, 'bc_l', &mBluePikis, 100);
+	setNumberTag(screen, 'bc_c', &mBluePikis, 10);
+	setNumberTag(screen, 'bc_r', &mBluePikis, 1);
+
+	setNumberTag(screen, '4_yc', &mYellowPikis, 1000);
+	setNumberTag(screen, 'yc_l', &mYellowPikis, 100);
+	setNumberTag(screen, 'yc_c', &mYellowPikis, 10);
+	setNumberTag(screen, 'yc_r', &mYellowPikis, 1);
+
+	setNumberTag(screen, 'tp_4', &mTotalPikis, 1000);
+	setNumberTag(screen, 'tp_l', &mTotalPikis, 100);
+	setNumberTag(screen, 'tp_c', &mTotalPikis, 10);
+	setNumberTag(screen, 'tp_r', &mTotalPikis, 1);
+
+	setNumberTag(screen, '4_bo', &mBornPikis, 1000);
+	setNumberTag(screen, 'bo_l', &mBornPikis, 100);
+	setNumberTag(screen, 'bo_c', &mBornPikis, 10);
+	setNumberTag(screen, 'bo_r', &mBornPikis, 1);
+
+	setNumberTag(screen, '4_ba', &mDeadPikis, 1000);
+	setNumberTag(screen, 'ba_l', &mDeadPikis, 100);
+	setNumberTag(screen, 'ba_c', &mDeadPikis, 10);
+	setNumberTag(screen, 'ba_r', &mDeadPikis, 1);
+
+	setNumberTag(screen, '4_sd', &mVictimPikis, 1000);
+	setNumberTag(screen, 'sd_l', &mVictimPikis, 100);
+	setNumberTag(screen, 'sd_c', &mVictimPikis, 10);
+	setNumberTag(screen, 'sd_r', &mVictimPikis, 1);
+
+	setNumberTag(screen, '4bo2', &mSproutedPikis, 1000);
+	setNumberTag(screen, 'bo2l', &mSproutedPikis, 100);
+	setNumberTag(screen, 'bo2c', &mSproutedPikis, 10);
+	setNumberTag(screen, 'bo2r', &mSproutedPikis, 1);
+
+	setNumberTag(screen, '4ba2', &mPikisLostToBattle, 1000);
+	setNumberTag(screen, 'ba2l', &mPikisLostToBattle, 100);
+	setNumberTag(screen, 'ba2c', &mPikisLostToBattle, 10);
+	setNumberTag(screen, 'ba2r', &mPikisLostToBattle, 1);
+
+	setNumberTag(screen, '4sd2', &mLeftBehindPikis, 1000);
+	setNumberTag(screen, 'sd2l', &mLeftBehindPikis, 100);
+	setNumberTag(screen, 'sd2c', &mLeftBehindPikis, 10);
+	setNumberTag(screen, 'sd2r', &mLeftBehindPikis, 1);
+
+	mPaneBornThousandsDigit         = mMainScreen->search('4_bo', true);
+	mPaneDeadThousandsDigit         = mMainScreen->search('4_ba', true);
+	mPaneVictimThousandsDigit       = mMainScreen->search('4_sd', true);
+	mPaneSproutedThousandsDigit     = mMainScreen->search('4bo2', true);
+	mPaneLostToBattleThousandsDigit = mMainScreen->search('4ba2', true);
+	mPaneLeftBehindThousandsDigit   = mMainScreen->search('4sd2', true);
+	mPaneRedThousandsDigit          = mMainScreen->search('4_rc', true);
+	mPaneYellowThousandsDigit       = mMainScreen->search('4_yc', true);
+	mPaneBlueThousandsDigit         = mMainScreen->search('4_bc', true);
+	mPaneRedOnesDigit               = mMainScreen->search('rc_r', true);
+	mPaneYellowOnesDigit            = mMainScreen->search('yc_r', true);
+	mPaneBlueOnesDigit              = mMainScreen->search('bc_r', true);
+
+	setNumberTag(screen, 'dc_l', &mCurrentDay, 10);
+	setNumberTag(screen, 'dc_c', &mCurrentDay, 1);
+	setNumberTag(screen, 'dc_r', &mCurrentDay, 1);
+
+	setNumberTag(screen, 'ro_l', &mRemainingParts, 10);
+	setNumberTag(screen, 'ro_c', &mRemainingParts, 1);
+	setNumberTag(screen, 'ro_r', &mRemainingParts, 1);
+
+	setNumberTag(screen, 'ti_l', &mRemainingDays, 10);
+	setNumberTag(screen, 'ti_c', &mRemainingDays, 1);
+	setNumberTag(screen, 'ti_r', &mRemainingDays, 1);
+
+	mPaneDaysL                 = screen->search('dc_l', true);
+	mPaneDaysC                 = screen->search('dc_c', true);
+	mPaneDaysR                 = screen->search('dc_r', true);
+	mPaneBornOnesDigit         = screen->search('bo_r', true);
+	mPaneDeadOnesDigit         = screen->search('ba_r', true);
+	mPaneVictimOnesDigit       = screen->search('sd_r', true);
+	mPaneSproutedOnesDigit     = screen->search('bo2r', true);
+	mPaneLostToBattleOnesDigit = screen->search('ba2r', true);
+	mPaneLeftBehindOnesDigit   = screen->search('sd2r', true);
+
+	mPaneDaysLeftL  = screen->search('ti_l', true);
+	mPaneDaysLeftC  = screen->search('ti_c', true);
+	mPaneDaysLeftR  = screen->search('ti_r', true);
+	mPanePartsLeftL = screen->search('ro_l', true);
+	mPanePartsLeftC = screen->search('ro_c', true);
+	mPanePartsLeftR = screen->search('ro_r', true);
+
+	mBluePikis     = 111;
+	mRedPikis      = 222;
+	mYellowPikis   = 333;
+	mTotalPikis    = 444;
+	mBornPikis     = 555;
+	mDeadPikis     = 666;
+	mVictimPikis   = 777;
+	_114           = 999;
+	_118           = 0;
+	mCurrentDay    = 77;
+	mRemainingDays = 88;
+	mCurrentParts  = 99;
+	mTotalDays     = MAX_DAYS;
+	mTotalParts    = 55;
+
+	if (playerState == nullptr) {
+		mHasBlue   = true;
+		mHasRed    = true;
+		mHasYellow = true;
+	} else {
+		mHasBlue   = playerState->displayPikiCount(Blue);
+		mHasRed    = playerState->displayPikiCount(Red);
+		mHasYellow = playerState->displayPikiCount(Yellow);
+	}
+
+	if (mHasBlue) {
+		mPaneBluePikis->show();
+	}
+	if (mHasRed) {
+		mPaneRedPikis->show();
+	}
+	if (mHasYellow) {
+		mPaneYellowPikis->show();
+	}
+	mPageInfoPtr = mDiaryPathList;
+	_554         = 0;
+
+	mMesgScreen = new ogScrMessageMgr("screen/blo/tu_base.blo");
+	mGraphMgr   = new ogGraphMgr(mMainScreen);
+	mAlphaMgr   = new PikaAlphaMgr(mMainScreen);
+	mStatus     = Status_NULL;
+	mBgAlpha    = 0;
+
+	mSaveMgr = new ogSaveMgr;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000068
+ */
+void zen::ogScrResultMgr::check1000(int val, P2DPane* pane1, P2DPane* pane2, int x)
+{
+	if (val >= 1000) {
+		pane1->show();
+		pane2->move(x + pane2->getPosH(), pane2->getPosV());
+	} else {
+		pane1->hide();
+	}
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00013C
+ */
+void zen::ogScrResultMgr::setEnumResultTable(EnumResult* result)
+{
+	for (int i = 0; i < 256; i++) {
+		zen::EnumResult res = result[i];
+		mDiaryPathList[i]   = bloFile_Res_Table[res];
+		if (res == RESFLAG_DOC_END) {
+			return;
+		}
+	}
+	PRINT("OVERFLOW in setEnumResultTable()\n");
+}
+
+/**
+ * @todo: Documentation
+ */
+zen::ogScrResultMgr::ogScrResultMgr()
+{
+	playerState = nullptr;
+	setEnumResultTable(dummy_blo_num_table);
+	ogScrResultMgrSub();
+}
+
+/**
+ * @todo: Documentation
+ */
+zen::ogScrResultMgr::ogScrResultMgr(EnumResult* table)
+{
+	setEnumResultTable(table);
+	ogScrResultMgrSub();
+}
+
+/**
+ * @todo: Documentation
+ */
+void zen::ogScrResultMgr::start()
+{
+	if (playerState == nullptr) {
+		setSpecialNumber(1, -123);
+		mCurrentDay        = 1;
+		mRemainingDays     = 2;
+		mRemainingParts    = 3;
+		mCurrentParts      = 77;
+		mTotalParts        = MAX_UFO_PARTS;
+		mTotalDays         = MAX_DAYS;
+		mSproutedPikis     = 2345;
+		mPikisLostToBattle = 3456;
+		mLeftBehindPikis   = 4567;
+		mBluePikis         = 1234;
+		mRedPikis          = 2345;
+		mYellowPikis       = 3456;
+		mTotalPikis        = 9876;
+		mBornPikis         = 1234;
+		mDeadPikis         = 2345;
+		mVictimPikis       = 3456;
+		mPowerupNum        = 77;
+	} else {
+		mCurrentDay        = playerState->getCurrDay();
+		mTotalDays         = playerState->getTotalDays();
+		mRemainingDays     = mTotalDays - mCurrentDay;
+		mCurrentParts      = playerState->getCurrParts();
+		mTotalParts        = playerState->getTotalParts();
+		mRemainingParts    = mTotalParts - mCurrentParts;
+		mSproutedPikis     = playerState->mSproutedNum;
+		mPikisLostToBattle = playerState->mLostBattlePikis;
+		mLeftBehindPikis   = playerState->mLeftBehindPikis;
+		mBluePikis         = GameStat::containerPikis[Blue] + GameStat::formationPikis[Blue];
+		mRedPikis          = GameStat::containerPikis[Red] + GameStat::formationPikis[Red];
+		mYellowPikis       = GameStat::containerPikis[Yellow] + GameStat::formationPikis[Yellow];
+		mTotalPikis        = mRedPikis + mBluePikis + mYellowPikis;
+		mBornPikis         = GameStat::bornPikis;
+		mDeadPikis         = GameStat::deadPikis - GameStat::victimPikis;
+		mVictimPikis       = GameStat::victimPikis;
+		mPowerupNum        = playerState->getNextPowerupNumber();
+	}
+	setSpecialNumber(1, mCurrentDay);
+	setSpecialNumber(2, mCurrentParts);
+	setSpecialNumber(3, mRemainingParts);
+	setSpecialNumber(4, mRemainingDays);
+	setSpecialNumber(5, mPowerupNum);
+
+	strcpy(mDiaryTemplateTextBuffer, mDiaryTemplateTextBox->getString());
+	cnvSpecialNumber(mDiaryTemplateTextBuffer);
+	mDiaryTemplateTextBox->setString(mDiaryTemplateTextBuffer);
+	mMesgScreen->MakeAndSetPageInfo(&mPageInfoPtr);
+	mMesgScreen->setSolidMode(true);
+	mStatus = RESULT_DiaryMessage;
+	mMesgScreen->start(0);
+	mBlackPane->setAlpha(0);
+	mGraphAlpha = 0;
+	mWaitTimer  = 0.0f;
+	mBgAlpha    = 0;
+	mPaneRoot->move(0, -480);
+
+	if (mCurrentDay < 10) {
+		mPaneDaysL->hide();
+		mPaneDaysC->show();
+		mPaneDaysR->hide();
+	} else {
+		mPaneDaysL->show();
+		mPaneDaysC->hide();
+		mPaneDaysR->show();
+	}
+
+	if (mRemainingDays < 10) {
+		mPaneDaysLeftL->hide();
+		mPaneDaysLeftC->show();
+		mPaneDaysLeftR->hide();
+	} else {
+		mPaneDaysLeftL->show();
+		mPaneDaysLeftC->hide();
+		mPaneDaysLeftR->show();
+	}
+
+	if (mRemainingParts < 10) {
+		mPanePartsLeftL->hide();
+		mPanePartsLeftC->show();
+		mPanePartsLeftR->hide();
+	} else {
+		mPanePartsLeftL->show();
+		mPanePartsLeftC->hide();
+		mPanePartsLeftR->show();
+	}
+
+	check1000(mBornPikis, mPaneBornThousandsDigit, mPaneBornOnesDigit, 14);
+	check1000(mDeadPikis, mPaneDeadThousandsDigit, mPaneDeadOnesDigit, 14);
+	check1000(mVictimPikis, mPaneVictimThousandsDigit, mPaneVictimOnesDigit, 14);
+	check1000(mSproutedPikis, mPaneSproutedThousandsDigit, mPaneSproutedOnesDigit, 14);
+	check1000(mPikisLostToBattle, mPaneLostToBattleThousandsDigit, mPaneLostToBattleOnesDigit, 14);
+	check1000(mLeftBehindPikis, mPaneLeftBehindThousandsDigit, mPaneLeftBehindOnesDigit, 14);
+	check1000(mBluePikis, mPaneBlueThousandsDigit, mPaneBlueOnesDigit, 12);
+	check1000(mRedPikis, mPaneRedThousandsDigit, mPaneRedOnesDigit, 12);
+	check1000(mYellowPikis, mPaneYellowThousandsDigit, mPaneYellowOnesDigit, 12);
+	mCMBestData->sleep();
+
+	STACK_PAD_VAR(18);
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000038
+ */
+void zen::ogScrResultMgr::StartRESULT()
+{
+	PRINT("--- StartRESULT !---\n");
+	P2DPaneLibrary::makeResident(mMainScreen);
+	mStartWaitDelay = 6;
+}
+
+/**
+ * @todo: Documentation
+ */
+zen::ogScrResultMgr::returnStatusFlag zen::ogScrResultMgr::update(Controller* input)
+{
+	if (mStatus == -1) {
+		return mStatus;
+	}
+
+	if (mStatus == RESULT_StartDelay) {
+		PRINT("--- RESULT_TEX_WAIT %d ---\n", mStartWaitDelay);
+		mStartWaitDelay--;
+		if (mStartWaitDelay <= 0) {
+			mStatus = RESULT_SlideIn;
+			mAlphaMgr->startFadeIn(1.0f);
+			mWaitTimer = 0.0f;
+		}
+		return mStatus;
+	}
+
+	mMainScreen->update();
+	mAlphaMgr->update();
+	mCMBestData->update();
+
+	if (mStatus == RESULT_SlideIn) {
+		mWaitTimer += gsys->getFrameTime();
+		if (mWaitTimer >= 1.0f) {
+			mStatus = RESULT_Active;
+			mPaneRoot->move(0, 0);
+			mCMBestData->appear();
+		} else {
+			mPaneRoot->move(0, f32((mWaitTimer + -1.0) * 480.0f));
+			mBgAlpha = u8(mWaitTimer * 255.0f);
+		}
+		return mStatus;
+	}
+
+	if (mStatus == RESULT_FadeOut) {
+		mWaitTimer += gsys->getFrameTime();
+		if (mWaitTimer >= 0.5f) {
+			mBgAlpha = 0;
+			mBlackPane->setAlpha(255);
+			mStatus = mPendingStatus;
+		} else {
+			mBgAlpha = u8((1.0f - mWaitTimer) * 255.0f);
+			mBlackPane->setAlpha(255 - mBgAlpha);
+		}
+		return mStatus;
+	}
+
+	if (mStatus >= RESULT_ExitToMapSelect) {
+		mStatus = Status_NULL;
+		return mStatus;
+	}
+
+	if (mStatus == RESULT_DiaryMessage) {
+		if (mMesgScreen->update(input) == ogScrMessageMgr::STATE_Exiting) {
+			mStatus = RESULT_StartDelay;
+			StartRESULT();
+		}
+		return mStatus;
+	}
+
+	if (mStatus == RESULT_Active) {
+		if (mGraphAlpha < 255) {
+			mGraphAlpha += 8;
+			if (mGraphAlpha > 255) {
+				mGraphAlpha = 255;
+			}
+		}
+
+		mSaveStatus = mSaveMgr->update(input);
+		if (mSaveStatus == 14) {
+			mWaitTimer     = 0.0f;
+			mPendingStatus = RESULT_ExitToMapSelect;
+			mStatus        = RESULT_FadeOut;
+		} else if (mSaveStatus == 12) {
+			mWaitTimer = 0.0f;
+			mStatus    = RESULT_Active;
+		} else if (mSaveStatus == 13) {
+			mPendingStatus = RESULT_ExitToMapSelect;
+			mStatus        = RESULT_FadeOut;
+		} else if (mSaveStatus == 15) {
+			mWaitTimer     = 0.0f;
+			mPendingStatus = RESULT_ExitToCardSelect;
+			mStatus        = RESULT_FadeOut;
+		} else if (mSaveStatus == -1) {
+			bool touchGo = false;
+#if PIKI_PC_TOUCH
+			// Pantalla de resultados: cualquier toque equivale a "seguir".
+			pc_touch_claim_game_menu();
+			float nx = 0.0f, ny = 0.0f;
+			if (pc_touch_take_game_menu_tap(&nx, &ny)) touchGo = true;
+#endif
+			if (input->keyClick(KBBTN_START | KBBTN_A | KBBTN_B) || touchGo) {
+				seSystem->playSysSe(ogEnumFix(SYSSE_DECIDE1, JACSYS_Decide1));
+				mWaitTimer = 0.0f;
+				mSaveMgr->start();
+				PRINT("<<<<<<<<< SAVE Mgr START! >>>>>>>>>>>\n");
+			}
+			mSaveWaitTimer += gsys->getFrameTime();
+			if (mSaveWaitTimer > 1.0f) {
+				mSaveWaitTimer = 0.0f;
+			}
+			sinf(mSaveWaitTimer * TAU);
+		}
+	}
+
+	mBlackScreen->update();
+	return mStatus;
+
+	STACK_PAD_VAR(2);
+}
+
+/**
+ * @todo: Documentation
+ */
+#if defined(PIKI_PC_PORT)
+// ogSaveMgr se maqueta en 640 fijo: se dibuja sin el lienzo ancho del informe
+// (como antes del arreglo del #62) y luego se recupera para el fundido negro.
+void zen::ogScrResultMgr::drawSaveMgr(Graphics& gfx, P2DPerspGraph& graf)
+{
+	pc_gfx_set_hud_wide(0);
+	mSaveMgr->draw(gfx);
+	pc_gfx_begin_menu_2d();
+	graf.setPort();
+}
+#else
+void zen::ogScrResultMgr::drawSaveMgr(Graphics& gfx, P2DPerspGraph&) { mSaveMgr->draw(gfx); }
+#endif
+
+/**
+ * @todo: Documentation
+ */
+void zen::ogScrResultMgr::draw(Graphics& gfx)
+{
+	if (mStatus != Status_NULL && mStatus != RESULT_StartDelay) {
+		if (mStatus == RESULT_DiaryMessage) {
+			mMesgScreen->draw(gfx);
+			return;
+		}
+
+#if defined(PIKI_PC_PORT)
+		// Issue #62: en ancho se estiraba. Mismo esquema que la pausa: lienzo
+		// virtW×480 y el 640 del informe (y su gráfica) centrado; el fundido
+		// negro se dibuja en 0 para cubrir todo el ancho.
+		pc_gfx_begin_menu_2d();
+		const int virtW = pc_gfx_menu_virt_width();
+		const int shiftX = pc_gfx_menu_shift_center();
+		P2DPerspGraph graf(0, 0, virtW, 480, 30.0f, 1.0f, 5000.0f);
+		graf.setPort();
+		pc_gfx_note_menu_tap_space(virtW, 480);
+#else
+		P2DPerspGraph graf(0, 0, 640, 480, 30.0f, 1.0f, 5000.0f);
+		graf.setPort();
+		const int shiftX = 0;
+#endif
+#if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01)
+		mMainScreen->draw(shiftX, 0, &graf);
+		mGraphMgr->draw(mGraphAlpha);
+		drawSaveMgr(gfx, graf);
+		mBlackScreen->draw(0, 0, &graf);
+#else
+		if (mSaveMgr->isFileMode()) {
+			mSaveMgr->draw(gfx);
+		} else {
+			mMainScreen->draw(shiftX, 0, &graf);
+			mGraphMgr->draw(mGraphAlpha);
+			drawSaveMgr(gfx, graf);
+			mBlackScreen->draw(0, 0, &graf);
+		}
+#endif
+	}
+}

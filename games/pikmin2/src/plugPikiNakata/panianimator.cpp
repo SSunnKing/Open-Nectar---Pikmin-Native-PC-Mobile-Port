@@ -1,0 +1,361 @@
+#include "PaniAnimator.h"
+#include "DebugLog.h"
+#include "nlib/System.h"
+#include "sysNew.h"
+#if defined(PIKI_PC_PORT)
+#include "timing/pc_render_phase.h"
+#endif
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(3)
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F4
+ */
+DEFINE_PRINT("panianimator");
+
+immut char* PaniAnimator::keyNames[6] = {
+	"loop start", "loop end", "action 0", "action 1", "action 2", "action 3",
+};
+
+/**
+ * @todo: Documentation
+ */
+PaniMotionInfo::PaniMotionInfo(int motionIdx)
+{
+	init(motionIdx, nullptr);
+}
+
+/**
+ * @todo: Documentation
+ */
+PaniMotionInfo::PaniMotionInfo(int motionIdx, PaniAnimKeyListener* listener)
+{
+	init(motionIdx, listener);
+}
+
+/**
+ * @todo: Documentation
+ */
+void PaniMotionInfo::init(int motionIdx, PaniAnimKeyListener* listener)
+{
+	mMotionIdx = motionIdx;
+	mListener  = listener;
+}
+
+/**
+ * @todo: Documentation
+ */
+PaniMotion::PaniMotion(int animID)
+{
+	init(animID, 1);
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000030 (Matching by size)
+ */
+PaniMotion::PaniMotion(int animID, int p2)
+{
+	init(animID, p2);
+}
+
+/**
+ * @todo: Documentation
+ */
+void PaniMotion::init(int id, int p2)
+{
+	mAnimID   = id;
+	_UNUSED04 = p2;
+}
+
+/**
+ * @todo: Documentation
+ */
+PaniMotionTable::PaniMotionTable(int count)
+{
+	mMotionCount = count;
+	mMotions     = new PaniMotion*[mMotionCount];
+
+	for (int i = 0; i < mMotionCount; i++) {
+		mMotions[i] = nullptr;
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+PaniSoundTable::PaniSoundTable(int count)
+{
+	mSoundCount = count;
+	mSounds     = new PaniSound*[mSoundCount];
+
+	for (int i = 0; i < mSoundCount; i++) {
+		mSounds[i] = nullptr;
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+PaniAnimator::PaniAnimator()
+{
+	mCurrentKeyIndex  = -1;
+	mIsFinished       = false;
+	mListener         = nullptr;
+	mAnimInfo         = nullptr;
+	mMotionTable      = nullptr;
+	mMotionIdx        = -1;
+	mAnimationCounter = 0.0f;
+}
+
+/**
+ * @todo: Documentation
+ */
+void PaniAnimator::init(AnimContext* context, AnimMgr* mgr, PaniMotionTable* table)
+{
+	mContext          = context;
+	mMgr              = mgr;
+	mAnimInfo         = nullptr;
+	mAnimationCounter = 0.0f;
+	mMotionTable      = table;
+	if (mgr->countAnims()) {
+		startAnim(ANIMSTATE_OneShot, 0, 0, 8);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void PaniAnimator::changeContext(AnimContext* context)
+{
+	mContext = context;
+}
+
+/**
+ * @todo: Documentation
+ */
+void PaniAnimator::updateContext()
+{
+	if (mAnimInfo) {
+		mContext->mData         = mAnimInfo->mData;
+		mContext->mCurrentFrame = mAnimationCounter;
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void PaniAnimator::startMotion(immut PaniMotionInfo& info)
+{
+	if (mAnimInfo) {
+		mMotionIdx        = info.mMotionIdx;
+		mListener         = info.mListener;
+		mCurrentKeyIndex  = 0;
+		mPreviousKeyIndex = 0;
+		mIsFinished       = false;
+		startAnim(ANIMSTATE_OneShot, getMotion(mMotionIdx)->mAnimID, 0, 8);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void PaniAnimator::finishMotion(immut PaniMotionInfo& info)
+{
+	if (!mAnimInfo) {
+		return;
+	}
+
+	mListener   = info.mListener;
+	mIsFinished = true;
+
+	f32 maxFrame = (f32)((!mAnimInfo) ? -1 : mAnimInfo->mData->mTotalFrameCount);
+	if (mAnimationCounter >= maxFrame) {
+		PRINT("!!!finishMotion:%08x:%f,%f\n", this, mAnimationCounter, maxFrame);
+		mAnimationCounter = maxFrame;
+		finishAnimation();
+	} else {
+		startAnim(ANIMSTATE_OneShot, mCurrentAnimID, -1, 8);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void PaniAnimator::animate(f32 speed)
+{
+#if defined(PIKI_PC_PORT)
+	if (!pc_render_is_authoritative()) return;
+#endif
+	if (!mAnimInfo) {
+		return;
+	}
+
+	if (speed < 0.0f) {
+		PRINT_NAKATA("!animate:%08x:%f,%f\n", this, mAnimationCounter, speed);
+	}
+
+	if (mCurrentKeyIndex < 0) {
+		return;
+	}
+
+	f32 startValue = (f32)mAnimInfo->getKeyValue(mStartKeyIndex);
+	f32 endValue   = (f32)mAnimInfo->getKeyValue(mEndKeyIndex);
+	if (startValue > endValue) {
+		PRINT_NAKATA("!animate:%08x:to<from:%f,%f,%f\n", this, endValue, startValue, mAnimationCounter);
+		return;
+	}
+
+	speed *= NSystem::getFrameTime();
+	mAnimationCounter += speed;
+
+	checkConstantKeys();
+	checkEventKeys(mAnimationCounter - speed, mAnimationCounter);
+	if (mAnimationCounter >= endValue) {
+		mAnimationCounter = endValue;
+		finishAnimation();
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void PaniAnimator::checkConstantKeys()
+{
+	int iKeyCount;
+	if (mCurrentKeyIndex < 0) {
+		iKeyCount = mAnimInfo->countIKeys();
+		ERROR("checkConstantKeys:nextKeyInfoIndex:%d,%d\n", mCurrentKeyIndex, iKeyCount);
+	}
+
+	if (mAnimInfo->countIKeys() > 16) {
+		iKeyCount = mAnimInfo->countIKeys();
+		ERROR("checkConstantKeys:getKeyInfoCount():%d,%d\n", mCurrentKeyIndex, iKeyCount);
+	}
+
+	for (; mCurrentKeyIndex < mAnimInfo->countIKeys(); mCurrentKeyIndex++) {
+		int keyIdx = getInfoKeyValue(mCurrentKeyIndex);
+		f32 value  = getKeyValue(keyIdx);
+
+		if (mAnimationCounter < value) {
+			return;
+		}
+
+		checkConstantKey(mCurrentKeyIndex);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void PaniAnimator::checkConstantKey(int idx)
+{
+	int type = mAnimInfo->getInfoKey(idx)->mKeyType;
+
+	if (!mIsFinished) {
+		if (type == 0) {
+			mPreviousKeyIndex = idx;
+		} else if (type == 1) {
+			int firstKeyID  = getInfoKeyValue(mPreviousKeyIndex);
+			int secondKeyID = getInfoKeyValue(idx);
+
+			f32 firstKeyValue  = getKeyValue(firstKeyID);
+			f32 secondKeyValue = getKeyValue(secondKeyID);
+
+			mAnimationCounter -= (secondKeyValue - firstKeyValue);
+			mCurrentKeyIndex = mPreviousKeyIndex;
+		}
+	}
+
+	if (type == 0) {
+		if (mListener) {
+			PaniAnimKeyEvent event(KEY_LoopStart);
+			mListener->animationKeyUpdated(event);
+		}
+	} else if (type == 1) {
+		if (mListener) {
+			PaniAnimKeyEvent event(KEY_LoopEnd);
+			mListener->animationKeyUpdated(event);
+		}
+	}
+
+	if (type >= 2 && type <= 5 && mListener) {
+		PaniAnimKeyEvent event(type - 1);
+		mListener->animationKeyUpdated(event);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void PaniAnimator::checkEventKeys(f32 startKeyframe, f32 endKeyframe)
+{
+	if (!mListener) {
+		return;
+	}
+
+	for (int i = 0; i < mAnimInfo->countEKeys(); i++) {
+		AnimKey* eventKey = mAnimInfo->getEventKey(i);
+
+		// f32 val2 = eventKey->mKeyframeIndex;
+		f32 frame = eventKey->mFrameIndex;
+		STACK_PAD_VAR(1);
+		if (startKeyframe <= frame && frame < endKeyframe) {
+			int type = KEY_Finished;
+			if (eventKey->mEventType == ANIMEVENT_Notify) {
+				type = KEY_PlaySound;
+			} else if (eventKey->mEventType == ANIMEVENT_Action) {
+				type = KEY_PlayEffect;
+			} else {
+				PRINT("!checkEventKeys:%08x:not supported event type:%d\n", this, eventKey->mEventType);
+			}
+
+			mListener->animationKeyUpdated(PaniAnimKeyEvent(type, eventKey->mKeyType));
+		}
+	}
+	STACK_PAD_TERNARY(startKeyframe, 1);
+}
+
+/**
+ * @todo: Documentation
+ */
+void PaniAnimator::finishAnimation()
+{
+	mCurrentKeyIndex = -1;
+	if (mListener) {
+		mListener->animationKeyUpdated(PaniAnimKeyEvent(KEY_Finished));
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 PaniAnimator::getKeyValueByKeyType(int type)
+{
+	STACK_PAD_VAR(1);
+	for (int i = 0; i < mAnimInfo->countIKeys(); i++) {
+		if (type == mAnimInfo->getInfoKey(i)->mKeyType) {
+			int keyIdx = mAnimInfo->getInfoKey(i)->mFrameIndex;
+			return getKeyValue(keyIdx);
+		}
+	}
+
+	return 0.0f;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00004C
+ */
+void PaniAnimator::checkCounter_4DEBUG()
+{
+	if (mAnimationCounter < 0.0f || mAnimInfo->mData->mTotalFrameCount <= mAnimationCounter) {
+		PRINT("!checkCounter_4DEBUG:%08x:%d,%f/%f\n", this, mMotionIdx, mAnimationCounter, mAnimInfo->mData->mTotalFrameCount);
+		ERROR("!checkCounter_4DEBUG:%08x:%d,%f/%f\n", this, mMotionIdx, mAnimationCounter, mAnimInfo->mData->mTotalFrameCount);
+	}
+}

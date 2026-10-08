@@ -1,0 +1,588 @@
+#include "DebugLog.h"
+#include "nlib/Array.h"
+#include "nlib/Spline.h"
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(__LINE__) // Never used in the DLL
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F4
+ */
+DEFINE_PRINT("nlibspline")
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000E8
+ */
+SplineInterpolator::SplineInterpolator(int size, NPool<SplineSegment>* segPool)
+{
+	mFrameArray      = new NArray<SplineKeyFrame>(size);
+	mSegmentPool         = segPool;
+	mViewpointCurve  = new SplineCurve(size - 1);
+	mWatchpointCurve = new SplineCurve(size - 1);
+	mCurrentSegmentIndex      = 0;
+}
+
+/**
+ * @todo: Documentation
+ */
+void SplineInterpolator::reset()
+{
+	mCurrentSegmentIndex = 0;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000130
+ */
+void SplineInterpolator::makeSpline()
+{
+	NVector3f* vecVals[16];
+	f32 fVals[16];
+	int i;
+
+	if (mFrameArray->getSize() < 2) {
+		return;
+	}
+
+	for (i = 0; i < mFrameArray->getSize(); i++) {
+		fVals[i] = mFrameArray->get(i)->getParameter();
+	}
+
+	for (i = 0; i < mFrameArray->getSize(); i++) {
+		vecVals[i] = &mFrameArray->get(i)->getPosture().getViewpoint();
+	}
+
+	mViewpointCurve->makeCurve(fVals, vecVals, mFrameArray->getSize());
+
+	for (i = 0; i < mFrameArray->getSize(); i++) {
+		vecVals[i] = &mFrameArray->get(i)->getPosture().getWatchpoint();
+	}
+
+	mWatchpointCurve->makeCurve(fVals, vecVals, mFrameArray->getSize());
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000030
+ */
+bool SplineInterpolator::interpolate(f32 t, NPosture3D& outPosture, bool isDirect)
+{
+	if (isDirect) {
+		return interpolateDirect(t, outPosture);
+	}
+
+	return interpolateNext(t, outPosture);
+}
+
+/**
+ * @todo: Documentation
+ */
+bool SplineInterpolator::interpolateNext(f32 t, NPosture3D& outPosture)
+{
+	if (mFrameArray->getSize() == 0) {
+		return false;
+	}
+
+	if (mFrameArray->getSize() == 1) {
+		outPosture.input(mFrameArray->get(0)->getPosture());
+		return true;
+	}
+
+	int idx = searchSegmentIndex(t, mCurrentSegmentIndex);
+	if (idx < 0) {
+		PRINT("?interpolateNext:nextIndex<0\n");
+		return false;
+	}
+
+	mCurrentSegmentIndex = idx;
+	outputPosture(t, outPosture);
+	return true;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000FC
+ */
+bool SplineInterpolator::interpolateDirect(f32 t, NPosture3D& outPosture)
+{
+	u8 prev              = mCurrentSegmentIndex;
+	mCurrentSegmentIndex = 0;
+	bool res = interpolateNext(t, outPosture);
+	mCurrentSegmentIndex = prev;
+	return res;
+}
+
+/**
+ * @todo: Documentation
+ */
+void SplineInterpolator::outputPosture(f32 t, NPosture3D& outPosture)
+{
+	f32 thisParam = mFrameArray->get(mCurrentSegmentIndex)->getParameter();
+	f32 nextParam = mFrameArray->get(mCurrentSegmentIndex + 1)->getParameter();
+	f32 newT      = (t - thisParam) / (nextParam - thisParam);
+	mViewpointCurve->getSegment(mCurrentSegmentIndex)->outputPosition(newT, outPosture.getViewpoint());
+	mWatchpointCurve->getSegment(mCurrentSegmentIndex)->outputPosition(newT, outPosture.getWatchpoint());
+}
+
+/**
+ * @todo: Documentation
+ */
+int SplineInterpolator::searchSegmentIndex(f32 targetParam, int startIdx)
+{
+	if (mFrameArray->getSize() < 2) {
+		return 0;
+	}
+
+	for (int i = startIdx; i < mFrameArray->getSize() - 1; i++) {
+		if (targetParam <= mFrameArray->get(i + 1)->getParameter()) {
+			return i;
+		}
+	}
+
+	PRINT_NAKATA("?searchSegmentIndex:%f,%f,%d\n", targetParam, mFrameArray->get(mFrameArray->getSize() - 1)->getParameter(), startIdx);
+	return mFrameArray->getSize() - 2;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000054
+ */
+void SplineInterpolator::addFrame(SplineKeyFrame*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000038
+ */
+template <>
+void NArray<SplineKeyFrame>::add(SplineKeyFrame*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000098
+ */
+void SplineInterpolator::addSegment()
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000038
+ */
+template <>
+void NArray<SplineSegment>::add(SplineSegment*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000038
+ */
+template <>
+void NPool<SplineSegment>::newObject()
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F4
+ */
+void SplineInterpolator::removeAllFrames()
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000034
+ */
+template <>
+void NArray<SplineSegment>::removeAll()
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00013C
+ */
+template <>
+void NArray<SplineSegment>::remove(int, int)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000054
+ */
+template <>
+void NPool<SplineSegment>::deleteObject(SplineSegment*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00006C
+ */
+template <>
+void NPool<SplineSegment>::deleteObject(int)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000030
+ */
+template <>
+void NPool<SplineSegment>::indexOf(SplineSegment*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000044
+ */
+template <>
+void NPool<SplineSegment>::indexOf(SplineSegment*, int)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000034
+ */
+template <>
+void NArray<SplineKeyFrame>::removeAll()
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00013C
+ */
+template <>
+void NArray<SplineKeyFrame>::remove(int, int)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000048
+ */
+SplineKeyFrame::SplineKeyFrame()
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000024
+ */
+void SplineKeyFrame::transform(NTransform3D&)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00005C
+ */
+void SplineKeyFrame::inputPosture(NPosture3D&)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000060
+ */
+void SplineKeyFrame::outputPosture(NPosture3D&)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000070
+ */
+void SplineKeyFrame::interpolate(SplineKeyFrame&, f32, NPosture3D&)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000060
+ */
+void SplineKeyFrame::readData(Stream&, int)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000C4
+ */
+SplineSegment::SplineSegment()
+{
+	mPolyFunX.construct(mCoeffsX, 3);
+	mPolyFunY.construct(mCoeffsY, 3);
+	mPolyFunZ.construct(mCoeffsZ, 3);
+	mFunction3D.construct(&mPolyFunX, &mPolyFunY, &mPolyFunZ);
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0001EC
+ */
+f32 SplineSegment::calcDistance(NVector3f&, f32*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000B0
+ */
+SplineCurve::SplineCurve(int)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0003E8
+ */
+void SplineCurve::makeCurve(f32*, NVector3f**, int)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000334
+ */
+void SplineCurve::makeFunctions(int, f32*, f32*, NPolynomialFunction**)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000054
+ */
+template <>
+int NArray<SplineKeyFrame>::indexOf(SplineKeyFrame*, int)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00003C
+ */
+template <>
+void NArray<SplineKeyFrame>::set(int, SplineKeyFrame*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000050
+ */
+template <>
+void NArray<SplineKeyFrame>::remove(int)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000114
+ */
+template <>
+void NArray<SplineKeyFrame>::insert(int, SplineKeyFrame*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000030
+ */
+template <>
+SplineKeyFrame* NArray<SplineKeyFrame>::firstElement()
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000034
+ */
+template <>
+SplineKeyFrame* NArray<SplineKeyFrame>::lastElement()
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000054
+ */
+template <>
+int NArray<SplineSegment>::indexOf(SplineSegment*, int)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00003C
+ */
+template <>
+void NArray<SplineSegment>::set(int, SplineSegment*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000050
+ */
+template <>
+void NArray<SplineSegment>::remove(int)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000114
+ */
+template <>
+void NArray<SplineSegment>::insert(int, SplineSegment*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000030
+ */
+template <>
+SplineSegment* NArray<SplineSegment>::firstElement()
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000034
+ */
+template <>
+SplineSegment* NArray<SplineSegment>::lastElement()
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000050
+ */
+template <>
+void NArray<SplineSegment>::remove(SplineSegment*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000050
+ */
+template <>
+void NArray<SplineSegment>::add(int, SplineSegment*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000030
+ */
+template <>
+int NArray<SplineSegment>::indexOf(SplineSegment*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000044
+ */
+template <>
+bool NArray<SplineSegment>::contains(SplineSegment*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000050
+ */
+template <>
+void NArray<SplineKeyFrame>::remove(SplineKeyFrame*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000050
+ */
+template <>
+void NArray<SplineKeyFrame>::add(int, SplineKeyFrame*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000030
+ */
+template <>
+int NArray<SplineKeyFrame>::indexOf(SplineKeyFrame*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000044
+ */
+template <>
+bool NArray<SplineKeyFrame>::contains(SplineKeyFrame*)
+{
+	TRAP_UNIMPLEMENTED;
+}

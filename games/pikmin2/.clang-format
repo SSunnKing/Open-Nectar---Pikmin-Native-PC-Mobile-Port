@@ -1,0 +1,42 @@
+﻿Language: Cpp
+
+BasedOnStyle: WebKit
+ColumnLimit: 140
+SortIncludes: true
+
+IndentWidth: 4
+TabWidth: 4
+
+UseTab: ForIndentation
+
+NamespaceIndentation: None
+FixNamespaceComments: true
+CompactNamespaces: false
+
+AlignTrailingComments: true
+AlignAfterOpenBracket: true
+AlignConsecutiveAssignments: true
+AlignConsecutiveMacros: true
+AlignEscapedNewlines: Left
+AlignOperands: AlignAfterOperator
+
+AllowShortFunctionsOnASingleLine: InlineOnly
+AllowShortIfStatementsOnASingleLine: Never
+
+BreakAfterAttributes: Leave
+BreakBeforeBraces: Custom
+
+BraceWrapping:
+  AfterCaseLabel: true
+  AfterFunction: true
+
+Cpp11BracedListStyle: false
+
+AlwaysBreakTemplateDeclarations: true
+BreakStringLiterals: true
+ReflowComments: true
+
+InsertNewlineAtEOF: true
+
+QualifierAlignment: Custom
+QualifierOrder: [static, constexpr, inline, const, volatile, type]

@@ -1,0 +1,2338 @@
+#include "settings/pc_settings.h"
+#include "teki.h"
+#include "AIConstant.h"
+#include "AIPerf.h"
+#include "BaseInf.h"
+#include "Creature.h"
+#include "CreatureProp.h"
+#include "DebugLog.h"
+#include "EffectMgr.h"
+#include "GameStat.h"
+#include "Graphics.h"
+#include "MapCode.h"
+#include "MapMgr.h"
+#include "MizuItem.h"
+#include "NaviMgr.h"
+#include "Pellet.h"
+#include "PikiMgr.h"
+#include "RadarInfo.h"
+#include "Route.h"
+#include "Shape.h"
+#include "SoundMgr.h"
+#include "Stickers.h"
+#include "TekiConditions.h"
+#include "TekiStrategy.h"
+#include "nlib/System.h"
+#include "sysNew.h"
+#include "zen/particle.h"
+
+const int BTeki::TEKI_OPTION_VISIBLE            = 1 << 0;
+const int BTeki::TEKI_OPTION_SHADOW_VISIBLE     = 1 << 1;
+const int BTeki::TEKI_OPTION_LIFE_GAUGE_VISIBLE = 1 << 2;
+const int BTeki::TEKI_OPTION_ATARI              = 1 << 3;
+const int BTeki::TEKI_OPTION_ALIVE              = 1 << 4;
+const int BTeki::TEKI_OPTION_ORGANIC            = 1 << 5;
+const int BTeki::TEKI_OPTION_MANUAL_ANIMATION   = 1 << 7;
+const int BTeki::TEKI_OPTION_GRAVITATABLE       = 1 << 8;
+const int BTeki::TEKI_OPTION_INVINCIBLE         = 1 << 9;
+const int BTeki::TEKI_OPTION_PRESSED            = 1 << 10;
+const int BTeki::TEKI_OPTION_DRAWED             = 1 << 13;
+const int BTeki::TEKI_OPTION_SHAPE_VISIBLE      = 1 << 14;
+const int BTeki::TEKI_OPTION_DAMAGE_COUNTABLE   = 1 << 15;
+
+const int BTeki::ANIMATION_KEY_OPTION_FINISHED  = 1 << KEY_Finished;
+const int BTeki::ANIMATION_KEY_OPTION_ACTION_0  = 1 << KEY_Action0;
+const int BTeki::ANIMATION_KEY_OPTION_ACTION_1  = 1 << KEY_Action1;
+const int BTeki::ANIMATION_KEY_OPTION_ACTION_2  = 1 << KEY_Action2;
+const int BTeki::ANIMATION_KEY_OPTION_LOOPSTART = 1 << KEY_LoopStart;
+const int BTeki::ANIMATION_KEY_OPTION_LOOPEND   = 1 << KEY_LoopEnd;
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(57)
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F0
+ */
+DEFINE_PRINT("teki");
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::viewStartTrembleMotion(f32 motionSpeed)
+{
+	startMotion(TekiMotion::Type5);
+	setTekiOption(TEKIOPT_ManualAnimation);
+	mMotionSpeed = motionSpeed;
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::viewSetMotionSpeed(f32 speed)
+{
+	mMotionSpeed = speed;
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::viewDoAnimation()
+{
+	doAnimation();
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::viewFinishMotion()
+{
+	mTekiAnimator->finishMotion(PaniMotionInfo(PANI_NO_MOTION, this));
+}
+
+/**
+ * @todo: Documentation
+ */
+Vector3f BTeki::viewGetScale()
+{
+	return mSRT.s;
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 BTeki::viewGetBottomRadius()
+{
+	return mTekiParams->getF(TPF_CorpseSize);
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 BTeki::viewGetHeight()
+{
+	return mTekiParams->getF(TPF_CorpseHeight);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::viewDraw(Graphics& gfx, immut Matrix4f& mat)
+{
+	gfx.useMatrix(Matrix4f::ident, 0);
+	mTekiAnimator->updateContext();
+	mTekiShape->mShape->updateAnim(gfx, mat, nullptr, this);
+#if defined(PIKI_PC_PORT)
+	if (!pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
+#endif
+		mTekiShape->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
+}
+
+#if defined(PIKI_PC_PORT)
+/**
+ * HD replacement mesh for this enemy type, if a pack is installed.
+ */
+PcHdModelId BTeki::hdModel() const
+{
+	switch (mTekiType) {
+	case TEKI_Chappy: return PC_HD_MODEL_BULBORB_DWARF;
+	case TEKI_Swallow: return PC_HD_MODEL_BULBORB;
+	default: return PC_HD_MODEL_COUNT;
+	}
+}
+
+GXColor BTeki::hdTint() const
+{
+	const GXColor white = { 255, 255, 255, 255 };
+	return white;
+}
+#endif
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::viewKill()
+{
+	kill(false);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::doStore(CreatureInf* info)
+{
+	info->mObjInfo1 = mTekiType;
+	PRINT_NAKATA("TEKI STORE *****************************************\n");
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::doRestore(CreatureInf* info)
+{
+	mTekiType = (TekiTypes)info->mObjInfo1;
+}
+
+/**
+ * @todo: Documentation
+ */
+TekiShapeObject::TekiShapeObject(Shape* shape)
+{
+	mShape               = shape;
+	mShape->mFrameCacher = nullptr;
+	mAnimMgr             = new AnimMgr(shape, nullptr, ANIMMGR_LOAD_BUNDLE, nullptr);
+	PRINT_NAKATA("OVERRIDING ANIM with %08x\n", &mAnimContext);
+	mShape->overrideAnim(0, &mAnimContext);
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::isPellet(int objType)
+{
+	return objType == OBJTYPE_Pellet;
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 BTeki::calcCircleDistanceStatic(immut Vector3f& pos1, f32 radius1, immut Vector3f& pos2, f32 radius2)
+{
+	return qdist2(pos1.x, pos1.z, pos2.x, pos2.z) - radius1 - radius2;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::alwaysUpdatePlatform()
+{
+	return mTekiType == TEKI_Shell;
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 BTeki::calcSphereDistanceStatic(immut Vector3f& pos1, f32 radius1, immut Vector3f& pos2, f32 radius2)
+{
+	return pos1.distance(pos2) - radius1 - radius2;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::moveTowardStatic(immut Vector3f& currentPosition, immut Vector3f& targetPosition, f32 speed, Vector3f& output)
+{
+	NVector3f vec1(targetPosition);
+	vec1.y = 0.0f;
+
+	NVector3f vec2(currentPosition);
+	vec2.y = 0.0f;
+
+	output.sub2(vec1, vec2);
+
+	f32 dist = output.length();
+	if (!NMathF::isZero(dist)) {
+		output.normalize();
+	}
+	output.scale(speed);
+	f32 dist2 = vec1.distance(vec2);
+	return (BTeki::arrivedAt(dist2, speed)) ? true : false;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::arrivedAt(f32 distance, f32 speed)
+{
+	f32 threshold = 2.0f * speed * NSystem::getFrameTime();
+	return distance <= threshold;
+}
+
+/**
+ * @todo: Documentation
+ */
+BTeki::BTeki()
+    : Creature(nullptr)
+{
+	mObjType                = OBJTYPE_Teki;
+	mLifeGauge.mRenderStyle = LifeGauge::Wheel;
+	mProps                  = new CreatureProp();
+	mPersonality            = new TekiPersonality();
+	mTekiAnimator           = new PaniTekiAnimator();
+	mVibrationController    = new NVibrationFunction();
+	mRouteWayPointMax       = 20;
+	mRouteWayPoints         = new WayPoint*[mRouteWayPointMax];
+	mRouteWayPointCount     = 0;
+	mParticleGenerators     = new zen::particleGenerator*[4];
+	mCollInfo               = new CollInfo(22);
+	mSeContext              = new SeContext(this, 1);
+	mParticleGenPack        = new zen::PtclGenPack(3);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::init(int tekiType)
+{
+	PRINT_NAKATA("Teki::init:%08x:%d\n", this, tekiType);
+	mTekiType   = (TekiTypes)tekiType;
+	mTekiParams = tekiMgr->getTekiParameters(mTekiType);
+	mSearchBuffer.init(mTekiSearchData, 3);
+	resetCreatureFlag(CF_Unk1 | CF_DisableAutoFaceDir);
+	Creature::init();
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::reset()
+{
+	PRINT_NAKATA("Teki::reset>:%08x\n", this);
+	if (tekiOptUpdateMgr) {
+		mOptUpdateContext.init(tekiOptUpdateMgr);
+	}
+
+	clearTekiOptions();
+	setTekiOption(TEKIOPT_Visible | TEKIOPT_ShadowVisible | TEKIOPT_LifeGaugeVisible | TEKIOPT_Atari | TEKIOPT_Alive | TEKIOPT_Organic
+	              | TEKIOPT_Unk11 | TEKIOPT_ShapeVisible | TEKIOPT_DamageCountable);
+
+	resetPosition(mPersonality->mPosition);
+	setDirection(mPersonality->mFaceDirection);
+	mSize             = getSize();
+	mDeadState        = 0;
+	mStateID          = 0;
+	mReturnStateID    = 0;
+	mActionStateId    = 0;
+	mCurrentQueueId   = 0;
+	mHealth           = getMaxLife();
+	mStoredDamage     = 0.0f;
+	mDamageCount      = 0.0f;
+	_344              = -1;
+	_3C0              = 0.0f;
+	_3BC              = 0;
+	mCurrentAnimEvent = KEY_NULL;
+
+	clearAnimationKeyOptions();
+	mMotionLoopCount = 0;
+	mMotionSpeed     = 0.0f;
+	mAnimationSpeed  = 0.0f;
+
+	int i;
+	for (i = 0; i < 4; i++) {
+		mTargetCreatures[i].reset();
+	}
+
+	mPathHandle          = 'test';
+	mCurrRouteWayPointID = -1;
+	mTargetPosition.set(0.0f, 0.0f, 0.0f);
+	mTargetAngle = 0.0f;
+	mActionVelocity.set(0.0f, 0.0f, 0.0f);
+	_3A4 = 0.0f;
+
+	mPellet = nullptr;
+
+	mTekiShape = tekiMgr->getTekiShapeObject(mTekiType);
+
+	if (!mTekiShape) {
+		clearTekiOption(TEKIOPT_Visible | TEKIOPT_ShadowVisible | TEKIOPT_LifeGaugeVisible | TEKIOPT_Atari | TEKIOPT_Alive
+		                | TEKIOPT_Organic);
+	} else {
+		mTekiShape->mShape->makeInstance(mAnimatedMaterials, 0);
+		mCollInfo->initInfo(mTekiShape->mShape, nullptr, nullptr);
+		mTekiAnimator->init(&mTekiShape->mAnimContext, mTekiShape->mAnimMgr, tekiMgr->mMotionTable);
+	}
+
+	if (mTekiShape && mTekiShape->mShape) {
+		mPlatMgr.init(this, mapMgr, mTekiShape->mShape);
+	}
+
+	for (i = 0; i < mRouteWayPointMax; i++) {
+		mRouteWayPoints[i] = nullptr;
+	}
+
+	for (i = 0; i < 4; i++) {
+		mParticleGenerators[i] = 0;
+	}
+
+	for (i = 0; i < 5; i++) {
+		mTimers[i] = 0.0f;
+	}
+
+	for (i = 0; i < 8; i++) {
+		mCorpsePartJoints[i] = -1;
+	}
+
+	if (getParameterI(TPI_CullingType) == CULLAI_CullAIOffCamera) {
+		setOutsideView();
+	} else {
+		setInsideView();
+	}
+
+	mCollisionRadius = getParameterF(TPF_CollisionRadius);
+
+	prepareEffects();
+	stopMove();
+
+	PRINT_NAKATA("NNNNNreset:%08x:%d:%s:%f\n", this, mTekiType, TekiMgr::getTypeName(mTekiType), getCentreSize());
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::prepareEffects()
+{
+	if (!effectMgr) {
+		return;
+	}
+
+	for (int i = 0; i < 3; i++) {
+		zen::particleGenerator* ptcl
+		    = effectMgr->create((EffectMgr::effTypeTable)(i + EffectMgr::EFF_RippleWhite2), Vector3f(0.0f, 0.0f, 0.0f), nullptr, nullptr);
+		if (!ptcl) {
+			PRINT("!!!prepareEffects:generator==null:%08x:%d,%d:%08x\n", this, i, mTekiType, nullptr);
+			break;
+		}
+
+		ptcl->setOrientedNormalVector(Vector3f(0.0f, 1.0f, 0.0f));
+		f32 val = ptcl->getScaleSize();
+		ptcl->setScaleSize(val * getParameterF(TPF_RippleScale));
+		ptcl->stopGen();
+		mParticleGenPack->setPtclGenPtr(i, ptcl);
+	}
+
+	mParticleGenPack->setEmitPosPtr(&getPosition());
+
+	// fake just to inflate stack.
+	STACK_PAD_TERNARY(mParticleGenPack, 4);
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000090
+ */
+void BTeki::setCorpsePartJoint(int partIdx, int jointIdx)
+{
+	if (getCorpsePartID(partIdx).match('none')) {
+		PRINT("!setCorpsePartJoint:%08x:%d,%d\n", this, partIdx, jointIdx);
+		return;
+	}
+
+	mCorpsePartJoints[partIdx] = jointIdx;
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::startAI(int)
+{
+	TekiStrategy* strat = getStrategy();
+	if (!strat) {
+		PRINT("!startAI:strategy==null:%08x\n", this);
+		return;
+	}
+	strat->start(*static_cast<Teki*>(this));
+	ID32& id = mPersonality->mID;
+	PRINT_NAKATA("BTeki::reset:%08x:item:%s\n", this, id.mStringID);
+	if (Pellet::isUfoPartsID(id.mId)) {
+		radarInfo->attachParts(this);
+		pelletMgr->addUseList(id.mId);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::update()
+{
+	Creature::update();
+	if (mDeadState == 0) {
+		updateTimers();
+		if (mHealth > 0.0f) {
+			f32 max = getMaxLife();
+			f32 inc = getParameterF(TPF_LifeRecoverRate);
+			mHealth += NSystem::getFrameTime() * (max * inc);
+
+			if (mHealth >= max) {
+				mHealth = max;
+			}
+		}
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::doAnimation()
+{
+	STACK_PAD_VAR(1);
+	if (!mTekiShape) {
+		return;
+	}
+	if (getTekiOption(TEKIOPT_ManualAnimation)) {
+		mAnimationSpeed = mMotionSpeed;
+	} else if (!mTekiAnimator->getCurrentOption(ANIMFLAG_UseDynamicSpeed)) {
+		mAnimationSpeed = mTekiAnimator->getAnimationSpeed();
+	} else if (getTekiOption(TEKIOPT_StoppingMove)) {
+		mAnimationSpeed = mPreStopAnimationSpeed;
+	} else {
+		f32 speed       = getDriveLength();
+		mAnimationSpeed = getVelocityAnimationSpeed(speed);
+	}
+
+	mTekiAnimator->animate(mAnimationSpeed);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::startMotion(int motionID)
+{
+	mTekiAnimator->startMotion(PaniMotionInfo(motionID, this));
+	mCurrentAnimEvent = KEY_NULL;
+	clearAnimationKeyOptions();
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::startStoppingMove()
+{
+	PRINT_NAKATA("startStoppingMove:%08x:%f,%f\n", this, mAnimationSpeed, mPreStopAnimationSpeed);
+	stopMove();
+	setTekiOption(TEKIOPT_StoppingMove);
+	mPreStopAnimationSpeed = mAnimationSpeed;
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::finishStoppingMove()
+{
+	PRINT_NAKATA("finishStoppingMove:%08x:%f,%f\n", this, mAnimationSpeed, mPreStopAnimationSpeed);
+	clearTekiOption(TEKIOPT_StoppingMove);
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 BTeki::getVelocityAnimationSpeed(f32 speed)
+{
+	f32 animSpeed   = mTekiAnimator->getAnimationSpeed() / 30.0f;
+	f32 scaledSpeed = speed * animSpeed / getScaleRate();
+	f32 minSpeed    = 10.0f * animSpeed;
+	if (scaledSpeed < minSpeed) {
+		scaledSpeed = minSpeed;
+	}
+
+	return scaledSpeed;
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::animationKeyUpdated(immut PaniAnimKeyEvent& event)
+{
+	if (event.mEventType == KEY_PlaySound) {
+		playTableSound(event.mValue);
+		return;
+	}
+
+	if (event.mEventType == KEY_PlayEffect) {
+		createTekiEffect(event.mValue);
+		return;
+	}
+
+	mCurrentAnimEvent = event.mEventType;
+	setAnimationKeyOption(1 << event.mEventType);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::doAI()
+{
+	STACK_PAD_VAR(2);
+	if (!mDeadState && (AIPerf::optLevel < 3 || mOptUpdateContext.updatable())) {
+		TekiStrategy* strat = getStrategy();
+		strat->act(*static_cast<Teki*>(this));
+		mCurrentAnimEvent = KEY_NULL;
+		clearAnimationKeyOptions();
+
+		if (!mGroundTriangle) {
+			mParticleGenPack->stopGen();
+		} else {
+			int attr         = MapCode::getAttribute(mGroundTriangle);
+			bool isActiveGen = !mParticleGenPack->checkStopGen();
+			if (isActiveGen) {
+				if (attr != ATTR_Water) {
+					mParticleGenPack->stopGen();
+				}
+			} else if (attr == ATTR_Water) {
+				mParticleGenPack->startGen();
+			}
+		}
+
+		if (getTekiOption(TEKIOPT_Gravitatable)) {
+			gravitate(getGravity());
+		}
+
+		f32 factor = 1.0f;
+		if (!timerElapsed(3)) {
+			factor += mVibrationController->getValue(mTimers[3]);
+		}
+
+		if (getTekiOption(TEKIOPT_Pressed)) {
+			mSRT.s.set(1.2f, 0.2f, 1.2f);
+		} else {
+			f32 scale = getScale();
+			mSRT.s.set(scale * factor, scale / factor, scale * factor);
+		}
+
+		updateLifeGauge();
+		if (mDeadState == 1) {
+			dieSoon();
+		}
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::die()
+{
+	mDeadState = 1;
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::dieSoon()
+{
+	PRINT_NAKATA("dieSoon:%08x:\n", this);
+	clearTekiOption(TEKIOPT_Alive | TEKIOPT_Visible | TEKIOPT_ShadowVisible | TEKIOPT_Atari);
+	if (getParameterI(TPI_CorpseType) == TEKICORPSE_LeaveCorpse) {
+		createSoulEffect();
+		u32 typeID = TekiMgr::getTypeId(mTekiType);
+		ID32 id(typeID);
+		PRINT_NAKATA("dieSoon:%08x:%d,%s\n", this, mTekiType, id.mStringID);
+
+		NVector3f vec1;
+		CollPart* carcass = mCollInfo->getSphere('carc');
+		if (!carcass) {
+			vec1.set(getCentre());
+		} else {
+			PRINT_NAKATA("dieSoon:%08x:'carc'\n", this);
+			vec1.set(carcass->mCentre);
+		}
+
+		becomePellet(typeID, vec1, getDirection());
+		PRINT_NAKATA("dieSoon:%08x:pellet:%08x\n", this, mPellet);
+		if (!mPellet) {
+			ERROR("?dieSoon:%08x:pellet==null:abusan\n", this);
+			return;
+		}
+
+		NVector3f vec2;
+		outputDirectionVector(vec2);
+		vec2.scale(getParameterF(TPF_CorpseVelocityHoriz));
+		vec2.y = getParameterF(TPF_CorpseVelocityVert);
+		mPellet->mVelocity.set(vec2);
+		mDeadState = 2;
+	}
+
+	detachGenerator();
+	spawnCorpseParts();
+	mSeContext->releaseEvent();
+	GameStat::killTekis.inc();
+	clearCreaturePointers();
+	mPlatMgr.release();
+	if (mDeadState == 2) {
+		becomeCorpse();
+	} else {
+		kill(false);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::becomeCorpse()
+{
+	PRINT_NAKATA("BTeki::becomeCorpse:%08x\n", this);
+	for (int i = 0; i < 4; i++) {
+		if (mParticleGenerators[i]) {
+			mParticleGenerators[i]->finish();
+		}
+	}
+
+	mParticleGenPack->finish();
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::doKill()
+{
+	PRINT_NAKATA("BTeki::doKill:%08x\n", this);
+	if (tekiOptUpdateMgr) {
+		mOptUpdateContext.exit();
+	}
+
+	clearTekiOption(TEKIOPT_Alive);
+	mSeContext->releaseEvent();
+	clearCreaturePointers();
+	mPlatMgr.release();
+	for (int i = 0; i < 4; i++) {
+		if (mParticleGenerators[i]) {
+			mParticleGenerators[i]->finish();
+			mParticleGenerators[i] = nullptr;
+		}
+	}
+
+	mParticleGenPack->finish();
+	tekiMgr->kill(this);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::exitCourse()
+{
+	PRINT_NAKATA("BTeki::exitCourse:%08x\n", this);
+	for (int i = 0; i < 4; i++) {
+		if (mParticleGenerators[i]) {
+			mParticleGenerators[i]->forceFinish();
+			mParticleGenerators[i] = nullptr;
+		}
+	}
+
+	mParticleGenPack->forceFinish();
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::gravitate(f32 accel)
+{
+	f32 fTime = NSystem::getFrameTime();
+	mActionVelocity.y -= accel * fTime;
+	Vector3f vec(mActionVelocity);
+	vec.scale(fTime);
+	mSRT.t.add(vec);
+	f32 seaLevel = getSeaLevel();
+	if (getPosition().y <= seaLevel) {
+		getPosition().y = seaLevel;
+		bounceCallback();
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::updateTimers()
+{
+	f32 fTime = NSystem::getFrameTime();
+	for (int i = 0; i < 5; i++) {
+		if (mTimers[i] > 0.0f) {
+			mTimers[i] -= fTime;
+			if (mTimers[i] < 0.0f) {
+				mTimers[i] = 0.0f;
+			}
+		}
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::stimulate(immut Interaction& interaction)
+{
+	if (interaction.actCommon(this)) {
+		return interaction.actTeki(static_cast<Teki*>(this));
+	}
+	return false;
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 BTeki::getiMass()
+{
+	f32 weight = getParameterF(TPF_Weight);
+	if (weight <= 0.0f) {
+		return 0.0f;
+	}
+	return 1.0f / (getScaleRate() * weight);
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 BTeki::getTekiCollisionSize()
+{
+	return getCentreSize();
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::makeDamaged()
+{
+	mHealth -= pc_mods_teki_damage(mStoredDamage);
+	if (mHealth < 0.0f) {
+		mHealth = 0.0f;
+	}
+
+	mStoredDamage = 0.0f;
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::startDamageMotion(f32 period, f32 amp)
+{
+	if (timerElapsed(3)) {
+		mTimers[3] = period;
+		mVibrationController->makeVibrationFunction(0.0f, period, amp);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::releasePlatCollisions()
+{
+	PRINT_NAKATA("releasePlatCollisions:%08x:\n", this);
+	mPlatMgr.release();
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::createDeadEffect()
+{
+	immut Vector3f& effectPos = getBoundingSphereCentre();
+	int carcassSize           = getParameterI(TPI_CarcassSize);
+	if (carcassSize == 2) {
+		effectMgr->create(EffectMgr::EFF_Teki_DeathWaveS, effectPos, nullptr, nullptr);
+		effectMgr->create(EffectMgr::EFF_Teki_DeathGlowS, effectPos, nullptr, nullptr);
+		effectMgr->create(EffectMgr::EFF_Teki_DeathSmokeS, effectPos, nullptr, nullptr);
+	} else if (carcassSize == 1) {
+		effectMgr->create(EffectMgr::EFF_Teki_DeathWaveM, effectPos, nullptr, nullptr);
+		effectMgr->create(EffectMgr::EFF_Teki_DeathGlowM, effectPos, nullptr, nullptr);
+		effectMgr->create(EffectMgr::EFF_Teki_DeathSmokeM, effectPos, nullptr, nullptr);
+	} else if (carcassSize == 0) {
+		effectMgr->create(EffectMgr::EFF_Teki_DeathWaveL, effectPos, nullptr, nullptr);
+		effectMgr->create(EffectMgr::EFF_Teki_DeathGlowL, effectPos, nullptr, nullptr);
+		effectMgr->create(EffectMgr::EFF_Teki_DeathSmokeL, effectPos, nullptr, nullptr);
+
+	} else if (carcassSize != 3) {
+		PRINT("!createDeadEffect:%08x:%d\n", this, carcassSize);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::createSoulEffect()
+{
+	immut Vector3f& effectPos = getBoundingSphereCentre();
+	int carcassSize           = getParameterI(TPI_CarcassSize);
+	if (carcassSize == 2) {
+		effectMgr->create(EffectMgr::EFF_Teki_SoulS, effectPos, nullptr, nullptr);
+	} else if (carcassSize == 1) {
+		effectMgr->create(EffectMgr::EFF_Teki_SoulM, effectPos, nullptr, nullptr);
+	} else if (carcassSize == 0) {
+		effectMgr->create(EffectMgr::EFF_Teki_SoulL, effectPos, nullptr, nullptr);
+
+	} else if (carcassSize != 3) {
+		PRINT("!createSoulEffect:%08x:%d\n", this, carcassSize);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::spawnItems()
+{
+	// spawn item
+	ID32& id = mPersonality->mID;
+	if (!id.match('none')) {
+		PRINT_NAKATA("spawnItems:%08x:spawn item:%s\n", this, id.mStringID);
+		spawnPellets(id.mId, -2, 1);
+		radarInfo->detachParts(this);
+		detachGenerator();
+	}
+
+	// spawn pellets
+	f32 pelletChance = getPersonalityF(TekiPersonality::FLT_PelletAppearChance);
+	PRINT("spawnItems:PELLET:probability:%f\n", pelletChance);
+
+	if (NMathF::occurred(pelletChance)) {
+		int kind   = mPersonality->mPelletKind;
+		int color  = mPersonality->mPelletColor;
+		int min    = getPersonalityI(TekiPersonality::INT_PelletMinCount);
+		int max    = getPersonalityI(TekiPersonality::INT_PelletMaxCount);
+		int pelNum = NMathI::rangeRandom(min, max);
+		PRINT("spawn pellet col=%d kind=%d\n", color, kind);
+		spawnPellets(kind, color, pelNum);
+	}
+
+	// spawn nectar (waters)
+	f32 nectarChance = getPersonalityF(TekiPersonality::FLT_NectarAppearChance);
+	PRINT("spawnItems:WATER:probability:%f\n", nectarChance);
+	if (NMathF::occurred(nectarChance)) {
+		int min       = getPersonalityI(TekiPersonality::INT_NectarMinCount);
+		int max       = getPersonalityI(TekiPersonality::INT_NectarMaxCount);
+		int nectarNum = NMathI::rangeRandom(min, max);
+		PRINT_NAKATA("spawnItems:spawnWaters:%08x:%d,%d,%d\n", this, min, max, nectarNum);
+		spawnWaters(nectarNum);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::spawnPellets(int kind, int color, int count)
+{
+	PRINT_NAKATA("spawnPellets:%08x:%d,%d,%d\n", this, kind, color, count);
+	Vector3f spawnPos   = getCentre();
+	f32 spawnSpeedVert  = getParameterF(TPF_SpawnPelletVelocityVert);
+	f32 spawnSpeedHoriz = getParameterF(TPF_SpawnPelletVelocityHoriz);
+
+	f32 direction;
+	if (getParameterI(TPI_SpawnPelletForward) == TRUE) {
+		direction = getDirection();
+	} else {
+		direction = 2 * NMathF::pi * NSystem::random();
+	}
+
+	for (int i = 0; i < count; i++) {
+		Pellet* pellet = nullptr;
+		if (color == PELCOLOR_Part) {
+			pellet = pelletMgr->newPellet(kind, nullptr);
+			if (Pellet::isUfoPartsID(kind)) {
+				SeSystem::playSysSe(SYSSE_PARTS_APPEAR);
+			}
+		} else {
+			int pelColor = Blue;
+			if (color >= 0) {
+				pelColor = color;
+			} else {
+				pelColor = NMathI::rangeRandom(PELCOLOR_MIN, PELCOLOUR_MAX);
+			}
+			pellet = pelletMgr->newNumberPellet(pelColor, kind);
+		}
+
+		if (!pellet) {
+			PRINT("!spawnPellets:pellet==null:%08x\n", this);
+			return;
+		}
+
+		pellet->init(spawnPos);
+		f32 angle = direction + (f32(i) / f32(count)) * NMathF::pi * 2.0f;
+		pellet->mVelocity.set(spawnSpeedHoriz * NMathF::sin(angle), spawnSpeedVert, spawnSpeedHoriz * NMathF::cos(angle));
+
+		pellet->mFaceDirection = getDirection();
+		pellet->mRotationQuat.fromEuler(Vector3f(0.0f, pellet->mFaceDirection, 0.0f));
+
+		if (getParameterI(TPI_SpawnPelletScaleOff)) {
+			pellet->startAI(TRUE);
+		} else {
+			pellet->startAI(FALSE);
+		}
+
+		pellet->playEventSound(pellet, SE_PELLET_BORN);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::spawnWaters(int count)
+{
+	PRINT_NAKATA("spawnWaters:%08x:%d\n", this, count);
+	Vector3f spawnPos   = getCentre();
+	f32 spawnSpeedVert  = getParameterF(TPF_SpawnPelletVelocityVert);
+	f32 spawnSpeedHoriz = getParameterF(TPF_SpawnPelletVelocityHoriz);
+
+	f32 direction;
+	if (getParameterI(TPI_SpawnPelletForward) == TRUE) {
+		direction = getDirection();
+	} else {
+		direction = 2 * NMathF::pi * NSystem::random();
+	}
+
+	for (int i = 0; i < count; i++) {
+		MizuItem* nectar = static_cast<MizuItem*>(itemMgr->birth(OBJTYPE_FallWater));
+
+		if (!nectar) {
+			PRINT("!spawnWaters::item==null:%08x\n", this);
+			return;
+		}
+
+		nectar->init(spawnPos);
+		f32 angle = direction + (f32(i) / f32(count)) * NMathF::pi * 2.0f;
+		nectar->mVelocity.set(spawnSpeedHoriz * NMathF::sin(angle), spawnSpeedVert, spawnSpeedHoriz * NMathF::cos(angle));
+
+		nectar->startAI(0);
+
+		nectar->playEventSound(nectar, SE_PELLET_BORN);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::spawnCorpseParts()
+{
+	getStrategy()->spawnCorpseParts(*static_cast<Teki*>(this));
+}
+
+/**
+ * @todo: Documentation
+ */
+Teki* BTeki::generateTeki(int tekiType)
+{
+	Teki* teki = tekiMgr->newTeki(tekiType);
+	PRINT("generateTeki:%08x->%08x:%d->%d\n", this, teki, mTekiType, tekiType);
+	if (!teki) {
+		return nullptr;
+	}
+
+	teki->mPersonality->reset();
+	teki->mPersonality->mPosition.input(getPosition());
+	teki->mPersonality->mNestPosition.input(getNestPosition());
+	teki->mPersonality->mFaceDirection = getDirection();
+	teki->setPersonalityF(TekiPersonality::FLT_TerritoryRange, getPersonalityF(TekiPersonality::FLT_TerritoryRange));
+	teki->reset();
+	return teki;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000140
+ */
+void BTeki::outputDirectionPosition(Vector3f& outPos, f32 dist, f32 height)
+{
+	Vector3f offset;
+	outputDirectionVector(offset);
+
+	offset.scale(dist * getScaleRate());
+	outPos.input(getPosition());
+	outPos.y += height * getScaleRate();
+	outPos.add(offset);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::outputSpawnPosition(Vector3f& spawnPos)
+{
+	outputDirectionPosition(spawnPos, getParameterF(TPF_SpawnDistance), getParameterF(TPF_SpawnHeight));
+}
+
+/**
+ * @todo: Documentation
+ */
+Teki* BTeki::spawnTeki(int tekiType)
+{
+	Teki* teki = generateTeki(tekiType);
+	if (!teki) {
+		return nullptr;
+	}
+
+	Vector3f spawnPos;
+	outputSpawnPosition(spawnPos);
+	teki->inputPosition(spawnPos);
+
+	Vector3f spawnVel;
+	outputDirectionVector(spawnVel);
+	spawnVel.scale(getParameterF(TPF_SpawnVelocity) * getPersonalityF(TekiPersonality::FLT_Strength));
+	teki->inputVelocity(spawnVel);
+
+	teki->startAI(0);
+	return teki;
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::shootBall(Creature&)
+{
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::dump()
+{
+	PRINT("BTeki:%s:%08x\n", TekiMgr::getTypeName(mTekiType), this);
+	PRINT("MotionName:%s\n", mTekiAnimator->getCurrentMotionName());
+	PRINT("MotionFrame:%f/%d\n", mTekiAnimator->getCounter(), mTekiAnimator->getFrameCount());
+	int battlePikiCount = countPikis(TekiLowerRangeCondition(static_cast<Teki*>(this)));
+	int stickPikiCount  = countPikis(TekiStickerCondition(static_cast<Teki*>(this)));
+	PRINT("battlePikiCount:%d,stickPikiCount:%d\n", battlePikiCount, stickPikiCount);
+	int flickCount = getFlickDamageCount(battlePikiCount);
+	PRINT("DamageCount:%f/%f\n", mDamageCount, flickCount);
+	PRINT("damage:%f\n", mStoredDamage);
+	PRINT("tekiState:%d\n", mStateID);
+	PRINT("returnState:%d\n", mReturnStateID);
+
+	// nakata did you just forget to take this out for some reason.
+	TekiLowerRangeCondition(static_cast<Teki*>(this));
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::nearestAngleTarget(Creature* newTarget)
+{
+	if (!newTarget) {
+		PRINT("!nearestAngleTarget:newTarget==null:%08x\n", this);
+		return false;
+	}
+
+	Creature* oldTarget = getCreaturePointer(0);
+	if (!oldTarget) {
+		return true;
+	}
+
+	if (newTarget == oldTarget) {
+		return false;
+	}
+
+	bool isNewContact = contactCreature(*newTarget);
+	bool isOldContact = contactCreature(*oldTarget);
+
+	if (isNewContact) {
+		if (isOldContact) {
+			f32 newAngle = calcTargetAngle(newTarget->getPosition());
+			f32 oldAngle = calcTargetAngle(oldTarget->getPosition());
+			if (newAngle < oldAngle) {
+				return true;
+			}
+			return false;
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::cullableCenter(Creature& target, f32 radius)
+{
+	return roughCull(this, &target, radius);
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::cullableSphere(Creature& target, f32 radius)
+{
+	return cullableCenter(target, getBoundingSphereRadius() + target.getBoundingSphereRadius() + radius);
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::inSectorPosition(immut Vector3f& targetPos, f32 maxDistance, f32 sectorAngle)
+{
+	NVector3f selfPos(getPosition());
+	f32 distance = selfPos.distanceXZ(targetPos);
+	if (distance > maxDistance) {
+		return false;
+	}
+
+	if (calcTargetAngle(targetPos) > sectorAngle / 2.0f) {
+		return false;
+	}
+
+	return true;
+}
+
+/**
+ * @todo: Documentation
+ */
+#if defined(PIKI_PC_PORT)
+Creature* BTeki::pcRetargetDeadNavi(Creature* target)
+{
+	Navi* other = naviMgr ? naviMgr->getNearestNavi(getPosition()) : nullptr;
+	if (!other || other == target || !other->isAlive()) {
+		return nullptr;
+	}
+	NVector3f pos(getPosition());
+	NVector3f otherPos(other->getPosition());
+	if (pos.distanceXZ(otherPos) > getParameterF(TPF_VisibleRange)) {
+		return nullptr;
+	}
+	return other;
+}
+#endif
+
+bool BTeki::visibleCreature(Creature& target)
+{
+	TekiRecognitionCondition recog(static_cast<Teki*>(this));
+	if (!recog.satisfy(&target)) {
+		return false;
+	}
+
+	f32 range = getParameterF(TPF_VisibleRange);
+	if (cullableCenter(target, range)) {
+		return false;
+	}
+
+	NVector3f pos(getPosition());
+	NVector3f targetPos(target.getPosition());
+
+	if (targetPos.y > pos.y + getParameterF(TPF_VisibleHeight)) {
+		return false;
+	}
+
+	if (pos.distanceXZ(targetPos) > range) {
+		return false;
+	}
+
+	if (!timerElapsed(4)) {
+		return true;
+	}
+
+	f32 angle = calcTargetAngle(targetPos);
+	f32 limit = NMathF::d2r(getParameterF(TPF_VisibleAngle) / 2.0f);
+	if (angle > limit) {
+		return false;
+	}
+
+	return true;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::separateCreature(Creature& target)
+{
+	TekiRecognitionCondition recog(static_cast<Teki*>(this));
+	if (!recog.satisfy(&target)) {
+		return true;
+	}
+
+	if (target.getStickObject() == this) {
+		return false;
+	}
+
+	f32 range = getAttackableRange() + 1.0f;
+
+	if (cullableSphere(target, range)) {
+		return true;
+	}
+
+	f32 collDist = calcCollisionDistance(target);
+	if (collDist > range) {
+		PRINT_NAKATA("separateCreature1:%08x:%08x:%f,%f\n", this, &target, range, collDist);
+		return true;
+	}
+
+	return false;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::contactCreature(Creature& target)
+{
+	TekiRecognitionCondition recog(static_cast<Teki*>(this));
+	if (!recog.satisfy(&target)) {
+		return false;
+	}
+
+	if (target.getStickObject() == this) {
+		return true;
+	}
+
+	f32 range = getAttackableRange() - 1.0f;
+
+	if (cullableSphere(target, range)) {
+		return false;
+	}
+
+	f32 collDist = calcCollisionDistance(target);
+	if (collDist > range) {
+		return false;
+	}
+
+	return true;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::attackableCreature(Creature& target)
+{
+	if (target.getStickObject() == this) {
+		return false;
+	}
+
+	if (!contactCreature(target)) {
+		return false;
+	}
+
+	f32 angle = calcTargetAngle(target.getPosition());
+	f32 limit = NMathF::d2r(getParameterF(TPF_AttackableAngle)) / 2.0f;
+	if (angle > limit) {
+		return false;
+	}
+
+	return true;
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 BTeki::calcTargetAngle(immut Vector3f& targetPos)
+{
+	STACK_PAD_VAR(1);
+
+	f32 targetDir = calcTargetDirection(targetPos);
+	f32 faceDir   = NMathF::roundAngle(getDirection());
+	return NMathF::angleDifference(faceDir, targetDir);
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::moveToward(immut Vector3f& target, f32 speed)
+{
+	return moveTowardStatic(getPosition(), target, speed, mTargetVelocity);
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::turnToward(f32 targetAngle, f32 turnSpeed)
+{
+	f32 faceDir   = NMathF::roundAngle(getDirection());
+	f32 nearerDir = NMathF::calcNearerDirection(faceDir, targetAngle);
+	f32 speed     = turnSpeed * NSystem::getFrameTime();
+
+	bool res = false;
+	if (nearerDir > faceDir) {
+		if (nearerDir - faceDir < speed) {
+			speed = nearerDir - faceDir;
+			res   = true;
+		}
+		setDirection(faceDir + speed);
+	} else {
+		if (faceDir - nearerDir < speed) {
+			speed = faceDir - nearerDir;
+			res   = true;
+		}
+		setDirection(faceDir - speed);
+	}
+
+	return res;
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::rotateTeki(f32 speed)
+{
+	f32 faceDir = NMathF::roundAngle(getDirection());
+	f32 amt     = speed * NSystem::getFrameTime();
+
+	setDirection(faceDir + amt);
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000218 (Matching by size)
+ */
+void BTeki::jumpTo(immut Vector3f& destination, f32 jumpHeight)
+{
+	startFlying();
+	stopDrive();
+	stopVelocity();
+	turnTo(destination);
+
+	// These units are all over the place.  Let's imagine classical physics.
+	f32 gravity = getGravity();                              // units/sec^2
+	f32 ySpeed  = NMathF::sqrt(2.0f * gravity * jumpHeight); // units/sec (`jumpHeight` is in units)
+	f32 timeTmp = ySpeed / gravity;                          // seconds (yes this is a named temporary)
+	f32 time    = 2.0f * timeTmp;                            // seconds
+
+	Vector3f dest2D(destination);
+	dest2D.y = 0.0f;
+	Vector3f pos2D(getPosition());
+	pos2D.y = 0.0f;
+
+	f32 distance    = dest2D.distance(pos2D);
+	f32 actionSpeed = distance / time; // units/sec
+
+	mActionVelocity.sub2(dest2D, pos2D);
+	mActionVelocity.normalizeCheck();
+	mActionVelocity.scale(actionSpeed);
+	mActionVelocity.y = ySpeed;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000168 (Matching by size)
+ */
+bool BTeki::insideDirection(Vector3f& direction)
+{
+	f32 faceDir = NMathF::roundAngle(getDirection());
+	f32 targDir = NMathF::roundAngle(calcTargetDirection(direction));
+	targDir     = NMathF::calcNearerDirection(faceDir, targDir);
+	return NMath<f32>::absolute(faceDir - targDir) <= getParameterF(TPF_TurnVelocity) * NSystem::getFrameTime();
+}
+
+/**
+ * @todo: Documentation
+ */
+Creature* BTeki::getClosestNaviPiki(immut Condition& cond, f32* outDist)
+{
+	// Cooperativo: el navi más cercano que cumpla la condición.
+	Creature* navi = nullptr;
+	f32 naviBest   = 0.0f;
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+		Navi* cand = naviMgr->getNavi(ni);
+		if (!cand || !cond.satisfy(cand)) {
+			continue;
+		}
+		f32 d = calcSphereDistance(*cand);
+		if (!navi || d < naviBest) {
+			navi     = cand;
+			naviBest = d;
+		}
+	}
+
+	Creature* piki   = pikiMgr->findClosest(getPosition(), &cond);
+	Creature* result = nullptr;
+	if (!navi) {
+		if (piki) {
+			result = piki;
+		}
+	} else if (!piki) {
+		result = navi;
+	} else {
+		f32 naviDist = calcSphereDistance(*navi);
+		f32 pikiDist = calcSphereDistance(*piki);
+		if (naviDist < pikiDist) {
+			result = navi;
+		} else {
+			result = piki;
+		}
+	}
+
+	if (outDist && result) {
+		*outDist = calcSphereDistance(*result);
+	}
+	return result;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::attackTarget(Creature& target, f32 range, f32 damage, immut Condition& cond)
+{
+	if (!cond.satisfy(&target)) {
+		return false;
+	}
+
+	f32 collDist = calcCollisionDistance(target);
+	if (collDist > range + 1.0f) {
+		return false;
+	}
+
+	target.stimulate(InteractAttack(this, nullptr, damage, false));
+	return true;
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::outputHitCenter(Vector3f& outCenter)
+{
+	Vector3f dir;
+	outputDirectionVector(dir);
+	dir.scale(getTekiCollisionSize() + getAttackRange());
+	outCenter.add2(getPosition(), dir);
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0001F4 (Matching by size)
+ */
+bool BTeki::attackRangeNaviPiki(immut Interaction& interaction, immut Condition& condition)
+{
+	Vector3f hitCenter;
+	outputHitCenter(hitCenter);
+
+	// Fun Fact: Decompiling this unused function fixed a fakematch related to `TekiAndCondition` in this file.
+	TekiPositionSphereDistanceCondition distanceCondition(hitCenter, getAttackHitRange());
+	TekiAndCondition andCond(&condition, &distanceCondition);
+	return interactNaviPiki(interaction, andCond);
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00015C (Matching by size)
+ */
+bool BTeki::interactTeki(immut Interaction& interaction, immut Condition& condition)
+{
+	bool res = false;
+	Iterator iter(tekiMgr);
+	CI_LOOP(iter)
+	{
+		Creature* teki = *iter;
+		if (!teki) {
+			PRINT("?interactTeki:%08x:creature==null\n", this);
+			break;
+		}
+		if (teki != this && condition.satisfy(teki)) {
+			teki->stimulate(interaction);
+			res = true;
+		}
+	}
+	return res;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::interactNaviPiki(immut Interaction& interaction, immut Condition& cond)
+{
+	bool navi = interactNavi(interaction, cond);
+	bool piki = interactPiki(interaction, cond);
+
+	return navi || piki;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::interactNavi(immut Interaction& interaction, immut Condition& cond)
+{
+	bool res = false;
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+		Navi* navi = naviMgr->getNavi(ni);
+		if (navi && cond.satisfy(navi)) {
+			navi->stimulate(interaction);
+			res = true;
+		}
+	}
+
+	return res;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::interactPiki(immut Interaction& interaction, immut Condition& cond)
+{
+	bool res = false;
+	Iterator iter(pikiMgr);
+	CI_LOOP(iter)
+	{
+		Creature* piki = *iter;
+		if (!piki) {
+			PRINT("?interactPiki:%08x:creature==null\n", this);
+			break;
+		}
+		if (cond.satisfy(piki)) {
+			piki->stimulate(interaction);
+			res = true;
+		}
+	}
+
+	return res;
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::flick()
+{
+	flickUpper();
+	flickLower();
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::flick(InteractFlick& upperFlick, InteractFlick& lowerFlick)
+{
+	flickUpper(upperFlick);
+	flickLower(lowerFlick);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::flickUpper()
+{
+	InteractFlick NRef flick = InteractFlick(this, getParameterF(TPF_UpperFlickPower), 0.0f, FLICK_BACKWARDS_ANGLE);
+	flickUpper(flick);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::flickUpper(InteractFlick& flick)
+{
+	Stickers stuckList(this);
+	Iterator iter(&stuckList);
+	CI_LOOP(iter)
+	{
+		Creature* stuck = *iter;
+		if (!stuck) {
+			PRINT("?flickUpper:%08x:creature==null\n", this);
+			break;
+		}
+
+		if (NMathF::occurred(getParameterF(TPF_FlickProbability))) {
+			stuck->stimulate(flick);
+			iter.dec();
+		}
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::flickLower()
+{
+	InteractFlick NRef flick
+	    = InteractFlick(this, getParameterF(TPF_LowerFlickPower), getParameterF(TPF_LowerAttackPower), FLICK_BACKWARDS_ANGLE);
+	flickLower(flick);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::flickLower(InteractFlick& flick)
+{
+	TekiRecognitionCondition recognitionCondition(static_cast<Teki*>(this));
+	TekiStickingCondition stickingCondition;
+	TekiNotCondition notStickingCondition(&stickingCondition);
+	TekiAndCondition recognizedAndNotSticking(&recognitionCondition, &notStickingCondition);
+	TekiDistanceCondition distanceCondition(static_cast<Teki*>(this), getLowerRange());
+	TekiAndCondition andCond(&recognizedAndNotSticking, &distanceCondition);
+	interactNavi(flick, andCond);
+	flick.mDamage = 0.0f;
+
+	interactPiki(flick, andCond);
+
+	// this is so fake and cursed, but whatever bullshit nakata did with the condition stacking has me stumped.
+	STACK_PAD_TERNARY(flick.mAngle, 9);
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::checkNaviPiki(immut Condition& cond)
+{
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+		Navi* navi = naviMgr->getNavi(ni);
+		if (navi && cond.satisfy(navi)) {
+			return true;
+		}
+	}
+
+	Iterator iter(pikiMgr);
+	CI_LOOP(iter)
+	{
+		Creature* piki = *iter;
+		if (cond.satisfy(piki)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * @todo: Documentation
+ */
+int BTeki::countPikis(immut Condition& cond)
+{
+	int count = 0;
+	Iterator iter(pikiMgr);
+	CI_LOOP(iter)
+	{
+		Creature* piki = *iter;
+		if (cond.satisfy(piki)) {
+			count++;
+		}
+	}
+	return count;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000148
+ */
+int BTeki::countTekis(immut Condition& cond)
+{
+	int count = 0;
+	Iterator iter(tekiMgr);
+	CI_LOOP(iter)
+	{
+		Creature* piki = *iter;
+		if (cond.satisfy(piki)) {
+			count++;
+		}
+	}
+	return count;
+}
+
+/**
+ * @todo: Documentation
+ */
+int BTeki::getFlickDamageCount(int pikiCount)
+{
+	if (pikiCount <= getParameterI(TPI_FlickPikiCount1)) {
+		return getParameterI(TPI_FlickDamageCount1);
+
+	} else if (pikiCount <= getParameterI(TPI_FlickPikiCount2)) {
+		return getParameterI(TPI_FlickDamageCount2);
+
+	} else if (pikiCount <= getParameterI(TPI_FlickPikiCount3)) {
+		return getParameterI(TPI_FlickDamageCount3);
+	}
+
+	return getParameterI(TPI_FlickDamageCount4);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::eventPerformed(immut TekiEvent& event)
+{
+	TekiStrategy* tekiEvent = getStrategy();
+	tekiEvent->eventPerformed(event);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::collisionCallback(immut CollEvent& event)
+{
+	if (!isAlive()) {
+		return;
+	}
+
+	Creature* collider = event.mCollider;
+	if (collider->isAlive()) {
+		eventPerformed(TekiEvent(TekiEventType::Entity, static_cast<Teki*>(this), collider));
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::ignoreAtari(Creature* target)
+{
+	if (target->getStickObject() == this) {
+		return true;
+	}
+
+	return false;
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::bounceCallback()
+{
+	eventPerformed(TekiEvent(TekiEventType::Ground, static_cast<Teki*>(this)));
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::wallCallback(immut Plane&, DynCollObject*)
+{
+	eventPerformed(TekiEvent(TekiEventType::Wall, static_cast<Teki*>(this)));
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::interact(immut TekiInteractionKey& key)
+{
+	TekiStrategy* strat = getStrategy();
+	return strat->interact(*static_cast<Teki*>(this), key);
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::interactDefault(immut TekiInteractionKey& key)
+{
+	STACK_PAD_VAR(1);
+	if (key.mInteractionType == TekiInteractType::Attack) {
+		InteractAttack* attack = (InteractAttack*)key.mInteraction;
+		if (getTekiOption(TEKIOPT_Invincible)) {
+			return false;
+		}
+
+		_344 = attack->getDamagePortion();
+		mStoredDamage += attack->mDamage;
+		if (getTekiOption(TEKIOPT_DamageCountable)) {
+			mDamageCount++;
+		}
+		setCreaturePointer(1, attack->mOwner);
+		return true;
+	}
+
+	if (key.mInteractionType == TekiInteractType::HitEffect) {
+		InteractHitEffect* hitEffect = (InteractHitEffect*)key.mInteraction;
+		effectMgr->create(EffectMgr::EFF_Piki_BigHit, hitEffect->mEffectPos, nullptr, nullptr);
+		if (mTekiType == TEKI_Beatle) {
+			if (hitEffect->mCollPart->isBouncy()) {
+				playEventSound(this, SE_KABUTO_FLIP);
+			}
+		} else if (mTekiType == TEKI_Kinoko) {
+			if (hitEffect->mCollPart->isBouncy()) {
+				playEventSound(this, SE_MUSH_FLIP);
+			}
+		}
+	}
+	return false;
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 BTeki::getGravity()
+{
+	return AICONST.mGravity();
+}
+
+/**
+ * @todo: Documentation
+ */
+TekiStrategy* BTeki::getStrategy()
+{
+	return tekiMgr->getStrategy(mTekiType);
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 BTeki::getSeaLevel()
+{
+	immut Vector3f& pos = getPosition();
+	return mapMgr->getMinY(pos.x, pos.z, true);
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 BTeki::getYFromSeaLevel()
+{
+	immut Vector3f& pos = getPosition();
+	return pos.y - getSeaLevel();
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::makePositionRoute(immut Vector3f& pos1, immut Vector3f& pos2, bool includeBlockedPaths)
+{
+	int idx2 = getTargetNearestWayPoint(pos2)->mIndex;
+	int idx1 = getTargetNearestWayPoint(pos1)->mIndex;
+	makeWayPointRoute(idx1, idx2, includeBlockedPaths);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::makeWayPointRoute(int start, int destination, bool includeBlockedPaths)
+{
+	for (int i = 0; i < mRouteWayPointMax; i++) {
+		mRouteWayPoints[i] = nullptr;
+	}
+
+	mRouteWayPointCount
+	    = routeMgr->getPathFinder(mPathHandle)->findSync(mRouteWayPoints, mRouteWayPointMax, start, destination, includeBlockedPaths);
+
+	if (mRouteWayPointCount > mRouteWayPointMax) {
+		PRINT("!makeWayPointRoute:routeWayPointCount>routeWayPointMax:%08x:%d,%d\n", this, mRouteWayPointCount, mTekiType);
+	}
+
+	PRINT_NAKATA("makeWayPointRoute:%08x,%d->%d,%d\n", this, start, destination, mRouteWayPointCount);
+	if (mRouteWayPointCount == 0) {
+		PRINT("!makeWayPointRoute:%08x,%d->%d,%d\n", this, start, destination, mRouteWayPointCount);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+WayPoint* BTeki::getTargetNearestWayPoint(immut Vector3f& pos)
+{
+	return routeMgr->findNearestWayPoint(mPathHandle, pos, false);
+}
+
+/**
+ * @todo: Documentation
+ */
+WayPoint* BTeki::getNearestWayPoint()
+{
+	return getTargetNearestWayPoint(getPosition());
+}
+
+/**
+ * @todo: Documentation
+ */
+WayPoint* BTeki::getWayPoint(int wpIdx)
+{
+	return routeMgr->getWayPoint(mPathHandle, wpIdx);
+}
+
+/**
+ * @todo: Documentation
+ */
+WayPoint* BTeki::getRouteWayPoint(int idx)
+{
+	if (idx < 0 || idx > mRouteWayPointMax) {
+		PRINT("!getRouteWayPoint:%08x:%d,%d\n", this, idx, mTekiType);
+		return nullptr;
+	}
+
+	return mRouteWayPoints[idx];
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::updateLifeGauge()
+{
+	mLifeGauge.updValue(mHealth, getMaxLife());
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::refresh(Graphics& gfx)
+{
+	if (mDeadState == 0) {
+		TekiStrategy* strat = getStrategy();
+		if (strat) {
+			strat->draw(*static_cast<Teki*>(this), gfx);
+		}
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::drawDefault(Graphics& gfx)
+{
+	if (!mTekiShape) {
+		return;
+	}
+
+	clearTekiOption(TEKIOPT_Unk6);
+	clearTekiOption(TEKIOPT_Drawed);
+
+	f32 rad = getBoundingSphereRadius();
+	if (!gfx.mCamera->isPointVisible(getBoundingSphereCentre(), rad)) {
+		enableAICulling();
+	} else {
+		disableAICulling();
+	}
+
+	if (!aiCullable() && mGrid.aiCulling() && !getTekiOption(CF_IsAiDisabled)) {
+		setTekiOption(TEKIOPT_Unk6);
+	}
+
+	if (getTekiOption(TEKIOPT_Unk6) && !isCreatureFlag(CF_AIAlwaysActive)) {
+		// some debug flag thing
+	} else {
+		drawTekiShape(gfx);
+	}
+
+	if (gsys->mToggleDebugInfo) {
+		drawTekiDebugInfo(gfx);
+	}
+
+	// genuinely unsure what else would even be here, i assume it's the debug flag setting stuff
+	STACK_PAD_TERNARY(rad, 2);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::drawTekiShape(Graphics& gfx)
+{
+	if (!getTekiOption(TEKIOPT_ShapeVisible)) {
+		return;
+	}
+
+	clearTekiOption(TEKIOPT_Unk11);
+	Quat q1(0.0f, 0.0f, 0.0f, 1.0f);
+	f32 dir = getDirection();
+	q1.rotate(Vector3f(0.0f, 1.0f, 0.0f), dir);
+
+	NVector3f zVec;
+	q1.genVectorZ(zVec);
+	q1.rotate(zVec, _3A4);
+
+	mWorldMtx.makeVQS(mSRT.t, q1, mSRT.s);
+
+	Matrix4f onCamMtx;
+	gfx.mCamera->mLookAtMtx.multiplyTo(mWorldMtx, onCamMtx);
+	gfx.useMatrix(Matrix4f::ident, 0);
+	mTekiAnimator->updateContext();
+	mTekiShape->mShape->updateAnim(gfx, onCamMtx, nullptr, this);
+
+	if (mCollInfo) {
+		mCollInfo->updateInfo(gfx, false);
+	}
+
+	mPlatMgr.update(gfx);
+
+	if (aiCullable()) {
+		int lightType = getParameterI(TPI_LightType);
+		if (lightType == 1) {
+			gfx.calcLighting(_3C0);
+		}
+		int animType = getParameterI(TPI_AnimationType);
+		if (animType == 1) {
+			f32 val = _3BC;
+			mAnimatedMaterials.animate(&val);
+		} else {
+			mAnimatedMaterials.animate(nullptr);
+		}
+
+#if defined(PIKI_PC_PORT)
+		if (!pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
+#endif
+			mTekiShape->mShape->drawshape(gfx, *gfx.mCamera, &mAnimatedMaterials);
+		if (lightType == 1) {
+			gfx.calcLighting(1.0f);
+		}
+		setTekiOption(TEKIOPT_Drawed);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::drawTekiDebugInfo(Graphics& gfx)
+{
+	TekiStrategy* strat = getStrategy();
+	if (strat) {
+		bool light = gfx.setLighting(false, nullptr);
+		strat->drawDebugInfo(*static_cast<Teki*>(this), gfx);
+		gfx.setLighting(light, nullptr);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::drawTekiDebugInfoDefault(Graphics& gfx)
+{
+	// don't ask why this works.
+	Teki* teki = static_cast<Teki*>(this);
+	teki->drawRange(gfx, teki->getPosition(), getParameterF(TPF_VisibleRange), Colour(0, 0, 255, 255));
+	teki->drawRange(gfx, teki->getPosition(), getTekiCollisionSize() + getAttackableRange(), Colour(255, 255, 0, 255));
+
+	NVector3f vec1;
+	outputHitCenter(vec1);
+	teki->drawRange(gfx, vec1, getAttackHitRange(), Colour(255, 0, 0, 255));
+	teki->drawRange(gfx, teki->getPosition(), getLowerRange(), Colour(255, 0, 255, 255));
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::drawRange(Graphics& gfx, immut Vector3f& centre, f32 range, immut Colour& colour)
+{
+	Matrix4f mtx1;
+	Matrix4f mtx2;
+	mtx1.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, 0.0f, 0.0f), Vector3f(0.0f, 0.0f, 0.0f));
+	gfx.mCamera->mLookAtMtx.multiplyTo(mtx1, mtx2);
+	gfx.setColour(colour, true);
+	gfx.drawSphere(centre, range, mtx2);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::refresh2d(Graphics& gfx)
+{
+#if defined(PIKI_PC_PORT)
+	// Pantalla partida: CF_UseAICulling solo lo calcula la vista de J1, así que
+	// en la de J2 el círculo de vida desaparecía cuando J1 no miraba al
+	// enemigo. Se comprueba con la cámara de la vista que se dibuja.
+	if (mDeadState != 0 || !tekiMgr->hasModel(mTekiType) || !isVisible()
+	    || !gfx.mCamera->isPointVisible(getBoundingSphereCentre(), getBoundingSphereRadius())) {
+		return;
+	}
+#else
+	if (mDeadState != 0 || !tekiMgr->hasModel(mTekiType) || !isVisible() || isCreatureFlag(CF_UseAICulling)) {
+		return;
+	}
+#endif
+
+	if (getTekiOption(TEKIOPT_LifeGaugeVisible)) {
+		immut Vector3f& pos = getCentre();
+		mLifeGauge.mPosition.input(pos);
+		mLifeGauge.mOffset.y = getParameterF(TPF_LifeGaugeOffset);
+		mLifeGauge.mScale    = 5000.0f / gfx.mCamera->mNear;
+		mLifeGauge.refresh(gfx);
+	}
+
+	// w/e man.
+	STACK_PAD_TERNARY(mDeadState, 1);
+}
+
+/**
+ * @todo: Documentation
+ */
+CollPart* BTeki::getFreeSlot()
+{
+	CollPart* mouth = mCollInfo->getSphere('slot');
+	int slotCount   = mouth->getChildCount();
+	for (int i = 0; i < slotCount; i++) {
+		CollPart* slot = mouth->getChildAt(i);
+		if (isFreeCollPart(slot)) {
+			return slot;
+		}
+	}
+
+	return nullptr;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::isFreeCollPart(CollPart* part)
+{
+	Stickers stuckList(this);
+	Iterator iter(&stuckList);
+	CI_LOOP(iter)
+	{
+		Creature* stuck = *iter;
+		if (!stuck) {
+			return true;
+		}
+
+		CollPart* stickPart = stuck->getStickPart();
+		if (stickPart == part) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::playTableSound(int index)
+{
+	PaniSoundTable* table = tekiMgr->getSoundTable(mTekiType);
+	if (!table) {
+		PRINT("!playTableSound:%08x:soundTable==null\n", this);
+		return;
+	}
+
+	if (index >= table->getSize()) {
+		PRINT("!playTableSound:%08x:index>=soundCount\n", this);
+		return;
+	}
+
+	PaniSound* sound = table->getSound(index);
+	if (!sound) {
+		PRINT("!playTableSound:%08x:sound==null\n", this);
+		return;
+	}
+
+	playSound(sound->mSoundID);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::playSound(int soundID)
+{
+	mSeContext->playSound(soundID);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::stopSound(int soundID)
+{
+	mSeContext->stopSound(soundID);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::createTekiEffect(int effectID)
+{
+	PRINT_NAKATA("createTekiEffect:%08x,%d:%d\n", this, mTekiType, effectID);
+	TekiStrategy* strategy = tekiMgr->getStrategy(mTekiType);
+	strategy->createEffect(*(Teki*)this, effectID);
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000028
+ */
+Matrix4f& BTeki::getCameraAnimationMatrix(int idx)
+{
+	return mTekiShape->mShape->getAnimMatrix(idx);
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000080
+ */
+void BTeki::outputWorldAnimationMatrix(Matrix4f& mtx1, int idx, immut Matrix4f& mtx2)
+{
+	immut Matrix4f& animMtx = getCameraAnimationMatrix(idx);
+	NMatrix4f tmp;
+	tmp.construct(animMtx);
+	tmp.makeIdentRow(3);
+	mtx2.multiplyTo(tmp, mtx1);
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::outputWorldAnimationPosition(Vector3f& position, int idx, immut Matrix4f& mtx)
+{
+	NMatrix4f tmp;
+	outputWorldAnimationMatrix(tmp, idx, mtx);
+	tmp.outputCol(3, position);
+}
+
+/**
+ * @todo: Documentation
+ */
+int BTeki::getPositionMapCode(immut Vector3f& pos)
+{
+	CollTriInfo* currentTri = mapMgr->getCurrTri(pos.x, pos.z, true);
+	if (currentTri == nullptr) {
+		PRINT("!getPositionMapCode:%08x\n", this);
+		return -1;
+	}
+
+	return MapCode::getAttribute(currentTri);
+}
+
+/**
+ * @todo: Documentation
+ */
+int BTeki::getPositionMapCode()
+{
+	return getPositionMapCode(getPosition());
+}
+
+/**
+ * @todo: Documentation
+ */
+bool BTeki::inWaterTeki()
+{
+	if (getPositionMapCode() == ATTR_Water) {
+		return true;
+	}
+
+	return false;
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::moveNestPosition()
+{
+	mSRT.t = mPersonality->mNestPosition;
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::startParticleGenerator(int param_1)
+{
+	zen::particleGenerator* particleGenerator = mParticleGenerators[param_1];
+	if (particleGenerator != nullptr) {
+		particleGenerator->startGen();
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::stopParticleGenerator(int generatorIndex)
+{
+	zen::particleGenerator* particleGenerator = mParticleGenerators[generatorIndex];
+	if (particleGenerator != nullptr) {
+		particleGenerator->stopGen();
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::setParticleGeneratorPosition(int param_1, immut Vector3f& effectPos)
+{
+	zen::particleGenerator* particleGenerator = mParticleGenerators[param_1];
+	if (particleGenerator != nullptr) {
+		particleGenerator->setEmitPos(effectPos);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void BTeki::setParticleGeneratorDirection(int param_1, immut Vector3f& effectDir)
+{
+	zen::particleGenerator* particleGenerator = mParticleGenerators[param_1];
+	if (particleGenerator != nullptr) {
+		particleGenerator->setEmitDir(effectDir);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 BTeki::calcCollisionDistance(Creature& creature)
+{
+	f32 dist = qdist2(getCentre().x, getCentre().z, creature.getCentre().x, creature.getCentre().z);
+
+	f32 collSize         = getCollisionSize();
+	f32 creatureCollSize = creature.getCentreSize();
+
+	return dist - creatureCollSize - collSize;
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 BTeki::getCollisionSize()
+{
+	return getCentreSize();
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000038 (Matching by size)
+ */
+Vector3f BTeki::getCollisionCenter()
+{
+	return getCentre();
+}

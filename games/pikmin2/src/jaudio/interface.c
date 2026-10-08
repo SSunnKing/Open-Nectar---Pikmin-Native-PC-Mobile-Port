@@ -1,0 +1,124 @@
+#include "jaudio/interface.h"
+
+#include "Dolphin/os.h"
+#include "jaudio/aictrl.h"
+#include "jaudio/piki_bgm.h"
+#include "jaudio/pikidemo.h"
+#include "jaudio/pikiinter.h"
+#include "jaudio/verysimple.h"
+
+#ifdef PIKI_PC_PORT
+#include "port/jaudio_host.h"
+#endif
+
+static int process_stack[4];
+
+static BOOL vol_chg   = 0;
+static int stacklevel = 0;
+
+static u8 game_bgm_vol     = 8;
+static u8 game_se_vol      = 8;
+static int current_process = 0xFFFFFFFF;
+
+/**
+ * @TODO: Documentation
+ */
+void Jac_OutputMode(int mode)
+{
+	Jac_SetOutputMode(mode);
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Jac_SetBGMVolume(u8 vol)
+{
+	if (vol > 10) {
+		vol = 10;
+	}
+	game_bgm_vol = vol;
+	vol_chg      = TRUE;
+#ifdef PIKI_PC_PORT
+	PikiJAudioSetGameVolumeState(game_bgm_vol, game_se_vol);
+#endif
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Jac_SetSEVolume(u8 vol)
+{
+	if (vol > 10) {
+		vol = 10;
+	}
+	game_se_vol = vol;
+	vol_chg     = TRUE;
+#ifdef PIKI_PC_PORT
+	PikiJAudioSetGameVolumeState(game_bgm_vol, game_se_vol);
+#endif
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Jac_Gsync()
+{
+	if (vol_chg) {
+		vol_chg = FALSE;
+		Jac_GameVolume(game_bgm_vol, game_se_vol);
+	}
+	Jac_DemoEventUnPauseCheck();
+	Jac_SysSEDemoFadeCheck();
+#if defined(VERSION_GPIJ01_01) || defined(VERSION_G98P01_PIKIDEMO) || defined(VERSION_DPIJ01_PIKIDEMO)
+#else
+	Jac_EventFrameCheck();
+#endif
+}
+
+/**
+ * @TODO: Documentation
+ * @note UNUSED Size: 00003C
+ */
+void Jac_DebugCall(void)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @TODO: Documentation
+ * @note UNUSED Size: 000048
+ */
+void __print_thread(immut char*, OSThread*)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Jac_SetProcessStatus(u32 processStat)
+{
+	if (current_process != -1) {
+		if ((processStat & 1) == 1) {
+			if (current_process == processStat - 1 && stacklevel != 0) {
+				stacklevel--;
+				current_process = process_stack[stacklevel];
+				return;
+			}
+		} else if ((current_process & 1) == 0) {
+			process_stack[stacklevel] = current_process;
+			stacklevel++;
+		}
+	}
+
+	current_process = processStat;
+}
+
+/**
+ * @TODO: Documentation
+ * @note UNUSED Size: 000024
+ */
+void Jac_CheckStreamBufferEmpty(void)
+{
+	TRAP_UNIMPLEMENTED;
+}

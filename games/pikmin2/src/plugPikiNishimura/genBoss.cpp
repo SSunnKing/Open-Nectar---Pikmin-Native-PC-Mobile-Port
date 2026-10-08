@@ -1,0 +1,262 @@
+#include "Age.h"
+#include "Boss.h"
+#include "DebugLog.h"
+#include "Generator.h"
+#include "Pellet.h"
+#include "sysNew.h"
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(__LINE__) // Never used in the DLL
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F0
+ */
+DEFINE_PRINT("genBoss");
+
+/**
+ * @todo: Documentation
+ */
+static GenObject* makeObjectBoss()
+{
+	return new GenObjectBoss();
+}
+
+/**
+ * @todo: Documentation
+ */
+void GenObjectBoss::initialise()
+{
+	GenObjectFactory::factory->registerMember('boss', &makeObjectBoss, "ボスを発生", 2);
+}
+
+/**
+ * @todo: Documentation
+ */
+void GenObjectBoss::doRead(RandomAccessStream& input)
+{
+	if (mVersion == 'v0.0') {
+		mBossID = input.readInt();
+		return;
+	}
+
+	if (mVersion < 2) {
+		mBossID     = input.readInt();
+		mItemIndex  = input.readInt();
+		mItemColour = input.readInt();
+		mItemCount  = input.readInt();
+		ID32 id;
+		id.read(input);
+		return;
+	}
+
+	readParameters(input);
+}
+
+/**
+ * @todo: Documentation
+ */
+void GenObjectBoss::doWrite(RandomAccessStream& output)
+{
+	writeParameters(output);
+}
+
+/**
+ * @todo: Documentation
+ */
+void GenObjectBoss::ramLoadParameters(RandomAccessStream& input)
+{
+	readParameters(input);
+}
+
+/**
+ * @todo: Documentation
+ */
+void GenObjectBoss::ramSaveParameters(RandomAccessStream& output)
+{
+	writeParameters(output);
+}
+
+/**
+ * @todo: Documentation
+ */
+void GenObjectBoss::readParameters(RandomAccessStream& input)
+{
+	// File layout is fixed; host C++ bitfield allocation order is not.
+	const u32 flags = static_cast<u32>(input.readInt());
+	mBossID          = flags & 0xf;
+	mItemIndex       = (flags >> 4) & 0x3;
+	mItemColour      = (flags >> 6) & 0x3;
+	mItemCount       = (flags >> 8) & 0xf;
+	mPelletConfigIdx = static_cast<int>(flags >> 12) - 1;
+}
+
+/**
+ * @todo: Documentation
+ */
+void GenObjectBoss::writeParameters(RandomAccessStream& output)
+{
+	const u32 flags = (static_cast<u32>(mBossID) & 0xf)
+	    | ((static_cast<u32>(mItemIndex) & 0x3) << 4)
+	    | ((static_cast<u32>(mItemColour) & 0x3) << 6)
+	    | ((static_cast<u32>(mItemCount) & 0xf) << 8)
+	    | ((static_cast<u32>(mPelletConfigIdx + 1) & 0xfffff) << 12);
+	output.writeInt(flags);
+}
+
+/**
+ * @todo: Documentation
+ */
+void GenObjectBoss::updateUseList(Generator*, int count)
+{
+	if (mBossID == GENBOSS_Spider) {
+		bossMgr->addUseCount(BOSS_Spider, 1);
+		return;
+	}
+	if (mBossID == GENBOSS_Snake) {
+		bossMgr->addUseCount(BOSS_Snake, 1);
+		return;
+	}
+	if (mBossID == GENBOSS_Slime) {
+		bossMgr->addUseCount(BOSS_Slime, 1);
+		bossMgr->addUseCount(BOSS_Nucleus, 1);
+		bossMgr->addUseCount(BOSS_CoreNucleus, 1);
+		return;
+	}
+	if (mBossID == GENBOSS_King) {
+		bossMgr->addUseCount(BOSS_King, 1);
+		return;
+	}
+	if (mBossID == GENBOSS_Kogane) {
+		bossMgr->addUseCount(BOSS_Kogane, count);
+		return;
+	}
+	if (mBossID == GENBOSS_Pom) {
+		bossMgr->addUseCount(BOSS_Pom, 1);
+		return;
+	}
+	if (mBossID == GENBOSS_KingBack) {
+		bossMgr->addUseCount(BOSS_KingBack, 1);
+		return;
+	}
+	if (mBossID == GENBOSS_BoxSnake) {
+		bossMgr->addUseCount(BOSS_BoxSnake, 1);
+		return;
+	}
+	if (mBossID == GENBOSS_Mizu) {
+		bossMgr->addUseCount(BOSS_Mizu, 1);
+		return;
+	}
+	if (mBossID == GENBOSS_Geyzer) {
+		bossMgr->addUseCount(BOSS_Geyzer, 1);
+		return;
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+Creature* GenObjectBoss::birth(BirthInfo& info)
+{
+	Creature* boss = nullptr;
+	PRINT("\n");
+	PRINT("************ BOSS BIRTH START : kind = %d ************\n", mBossID);
+	if (mBossID == GENBOSS_Spider) {
+		boss = bossMgr->create(GENBOSS_Spider, info, this);
+	} else if (mBossID == GENBOSS_Snake) {
+		boss = bossMgr->create(GENBOSS_Snake, info, this);
+	} else if (mBossID == GENBOSS_Slime) {
+		boss = bossMgr->create(GENBOSS_Slime, info, this);
+	} else if (mBossID == GENBOSS_King) {
+		boss = bossMgr->create(GENBOSS_King, info, this);
+	} else if (mBossID == GENBOSS_Kogane) {
+		boss = bossMgr->create(GENBOSS_Kogane, info, this);
+	} else if (mBossID == GENBOSS_Pom) {
+		boss = bossMgr->create(GENBOSS_Pom, info, this);
+	} else if (mBossID == GENBOSS_KingBack) {
+		boss = bossMgr->create(GENBOSS_KingBack, info, this);
+	} else if (mBossID == GENBOSS_BoxSnake) {
+		boss = bossMgr->create(GENBOSS_BoxSnake, info, this);
+	} else if (mBossID == GENBOSS_Mizu) {
+		boss = bossMgr->create(GENBOSS_Mizu, info, this);
+	} else if (mBossID == GENBOSS_Geyzer) {
+		boss = bossMgr->create(GENBOSS_Geyzer, info, this);
+	}
+
+	if (!boss) {
+		PRINT("************ BOSS BIRTH END   : FAILURE  ************\n");
+	} else {
+		PRINT("  VVVVVVVVV   \n");
+		PRINT(" ww       ww  \n");
+		PRINT("<-○--__   |  \n");
+		PRINT(" |    Λ -○->\n");
+		PRINT("  ＼  ё ／   \n");
+		PRINT("************ BOSS BIRTH END   : SUCCESS  ************\n");
+	}
+	PRINT("\n");
+
+	return boss;
+}
+
+#ifdef WIN32
+
+void GenObjectBoss::doGenAge(AgeServer& server)
+{
+	server.StartOptionBox("ボスの種類", &mBossID, 252); // boss type
+	server.NewOption("ダマグモ", 0);
+	server.NewOption("ヘビガラス１", 1);
+	server.NewOption("ヘビガラス２", 7);
+	server.NewOption("スライム", 2);
+	server.NewOption("キングチャッピー", 3);
+	server.NewOption("コガネ", 4);
+	server.NewOption("ポンガシ草", 5);
+	server.NewOption("キングの背中", 6);
+	server.NewOption("間欠泉１", 8);
+	server.NewOption("間欠泉２", 9);
+	server.EndOptionBox();
+
+	server.StartOptionBox("ペレットの種類", &mItemIndex, 252);
+	server.NewOption("１ペレット", 0);
+	server.NewOption("５ペレット", 1);
+	server.NewOption("１０ペレット", 2);
+	server.NewOption("２０ペレット", 3);
+	server.EndOptionBox();
+
+	server.StartOptionBox("ペレットの色", &mItemColour, 252);
+	server.NewOption("青ペレット", 0);
+	server.NewOption("赤ペレット", 1);
+	server.NewOption("黄ペレット", 2);
+	server.NewOption("ランダム", 3);
+	server.EndOptionBox();
+
+	int i;
+
+	server.StartOptionBox("ペレットの数", &mItemCount, 252);
+	for (i = 0; i < 16; i++) {
+		char str[4];
+		int tens = i / 10;
+		if (tens > 0) {
+			str[0] = tens + '0';
+			str[1] = i % 10 + '0';
+			str[2] = '\0';
+		} else {
+			str[0] = i % 10 + '0';
+			str[1] = '\0';
+		}
+		server.NewOption(str, i);
+	}
+	server.EndOptionBox();
+
+	server.StartOptionBox("ＵＦＯパーツ", &mPelletConfigIdx, 252);
+	server.NewOption("none", -1);
+	for (i = 0; i < pelletMgr->getNumConfigs(); i++) {
+		PelletConfig* config = pelletMgr->getConfigFromIdx(i);
+		server.NewOption(config->mPelletName().mString, i);
+	}
+	server.EndOptionBox();
+}
+
+#endif

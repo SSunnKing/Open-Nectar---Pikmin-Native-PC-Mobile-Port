@@ -1,0 +1,573 @@
+#ifndef _INTERACTIONS_H
+#define _INTERACTIONS_H
+
+#include "Vector.h"
+#include "types.h"
+
+// passing this as the flick angle = flick directly away from enemy
+#define FLICK_BACKWARDS_ANGLE (-1000.0f)
+
+// any angle below this will flick directly away from enemy
+#define FLICK_BACKWARDS_THRESHOLD (-10.0f)
+
+class Boss;
+class Bridge;
+class Creature;
+class CollPart;
+class HinderRock;
+class ItemCreature;
+class Navi;
+class Pellet;
+class Piki;
+class Teki;
+
+namespace zen {
+class particleGenerator;
+}
+
+/**
+ * @brief TODO
+ */
+class Interaction {
+public:
+	inline Interaction(Creature* owner)
+	    : mOwner(owner)
+	{
+	}
+
+	virtual bool actCommon(Creature*) immut { return true; }       // _08
+	virtual bool actPiki(Piki*) immut { return true; }             // _0C
+	virtual bool actTeki(Teki*) immut { return true; }             // _10
+	virtual bool actNavi(Navi*) immut { return true; }             // _14
+	virtual bool actBoss(Boss*) immut { return true; }             // _18
+	virtual bool actPellet(Pellet*) immut { return true; }         // _1C
+	virtual bool actHinderRock(HinderRock*) immut { return true; } // _20
+	virtual bool actBridge(Bridge*) immut { return true; }         // _24
+	virtual bool actItem(ItemCreature*) immut { return true; }     // _28
+
+	// _00 = VTBL
+	Creature* mOwner; // _04, creature causing the interaction
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractAttack : public Interaction {
+	InteractAttack(Creature* owner, CollPart* collPart, f32 damage, bool p4)
+	    : Interaction(owner)
+	    , mDamage(damage)
+	    , mCollPart(collPart)
+	    , _10(p4)
+	{
+	}
+
+	virtual bool actCommon(Creature*) immut;   // _08
+	virtual bool actPiki(Piki*) immut;         // _0C
+	virtual bool actTeki(Teki*) immut;         // _10
+	virtual bool actNavi(Navi*) immut;         // _14
+	virtual bool actBoss(Boss*) immut;         // _18
+	virtual bool actItem(ItemCreature*) immut; // _28
+
+	int getDamagePortion() immut;
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	f32 mDamage;         // _08
+	CollPart* mCollPart; // _0C
+	bool _10;            // _10
+};
+
+/**
+ * @brief TODO
+ */
+class InteractBikkuri : public Interaction {
+public:
+	InteractBikkuri(Creature* owner)
+	    : Interaction(owner)
+	{
+	}
+
+	virtual bool actItem(ItemCreature*) immut; // _28
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	// TODO: members
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractBomb : public Interaction {
+	inline InteractBomb(Creature* owner, f32 damage, CollPart* part)
+	    : Interaction(owner)
+	    , mDamage(damage)
+	    , mCollPart(part)
+	{
+	}
+
+	// need this to not be in order, otherwise vtable generates in interactBattle
+	virtual bool actTeki(Teki*) immut;         // _10
+	virtual bool actPiki(Piki*) immut;         // _0C
+	virtual bool actNavi(Navi*) immut;         // _14
+	virtual bool actBoss(Boss*) immut;         // _18
+	virtual bool actItem(ItemCreature*) immut; // _28
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	f32 mDamage;         // _08
+	CollPart* mCollPart; // _0C
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractBreak : public Interaction {
+	InteractBreak(Creature* owner, int stage, f32 rate)
+	    : Interaction(owner)
+	{
+		mStageIndex   = stage;
+		mProgressRate = rate;
+	}
+
+	virtual bool actBridge(Bridge*) immut; // _24
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	int mStageIndex;   // _08
+	f32 mProgressRate; // _0C
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractBubble : public Interaction {
+	inline InteractBubble(Creature* owner, f32 damage)
+	    : Interaction(owner)
+	{
+		mDamage = damage;
+	}
+
+	virtual bool actPiki(Piki*) immut; // _0C
+	virtual bool actNavi(Navi*) immut; // _14
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	f32 mDamage; // _08
+};
+
+/**
+ * @brief TODO
+ */
+class InteractBuild : public Interaction {
+public:
+	InteractBuild(Creature* owner, int stage, f32 rate)
+	    : Interaction(owner)
+	{
+		mStageIndex   = stage;
+		mProgressRate = rate;
+	}
+
+	virtual bool actBridge(Bridge*) immut;     // _24
+	virtual bool actItem(ItemCreature*) immut; // _28
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	int mStageIndex;   // _0C
+	f32 mProgressRate; // _10
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractBury : public Interaction {
+	InteractBury(Creature* owner, bool makeFlower, f32 p3)
+	    : Interaction(owner)
+	{
+		mMakeFlower = makeFlower;
+		mDamage     = p3;
+	}
+
+	virtual bool actPiki(Piki*) immut; // _0C
+	virtual bool actNavi(Navi*) immut; // _14
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	bool mMakeFlower; // _08, causes piki to be flowered
+	f32 mDamage;      // _0C
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractChangeColor : public Interaction {
+	inline InteractChangeColor(); // TODO: probably
+
+	virtual bool actPiki(Piki*) immut; // _0C
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	int mColor; // _08, color to change to
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractChangeHappa : public Interaction {
+	inline InteractChangeHappa(); // TODO: probably
+
+	virtual bool actPiki(Piki*) immut; // _0C
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	int mHappa; // _08, flower stage to change to
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractFire : public Interaction {
+	InteractFire(Creature* owner, f32 damage)
+	    : Interaction(owner)
+	{
+		mDamage = damage;
+	}
+
+	virtual bool actPiki(Piki*) immut; // _0C
+	virtual bool actNavi(Navi*) immut; // _14
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	f32 mDamage; // _08
+};
+
+/**
+ * @brief TODO
+ */
+class InteractFlick : public Interaction {
+public:
+	inline InteractFlick(Creature* owner, f32 knockback, f32 damage, f32 angle)
+	    : Interaction(owner)
+	{
+		mIntensity = knockback;
+		mDamage    = damage;
+		mAngle     = angle;
+	}
+
+	virtual bool actCommon(Creature*) immut;   // _08
+	virtual bool actPiki(Piki*) immut;         // _0C
+	virtual bool actTeki(Teki*) immut;         // _10
+	virtual bool actNavi(Navi*) immut;         // _14
+	virtual bool actBoss(Boss*) immut;         // _18
+	virtual bool actItem(ItemCreature*) immut; // _28
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	f32 mIntensity; // _08
+	f32 mDamage;    // _0C
+	f32 mAngle;     // _10
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractFlute : public Interaction {
+	InteractFlute(Creature* owner)
+	    : Interaction(owner)
+	{
+	}
+
+	virtual bool actTeki(Teki*) immut; // _10
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	// TODO: members
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractGeyzer : public Interaction {
+	inline InteractGeyzer(Creature* owner, immut Vector3f& p2)
+	    : Interaction(owner)
+	    , mLaunchTargetPos(p2)
+	{
+	}
+
+	virtual bool actNavi(Navi*) immut; // _14
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	Vector3f mLaunchTargetPos; // _08
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractGrab : public Interaction {
+	InteractGrab(Creature* owner)
+	    : Interaction(owner)
+	{
+	}
+
+	virtual bool actCommon(Creature*) immut; // _08
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	// TODO: members
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractHitEffect : public Interaction {
+	InteractHitEffect(Creature* owner, immut Vector3f& effPos, immut Vector3f& effDir, CollPart* part)
+	    : Interaction(owner)
+	    , mEffectPos(effPos)
+	    , mEffectDir(effDir)
+	    , mCollPart(part)
+	{
+	}
+
+	virtual bool actTeki(Teki*) immut; // _10
+	virtual bool actBoss(Boss*) immut; // _18
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	Vector3f mEffectPos; // _08
+	Vector3f mEffectDir; // _14
+	CollPart* mCollPart; // _20
+};
+
+/**
+ * @brief TODO
+ */
+class InteractKill : public Interaction {
+public:
+	InteractKill(Creature* owner, int p2)
+	    : Interaction(owner)
+	{
+		_08 = p2;
+	}
+
+	virtual bool actPiki(Piki*) immut;     // _0C
+	virtual bool actNavi(Navi*) immut;     // _14
+	virtual bool actPellet(Pellet*) immut; // _1C
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	int _08; // _08
+};
+
+/**
+ * @brief TODO
+ */
+class InteractPress : public Interaction {
+public:
+	inline InteractPress(Creature* owner, f32 damage)
+	    : Interaction(owner)
+	{
+		mDamage = damage;
+	}
+
+	virtual bool actPiki(Piki*) immut; // _0C
+	virtual bool actTeki(Teki*) immut; // _10
+	virtual bool actNavi(Navi*) immut; // _14
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	f32 mDamage; // _08
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractPullout : public Interaction {
+	InteractPullout(Creature* owner)
+	    : Interaction(owner)
+	{
+	}
+
+	virtual bool actCommon(Creature*) immut;   // _08
+	virtual bool actPiki(Piki*) immut;         // _0C
+	virtual bool actItem(ItemCreature*) immut; // _28
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractPush : public Interaction {
+	InteractPush(Creature* owner, int p2)
+	    : Interaction(owner)
+	    , mStrength(p2)
+	{
+	}
+
+	virtual bool actHinderRock(HinderRock*) immut; // _20
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	int mStrength; // _08
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractRelease : public Interaction {
+	InteractRelease(Creature* owner, f32 p2)
+	    : Interaction(owner)
+	{
+		_08 = p2;
+	}
+
+	virtual bool actCommon(Creature*) immut; // _08
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	f32 _08; // _08
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractSlimeAttack : public Interaction {
+	inline InteractSlimeAttack(); // TODO: probably
+
+	virtual bool actCommon(Creature*) immut; // _08
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	// TODO: members
+};
+
+/**
+ * @brief TODO
+ */
+class InteractSpore : public Interaction {
+public:
+	InteractSpore(Creature* owner)
+	    : Interaction(owner)
+	{
+	}
+
+	virtual bool actPiki(Piki*) immut; // _0C
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractSuck : public Interaction {
+	InteractSuck(Creature* owner, f32 damage)
+	    : Interaction(owner)
+	    , mDamage(damage)
+	{
+	}
+
+	virtual bool actNavi(Navi*) immut; // _14
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	f32 mDamage; // _08
+};
+
+/**
+ * @brief TODO
+ */
+class InteractSwallow : public Interaction {
+public:
+	inline InteractSwallow(Creature* owner, CollPart* mouthPart, int p3)
+	    : Interaction(owner)
+	{
+		_08        = p3;
+		mMouthPart = mouthPart;
+	}
+
+	virtual bool actCommon(Creature*) immut;   // _08
+	virtual bool actPiki(Piki*) immut;         // _0C
+	virtual bool actTeki(Teki*) immut;         // _10
+	virtual bool actNavi(Navi*) immut;         // _14
+	virtual bool actPellet(Pellet*) immut;     // _1C
+	virtual bool actItem(ItemCreature*) immut; // _28
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	int _08;              // _08
+	CollPart* mMouthPart; // _0C
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractTalk : public Interaction {
+	inline InteractTalk(Creature* owner)
+	    : Interaction(owner)
+	{
+	}
+
+	virtual bool actPiki(Piki*) immut; // _0C
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	// TODO: members
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractThrowAway : public Interaction {
+	InteractThrowAway(Creature* owner)
+	    : Interaction(owner)
+	{
+	}
+
+	virtual bool actPiki(Piki*) immut; // _0C
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	// TODO: members
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractWarn : public Interaction {
+	InteractWarn(Creature* owner)
+	    : Interaction(owner)
+	{
+	}
+
+	virtual bool actPiki(Piki*) immut; // _0C
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+};
+
+/**
+ * @brief TODO
+ */
+struct InteractWind : public Interaction {
+	InteractWind(Creature* owner, Vector3f vel, f32 p3, zen::particleGenerator* windPtclGen)
+	    : Interaction(owner)
+	    , _08(p3)
+	    , mVelocity(vel)
+	    , mWindParticles(windPtclGen)
+	{
+	}
+
+	virtual bool actCommon(Creature*) immut; // _08
+	virtual bool actPiki(Piki*) immut;       // _0C
+	virtual bool actNavi(Navi*) immut;       // _14
+
+	// _00     = VTBL
+	// _00-_08 = Interaction
+	f32 _08;                                // _08
+	Vector3f mVelocity;                     // _0C
+	zen::particleGenerator* mWindParticles; // _18
+};
+
+#endif

@@ -1,0 +1,141 @@
+#ifndef _P2JME_MOVIE_H
+#define _P2JME_MOVIE_H
+
+#include "P2JME/messageObj.h"
+#include "P2DScreen.h"
+#include "Vector3.h"
+#include "System.h"
+#include "Dolphin/rand.h"
+#include "Game/gamePlayData.h"
+
+namespace P2JME {
+namespace Movie {
+struct WindowPane : public P2DScreen::CallBackNode {
+	enum WindowPaneState {
+		WINDOWPANE_Inactive = 0,
+		WINDOWPANE_Appear   = 1,
+		WINDOWPANE_2        = 2,
+		WINDOWPANE_Finish   = 3,
+		WINDOWPANE_4,
+	};
+
+	WindowPane();
+
+	virtual ~WindowPane() { } // _08 (weak)
+	virtual void update();    // _10
+	virtual void doInit();    // _18
+
+	void moveWindow(bool);
+	void open(f32);
+	void close(f32); // unused
+
+	// _00     = VTBL
+	// _00-_1C = P2DScreen::CallBackNode
+	int mState;                // _1C
+	f32 mTimer;                // _20
+	f32 mMaxTime;              // _24
+	Vector3f mInitialPosition; // _28
+	f32 mCurrAngle;            // _34
+	Vector3f mNewPosition;     // _38
+	Vector3f mCurrPosition;    // _44
+};
+
+struct AbtnPane : public P2DScreen::CallBackNode {
+	AbtnPane(u8);
+
+	virtual ~AbtnPane() { } // _08 (weak)
+	virtual void update();  // _10
+	virtual void doInit();  // _18
+
+	// _00     = VTBL
+	// _00-_1C = P2DScreen::CallBackNode
+	u32 mState;       // _1C, 0 = inactive, 1 = active
+	f32 mAnimAlpha;   // _20, used to make button alpha change over time
+	f32 mAppearAlpha; // _24, goes from 0 to 1 when the button should be visible
+};
+
+struct MessageWindowScreen : P2DScreen::Mgr_tuning {
+	MessageWindowScreen() { }
+
+	virtual ~MessageWindowScreen() { } // _08 (weak)
+
+	void open(f32);
+	void set(JKRArchive*);
+
+	// _00      = VTBL
+	// _00-_148 = P2DScreen::Mgr_tuning
+	WindowPane* mWindowPane; // _148
+	AbtnPane* mAButton;      // _14C
+	AbtnPane* mArrowPane;    // _150
+	u8 _154[0x4];            // _154, unknown
+};
+
+struct PodIconScreen : P2DScreen::Mgr_tuning {
+	PodIconScreen();
+
+	virtual ~PodIconScreen() { } // _08 (weak)
+	virtual void update();       // _30
+
+	// unused/inlined functions
+	void setTrans();
+
+	void reset();
+
+	void appear()
+	{
+		reset();
+		show();
+		mState = 0;
+	}
+
+	void disappear();
+	void set(JKRArchive*);
+
+	// _00      = VTBL
+	// _00-_148 = P2DScreen::Mgr_tuning
+	int mState;                       // _148
+	J2DAnmColor* mAnmColor;           // _14C
+	f32 mAnmColorTimer;               // _150
+	J2DAnmTransform* mAnmTrans;       // _154
+	f32 mAnmTransTimer;               // _158
+	J2DAnmTexPattern* mAnmTexPattern; // _15C
+	f32 mAnmTexPatternTimer;          // _160
+	Vector3f mInitialPos;             // _164
+	Vector3f mPosition;               // _170
+	Vector3f mMomentum;               // _17C
+};
+
+struct TControl : public P2JME::Window::TControl {
+	enum EModeFlag {
+		MODEFLAG_Inactive = 0,
+		MODEFLAG_Start    = 1,
+		MODEFLAG_Writing  = 2,
+		MODEFLAG_Finish   = 3,
+	};
+
+	enum ControlFlag { ControlFlag_UnsuspendOnFinish = 1 };
+
+	TControl();
+
+	virtual ~TControl() { }                        // _08 (weak)
+	virtual void reset();                          // _0C
+	virtual bool update(Controller*, Controller*); // _14
+	virtual void draw(Graphics&);                  // _18
+	virtual bool onInit();                         // _34
+
+	EModeFlag setMode(EModeFlag);
+
+	// _00     = VTBL
+	// _00-_5C = P2JME::Window::TControl
+	MessageWindowScreen* mMessageWindow; // _5C
+	PodIconScreen* mPodIcon;             // _60
+	J2DPane* mPaneMgDemo;                // _64
+	bool mIsActive;                      // _68
+	EModeFlag mModeFlag;                 // _6C
+	BitFlag<u32> mFlags;                 // _70
+	u8 mIsPaused;                        // _74
+};
+} // namespace Movie
+} // namespace P2JME
+
+#endif

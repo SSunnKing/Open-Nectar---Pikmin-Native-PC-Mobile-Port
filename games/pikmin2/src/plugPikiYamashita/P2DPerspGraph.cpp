@@ -1,0 +1,158 @@
+#include "DebugLog.h"
+#include "Dolphin/gx.h"
+#include "P2D/Graph.h"
+#include "sysNew.h"
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(__LINE__) // Never used in the DLL
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F4
+ */
+DEFINE_PRINT("P2DPersGraph") // nice typo
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000054 (Matching by size)
+ */
+P2DPerspGraph::P2DPerspGraph()
+    : P2DGrafContext(0, 0, 0, 0)
+{
+	mGrafType = P2DGRAF_Persp;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000084 (Matching by size)
+ */
+P2DPerspGraph::P2DPerspGraph(const PUTRect& rect, f32 fovy, f32 nearZ, f32 farZ)
+    : P2DGrafContext(rect)
+{
+	set(fovy, nearZ, farZ);
+	mGrafType = P2DGRAF_Persp;
+}
+
+/**
+ * @todo: Documentation
+ */
+P2DPerspGraph::P2DPerspGraph(int x0, int y0, int width, int height, f32 fovy, f32 nearZ, f32 farZ)
+    : P2DGrafContext(x0, y0, width, height)
+{
+	set(fovy, nearZ, farZ);
+	mGrafType = P2DGRAF_Persp;
+}
+
+/**
+ * @todo: Documentation
+ */
+void P2DPerspGraph::set(f32 fovy, f32 nearZ, f32 farZ)
+{
+	setFovy(fovy);
+	setNearClip(nearZ);
+	setFarClip(farZ);
+	setLookat();
+}
+
+/**
+ * @todo: Documentation
+ */
+void P2DPerspGraph::setFovy(f32 fovy)
+{
+	mFovy = fovy;
+	if (fovy < 1.0f) {
+		mFovy = 1.0f;
+	} else if (fovy > 179.0f) {
+		mFovy = 179.0f;
+	}
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000080
+ */
+void P2DPerspGraph::getMatrix(Matrix4f& mtx)
+{
+	f32 aspectRatio = f32(mViewportBounds.getWidth()) / f32(mViewportBounds.getHeight());
+	mtx.makePerspective(mFovy, aspectRatio, mNearClipZ, mFarClipZ); // NB: unimplemented
+}
+
+/**
+ * @todo: Documentation
+ */
+void P2DPerspGraph::setPort()
+{
+	P2DGrafContext::setPort();
+	Matrix4f perspMtx;
+	f32 width  = f32(mViewportBounds.getWidth());
+	f32 height = f32(mViewportBounds.getHeight());
+
+	MTXPerspective(perspMtx.mMtx, mFovy, width / height, mNearClipZ, mFarClipZ);
+	GXSetProjection(perspMtx.mMtx, GX_PERSPECTIVE);
+
+	for (int i = 0; i < 4; i++) {
+		for (int j = 0; j < 4; j++) {
+			mProjectionMtx.mMtx[j][i] = perspMtx.mMtx[j][i];
+		}
+	}
+
+	f32 zScale                = (1.0f / (mFarClipZ - mNearClipZ));
+	mProjectionMtx.mMtx[2][2] = zScale * -(mFarClipZ + mNearClipZ);
+	mProjectionMtx.mMtx[2][3] = zScale * -(2.0f * mFarClipZ * mNearClipZ);
+
+	GXSetZMode(GX_FALSE, GX_ALWAYS, GX_FALSE);
+}
+
+/**
+ * @todo: Documentation
+ */
+void P2DPerspGraph::setLookat()
+{
+	mDistance = ((f32(mViewportBounds.mMaxY) - f32(mViewportBounds.mMinY)) / 2.0f) / tanf(mFovy * PI / 360.0f);
+	makeLookat();
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000024
+ */
+void P2DPerspGraph::setDistance(f32 distance)
+{
+	mDistance = distance;
+	makeLookat();
+}
+
+/**
+ * @todo: Documentation
+ */
+void P2DPerspGraph::makeLookat()
+{
+	f32 halfWidth  = (f32(mViewportBounds.mMaxX) - f32(mViewportBounds.mMinX)) / 2.0f;
+	f32 halfHeight = (f32(mViewportBounds.mMaxY) - f32(mViewportBounds.mMinY)) / 2.0f;
+
+	Vector3f cameraPos;
+	Vector3f targetPos;
+
+	cameraPos.x = halfWidth;
+	cameraPos.y = halfHeight;
+	cameraPos.z = -mDistance;
+
+	targetPos.x = halfWidth;
+	targetPos.y = halfHeight;
+	targetPos.z = 0.0f;
+
+	Vector3f upDir;
+	upDir.x = 0.0f;
+	upDir.y = -1.0f;
+	upDir.z = 0.0f;
+
+	mViewMtx.makeLookat(cameraPos, targetPos, &upDir);
+	mViewMtx.makeLookat(Vector3f(0.0f, 0.0f, 250.0f), Vector3f(0.0f, 0.0f, 0.0f), stack_new(Vector3f)(0.0f, 1.0f, 0.0f));
+	mViewMtx.makeLookat(Vector3f(halfWidth, halfHeight, -mDistance), Vector3f(1.0f, 0.0f, 0.0f), Vector3f(0.0f, -1.0f, 0.0f),
+	                    Vector3f(0.0f, 0.0f, -1.0f));
+
+	GXLoadPosMtxImm(mViewMtx.mMtx, 0);
+}

@@ -1,0 +1,137 @@
+#ifndef _CORENODE_H
+#define _CORENODE_H
+
+#include "ANode.h"
+#include "types.h"
+
+class RandomAccessStream;
+
+/**
+ * @brief The CoreNode struct represents a node in a core data structure.
+ *
+ * @note Size: 0x14.
+ */
+class SYSCORE_API CoreNode : public ANode {
+public:
+	/**
+	 * @brief Constructs a CoreNode object with the specified name.
+	 * @param name The name of the CoreNode.
+	 */
+	CoreNode(immut char* name = "CoreNode") { initCore(name); }
+
+#ifdef WIN32
+	/**
+	 * @brief TODO
+	 */
+	virtual void genAge(AgeServer& server) { }
+
+	/**
+	 * @brief TODO
+	 */
+	virtual void genAgeNode(AgeServer& server) { }
+
+	/**
+	 * @brief TODO
+	 */
+	virtual void write(RandomAccessStream& stream) { }
+#endif
+
+	/**
+	 * @brief Reads the data from a random access stream into the CoreNode.
+	 * @param stream The random access stream to read from.
+	 */
+	virtual void read(RandomAccessStream& stream) { } // _0C (weak)
+
+	/**
+	 * @brief Initializes the core data of the CoreNode.
+	 * @param name The name of the CoreNode.
+	 */
+	void initCore(immut char* name)
+	{
+		mParent = mNext = mChild = nullptr;
+		setName(name);
+	}
+
+	/**
+	 * @brief Gets the child node of the CoreNode.
+	 * @return A pointer to the child node.
+	 */
+	CoreNode* Child() { return mChild; }
+
+	/**
+	 * @brief Gets the next sibling node of the CoreNode.
+	 * @return A pointer to the next sibling node.
+	 */
+	CoreNode* Next() { return mNext; }
+
+	/**
+	 * @brief Gets the parent node of the CoreNode.
+	 * @return A pointer to the parent node.
+	 */
+	CoreNode* Parent() { return mParent; }
+
+	/**
+	 * @brief Sets the child node of the CoreNode.
+	 * @param child A pointer to the child node.
+	 */
+	void Child(CoreNode* child) { mChild = child; }
+
+	/**
+	 * @brief Sets the next sibling node of the CoreNode.
+	 * @param next A pointer to the next sibling node.
+	 */
+	void Next(CoreNode* next) { mNext = next; }
+
+	/**
+	 * @brief Gets the name of the CoreNode.
+	 * @return The name of the CoreNode.
+	 */
+	immut char* Name() { return mName; }
+
+	/**
+	 * @brief Gets the number of child nodes of the CoreNode.
+	 * @return The number of child nodes.
+	 */
+	int getChildCount();
+
+	/**
+	 * @brief Adds a child node to the CoreNode.
+	 * @param child A pointer to the child node to add.
+	 */
+	void add(class CoreNode* child);
+
+	/**
+	 * @brief Deletes the CoreNode and its child nodes.
+	 */
+	void del();
+
+	/**
+	 * @brief Sets the name of the CoreNode.
+	 * @param name The name to set.
+	 */
+	void setName(immut char* name) { mName = name; }
+
+	void load(immut char* dirPath, immut char* fileName, u32);
+
+	void genRead(AgeServer&) { }
+	void genWrite(AgeServer&) { }
+
+	// _00 = VTBL
+	immut char* mName; // _04
+	CoreNode* mParent; // _08
+	CoreNode* mNext;   // _0C
+	CoreNode* mChild;  // _10
+};
+
+#define FOREACH_NODE(type, first, varname) \
+	for (type* varname = static_cast<type*>(first); varname; varname = static_cast<type*>(varname->mNext))
+
+// Sometimes a loop uses the `CoreNode::Next` member function instead of accessing `CoreNode::mNext` directly.
+#define FOREACH_NODE_ALT(type, first, varname) \
+	for (type* varname = static_cast<type*>(first); varname; varname = static_cast<type*>(varname->Next()))
+
+// Sometimes a `CoreNode` derivate pointer gets reused and that affects matching.
+#define FOREACH_NODE_REUSE(type, first, varname) \
+	for (varname = static_cast<type*>(first); varname; varname = static_cast<type*>(varname->mNext))
+
+#endif

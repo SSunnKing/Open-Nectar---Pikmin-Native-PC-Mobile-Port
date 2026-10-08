@@ -1,0 +1,55 @@
+#ifndef _ZEN_ZENCONTROLLER_H
+#define _ZEN_ZENCONTROLLER_H
+
+#include "types.h"
+
+class Controller;
+
+namespace zen {
+
+/**
+ * @brief TODO
+ */
+struct KeyRepeat {
+	KeyRepeat(u32 button)
+	{
+		mButton = button;
+		mHeldTime         = 0.0f;
+		mRepeatDelay      = repeatTime;
+		mWasHeldLastFrame = 0;
+	}
+
+	bool update(Controller*);
+
+	static f32 repeatTime;
+
+	u32 mButton; // _00
+	f32 mHeldTime;        // _04
+	f32 mRepeatDelay;     // _08
+	u8 mWasHeldLastFrame; // _0C
+};
+
+/**
+ * @brief TODO
+ *
+ * @note Size: 0x6C.
+ */
+struct ZenController {
+	ZenController(Controller*);
+
+	void update();
+
+	bool keyRepeat(u32 button) { return mRepeatInput & button; }
+	void setContPtr(Controller* controller) { mController = controller; }
+
+	// DLL inline to do:
+	void setRepeatTime(f32 time) { KeyRepeat::repeatTime = time; }
+
+	Controller* mController;    // _00
+	u32 mRepeatInput;           // _04, probably some form of input
+	KeyRepeat* mKeyRepeats[25]; // _08
+};
+
+} // namespace zen
+
+#endif

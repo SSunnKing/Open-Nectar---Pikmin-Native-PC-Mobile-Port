@@ -1,0 +1,45 @@
+#ifndef _NLIB_SYSTEM_H
+#define _NLIB_SYSTEM_H
+
+#include "nlib/Array.h"
+#include "types.h"
+#include <system.h>
+
+class System;
+
+/**
+ * @brief TODO
+ */
+class NHeap {
+public:
+	NHeap(int); // unused/inlined
+
+	virtual void release();           // _08
+	virtual void addHeap(NHeap* heap) // _0C
+	{
+		mHeapArray->add(heap);
+	}
+
+protected:
+	// _00 = VTBL
+	NArray<NHeap>* mHeapArray; // _04
+};
+
+/**
+ * @brief TODO
+ */
+struct NSystem {
+public:
+	static void initSystem(System*);
+
+	static f32 getFrameTime() { return system->getFrameTime(); }
+	static u32 getFreeHeap();
+
+	static int randomInt(int);
+	static f32 random() { return system->getRand(1.0f); }
+
+protected:
+	static System* system;
+};
+
+#endif

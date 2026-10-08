@@ -1,0 +1,68 @@
+#include "OdoMeter.h"
+
+#include "DebugLog.h"
+#include "system.h"
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(__LINE__) // Never used in the DLL
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F4
+ */
+DEFINE_PRINT("odoMeter");
+
+/**
+ * @todo: Documentation
+ */
+OdoMeter::OdoMeter()
+{
+	mTotalDistance = 0.0f;
+	mRemainingTime = 0.0f;
+}
+
+/**
+ * @todo: Documentation
+ */
+void OdoMeter::start(f32 startTime, f32 maxDistance)
+{
+	mResetTimeValue     = startTime;
+	mRemainingTime      = startTime;
+	mMinAllowedDistance = maxDistance;
+	mTotalDistance      = 0.0f;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool OdoMeter::moving(immut Vector3f& startPosition, immut Vector3f& endPosition)
+{
+	if (mRemainingTime > 0.0f) {
+		mRemainingTime -= gsys->getFrameTime();
+	}
+
+	if (mTotalDistance < 100.0f) {
+		Vector3f positionDifference = startPosition - endPosition;
+		f32 distance                = positionDifference.length();
+		mTotalDistance += distance;
+	}
+
+	if (mRemainingTime <= 0.0f) {
+		PRINT("------ timer up -------- : trip %f\n", mTotalDistance);
+
+		if (mTotalDistance < mMinAllowedDistance) {
+			PRINT("zannen !\n");
+			mTotalDistance = 0.0f;
+			return false;
+		}
+
+		PRINT("re-calc again\n");
+		mRemainingTime = mResetTimeValue;
+		mTotalDistance = 0.0f;
+	}
+
+	return true;
+}

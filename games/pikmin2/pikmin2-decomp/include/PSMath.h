@@ -1,0 +1,117 @@
+#ifndef _PSMATH_H
+#define _PSMATH_H
+
+#include "types.h"
+#include "P2Macros.h"
+#include "Dolphin/vec.h"
+#include "sqrt.h"
+#include "sysMath.h"
+#include "Vector3.h"
+#include "JSystem/JMath.h"
+
+namespace PSMath {
+
+inline f32 abs(f32 value)
+{
+	return (value >= 0.0f) ? value : -value;
+}
+
+inline Vec squareComponents(const Vec& vector)
+{
+	Vec squares = vector;
+	squares.x *= squares.x;
+	squares.y *= squares.y;
+	squares.z *= squares.z;
+	return squares;
+}
+
+inline f32 calcSquareMagnitude(const Vec& vector)
+{
+	Vec squares = squareComponents(vector);
+	return squares.z + (squares.x + squares.y);
+}
+
+inline f32 calcLength(const Vec& vector)
+{
+	Vec squares  = squareComponents(vector);
+	f32 distance = squares.z + (squares.x + squares.y);
+	return sqrtfInPlace(distance);
+}
+
+template <typename A, typename B>
+inline f32 calcSquareDistance(const A& a, const B& b)
+{
+	JGeometry::TVec3f positionGeometry;
+	positionGeometry.x = b.x;
+	positionGeometry.y = b.y;
+	positionGeometry.z = b.z;
+	Vec position       = positionGeometry;
+	JGeometry::TVec3f deltaGeometry;
+	deltaGeometry.x = a.x - position.x;
+	deltaGeometry.y = a.y - position.y;
+	deltaGeometry.z = a.z - position.z;
+	Vec delta       = deltaGeometry;
+	return calcSquareMagnitude(delta);
+}
+
+// I am mad that this AND the below both seem necessary for ActorDirector_Scaled::getNearestDistance
+// if someone can find a better solution, please do -HP
+inline JGeometry::TVec3f toVec(Vector3f& position)
+{
+	JGeometry::TVec3f geometry;
+	geometry.set(position.x, position.y, position.z);
+	return geometry;
+}
+
+inline JGeometry::TVec3f toVec(const Vector3f& position)
+{
+	JGeometry::TVec3f geometry;
+	geometry.set(position.x, position.y, position.z);
+	return geometry;
+}
+
+template <typename A, typename B>
+inline f32 calcDistance(A from, B to)
+{
+	JGeometry::TVec3f delta;
+	delta.sub(from, to);
+	return JMAFastSqrt(calcSquareMagnitude(delta));
+}
+
+inline f32 calcMagnitude(const Vec& vector)
+{
+	return pikmin2_sqrtf((vector.x * vector.x) + (vector.y * vector.y) + (vector.z * vector.z));
+}
+
+template <typename A, typename B>
+inline f32 calcDistanceXZ(const A& a, const B& b)
+{
+	f32 x = a.x - b.x;
+	x *= x;
+	f32 z = a.z - b.z;
+	z *= z;
+	f32 distance = x + z;
+	return sqrtfInPlace(distance);
+}
+
+inline bool calcDistanceInRange(const Vec& pos1, const Vec& pos2, f32 a1, f32 a2)
+{
+	P2ASSERTLINE(45, a1 > a2);
+	f32 x = pos1.x - pos2.x;
+	x     = (x >= 0.0f) ? x : -x;
+
+	f32 y = pos1.y - pos2.y;
+	y     = (y >= 0.0f) ? y : -y;
+
+	f32 z = pos1.z - pos2.z;
+	z     = (z >= 0.0f) ? z : -z;
+
+	if ((x < a1) && (y < a1) && (z < a1) && (!(x > a2) || !(y > a2) || !(z > a2))) {
+		return true;
+	}
+	return false;
+}
+
+} // namespace PSMath
+
+#endif

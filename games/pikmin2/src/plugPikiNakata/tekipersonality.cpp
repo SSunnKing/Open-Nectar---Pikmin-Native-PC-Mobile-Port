@@ -1,0 +1,223 @@
+#include "TekiPersonality.h"
+#include "Age.h"
+#include "DebugLog.h"
+#include "ParaParameters.h"
+#include "Pellet.h"
+#include "sysNew.h"
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(9)
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F4
+ */
+DEFINE_PRINT("tekipersonality");
+
+#if defined(PIKI_PC_PORT)
+static void canonicalizePelletID(ID32& id)
+{
+	id.mId = __builtin_bswap32(id.mId);
+	id.updateString();
+}
+#endif
+
+/**
+ * @todo: Documentation
+ */
+TekiPersonality::TekiPersonality()
+{
+	int i                         = INT_ParamCount;
+	ParaParameterInfoI* intParams = new ParaParameterInfoI[i];
+	int j                         = 0;
+	intParams[j++].init("PELLET_MIN_COUNT", -128, 127);
+	intParams[j++].init("PELLET_MAX_COUNT", -128, 127);
+	intParams[j++].init("WATER_MIN_COUNT", -128, 127);
+	intParams[j++].init("WATER_MAX_COUNT", -128, 127);
+	intParams[j++].init("PARAMETER_0", -128, 127);
+
+	i                               = FLT_ParamCount;
+	ParaParameterInfoF* floatParams = new ParaParameterInfoF[i];
+	j                               = 0;
+	floatParams[j++].init("SIZE", 0.1f, 10.0f);
+	floatParams[j++].init("STRENGTH", 0.0f, 100.0f);
+	floatParams[j++].init("TERRITORY_RANGE", 0.0f, 10000.0f);
+	floatParams[j++].init("PELLET_APPEARANCE_PROBABILITY", 0.0f, 1.0f);
+	floatParams[j++].init("WATER_APPEARANCE_PROBABILITY", 0.0f, 1.0f);
+
+	mParams = new ParaMultiParameters(INT_ParamCount, intParams, INT_ParamCount, floatParams);
+	reset();
+}
+
+/**
+ * @todo: Documentation
+ */
+void TekiPersonality::reset()
+{
+	mPosition.set(0.0f, 0.0f, 0.0f);
+	mFaceDirection = 0.0f;
+	mNestPosition.set(0.0f, 0.0f, 0.0f);
+	mPelletKind  = 0;
+	mPelletColor = 0;
+	mID.setID('none');
+
+	setI(INT_PelletMinCount, 0);
+	setI(INT_PelletMaxCount, 0);
+	setI(INT_NectarMinCount, 0);
+	setI(INT_NectarMaxCount, 0);
+	setI(INT_Parameter0, 0);
+
+	setF(FLT_Size, 1.0f);
+	setF(FLT_Strength, 1.0f);
+	setF(FLT_TerritoryRange, 0.0f);
+	setF(FLT_PelletAppearChance, 0.0f);
+	setF(FLT_NectarAppearChance, 0.0f);
+}
+
+/**
+ * @todo: Documentation
+ */
+void TekiPersonality::input(TekiPersonality& other)
+{
+	mPosition.input(other.mPosition);
+	mFaceDirection = other.mFaceDirection;
+	mNestPosition.set(other.mNestPosition);
+	mPelletKind  = other.mPelletKind;
+	mPelletColor = other.mPelletColor;
+	mID          = other.mID;
+	mParams->input(*other.mParams);
+}
+
+/**
+ * @todo: Documentation
+ */
+void TekiPersonality::read(RandomAccessStream& input, int version)
+{
+	PRINT_NAKATA("TekiPersonality::read:%d\n", version);
+
+	ParaMultiParameters* params = mParams;
+
+	if (version <= 7) {
+		ERROR("TekiPersonality::read:too old version:%d\n", version);
+		mPelletKind  = input.readInt();
+		mPelletColor = input.readInt();
+		mID.setID('none');
+		params->read(input);
+		return;
+	}
+
+	if (version <= 8) {
+		mPelletKind  = input.readInt();
+		mPelletColor = input.readInt();
+		mID.read(input);
+#if defined(PIKI_PC_PORT)
+		canonicalizePelletID(mID);
+#endif
+
+		int i;
+		for (i = 0; i <= 2; i++) {
+			params->mIntParams->mParameters[i] = input.readInt();
+		}
+
+		params->setI(4, params->getI(2));
+		params->setI(2, 0);
+		params->setI(3, 0);
+
+		for (i = 0; i <= 3; i++) {
+			params->mFloatParams->mParameters[i] = input.readFloat();
+		}
+
+		params->setF(4, 0.0f);
+		return;
+	}
+
+	if (version <= 9) {
+		mPelletKind  = (s8)input.readByte();
+		mPelletColor = (s8)input.readByte();
+		mID.read(input);
+#if defined(PIKI_PC_PORT)
+		canonicalizePelletID(mID);
+#endif
+
+		int i;
+		for (i = 0; i <= 2; i++) {
+			params->mIntParams->mParameters[i] = input.readInt();
+		}
+
+		params->setI(4, params->getI(2));
+		params->setI(2, 0);
+		params->setI(3, 0);
+
+		for (i = 0; i <= 3; i++) {
+			params->mFloatParams->mParameters[i] = input.readFloat();
+		}
+
+		params->setF(4, 0.0f);
+		return;
+	}
+
+	mPelletKind  = (s8)input.readByte();
+	mPelletColor = (s8)input.readByte();
+	mID.read(input);
+#if defined(PIKI_PC_PORT)
+	canonicalizePelletID(mID);
+#endif
+	params->read(input);
+	PRINT_NAKATA("TekiPersonality::read:pelletColor:%d\n", mPelletColor);
+}
+
+/**
+ * @todo: Documentation
+ */
+void TekiPersonality::write(RandomAccessStream& output)
+{
+	PRINT_NAKATA("TekiPersonality::write>\n");
+	output.writeByte((s8)mPelletKind);
+	output.writeByte((s8)mPelletColor);
+#if defined(PIKI_PC_PORT)
+	output.writeInt(__builtin_bswap32(mID.mId));
+#else
+	mID.write(output);
+#endif
+	mParams->write(output);
+	PRINT_NAKATA("TekiPersonality::write<\n");
+}
+
+#ifdef WIN32
+
+void TekiPersonality::genAge(AgeServer& server)
+{
+	PRINT_NAKATA("TekiPersonality::genAge>%08x\n", mParams);
+	int id = 0;
+	server.StartOptionBox("pellet kind", &mPelletKind, 252);
+	server.NewOption("pellet 1", id++);
+	server.NewOption("pellet 5", id++);
+	server.NewOption("pellet 10", id++);
+	server.NewOption("pellet 20", id);
+	server.EndOptionBox();
+
+	id = 0;
+	server.StartOptionBox("pellet color", &mPelletColor, 252);
+	server.NewOption("blue", id++);
+	server.NewOption("red", id++);
+	server.NewOption("yellow", id);
+	server.NewOption("random", -1);
+	server.EndOptionBox();
+
+	server.StartOptionBox("item", (int*)&mID.mId, 252);
+	for (int i = 0; i < pelletMgr->getNumConfigs(); i++) {
+		PelletConfig* config = pelletMgr->getConfigFromIdx(i);
+		server.NewOption(config->mPelletName().mString, config->mPelletId.mId);
+	}
+
+	server.NewOption("none", ID32('none').mId);
+	server.EndOptionBox();
+
+	mParams->genAge(server);
+	PRINT_NAKATA("TekiPersonality::genAge<%08x\n", mParams);
+}
+
+#endif

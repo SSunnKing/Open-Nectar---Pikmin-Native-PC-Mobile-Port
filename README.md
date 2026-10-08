@@ -12,6 +12,10 @@ floats in front of you.
 
 **No game data is included.** You supply your own copy of the disc.
 
+The tree follows upstream's layout: the Pikmin port, and the VR mode with it,
+lives in `games/pikmin1/`. Upstream's Pikmin 2 port in `games/pikmin2/` comes
+along unchanged and has no VR mode.
+
 ## What runs today
 
 | | |
@@ -87,7 +91,7 @@ one per line.
 ## Playing on a Quest
 
 ```sh
-cd android && ./gradlew assembleDebug
+cd games/pikmin1/android && ./gradlew assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
@@ -115,15 +119,15 @@ Windows needs the MSYS2 MinGW-w64 toolchain and the OpenXR loader:
 ```sh
 pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja \
     mingw-w64-x86_64-pkgconf mingw-w64-x86_64-SDL2 mingw-w64-x86_64-openxr-sdk
-tools/build_windows_native.sh
+games/pikmin1/tools/build_windows_native.sh
 ```
 
-`build-win/bin/nectar-launcher.exe` installs the game data from your disc image
-once; after that run `nectar.exe` from the folder it installed into. Start your
-headset's runtime first. `-DPIKMIN_VR=OFF` builds without VR.
+`games/pikmin1/build-win/bin/nectar-launcher.exe` installs the game data from
+your disc image once; after that run `nectar.exe` from the folder it installed
+into. Start your headset's runtime first. `-DPIKMIN_VR=OFF` builds without VR.
 
-Linux builds as upstream documents; the VR mode is Windows and Android only so
-far, because the session binds to WGL or EGL.
+Linux builds as [upstream documents](games/pikmin1/README.md); the VR mode is
+Windows and Android only so far, because the session binds to WGL or EGL.
 
 ## Notes and known issues
 
@@ -147,7 +151,8 @@ far, because the session binds to WGL or EGL.
 
 ## How it works
 
-Three hooks, described in [pc_port/vr/README.md](pc_port/vr/README.md):
+Three hooks, described in
+[games/pikmin1/pc_port/vr/README.md](games/pikmin1/pc_port/vr/README.md):
 
 - **The camera** is replaced with the headset's head pose before the world is
   drawn, so culling, billboards and the stick's movement direction follow your
@@ -161,9 +166,9 @@ Three hooks, described in [pc_port/vr/README.md](pc_port/vr/README.md):
 - **The interface** lands on a floating panel, which is also how whole flat
   screens (title, file select, results) are shown.
 
-`pc_port/vr/pc_vr_rig.*` is plain maths with no OpenXR or GL in it, so
-`ctest -R pc_vr_rig_test` checks the conventions -- eye offsets, the GameCube
-frustum, snap turns, the table -- without a headset.
+`games/pikmin1/pc_port/vr/pc_vr_rig.*` is plain maths with no OpenXR or GL in
+it, so `ctest -R pc_vr_rig_test` checks the conventions -- eye offsets, the
+GameCube frustum, snap turns, the table -- without a headset.
 
 ## Credits
 
@@ -176,6 +181,6 @@ idea of a VR fork of a decompilation port follows
 ## Legal
 
 Independent, unaffiliated with Nintendo. Pikmin and Nintendo's characters,
-audio, artwork and names belong to their owners. See [LEGAL.md](LEGAL.md):
+audio, artwork and names belong to their owners. See [LEGAL.md](games/pikmin1/LEGAL.md):
 no disc images, extracted assets or game data belong in this repository or in
 anything built from it.

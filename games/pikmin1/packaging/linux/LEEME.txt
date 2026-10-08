@@ -1,0 +1,162 @@
+OPEN NECTAR — PORT NATIVO DE PIKMIN PARA LINUX (x86-64)
+
+Pikmin compilado para Linux: sin emulador. Usa el motor de sonido original
+JAudio, así que suenan la música, los efectos y el audio de las cinemáticas.
+
+No incluye la ROM ni ningún recurso propiedad de Nintendo. Tu imagen del
+disco solo se lee para extraer los datos del juego; nunca se copia ni se
+modifica.
+
+
+-------------------------------------------------------------------
+QUÉ NECESITAS
+-------------------------------------------------------------------
+
+  - Linux x86-64 con glibc 2.29 o posterior. Es decir, cualquier distro
+    actual: Ubuntu 20.04+, Linux Mint 20+, Pop!_OS, Debian 11+, Fedora 30+,
+    openSUSE Leap 15.3+ y Tumbleweed, Arch, Manjaro, EndeavourOS, SteamOS
+    (modo escritorio de la Steam Deck).
+  - Un driver gráfico con OpenGL 3.3 (cualquiera de Intel, AMD o NVIDIA),
+    en una sesión X11 o Wayland.
+  - zenity o kdialog, para los selectores de archivos y carpetas. GNOME, KDE
+    y la mayoría de escritorios ya traen uno. Si no:
+        Debian/Ubuntu/Mint:  sudo apt install zenity
+        Fedora:              sudo dnf install zenity
+        Arch/Manjaro:        sudo pacman -S zenity
+        openSUSE:            sudo zypper install zenity
+  - Tu copia de Pikmin USA Rev. 1 (GPIE01) o Pikmin Europa (GPIP01), en ISO
+    o GCM. RVZ/WIA/GCZ también sirven si tienes dolphin-tool de Dolphin en
+    el PATH o junto al launcher.
+  - Aproximadamente 1 GB libre.
+
+Todo lo demás (SDL2, el runtime de C++) va dentro de los ejecutables.
+
+
+-------------------------------------------------------------------
+DOS DESCARGAS, EL MISMO CONTENIDO
+-------------------------------------------------------------------
+
+Open_Nectar-x86_64.AppImage
+    Un solo archivo. Dale permiso de ejecución (clic derecho > Propiedades >
+    "Permitir ejecutar como programa", o: chmod +x
+    Open_Nectar-x86_64.AppImage) y ábrelo.
+
+nectar-linux.tar.gz
+    Una carpeta. Extráela (tar -xzf nectar-linux.tar.gz) y abre
+    nectar-launcher. Contiene nectar (USA), nectar-pal (Europa) y
+    nectar-launcher.
+
+Cualquiera de los dos abre el launcher de Open Nectar, que instala y
+actualiza el juego. Solo hace falta una vez: después manda el launcher que
+queda en la carpeta del juego.
+
+
+-------------------------------------------------------------------
+INSTALAR
+-------------------------------------------------------------------
+
+1. Abre el AppImage o nectar-launcher.
+2. Pulsa Install bajo la portada de Pikmin.
+3. Elige tu imagen del disco y la carpeta donde instalar.
+4. Se comprueba el disco y se extraen los datos (unos minutos).
+5. Pulsa "Play now".
+
+En la carpeta elegida quedan los datos del juego (assets), tus partidas y
+ajustes, y dos programas: nectar (el juego, de la región de tu disco) y
+nectar-launcher.
+
+Para jugar después, abre nectar-launcher en esa carpeta y pulsa la portada.
+
+
+-------------------------------------------------------------------
+EL LAUNCHER
+-------------------------------------------------------------------
+
+Games         Pulsa la portada para jugar. El botón de debajo actualiza.
+Settings      Todas las opciones del menú F1 del juego, más packs de
+              texturas, modelos HD e idioma. Los cambios se guardan al
+              momento y se aplican al arrancar el juego.
+Move Install  Mueve toda la instalación (partidas y ajustes incluidos) a
+              otra carpeta o disco.
+
+Cuando se publica una versión nueva, el launcher lo avisa ("Open Nectar X
+is available") y el botón Update la descarga e instala solo.
+
+
+-------------------------------------------------------------------
+ACTUALIZAR
+-------------------------------------------------------------------
+
+Desde el launcher instalado: pulsa Update. Descarga la última versión de
+GitHub, la instala y se reinicia. No toca tus partidas, ajustes, packs de
+texturas ni los datos extraídos del juego.
+
+Desde una descarga nueva: abre el AppImage o nectar-launcher nuevos, pulsa
+Update y elige la carpeta donde está instalado el juego. No hace falta la
+imagen del disco.
+
+Las instalaciones de versiones anteriores (las que tienen nectar.real y una
+carpeta lib) se pasan al formato nuevo al actualizarlas.
+
+
+-------------------------------------------------------------------
+LÍNEA DE ÓRDENES
+-------------------------------------------------------------------
+
+Instalar sin ninguna ventana (sirve por SSH y sin zenity/kdialog):
+
+  ./nectar-launcher --rom /ruta/a/pikmin.iso --install-dir ~/Juegos/OpenNectar
+
+Opciones:
+  --rom FICHERO      Imagen: Pikmin USA Rev. 1 o Europa, ISO o GCM.
+  --install-dir DIR  Carpeta donde instalar (se crea si no existe).
+  --extract-only     Instala y sale, sin arrancar el juego.
+  --skip-verify      Se salta las comprobaciones del disco (ver abajo).
+  --dolphin-tool R   dolphin-tool para convertir RVZ/WIA/GCZ.
+  --help             Ayuda.
+
+El instalador compara la imagen con un volcado correcto antes de extraer y
+vuelve a leer cada archivo que escribe. Así detecta copias dañadas y discos
+defectuosos, que son la razón habitual de que un juego se instale bien y
+luego falle de forma rara. Añade un minuto; --skip-verify lo omite.
+
+
+-------------------------------------------------------------------
+SI ALGO FALLA
+-------------------------------------------------------------------
+
+El AppImage no se abre
+    Tu sistema no tiene FUSE. Ábrelo una vez desde una terminal así:
+      ./Open_Nectar-x86_64.AppImage --appimage-extract-and-run
+    o usa nectar-linux.tar.gz.
+
+"libGL.so.1: cannot open shared object file"
+    Falta el driver de OpenGL:
+      Debian/Ubuntu: sudo apt install libgl1
+      Fedora:        sudo dnf install mesa-libGL
+      Arch:          sudo pacman -S libglvnd
+      openSUSE:      sudo zypper install Mesa-libGL1
+
+"GLIBC_2.29 not found" (o parecido)
+    La distro es anterior al mínimo (por ejemplo Debian 10, Ubuntu 18.04,
+    RHEL/Rocky/Alma 8). Actualízala o usa una más reciente.
+
+Browse no hace nada
+    No tienes zenity ni kdialog (ver QUÉ NECESITAS), o usa la línea de
+    órdenes.
+
+Rechaza la imagen del disco
+    Tiene que ser Pikmin USA Rev. 1 (GPIE01) o Europa (GPIP01). Convierte
+    RVZ/WIA/GCZ con: dolphin-tool convert -f iso -i juego.rvz -o juego.iso
+
+Falta espacio
+    Los datos extraídos ocupan unos 650 MB. Deja 1 GB libre.
+
+
+-------------------------------------------------------------------
+EN EL JUEGO
+-------------------------------------------------------------------
+
+F1 (o Select/View en un mando) abre el menú de ajustes en cualquier
+momento. El disco europeo empieza en inglés; cambia el idioma en Settings
+del launcher, en F1 > Display o en las opciones del propio juego.

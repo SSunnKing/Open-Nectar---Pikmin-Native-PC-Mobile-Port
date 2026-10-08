@@ -1,0 +1,65 @@
+name: Linux build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build release packages
+        # Compila en un contenedor Ubuntu 20.04 (glibc 2.31) con podman, que ya
+        # viene en el runner, y genera nectar-linux.tar.gz y el AppImage.
+        run: packaging/linux/build-release.sh --clean
+      - name: Verify distributable contains no game data
+        run: |
+          if find . -path './.git' -prune -o -type f \( -iname '*.iso' -o -iname '*.gcm' -o -iname '*.rvz' -o -path './assets/dataDir/*' \) -print -quit | grep -q .; then
+            echo 'Proprietary game data found in repository'
+            exit 1
+          fi
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nectar-linux
+          path: |
+            packaging/linux/out/nectar-linux.tar.gz
+            packaging/linux/out/Open_Nectar-x86_64.AppImage
+
+  smoke-clean-distro:
+    # Los ejecutables solo deben necesitar glibc >= 2.29, libGL y libX11 del
+    # sistema: se prueban en distros limpias con solo eso instalado.
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu:20.04
+            setup: apt-get update && apt-get install -y --no-install-recommends libgl1 libx11-6
+          - image: debian:12
+            setup: apt-get update && apt-get install -y --no-install-recommends libgl1 libx11-6
+          - image: fedora:40
+            setup: dnf install -y mesa-libGL libX11 tar gzip
+          - image: archlinux:latest
+            setup: pacman -Sy --noconfirm libglvnd libx11
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nectar-linux
+      - name: Install OpenGL and X11 only
+        run: ${{ matrix.setup }}
+      - name: Package runs on a clean system
+        run: |
+          tar -xzf nectar-linux.tar.gz
+          cd nectar-linux
+          ./nectar-launcher --help
+          mkdir -p /tmp/cfg && cd /tmp/cfg
+          "$GITHUB_WORKSPACE/nectar-linux/nectar" --settings-dump | grep -q '^{"groups"'
+          "$GITHUB_WORKSPACE/nectar-linux/nectar-pal" --settings-dump | grep -q '^{"groups"'
+      - name: AppImage runs without FUSE
+        run: |
+          chmod +x Open_Nectar-x86_64.AppImage
+          ./Open_Nectar-x86_64.AppImage --appimage-extract-and-run --help

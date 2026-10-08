@@ -1,0 +1,3071 @@
+#include "Game/Navi.h"
+#ifdef PIKI_PC_PORT
+extern "C" float pc_window_get_mouse_cursor_delta_x(void);
+extern "C" float pc_window_get_mouse_cursor_delta_y(void);
+extern "C" void pc_window_clear_mouse_cursor_delta(void);
+extern "C" int pc_window_get_control_mode(void);
+extern "C" int pc_settings_get_free_camera(void);
+extern "C" void pc_window_add_camera_drag(float normalizedDx);
+extern "C" int pc_settings_get_navi_health_pct(void);
+extern "C" float pc_p2_hard_navi_damage(float base);
+extern "C" float pc_settings_get_navi_speed_scale(void);
+extern "C" int pc_gyro_take_recenter_cursor(void);
+extern "C" bool pc_window_take_lockon_press(void);
+extern "C" bool pc_window_swarm_held(void);
+extern "C" int pc_settings_get_lock_on(void);
+extern "C" int pc_first_person_active(void);
+extern "C" void pc_settings_note_lock_on(int hasTarget);
+extern "C" void pc_settings_note_gameplay_frame(void);
+extern "C" void pc_discord_set_playing(const char* zoneName, const char* zoneKey, const char* stateLine);
+extern "C" int pc_settings_get_debug_keys(void);
+extern "C" const unsigned char* SDL_GetKeyboardState(int* numkeys);
+
+// Debug Keys: F6 adelanta una hora (en Infinite Day, solo la luz).
+static void pcDebugKeys()
+{
+	static bool sF6WasDown = false;
+	const int kScancodeF6  = 63; // SDL_SCANCODE_F6
+	int numKeys            = 0;
+	const unsigned char* keys = SDL_GetKeyboardState(&numKeys);
+	const bool down = pc_settings_get_debug_keys() && keys && numKeys > kScancodeF6 && keys[kScancodeF6];
+	Game::GameSystem* gs = Game::gameSystem;
+	if (down && !sF6WasDown && gs && gs->mTimeMgr && gs->isStoryMode() && !gs->mIsInCave) {
+		gs->mTimeMgr->pcDebugAdvanceHour();
+	}
+	sF6WasDown = down;
+}
+// Mod "Captain Health": escalar el dano recibido en vez de la vida mantiene
+// honestos la barra y el aviso de vida baja, que leen el maximo original.
+static f32 pcNaviHurt(f32 damage)
+{
+	damage          = pc_p2_hard_navi_damage(damage); // Hard: más daño
+	const int pct = pc_settings_get_navi_health_pct();
+	if (pct < 0) {
+		return 0.0f; // Infinite
+	}
+	return (pct != 100 && pct > 0) ? damage * 100.0f / f32(pct) : damage;
+}
+#endif
+#include "Game/NaviState.h"
+#include "Game/gamePlayData.h"
+#include "Game/TimeMgr.h"
+#include "Game/GameSystem.h"
+#include "Game/NaviParms.h"
+#include "Game/PikiState.h"
+#include "Game/StateMachine.h"
+#include "Game/CPlate.h"
+#include "Game/Footmark.h"
+#include "Game/MoviePlayer.h"
+#include "Game/PikiMgr.h"
+#include "Game/Entities/ItemPikihead.h"
+#include "Game/Entities/ItemBigFountain.h"
+#include "Game/Entities/ItemHole.h"
+#include "Game/Entities/ItemCave.h"
+#include "Game/Entities/ItemOnyon.h"
+#include "Game/MapMgr.h"
+#include "Game/CameraMgr.h"
+#include "Game/Stickers.h"
+#include "Game/rumble.h"
+#include "Game/AIConstants.h"
+#include "JSystem/J3D/J3DJoint.h"
+#include "PSSystem/PSSystemIF.h"
+#include "P2Macros.h"
+#include "PSSystem/PSMainSide_ObjSound.h"
+#include "SysShape/Model.h"
+#include "CollInfo.h"
+#include "Iterator.h"
+#include "PikiAI.h"
+#include "Radar.h"
+#include "nans.h"
+#include "utilityU.h"
+#include "PowerPC_EABI_Support/MSL_C/MSL_Common/arith.h"
+#ifdef PIKI_PC_PORT
+#include "Game/generalEnemyMgr.h"
+#include "Game/pelletMgr.h"
+#include "Game/Entities/ItemGate.h"
+#include "Game/Entities/ItemDengekiGate.h"
+#include "Game/Entities/ItemBridge.h"
+#include "Game/Entities/ItemRock.h"
+#include "Game/Entities/ItemBarrel.h"
+#include "Game/Entities/ItemTreasure.h"
+#include "Game/Entities/ItemDownFloor.h"
+#include "Game/PikiMgr.h"
+#include "Viewport.h"
+
+extern "C" bool pc_window_take_swarm_press(void);
+extern "C" int pc_settings_get_charge(void);
+
+namespace Game {
+// Mod "Lock-On" (como en Pikmin 1): enemigo u objeto fijado por el capitan
+// con mando. Se valida cada frame recorriendo los managers en vez de fiarse
+// del puntero, porque puede morir y desaparecer entre frames.
+static Creature* sPcLockTarget = nullptr;
+// Automatico: soltado a mano, no se recoge hasta que el cursor sale de el.
+static Creature* sPcLockIgnore = nullptr;
+// Cursor libre (lo que apunta el jugador) mientras el visible esta clavado,
+// y donde se clavo en el ultimo frame (para sumar lo que se mueve).
+static Vector3f sPcAimOffset(0.0f);
+static Vector3f sPcPinnedOffset(0.0f);
+static Navi* sPcLockNavi = nullptr;
+/// Mod "Charge": segundos que el grupo sigue corriendo hacia el objetivo.
+static f32 sPcChargeTime = 0.0f;
+// Mod "First Person": capitan cuyo modelo esta oculto (el ojo va en su cabeza).
+static Navi* sPcFpHiddenNavi = nullptr;
+
+// Discord Rich Presence: area, dia y Pokos de la partida en curso.
+static void pcDiscordNoteGameplay()
+{
+	static const char* const kZoneNames[4] = { "Valley of Repose", "Awakening Wood", "Perplexing Pool", "Wistful Wild" };
+	static const char* const kZoneKeys[4]  = { "valley_of_repose", "awakening_wood", "perplexing_pool", "wistful_wild" };
+	if (!gameSystem || !playData) {
+		return;
+	}
+	const int course = playData->getCurrentCourseIndex();
+	const bool known = course >= 0 && course < 4;
+	char zone[64];
+	snprintf(zone, sizeof(zone), "%s%s", known ? kZoneNames[course] : "Exploring", gameSystem->mIsInCave ? " (cave)" : "");
+	char line[96];
+	if (!gameSystem->isStoryMode()) {
+		snprintf(line, sizeof(line), "Challenge Mode");
+	} else {
+		const int day = gameSystem->mTimeMgr ? (int)gameSystem->mTimeMgr->mDayCount + 1 : 1;
+		snprintf(line, sizeof(line), "Day %d \xC2\xB7 %d Pokos", day, playData->getPokoCount());
+	}
+	pc_discord_set_playing(zone, known ? kZoneKeys[course] : "app", line);
+}
+
+/**
+ * @brief Lock-On: recorre lo que se puede fijar. Enemigos (jefes y bombas
+ * incluidos), pellets que se pueden llevar y los objetos con los que trabajan
+ * los Pikmin: muros (tambien electricos), puentes, rocas, tapones, tesoros
+ * enterrados y bolsas que se hunden. Devuelve true si `fn` corta el recorrido.
+ */
+template <typename F>
+static bool pcForEachLockable(F fn)
+{
+	if (generalEnemyMgr) {
+		GeneralMgrIterator<EnemyBase> iter(generalEnemyMgr);
+		CI_LOOP(iter)
+		{
+			EnemyBase* enemy = iter.getObject();
+			// Los "enemigos" decorativos (plantas) no estan vivos; las bombas
+			// tampoco, pero se fijan como en Pikmin 1.
+			// La planta de las pildoras tampoco: se fija la pildora que cuelga.
+			const EnemyTypeID::EEnemyTypeID type = enemy->getEnemyTypeID();
+			const bool lockable = (enemy->isLivingThing() || type == EnemyTypeID::EnemyID_Bomb) && type != EnemyTypeID::EnemyID_Pelplant;
+			if (enemy->isAlive() && lockable && fn(enemy)) {
+				return true;
+			}
+		}
+	}
+	if (pelletMgr) {
+		PelletIterator iter;
+		CI_LOOP(iter)
+		{
+			Pellet* pellet = *iter;
+			if (pellet->isAlive() && pellet->isPickable() && fn(pellet)) {
+				return true;
+			}
+		}
+	}
+	if (itemGateMgr) {
+		Iterator<ItemGate> iter(&itemGateMgr->mNodeObjectMgr);
+		CI_LOOP(iter)
+		{
+			if ((*iter)->isAlive() && fn(*iter)) {
+				return true;
+			}
+		}
+	}
+	auto items = [&](auto* mgr) {
+		if (!mgr) {
+			return false;
+		}
+		Iterator<BaseItem> iter(mgr);
+		CI_LOOP(iter)
+		{
+			if ((*iter)->isAlive() && fn(*iter)) {
+				return true;
+			}
+		}
+		return false;
+	};
+	if (ItemDengekiGate::mgr) {
+		Iterator<ItemGate> iter(ItemDengekiGate::mgr);
+		CI_LOOP(iter)
+		{
+			if ((*iter)->isAlive() && fn(*iter)) {
+				return true;
+			}
+		}
+	}
+	if (items(ItemBridge::mgr) || items(ItemRock::mgr) || items(ItemBarrel::mgr) || items(ItemTreasure::mgr)) {
+		return true;
+	}
+	// Bolsas y balancines: solo mientras no esten ya aplastados.
+	if (ItemDownFloor::mgr) {
+		Iterator<BaseItem> iter(ItemDownFloor::mgr);
+		CI_LOOP(iter)
+		{
+			ItemDownFloor::Item* floor = static_cast<ItemDownFloor::Item*>(*iter);
+			if (floor->isAlive() && !floor->mIsPressed && fn(floor)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/**
+ * @brief Radio del objetivo en el suelo: de el salen el alcance y el aro.
+ * La celda vale para los enemigos; los puentes, muros y rocas son mas grandes
+ * y su esfera envolvente da mejor idea de lo que ocupan.
+ */
+static f32 pcLockRadius(Creature* c)
+{
+	f32 r = c->getCellRadius();
+	if (c->mObjectTypeID != OBJTYPE_Teki) {
+		// Objetos: la esfera envolvente de algunos (bolsas, puentes) abarca
+		// mucho mas que su huella; se limita para que el aro no se dispare.
+		Sys::Sphere sphere;
+		c->getBoundingSphere(sphere);
+		f32 bound = sphere.mRadius * 0.8f;
+		bound     = bound > 45.0f ? 45.0f : bound;
+		r         = bound > r ? bound : r;
+		r         = r > 45.0f ? 45.0f : r;
+	}
+	return r > 4.0f ? r : 4.0f;
+}
+
+static f32 pcLockDistXZ(Creature* c, const Vector3f& pos)
+{
+	Vector3f sep = c->getPosition() - pos;
+	return sqrtf(sep.x * sep.x + sep.z * sep.z);
+}
+
+/**
+ * @brief Mod "Lock-On" (portado de Pikmin 1). Tres modos (ajuste lockOn):
+ * 0 apagado, 1 manual con el boton Lock-On, 2 automatico: se fija solo al
+ * acercar el cursor y se suelta al alejarse el capitan o con el boton. Con
+ * "Charge", el boton de swarm manda a la escuadra contra el enemigo fijado.
+ */
+static void pcUpdateLockOn(Navi* navi)
+{
+	// Se consumen siempre, para que no queden encoladas y salten solas al
+	// activar el mod.
+	const bool lockPressed   = pc_window_take_lockon_press() != 0;
+	const bool chargePressed = pc_window_take_swarm_press();
+	const int mode           = pc_settings_get_lock_on();
+	if (!mode || sPcLockNavi != navi) {
+		// Otro capitan (cambio con Y) o mod apagado: se empieza de cero.
+		sPcLockTarget = nullptr;
+		sPcLockIgnore = nullptr;
+		sPcLockNavi   = navi;
+		if (!mode) {
+			pc_settings_note_lock_on(0);
+			return;
+		}
+	}
+
+	const Vector3f naviPos = navi->getPosition();
+	const f32 maxRadius    = naviMgr->mNaviParms->mNaviParms.mMaxCursorMoveRadius();
+	Vector3f& cursor       = navi->mWhistle->mNaviOffsetVec;
+	// Donde apunta el jugador: con objetivo, el cursor visible esta clavado
+	// en el y el libre sigue en sPcAimOffset.
+	const Vector3f aim = naviPos + (sPcLockTarget ? sPcAimOffset : cursor);
+
+	if (sPcLockTarget) {
+		Creature* target = sPcLockTarget;
+		bool stillValid  = false;
+		if (pcForEachLockable([target](Creature* c) { return c == target; })) {
+			// Se suelta si el capitan se aleja: el doble del alcance del
+			// cursor, con la escala del propio juego.
+			Vector3f away  = target->getPosition() - naviPos;
+			away.y         = 0.0f;
+			stillValid     = away.length() < maxRadius * 2.0f + pcLockRadius(target);
+		}
+		if (!stillValid) {
+			sPcLockTarget = nullptr;
+			if (mode == 2) {
+				cursor = sPcAimOffset; // el cursor vuelve a donde apuntaba el jugador
+			}
+		}
+	}
+
+	// El objetivo soltado a mano en automatico no se recoge otra vez hasta que
+	// el cursor sale de el.
+	if (sPcLockIgnore) {
+		Creature* ignore = sPcLockIgnore;
+		if (!pcForEachLockable([ignore](Creature* c) { return c == ignore; })
+		    || pcLockDistXZ(ignore, aim) > pcLockRadius(ignore) + 12.0f) {
+			sPcLockIgnore = nullptr;
+		}
+	}
+
+	// El alcance sale del tamano de cada objetivo, no de un radio fijo: con
+	// uno fijo se enganchaba al mas cercano aunque apuntases a campo abierto.
+	auto pickNearest = [&]() -> Creature* {
+		Creature* best = nullptr;
+		f32 bestDist   = 0.0f;
+		pcForEachLockable([&](Creature* c) {
+			if (c == sPcLockIgnore) {
+				return false;
+			}
+			const f32 dist = pcLockDistXZ(c, aim);
+			if (dist <= pcLockRadius(c) + 12.0f && (!best || dist < bestDist)) {
+				best     = c;
+				bestDist = dist;
+			}
+			return false;
+		});
+		return best;
+	};
+
+	Creature* acquired = nullptr;
+	if (lockPressed) {
+		if (sPcLockTarget) {
+			// Segunda pulsacion: suelta el objetivo.
+			if (mode == 2) {
+				sPcLockIgnore = sPcLockTarget;
+			}
+			sPcLockTarget = nullptr;
+		} else {
+			acquired = pickNearest();
+		}
+	} else if (mode == 2 && !sPcLockTarget) {
+		acquired = pickNearest();
+	}
+	if (acquired) {
+		sPcLockTarget   = acquired;
+		sPcAimOffset    = cursor;
+		sPcPinnedOffset = cursor;
+	}
+	pc_settings_note_lock_on(sPcLockTarget != nullptr);
+
+	// Cargar solo tiene sentido contra lo que se ataca: los Pikmin en
+	// formacion van a por el; los que ya trabajan siguen a lo suyo.
+	// Antes se lanzaba ACT_Attack desde la formacion: salian en fila, sin ruta,
+	// y muchos se quedaban por el camino. Ahora el grupo entero corre hacia el
+	// objetivo (lo empuja makeCStick) y cada Pikmin ataca al llegar; al
+	// agotarse el tiempo van los que queden.
+	const bool chargeable = sPcLockTarget && pc_settings_get_charge() && sPcLockTarget->mObjectTypeID == OBJTYPE_Teki;
+	if (!chargeable) {
+		sPcChargeTime = 0.0f;
+		return;
+	}
+	if (chargePressed) {
+		sPcChargeTime = 2.5f;
+	}
+	if (sPcChargeTime <= 0.0f) {
+		return;
+	}
+	sPcChargeTime -= sys->mDeltaTime;
+	const bool last     = sPcChargeTime <= 0.0f;
+	const Vector3f goal = sPcLockTarget->getPosition();
+	const f32 reach     = pcLockRadius(sPcLockTarget) + 40.0f;
+	{
+		Iterator<Piki> iter(pikiMgr);
+		CI_LOOP(iter)
+		{
+			Piki* piki = *iter;
+			if (piki->mNavi != navi || !piki->isAlive() || piki->getCurrActionID() != PikiAI::ACT_Formation) {
+				continue;
+			}
+			const Vector3f pos = piki->getPosition();
+			const f32 dx       = pos.x - goal.x;
+			const f32 dz       = pos.z - goal.z;
+			if (!last && dx * dx + dz * dz >= reach * reach) {
+				continue;
+			}
+			PikiAI::ActAttackArg arg;
+			arg.mCreature = sPcLockTarget;
+			arg.mCollPart = nullptr;
+			piki->mBrain->start(PikiAI::ACT_Attack, &arg);
+		}
+	}
+}
+
+/**
+ * @brief Lock-On: clava el cursor en el objetivo. Lo que el jugador ha movido
+ * el cursor desde el ultimo clavado se suma al cursor libre, al que vuelve al
+ * soltar. Devuelve false si no hay objetivo.
+ */
+static bool pcPinCursorToLock(Navi* navi)
+{
+	if (!sPcLockTarget || sPcLockNavi != navi) {
+		return false;
+	}
+	const f32 maxRadius = naviMgr->mNaviParms->mNaviParms.mMaxCursorMoveRadius();
+	Vector3f& cursor    = navi->mWhistle->mNaviOffsetVec;
+	sPcAimOffset        = sPcAimOffset + (cursor - sPcPinnedOffset);
+	const f32 aimLen    = sPcAimOffset.length();
+	if (aimLen > maxRadius) {
+		sPcAimOffset = sPcAimOffset * (maxRadius / aimLen);
+	}
+	Vector3f offset = sPcLockTarget->getPosition() - navi->getPosition();
+	offset.y        = 0.0f;
+	sPcPinnedOffset = offset;
+	cursor          = offset;
+	return true;
+}
+
+/**
+ * @brief Camara libre: gira el cursor `angle` radianes alrededor del capitan
+ * para que siga en el mismo sitio de la pantalla. Con objetivo fijado el
+ * cursor visible va pegado a el; gira solo el libre (como en Pikmin 1).
+ */
+void pcNaviRotateCursor(Navi* navi, f32 angle)
+{
+	if (!navi || !navi->mWhistle) {
+		return;
+	}
+	const f32 c = cosf(angle), s = sinf(angle);
+	auto rotate = [&](Vector3f& v) {
+		const f32 x = v.x, z = v.z;
+		v.x         = x * c + z * s;
+		v.z         = z * c - x * s;
+	};
+	if (sPcLockTarget && sPcLockNavi == navi) {
+		rotate(sPcAimOffset);
+		return;
+	}
+	rotate(navi->mWhistle->mNaviOffsetVec);
+	rotate(sPcAimOffset);
+	rotate(sPcPinnedOffset);
+}
+
+/**
+ * @brief Camara libre (L): pone el cursor delante del capitan, a la distancia
+ * que tenia. Con objetivo fijado no se toca.
+ */
+void pcNaviCursorToFront(Navi* navi)
+{
+	if (!navi || !navi->mWhistle || (sPcLockTarget && sPcLockNavi == navi)) {
+		return;
+	}
+	Vector3f& ofs = navi->mWhistle->mNaviOffsetVec;
+	f32 dist      = sqrtf(ofs.x * ofs.x + ofs.z * ofs.z);
+	if (dist < 10.0f) {
+		dist = 40.0f;
+	}
+	const f32 dir   = navi->getFaceDir();
+	ofs.x           = sinf(dir) * dist;
+	ofs.z           = cosf(dir) * dist;
+	sPcAimOffset    = ofs;
+	sPcPinnedOffset = ofs;
+}
+
+/**
+ * @brief Aro del Lock-On en el suelo, alrededor del objetivo fijado (como en
+ * Pikmin 1): tramos que giran despacio, del color del cursor del capitan, con
+ * cada vertice apoyado en el terreno. Se dibuja en la pasada 3D directa.
+ */
+void pcDrawLockOnRing(Graphics& gfx, Viewport* port)
+{
+	if (!sPcLockTarget || !sPcLockNavi || !mapMgr || !pc_settings_get_lock_on()) {
+		return;
+	}
+	Creature* target = sPcLockTarget;
+	if (!pcForEachLockable([target](Creature* c) { return c == target; })) {
+		return;
+	}
+	static const int kDashes     = 8;
+	static const int kDashSegs   = 5;
+	static const f32 kDashFill   = 0.7f;
+	static const f32 kHalfStroke = 1.4f;
+	static f32 spin              = 0.0f;
+	spin += sys->mDeltaTime * 0.8f;
+	if (spin > TAU) {
+		spin -= TAU;
+	}
+	// Olimar magenta, Louie y el presidente azul.
+	u8 r = 235, g = 70, b = 235;
+	if (sPcLockNavi->mNaviIndex != NAVIID_Olimar) {
+		r = 60;
+		g = 130;
+		b = 255;
+	}
+	// El aro va en el suelo, debajo del objetivo: una pildora colgada o un
+	// enemigo que vuela lo llevan donde los demas.
+	Vector3f centre = target->getPosition();
+	centre.y        = mapMgr->getMinY(centre);
+	const f32 radius = pcLockRadius(target) + 5.0f;
+
+	gfx.initPrimDraw(port->getMatrix(true));
+	GXSetNumTexGens(0);
+	GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
+	GXSetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
+	// Sin indirecto: la última partícula pudo dejarlo puesto.
+	GXSetNumIndStages(0);
+	GXSetTevDirect(GX_TEVSTAGE0);
+	GXSetChanCtrl(GX_COLOR0A0, GX_FALSE, GX_SRC_VTX, GX_SRC_VTX, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
+	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+	GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
+	GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
+	GXSetZMode(GX_TRUE, GX_LEQUAL, GX_FALSE);
+	GXSetCullMode(GX_CULL_NONE);
+
+	const f32 dashArc = TAU / kDashes;
+	for (int d = 0; d < kDashes; d++) {
+		const f32 start = spin + d * dashArc;
+		const f32 step  = dashArc * kDashFill / kDashSegs;
+		for (int k = 0; k < kDashSegs; k++) {
+			const f32 a0     = start + k * step;
+			const f32 a1     = a0 + step;
+			const f32 rad[4] = { radius - kHalfStroke, radius + kHalfStroke, radius + kHalfStroke, radius - kHalfStroke };
+			const f32 ang[4] = { a0, a0, a1, a1 };
+			GXBegin(GX_QUADS, GX_VTXFMT0, 4);
+			for (int v = 0; v < 4; v++) {
+				Vector3f p(centre.x + rad[v] * sinf(ang[v]), 0.0f, centre.z + rad[v] * cosf(ang[v]));
+				// En taludes y bordes el suelo salta; se queda cerca de la
+				// altura del objetivo para que el aro no se levante en vertical.
+				f32 ground = mapMgr->getMinY(p);
+				ground     = ground > centre.y + 8.0f ? centre.y + 8.0f : (ground < centre.y - 20.0f ? centre.y - 20.0f : ground);
+				p.y        = ground + 1.5f;
+				GXPosition3f32(p.x, p.y, p.z);
+				GXColor4u8(r, g, b, 230);
+			}
+			GXEnd();
+		}
+	}
+	GXSetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
+	GXSetBlendMode(GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, GX_LO_CLEAR);
+}
+
+static bool pcNaviExists(Navi* navi)
+{
+	return navi && naviMgr && (naviMgr->getAt(0) == navi || naviMgr->getAt(1) == navi);
+}
+
+static void pcUpdateCameraMods(Navi* navi)
+{
+	if (!navi->mController1 || gameSystem->isVersusMode()) {
+		return;
+	}
+	pc_settings_note_gameplay_frame();
+	pcDiscordNoteGameplay();
+	pcDebugKeys();
+
+	// Lock-On (modos, objetos, carga): ver pcUpdateLockOn.
+	pcUpdateLockOn(navi);
+
+	// First Person: el modelo del capitan se oculta mientras el ojo esta en su cabeza.
+	const bool fp = pc_first_person_active() && (!moviePlayer || moviePlayer->mDemoState == DEMOSTATE_Inactive);
+	if (sPcFpHiddenNavi && (!fp || sPcFpHiddenNavi != navi)) {
+		if (pcNaviExists(sPcFpHiddenNavi)) {
+			sPcFpHiddenNavi->mModel->show();
+		}
+		sPcFpHiddenNavi = nullptr;
+	}
+	if (fp) {
+		navi->mModel->hide();
+		sPcFpHiddenNavi = navi;
+	}
+}
+} // namespace Game
+#endif
+
+static const u32 fillerbytes[3] = { 0, 0, 0 };
+int numSearch;
+
+namespace Game {
+
+/**
+ * @note Address: 0x8013F6D4
+ * @note Size: 0x50
+ */
+void Navi::getShadowParam(ShadowParam& param)
+{
+	param.mPosition = mPosition;
+	param.mPosition.y += 0.5f;
+
+	param.mBoundingSphere.mRadius = 10.0f;
+	param.mSize                   = 4.0f;
+
+	param.mBoundingSphere.mPosition = Vector3f(0.0f, 1.0f, 0.0f);
+}
+
+/**
+ * @note Address: 0x8013F724
+ * @note Size: 0x24
+ */
+void Navi::getLODSphere(Sys::Sphere& sphere)
+{
+	sphere.mRadius   = 24.0f;
+	sphere.mPosition = mBoundingSphere.mPosition;
+}
+
+/**
+ * @note Address: 0x8013F748
+ * @note Size: 0x208
+ */
+Navi::Navi()
+{
+#ifdef PIKI_PC_PORT
+	// Navis are rebuilt with every section: anything the camera mods still
+	// point at belongs to the previous section's (freed) heap. Pointer
+	// comparisons against new objects could otherwise match a recycled address.
+	sPcLockTarget   = nullptr;
+	sPcLockIgnore   = nullptr;
+	sPcLockNavi     = nullptr;
+	sPcFpHiddenNavi = nullptr;
+#endif
+	mController1 = nullptr;
+	mController2 = nullptr;
+	mCamera      = nullptr;
+	mCamera2     = nullptr;
+	mWhistle     = nullptr;
+
+	mObjectTypeID = OBJTYPE_Navi;
+
+	mEffectsObj = new efx::TNaviEffect;
+	mEffectsObj->init(nullptr, nullptr, nullptr, efx::TNaviEffect::NAVITYPE_Olimar);
+	mEffectsObj->mPos = &mPosition;
+
+	mFsm = new NaviFSM;
+	mFsm->init(this);
+
+	mCPlateMgr = new CPlate(MAX_PIKI_COUNT);
+	mMass      = 1.0f;
+
+	mFootmarks = new Footmarks;
+	mFootmarks->alloc(16);
+
+	mUpdateContext.mDoForceActive = true;
+
+	mCursorMatAnim = new Sys::MatRepeatAnimator;
+	mArrowMatAnim  = new Sys::MatLoopAnimator;
+
+	mSoundObj = new PSM::Navi(this);
+}
+
+/**
+ * @note Address: 0x801400B0
+ * @note Size: 0x290
+ */
+void Navi::onInit(Game::CreatureInitArg* arg)
+{
+	mStickCount      = 0;
+	mPlateScaleTimer = 0;
+
+	clearKaisanDisable();
+	clearThrowDisable();
+
+	mInvincibleTimer = 0;
+	mCStickAngle     = 0.0f;
+
+	mSprayCounts[SPRAY_TYPE_BITTER] = 0;
+	mSprayCounts[SPRAY_TYPE_SPICY]  = 0;
+
+	initFakePiki();
+	naviMgr->setupNavi(this);
+
+	mModel->mJ3dModel->mModelData->mJointTree.mJoints[0]->mMtxCalc = nullptr;
+	mModel->mJ3dModel->mModelData->mJointTree.mJoints[1]->mMtxCalc = nullptr;
+
+	mNaviControlFlag.clear();
+	resetControlFlag(NAVICTRL_InMovie);
+
+	initAnimator();
+
+	mHideModel           = false;
+	mSceneAnimationTimer = 0.0f;
+
+	mWhistle = new NaviWhistle(this);
+
+	_2DE           = 0;
+	mNextThrowPiki = nullptr;
+	mHoldPikiTimer = 0.0f;
+	mUnusedFlag2   = 0;
+
+	mCollTree->createFromFactory(mModel, naviMgr->mCollData, nullptr);
+#ifdef PIKI_PC_PORT
+	JUT_ASSERTLINE(838, mCollTree->mPart != nullptr, "ザンーー（・д・）−−ネン\n");
+#else
+	JUT_ASSERTLINE(838, ((int)mCollTree->mPart) >= 0x80000000,
+	               "ザンーー（・д・）−−ネン\n"); // 'disappointttttt D: ?? ment' (lol)
+#endif
+	mCollTree->attachModel(mModel);
+
+	mFsm->start(this, NSID_Walk, nullptr);
+
+	getCreatureID();
+
+	mBeaconJoint = mModel->getJoint("happajnt3");
+
+	mEffectsObj->mBeaconMtx = mBeaconJoint->getWorldMatrix();
+	mEffectsObj->mNaviPos   = &mWhistle->mPosition;
+
+	SysShape::Joint* headJnt = mModel->getJoint("headjnt");
+	mEffectsObj->mHeadMtx    = headJnt->getWorldMatrix();
+	mEffectsObj->setNaviType((efx::TNaviEffect::enumNaviType)(bool)mNaviIndex);
+
+	mEffectsObj->createLight();
+
+	setLifeMax();
+
+	mPluckingCounter = 0;
+	mUnusedFlag      = 0;
+
+	Vector3f modelScale;
+	modelScale = Vector3f(OLIMAR_SCALE);
+	if (mNaviIndex == NAVIID_Louie) {
+		modelScale = Vector3f(LOUIE_SCALE);
+	}
+
+	mScale = modelScale;
+
+	int id = mNaviIndex;
+	mCursorMatAnim->start(&naviMgr->mCursorAnims[id]);
+	mArrowMatAnim->start(&naviMgr->mMarkerAnims[id]);
+}
+
+/**
+ * @note Address: 0x8014037C
+ * @note Size: 0x88
+ */
+void Navi::onSetPosition(Vector3f& position)
+{
+	mPosition = position;
+	static_cast<FakePiki*>(this)->onSetPosition(); // Call base class version
+
+	if (mNaviIndex == NAVIID_Olimar) { // olimar
+		Radar::Mgr::entry(this, Radar::MAP_OLIMAR, 0);
+
+	} else { // louie/president
+		Radar::Mgr::entry(this, Radar::MAP_LOUIE_PRESIDENT, 0);
+	}
+
+	mWhistle->init();
+}
+
+/**
+ * @note Address: 0x80140404
+ * @note Size: 0x40
+ */
+void Navi::onKill(CreatureKillArg* killArg)
+{
+	killFakePiki();
+	mEffectsObj->killLight();
+}
+
+/**
+ * @note Address: 0x80140444
+ * @note Size: 0xD4
+ */
+void Navi::onKeyEvent(const SysShape::KeyEvent& event)
+{
+	if (mCurrentState) {
+		mCurrentState->onKeyEvent(this, event);
+	}
+
+	if (mFakePikiBounceTriangle) {
+		int walkSound = mFakePikiBounceTriangle->mCode.getAttribute();
+		if (inWater()) {
+			walkSound = 4;
+		}
+
+		if ((u32)event.mType == KEYEVENT_200) {
+			mSoundObj->playWalkSound(PSM::Navi::NAVIFOOT_840, walkSound);
+
+		} else if ((u32)event.mType == KEYEVENT_201) {
+			mSoundObj->playWalkSound(PSM::Navi::NAVIFOOT_820, walkSound);
+		}
+	}
+}
+
+/**
+ * @note Address: 0x8014051C
+ * @note Size: 0x80
+ */
+Vector3f Navi::getPosition()
+{
+	if (moviePlayer && moviePlayer->isFlag(MVP_IsActive)) {
+		Matrixf* worldMtx = mModel->mJoints->getWorldMatrix();
+
+		Vector3f position;
+		worldMtx->getTranslation(position);
+		return position;
+
+	} else {
+		return mPosition;
+	}
+}
+
+/**
+ * @note Address: 0x8014059C
+ * @note Size: 0x50
+ */
+void Navi::onStickStart(Creature* creature)
+{
+	if (creature->isPiki()) {
+		mStickCount++;
+	}
+}
+
+/**
+ * @note Address: 0x801405EC
+ * @note Size: 0x58
+ */
+void Navi::onStickEnd(Creature* creature)
+{
+	if (creature->isPiki() && mStickCount) {
+		mStickCount--;
+	}
+}
+
+/**
+ * @note Address: 0x80140644
+ * @note Size: 0x654
+ */
+bool Navi::procActionButton()
+{
+	f32 minDist;
+	if (mPluckingCounter) {
+		minDist = naviMgr->mNaviParms->mNaviParms.mAutopluckDistance.mValue;
+	} else {
+		minDist = naviMgr->mNaviParms->mNaviParms.mActionRadius.mValue;
+	}
+
+	Iterator<ItemPikihead::Item> iter(ItemPikihead::mgr);
+	minDist *= minDist;
+	ItemPikihead::Item* targetSprout = nullptr;
+
+	// find (closest) pluckable sprout within range
+	CI_LOOP(iter)
+	{
+		BaseItem* item             = *iter;
+		ItemPikihead::Item* sprout = (ItemPikihead::Item*)item;
+		Vector3f sproutPos         = item->getPosition();
+		Vector3f naviPos           = getPosition();
+		Vector3f diff              = sproutPos;
+		diff -= naviPos;
+		f32 heightDistance     = absF(diff.y);
+		f32 horizontalDistance = diff.x * diff.x + diff.z * diff.z;
+
+		// sprout has to be pluckable, closer than current/within range, not at massive height difference
+		// AND either we're not in VS mode OR sprout color matches captain color
+		if (sprout->canPullout() && horizontalDistance < minDist && heightDistance < 25.0f
+		    && (!gameSystem->isVersusMode() || sprout->mColor == (1 - mNaviIndex))) {
+			minDist      = horizontalDistance;
+			targetSprout = sprout;
+		}
+	}
+
+	// if sprout found, pluck it.
+	if (targetSprout) {
+		NaviNukuAdjustStateArg nukuAdjustArg;
+		setupNukuAdjustArg(targetSprout, nukuAdjustArg);
+		mFsm->transit(this, NSID_NukuAdjust, &nukuAdjustArg);
+
+		// if there's a captain following us, put them to work.
+		Navi* otherNavi = naviMgr->getAt(1 - mNaviIndex);
+		if (otherNavi && otherNavi->isAlive() && otherNavi->getStateID() == NSID_Follow) {
+			f32 actionRadius = naviMgr->mNaviParms->mNaviParms.mAutopluckDistance.mValue; // following captain uses autopluck range
+
+			ItemPikihead::Item* otherTargetSprout = nullptr;
+			minDist                               = actionRadius * actionRadius;
+
+			// find (closest) pluckable sprout within range that -isn't- the same as main captain's target
+			CI_LOOP(iter)
+			{
+				BaseItem* item             = *iter;
+				ItemPikihead::Item* sprout = (ItemPikihead::Item*)item;
+				if (sprout != targetSprout) {
+					Vector3f sproutPos = item->getPosition();
+					Vector3f naviPos   = getPosition();
+					Vector3f diff      = sproutPos;
+					diff -= naviPos;
+					f32 heightDiff = absF(diff.y);
+					f32 sqrXZ      = diff.x * diff.x + diff.z * diff.z;
+
+					// sprout has to be pluckable, closer than current/within range, not at massive height difference
+					// (we don't care about VS mode now bc can't have a following captain)
+					if (sprout->canPullout() && sqrXZ < minDist && heightDiff < 25.0f) {
+						minDist           = sqrXZ;
+						otherTargetSprout = sprout;
+					}
+				}
+			}
+
+			// if sprout found, pluck it.
+			if (otherTargetSprout) {
+				NaviNukuAdjustStateArg nukuAdjustArg2;
+				otherNavi->setupNukuAdjustArg(otherTargetSprout, nukuAdjustArg2);
+				nukuAdjustArg2.mIsFollowing = true;
+				otherNavi->mFsm->transit(otherNavi, NSID_NukuAdjust, &nukuAdjustArg2);
+			}
+		}
+
+		// we plucked something.
+		return true;
+	}
+
+	// we did not pluck something.
+	return false;
+}
+
+/**
+ * @note Address: 0x80140CF4
+ * @note Size: 0x138
+ */
+void Navi::setupNukuAdjustArg(ItemPikihead::Item* item, NaviNukuAdjustStateArg& arg)
+{
+	Vector3f direction = item->getPosition() - getPosition();
+	arg.mAngleToItem   = angDist(roundAng(pikmin2_atan2f(direction.x, direction.z)), mFaceDir) / 10.0f;
+
+	f32 distance = pikmin2_sqrtf(direction.sqrLength());
+	f32 norm     = 1.0f / distance;
+
+	// These two lines are unused
+	// Minimum distance to item is 15.0f
+	arg.mUnusedVelocity = direction * (3.0003002f * (norm * (distance - 15.0f)));
+	arg.mUnusedState    = 2;
+
+	arg.mPikihead = item;
+}
+
+/**
+ * @note Address: 0x80140E2C
+ * @note Size: 0x50
+ */
+bool Navi::hasDope(int sprayType)
+{
+	if (gameSystem->isVersusMode()) {
+		return mSprayCounts[sprayType] > 0;
+	}
+
+	return playData->hasDope(sprayType);
+}
+
+/**
+ * @note Address: 0x80140E7C
+ * @note Size: 0x44
+ */
+int Navi::getDopeCount(int sprayType)
+{
+	if (gameSystem->isVersusMode()) {
+		return (mSprayCounts[sprayType]);
+	}
+
+	return playData->getDopeCount(sprayType);
+}
+
+/**
+ * @note Address: 0x80140EC0
+ * @note Size: 0x4C
+ */
+void Navi::useDope(int sprayType)
+{
+	if (gameSystem->isVersusMode()) {
+		mSprayCounts[sprayType]--;
+		return;
+	}
+
+	playData->useDope(sprayType);
+}
+
+/**
+ * @note Address: 0x80140F0C
+ * @note Size: 0xA0
+ */
+void Navi::incDopeCount(int sprayType)
+{
+	if (gameSystem->isVersusMode()) {
+		GameMessageVsGetDoping dopeMessage(mNaviIndex, sprayType);
+		gameSystem->mSection->sendMessage(dopeMessage);
+		mSprayCounts[sprayType]++;
+		return;
+	}
+
+	playData->incDopeCount(sprayType);
+}
+
+/**
+ * @note Address: 0x80140FB4
+ * @note Size: 0x2E0
+ * 87%
+ */
+void Navi::applyDopes(int sprayType, Vector3f& sprayOrigin)
+{
+	if (sprayType == SPRAY_TYPE_BITTER) {
+		Sys::Sphere searchCirc(sprayOrigin, 140.0f);
+		Delegate1<Game::Navi, Game::CellObject*> funcCallback(this, &Navi::applyDopeSmoke);
+
+		cellMgr->mapSearch(searchCirc, &funcCallback);
+		return;
+	}
+
+	Iterator<Creature> cellIt(mCPlateMgr);
+	Creature* sprayTarget = nullptr;
+	CI_LOOP(cellIt)
+	{
+		Creature* got = *cellIt;
+		if (got->isPiki()) {
+			InteractDope dope(this, sprayType);
+			if (got->stimulate(dope) && sprayTarget == nullptr) {
+				sprayTarget = got;
+			}
+		}
+	}
+}
+
+/**
+ * @note Address: 0x80141294
+ * @note Size: 0x1B0
+ */
+void Navi::applyDopeSmoke(CellObject* object)
+{
+	Creature* creature = static_cast<Creature*>(object);
+
+	Vector3f naviPos = getPosition();
+	Vector3f direction;
+	direction.x = mWhistle->mPosition.x - naviPos.x;
+	direction.y = mWhistle->mPosition.y - naviPos.y;
+	direction.z = mWhistle->mPosition.z - naviPos.z;
+	direction.qNormalise();
+
+	Vector3f objPos   = creature->getPosition();
+	Vector3f smokePos = naviPos + (direction * 50.0f);
+	Vector3f sep      = objPos - smokePos;
+	if (sep.qLength() <= 140.0f) {
+		InteractDope dope(this, 1);
+		creature->stimulate(dope);
+	}
+}
+
+/**
+ * @note Address: 0x80141444
+ * @note Size: 0x1C
+ */
+int Navi::getStateID()
+{
+	if (mCurrentState) {
+		return mCurrentState->mId;
+	}
+
+	return -1;
+}
+
+/**
+ * @note Address: 0x80141460
+ * @note Size: 0x44
+ */
+void Navi::transit(int next, StateArg* arg)
+{
+	mFsm->transit(this, next, arg);
+}
+
+/**
+ * @note Address: 0x801414A4
+ * @note Size: 0xC
+ */
+OlimarData* Navi::getOlimarData()
+{
+	return playData->mOlimarData;
+}
+
+/**
+ * @note Address: 0x801414B0
+ * @note Size: 0x14
+ */
+JAInter::Object* Navi::getJAIObject()
+{
+	return mSoundObj;
+}
+
+/**
+ * @note Address: 0x801414C4
+ * @note Size: 0x8
+ */
+PSM::Creature* Navi::getPSCreature()
+{
+	return mSoundObj;
+}
+
+/**
+ * @note Address: 0x801414CC
+ * @note Size: 0x44
+ */
+void Navi::wallCallback(Vector3f& pos)
+{
+	if (mCurrentState) {
+		mCurrentState->wallCallback(this, pos);
+	}
+}
+
+/**
+ * @note Address: 0x80141514
+ * @note Size: 0x44
+ */
+void Navi::bounceCallback(Sys::Triangle* tri)
+{
+	if (mCurrentState) {
+		mCurrentState->bounceCallback(this, tri);
+	}
+}
+
+/**
+ * @note Address: 0x8014155C
+ * @note Size: 0x44
+ */
+void Navi::collisionCallback(CollEvent& event)
+{
+	if (mCurrentState) {
+		mCurrentState->collisionCallback(this, event);
+	}
+}
+
+/**
+ * @note Address: 0x801415A4
+ * @note Size: 0x194
+ */
+void Navi::platCallback(PlatEvent& plat)
+{
+	Creature* obj = plat.mObj;
+	if (plat.mInstance->mId.match('elec', '*')) {
+		if (!playData->mOlimarData->hasItem(OlimarData::ODII_DreamMaterial)) {
+			Vector3f origin;
+			plat.mInstance->mMatrix->getColumn(2, origin);
+			Vector3f objPos = obj->getPosition();
+			Vector3f sep    = mPosition - objPos;
+			if (sep.dot(origin) < 0.0f) {
+				origin.x *= -1.0f;
+				origin.z *= -1.0f;
+			}
+			Vector3f mag = origin;
+			mag *= 200.0f;
+			mag.y = 150.0f;
+			NaviFlickArg arg(obj, mag, naviMgr->mNaviParms->mNaviParms.mElectricGateDamage());
+			transit(NSID_Flick, &arg);
+		}
+
+		return;
+	}
+
+	if (plat.mInstance->mId.match('finl', '*')) {
+		mCPlateMgr->shrink();
+	}
+}
+
+/**
+ * @note Address: 0x80141738
+ * @note Size: 0x4
+ */
+void Navi::viewEntryShape(Matrixf&, Vector3f&)
+{
+}
+
+/**
+ * @note Address: 0x8014173C
+ * @note Size: 0x8
+ */
+SysShape::Model* Navi::viewGetShape()
+{
+	return mModel;
+}
+
+/**
+ * @note Address: 0x80141744
+ * @note Size: 0x1C
+ */
+f32 Navi::viewGetBaseScale()
+{
+	return mNaviIndex == NAVIID_Olimar ? OLIMAR_SCALE : LOUIE_SCALE;
+}
+
+/**
+ * @note Address: 0x80141760
+ * @note Size: 0x1F8
+ * ////////////////////////FIX//SOME//WEIRD//STUFF//GOING//ON//HERE////////////////////////
+ * 86%
+ */
+void Navi::doEntry()
+{
+	FakePiki::doEntry();
+	if (!isAlive() && mHideModel) {
+		mLod.resetFlag(AILOD_IsVisibleBoth);
+	}
+
+	if (mController1 == nullptr) {
+		return;
+	}
+
+	mCursorMatAnim->animate(10.0f);
+	mArrowMatAnim->animate(0.0f);
+
+	if (!isControlFlag(NAVICTRL_InMovie)) {
+		if (moviePlayer->isFlag(MVP_IsActive)) {
+			mMarkerModel->hide();
+		} else {
+			mMarkerModel->show();
+		}
+
+		mMarkerModel->mJ3dModel->entry();
+	}
+
+	J3DGXColorS10 color;
+	if (mNextThrowPiki) {
+		Color4& col = Piki::pikiColorsCursor[mNextThrowPiki->getKind()];
+		color.r     = col.r;
+		color.g     = col.g;
+		color.b     = col.b;
+		color.a     = col.a;
+	} else {
+		color.r = color.g = color.b = color.a = 255;
+	}
+
+	J3DMaterial* materials = mCursorModel->mJ3dModel->mModelData->mMaterialTable.mMaterials[0];
+	if (materials) {
+		materials->mTevBlock->setTevColor(0, color);
+		mCursorModel->mJ3dModel->calcMaterial();
+		mCursorModel->mJ3dModel->diff();
+	}
+
+	if (!isControlFlag(NAVICTRL_InMovie)) {
+		if (moviePlayer->isFlag(MVP_IsActive)) {
+			mCursorModel->hide();
+#ifdef PIKI_PC_PORT
+		} else if (sPcLockTarget && sPcLockNavi == this) {
+			// Lock-On: el aro propio sustituye al cursor mientras hay objetivo.
+			mCursorModel->hide();
+#endif
+		} else {
+			mCursorModel->show();
+		}
+
+		mCursorModel->mJ3dModel->entry();
+	}
+}
+
+/**
+ * @note Address: 0x80141958
+ * @note Size: 0x2C4
+ */
+void Navi::doAnimation()
+{
+	if (isMovieMotion()) {
+		f32 time = sys->mDeltaTime;
+		updateCell();
+
+		AILODParm parm;
+		parm.mFar   = 0.02f;
+		parm.mClose = 0.015f;
+		updateLOD(parm);
+
+		mModel->clearAnimatorAll();
+
+		f32 animTime = time * 30.0f;
+		mAnimator.mSelfAnimator.animate(animTime);
+		mAnimator.mBoundAnimator.animate(animTime);
+
+		updateTrMatrix();
+
+		mAnimator.mBoundAnimator.setModelCalc(mModel, 0);
+		PSMTXCopy(mBaseTrMatrix.mMatrix.mtxView, mModel->mJ3dModel->mPosMtx);
+		mModel->mJ3dModel->calc();
+
+		mCollTree->update();
+		updateCursor();
+	} else {
+		if (mapMgr) {
+			FakePiki::doAnimation();
+		} else {
+			f32 time = sys->mDeltaTime;
+			updateCell();
+			if (!gameSystem->mIsFrozen) {
+				mAnimator.mSelfAnimator.animate(mAnimSpeed * time);
+				mAnimator.mBoundAnimator.animate(mAnimSpeed * time);
+			}
+			updateTrMatrix();
+			moveVelocity();
+			moveRotation();
+			PSMTXCopy(mBaseTrMatrix.mMatrix.mtxView, mModel->mJ3dModel->mPosMtx);
+			mModel->mJ3dModel->calc();
+			mCollTree->update();
+		}
+		updateBeaconPosition();
+
+		f32 rad = mWhistle->mRadius;
+		if (mController1) {
+			mEffectsObj->updateCursor_(*mEffectsObj->mNaviPos, rad);
+		} else {
+			mEffectsObj->updateCursor_(*mEffectsObj->mNaviPos, rad);
+		}
+		updateCursor();
+	}
+}
+
+/**
+ * @note Address: 0x80141C1C
+ * @note Size: 0x280
+ */
+void Navi::updateCursor()
+{
+	Vector3f whistlePos = mWhistle->mPosition;
+	Vector3f dir        = whistlePos - getPosition();
+	dir.qNormalise();
+
+	Vector3f yVec = mWhistle->mNormal;
+	Vector3f xVec = yVec;
+	xVec.CP(dir);
+	dir = xVec;
+	dir.qNormalise();
+
+	Vector3f zVec = dir;
+	zVec.CP(yVec);
+	zVec.qNormalise();
+
+	Matrixf mtx;
+
+	mtx.setColumn(0, dir);
+	mtx.setColumn(1, yVec);
+	mtx.setColumn(2, zVec);
+	mtx.setColumn(3, whistlePos);
+
+	PSMTXCopy(mtx.mMatrix.mtxView, mMarkerModel->mJ3dModel->mPosMtx);
+	PSMTXCopy(mtx.mMatrix.mtxView, mCursorModel->mJ3dModel->mPosMtx);
+	mMarkerModel->mJ3dModel->calc();
+	mCursorModel->mJ3dModel->calc();
+}
+
+/**
+ * @note Address: 0x80141E9C
+ * @note Size: 0x58
+ */
+void Navi::doSimulation(f32 timeStep)
+{
+	if (moviePlayer->isFlag(MVP_IsActive)) {
+		mVelocity       = Vector3f(0.0f);
+		mTargetVelocity = Vector3f(0.0f);
+		mAcceleration   = Vector3f(0.0f);
+	}
+
+	FakePiki::doSimulation(timeStep);
+}
+
+/**
+ * @note Address: 0x80141EF4
+ * @note Size: 0xB8
+ */
+void Navi::doSetView(int viewportNumber)
+{
+	Creature::doSetView(viewportNumber);
+	mMarkerModel->setCurrentViewNo(viewportNumber);
+	mCursorModel->setCurrentViewNo(viewportNumber);
+
+	if (mLod.isVPVisible(viewportNumber)) {
+#ifdef PIKI_PC_PORT
+		// Lock-On: el aro propio sustituye al cursor (flecha y aro del suelo)
+		// mientras hay objetivo.
+		if (sPcLockTarget && sPcLockNavi == this) {
+			mMarkerModel->hidePackets();
+			mCursorModel->hidePackets();
+		} else {
+			mMarkerModel->showPackets();
+			mCursorModel->showPackets();
+		}
+#else
+		mMarkerModel->showPackets();
+		mCursorModel->showPackets();
+#endif
+	} else {
+		mMarkerModel->hidePackets();
+		mCursorModel->hidePackets();
+	}
+}
+
+/**
+ * @note Address: 0x80141FAC
+ * @note Size: 0x3C
+ */
+void Navi::doViewCalc()
+{
+	Creature::doViewCalc();
+	mMarkerModel->viewCalc();
+	mCursorModel->viewCalc();
+}
+
+/**
+ * @note Address: 0x80141FE8
+ * @note Size: 0x14
+ */
+void Navi::setLifeMax()
+{
+	mHealth = naviMgr->mNaviParms->mNaviParms.mMaxHealth;
+}
+
+/**
+ * @note Address: 0x80141FFC
+ * @note Size: 0x18
+ */
+f32 Navi::getLifeRatio()
+{
+	return mHealth / naviMgr->mNaviParms->mNaviParms.mMaxHealth.mValue;
+}
+
+/**
+ * @note Address: 0x80142014
+ * @note Size: 0xAC
+ */
+int Navi::getDownfloorMass()
+{
+	NaviState* curState = mCurrentState;
+
+	int id;
+	if (curState) {
+		id = curState->mId;
+	} else {
+		id = -1;
+	}
+
+	int mass = naviMgr->mNaviParms->mNaviParms.mSeesawWeight();
+
+	// if we're holding a piki, modify our mass
+	if (id == NSID_ThrowWait) {
+		Piki* heldPiki = static_cast<NaviThrowWaitState*>(curState)->mHeldPiki;
+		int a          = 1; // default mass to add is 1
+
+		if (heldPiki) {
+			int pikiState = heldPiki->getStateID();
+			if (pikiState == PIKISTATE_Hanged) {
+				if (static_cast<NaviThrowWaitState*>(curState)->mHeldPiki->getKind() == Purple) {
+					a = 2; // held piki is purple, so add double mass
+				}
+			} else {
+				a = 0; // held piki isn't in correct state, so don't add mass
+			}
+		} else {
+			a = 0; // held piki doesn't exist, so don't add mass
+		}
+
+		return mass + a;
+	}
+
+	return mass;
+}
+
+/**
+ * @note Address: 0x801420C0
+ * @note Size: 0x2A8
+ */
+void Navi::update()
+{
+#ifdef PIKI_PC_PORT
+	pcUpdateCameraMods(this);
+#endif
+	if (mInvincibleTimer) {
+		if (PC_ORIG_TICK()) mInvincibleTimer--;
+	}
+	mSoundObj->exec();
+	demoCheck();
+	updateLook();
+	updateLookCreature();
+	updateKaisanDisable();
+	updateThrowDisable();
+	mEffectsObj->update();
+
+	ItemHole::Item* hole = checkHole();
+	if (hole && mController1 && mController1->getButtonDown() & Controller::PRESS_A) {
+		gameSystem->mSection->openCaveMoreMenu(hole, mController1);
+		return;
+	}
+
+	ItemCave::Item* cave = checkCave();
+	if (cave && mController1 && mController1->getButtonDown() & Controller::PRESS_A) {
+		gameSystem->mSection->openCaveInMenu(cave, mNaviIndex);
+		return;
+	}
+
+	ItemBigFountain::Item* geyser = checkBigFountain();
+	if (geyser && mController1 && mController1->getButtonDown() & Controller::PRESS_A && !geyser->isAlive()) {
+		gameSystem->mSection->openKanketuMenu(geyser, mController1);
+		return;
+	}
+
+	if (abs(mFootmarks->mLastUpdateTime - gameSystem->mFrameTimer) > 10) {
+		Footmark mark;
+		mark.mPosition = getPosition();
+		mFootmarks->add(mark);
+	}
+
+	if (!gameSystem->paused_soft() && gameSystem->isVersusMode() && mController1 && mController1->getButtonDown() & Controller::PRESS_Y
+	    && mCurrentState && mCurrentState->vsUsableY()) {
+		GameMessageVsUseCard mesg(mNaviIndex);
+		gameSystem->mSection->sendMessage(mesg);
+	}
+
+	mFsm->exec(this);
+	mCPlateMgr->update();
+}
+
+/**
+ * @note Address: 0x8014237C
+ * @note Size: 0x4
+ */
+void Navi::do_updateLookCreature()
+{
+}
+
+/**
+ * @note Address: 0x80142380
+ * @note Size: 0x9C
+ */
+void Navi::inWaterCallback(WaterBox* wb)
+{
+	mEffectsObj->mHeight = wb->getSeaHeightPtr();
+
+	efx::TNaviEffect* fx = mEffectsObj;
+
+	bool isX = fx->isFlag(efx::NAVIFX_InWater);
+	fx->setFlag(efx::NAVIFX_InWater);
+	fx->updateHamon_();
+
+	if (!isX) {
+		efx::createSimpleDive(fx->mHamonPosition);
+	}
+
+	mSoundObj->startSound(PSSE_PL_WATER_IN, 0);
+}
+
+/**
+ * @note Address: 0x8014241C
+ * @note Size: 0x44
+ */
+void Navi::outWaterCallback()
+{
+	efx::TNaviEffect* fx = mEffectsObj;
+	fx->resetFlag(efx::NAVIFX_InWater);
+	fx->killHamonA_();
+	fx->killHamonB_();
+}
+
+/**
+ * @note Address: 0x80142460
+ * @note Size: 0xB0
+ */
+bool Navi::ignoreAtari(Creature* other)
+{
+	if (moviePlayer->isFlag(MVP_IsActive) && other->isNavi()) {
+		return true;
+	}
+
+	if (other->isPellet() && ((Pellet*)other)->mPelletFlag == 1) {
+		return true;
+	}
+
+	return mCurrentState->ignoreAtari(other);
+}
+
+/**
+ * @note Address: 0x80142518
+ * @note Size: 0x4C
+ */
+void Navi::on_movie_begin(bool)
+{
+	setControlFlag(NAVICTRL_InMovie);
+
+	efx::TNaviEffect* fx = mEffectsObj;
+	fx->killCursor_();
+	fx->killLightAct_();
+	fx->killFueact_();
+}
+
+/**
+ * @note Address: 0x80142564
+ * @note Size: 0x48
+ */
+void Navi::on_movie_end(bool)
+{
+	resetControlFlag(NAVICTRL_InMovie);
+	startMotion(IPikiAnims::WAIT, IPikiAnims::WAIT, nullptr, nullptr);
+}
+
+/**
+ * @note Address: 0x801425AC
+ * @note Size: 0x27C
+ */
+void Navi::movieUserCommand(u32 command, MoviePlayer* player)
+{
+	switch (command) {
+	case CC_MovieCommand1: {
+		enterAllPikis();
+		if (player->isFlag(MVP_IsFinished)) {
+			pikiMgr->forceEnterPikmins(0);
+		}
+		break;
+	}
+
+	case CC_MovieCommand3: {
+		Creature* hole = player->mTargetObject;
+		JUT_ASSERTLINE(2134, hole != nullptr, "no target!! HOLEIN\n");
+
+		Vector3f pos = hole->getPosition();
+		holeinAllPikis(pos);
+		break;
+	}
+
+	case CC_MovieCommand4: {
+		Creature* fountain = player->mTargetObject;
+		JUT_ASSERTLINE(2148, fountain, "no target!! FOUNTAINON\n");
+
+		Vector3f pos = fountain->getPosition();
+		fountainonAllPikis(pos);
+		break;
+	}
+
+	case CC_MovieCommand5: {
+		shadowMgr->delShadow(this);
+		break;
+	}
+
+	case CC_MovieCommand8: {
+		shadowMgr->addShadow(this);
+		break;
+	}
+
+	case CC_MovieCommand6: {
+		efx::TNaviEffect* fx = mEffectsObj;
+
+		if (!fx->isFlag(efx::NAVIFX_IsSaved)) {
+			fx->saveFlags();
+		}
+
+		fx->mLight.forceKill();
+		fx->mLightAct.forceKill();
+		fx->mDamage.forceKill();
+
+		fx->killHamonA_();
+		fx->killHamonB_();
+		fx->killLight_();
+		fx->killLightAct_();
+		fx->killCursor_();
+		fx->killFueact_();
+		break;
+	}
+
+	case CC_MovieCommand7: {
+		efx::TNaviEffect* fx = mEffectsObj;
+		if (fx->isFlag(efx::NAVIFX_IsSaved)) {
+			fx->restoreFlags();
+		}
+
+		u32 inWater = fx->mFlags.typeView & efx::NAVIFX_InWater;
+		if (inWater) {
+			fx->enterWater(inWater);
+		}
+
+		if (fx->isFlag(efx::NAVIFX_LightOn)) {
+			fx->createLight();
+		}
+		break;
+	}
+	}
+}
+
+/**
+ * @note Address: 0x80142828
+ * @note Size: 0x28
+ */
+void Navi::movieSetFaceDir(f32 direction)
+{
+	mFaceDir = direction;
+	mWhistle->setFaceDir(direction);
+}
+
+/**
+ * @note Address: 0x80142850
+ * @note Size: 0x4C
+ */
+void Navi::movieStartAnimation(u32 anim)
+{
+	startMotion(anim, anim, nullptr, nullptr);
+	mAnimSpeed = 30.0f;
+}
+
+/**
+ * @note Address: 0x8014289C
+ * @note Size: 0xDC
+ */
+void Navi::movieStartDemoAnimation(SysShape::AnimInfo* info)
+{
+	mAnimator.mBoundAnimator.startExAnim(info);
+	mAnimator.mSelfAnimator.startExAnim(info);
+
+	P2ASSERTLINE(2201, mAnimator.mSelfAnimator.assertValid(mModel));
+	P2ASSERTLINE(2202, mAnimator.mBoundAnimator.assertValid(mModel));
+
+	mModel->clearAnimatorAll();
+
+	mAnimator.mBoundAnimator.setModelCalc(mModel, 0);
+}
+
+/**
+ * @note Address: 0x80142978
+ * @note Size: 0x88
+ */
+void Navi::movieSetTranslation(Vector3f& newpos, f32 dir)
+{
+	mVelocity         = 0.0f;
+	mTargetVelocity   = 0.0f;
+	mAcceleration     = 0.0f;
+	mPreviousPosition = mPosition;
+	setPosition(newpos, false);
+	mFaceDir = dir;
+}
+
+/**
+ * @note Address: 0x80142A00
+ * @note Size: 0x12C
+ */
+bool Navi::movieGotoPosition(Vector3f& pos)
+{
+	Vector3f sep = pos - mPosition;
+	f32 xz       = sep.x * sep.x + sep.z * sep.z;
+	sep.qNormalise();
+
+	if (xz < 400.0f) {
+		mTargetVelocity = 0.0f;
+		mVelocity       = 0.0f;
+		return true;
+	}
+
+	mTargetVelocity = (sep * naviMgr->mNaviParms->mNaviParms.mMoveSpeed()) * 0.5f;
+	return false;
+}
+
+/**
+ * @note Address: 0x80142B2C
+ * @note Size: 0x1A8
+ */
+void Navi::set_movie_draw(bool on)
+{
+	if (!isMovieActor() && on) {
+		if (isAlive()) {
+			mEffectsObj->setMovieEffect();
+		}
+	} else if (!isMovieActor() && !on) {
+		efx::TNaviEffect* effectsObj = mEffectsObj;
+		if (!effectsObj->isFlag(efx::NAVIFX_IsSaved)) {
+			effectsObj->saveFlags();
+		}
+
+		effectsObj->mLight.forceKill();
+		effectsObj->mLightAct.forceKill();
+		effectsObj->mDamage.forceKill();
+		effectsObj->killHamonA_();
+		effectsObj->killHamonB_();
+		effectsObj->killLight_();
+		effectsObj->killLightAct_();
+		effectsObj->killCursor_();
+		effectsObj->killFueact_();
+	}
+}
+
+/**
+ * @note Address: 0x80142CD4
+ * @note Size: 0x50
+ */
+bool Navi::isWalking()
+{
+	return mTargetVelocity.qLength() > 10.0f;
+}
+
+/**
+ * @note Address: 0x80142D24
+ * @note Size: 0x16C
+ */
+void Navi::setDeadLaydown()
+{
+	int id         = mNaviIndex;
+	PlayData* data = playData;
+	data->mDeadNaviID.setBit(id);
+
+	Vector3f offset;
+	if (id == NAVIID_Olimar) { // olimar
+		offset = Vector3f(-170.0f, 0.0f, 40.0f);
+	} else { // louie/president
+		offset = Vector3f(-190.0f, 0.0f, 10.0f);
+	}
+	if (mapMgr->getDemoMatrix()) {
+		Matrixf* mtx = mapMgr->getDemoMatrix();
+		Vector3f newpos;
+		PSMTXMultVec(mtx->mMatrix.mtxView, (Vec*)&offset, (Vec*)&newpos);
+		offset = newpos;
+		setPosition(offset, false);
+		startMotion(IPikiAnims::DEAD, IPikiAnims::DEAD, nullptr, nullptr);
+		mHideModel = false;
+	} else {
+		mHideModel = true;
+	}
+	setAlive(false);
+	naviMgr->informOrimaDead(id);
+	mHealth = 0.0f;
+}
+
+/**
+ * @note Address: 0x80142E90
+ * @note Size: 0x2DC
+ */
+ItemHole::Item* Navi::checkHole()
+{
+	if (!ItemHole::mgr) {
+		return nullptr;
+	}
+	if (moviePlayer->mDemoState != DEMOSTATE_Inactive) {
+		return nullptr;
+	}
+	if (getStateID() != NSID_Walk) {
+		return nullptr;
+	}
+
+	Iterator<BaseItem> iterator(ItemHole::mgr);
+	CI_LOOP(iterator)
+	{
+		ItemHole::Item* hole = static_cast<ItemHole::Item*>(*iterator);
+		if (hole->isAlive() && hole->canRide() && !hole->mBarrel) {
+			Vector3f holepos = hole->getPosition();
+			if (holepos.sqrDistance2D(mPosition) < 3600.0f) {
+				return hole;
+			}
+		}
+	}
+
+	return nullptr;
+}
+
+/**
+ * @note Address: 0x801431B8
+ * @note Size: 0x2CC
+ */
+ItemCave::Item* Navi::checkCave()
+{
+	if (!ItemCave::mgr) {
+		return nullptr;
+	}
+	if (moviePlayer->mDemoState != DEMOSTATE_Inactive) {
+		return nullptr;
+	}
+	if (getStateID() != NSID_Walk) {
+		return nullptr;
+	}
+
+	Iterator<BaseItem> iterator(ItemCave::mgr);
+	CI_LOOP(iterator)
+	{
+		ItemCave::Item* hole = static_cast<ItemCave::Item*>(*iterator);
+		if (hole->isAlive() && !hole->mBarrel) {
+			Vector3f holepos = hole->getPosition();
+			if (holepos.sqrDistance2D(mPosition) < 6400.0f) {
+				return hole;
+			}
+		}
+	}
+	return nullptr;
+}
+
+/**
+ * @note Address: 0x80143484
+ * @note Size: 0x2B4
+ */
+ItemBigFountain::Item* Navi::checkBigFountain()
+{
+	if (!ItemBigFountain::mgr) {
+		return nullptr;
+	}
+	if (moviePlayer->mDemoState != DEMOSTATE_Inactive) {
+		return nullptr;
+	}
+	if (getStateID() != NSID_Walk) {
+		return nullptr;
+	}
+
+	Iterator<BaseItem> iterator(ItemBigFountain::mgr);
+	CI_LOOP(iterator)
+	{
+		ItemBigFountain::Item* hole = static_cast<ItemBigFountain::Item*>(*iterator);
+		if (hole->canRide()) {
+			Vector3f holepos = hole->getPosition();
+			if (holepos.sqrDistance2D(mPosition) < 6400.0f) {
+				return hole;
+			}
+		}
+	}
+
+	return nullptr;
+}
+
+/**
+ * @note Address: 0x80143738
+ * @note Size: 0x368
+ */
+Onyon* Navi::checkOnyon()
+{
+	if (!gameSystem->isStoryMode()) {
+		return nullptr;
+	}
+	if (moviePlayer->mDemoState != DEMOSTATE_Inactive) {
+		return nullptr;
+	}
+	if (!ItemOnyon::mgr) {
+		return nullptr;
+	}
+	if (gameSystem->isStoryMode() && gameSystem->mTimeMgr->mDayCount == 0) {
+		return nullptr;
+	}
+	if (getStateID() != NSID_Walk) {
+		return nullptr;
+	}
+
+	Iterator<Onyon> iterator(ItemOnyon::mgr);
+	Vector3f navipos = getPosition();
+	Onyon* ret       = nullptr;
+	CI_LOOP(iterator)
+	{
+		Onyon* onyon = static_cast<Onyon*>(*iterator);
+		if (onyon->mOnyonType != ONYON_TYPE_POD
+		    && (onyon->mOnyonType != ONYON_TYPE_SHIP || ((playData->hasContainer(White) || playData->hasContainer(Purple))))) {
+			if (onyon->insideAccessArea(navipos)) {
+				onyon->setSpotEffectActive(true);
+				PSSystem::spSysIF->playSystemSe(PSSE_SY_ONYON_READY, 0);
+				mNaviControlFlag.unset(2);
+				ret = onyon;
+			} else {
+				mNaviControlFlag.set(2);
+				onyon->setSpotEffectActive(false);
+			}
+		}
+	}
+
+	return ret;
+}
+
+/**
+ * @note Address: 0x80143AEC
+ * @note Size: 0x8
+ */
+f32 Navi::getMapCollisionRadius()
+{
+	return 8.5f;
+}
+
+/**
+ * @note Address: 0x80143AF4
+ * @note Size: 0x4
+ */
+void Navi::doDirectDraw(Graphics&)
+{
+}
+
+// /**
+//  * @note Address: N/A
+//  * @note Size: 0x4
+//  */
+// void Navi::draw2d(J2DGrafContext&)
+// {
+// 	// UNUSED FUNCTION
+// }
+
+// /**
+//  * @note Address: N/A
+//  * @note Size: 0x8
+//  */
+// void Navi::changeCamera(Camera*)
+// {
+// 	// UNUSED FUNCTION
+// }
+
+// /**
+//  * @note Address: N/A
+//  * @note Size: 0xC
+//  */
+// void Navi::restoreCamera()
+// {
+// 	// UNUSED FUNCTION
+// }
+
+/**
+ * @note Address: 0x80143AF8
+ * @note Size: 0xC
+ */
+void Navi::disableController()
+{
+	mController1 = nullptr;
+}
+
+// /**
+//  * @note Address: N/A
+//  * @note Size: 0x8
+//  */
+// void Navi::changeController(Controller*)
+// {
+// 	// UNUSED FUNCTION
+// }
+
+// /**
+//  * @note Address: N/A
+//  * @note Size: 0xC
+//  */
+// void Navi::restoreController()
+// {
+// 	// UNUSED FUNCTION
+// }
+
+/**
+ * @note Address: 0x80143B04
+ * @note Size: 0xD8
+ */
+void Navi::control()
+{
+	if (moviePlayer->isFlag(MVP_IsActive) == FALSE) {
+		makeVelocity();
+	}
+
+	makeCStick(false);
+
+	if (isMovieActor()) {
+		return;
+	}
+
+	if (gameSystem->isStoryMode()) {
+		Navi* active = naviMgr->getActiveNavi();
+		if (active != this) {
+			return;
+		}
+		f32 z = mCStickPosition.z;
+		f32 x = mCStickPosition.x;
+		mSoundObj->mRappa.playRappa(true, x, z, mSoundObj);
+
+	} else {
+		f32 z = mCStickPosition.z;
+		f32 x = mCStickPosition.x;
+		mSoundObj->mRappa.playRappa(true, x, z, mSoundObj);
+	}
+}
+
+/**
+ * @note Address: 0x80143BDC
+ * @note Size: 0x418
+ */
+void Navi::makeVelocity()
+{
+	if (mController1
+	    && ((mController1->getButton() & Controller::PRESS_A) || (mController1->getButton() & Controller::PRESS_B)
+	        || (mController1->getButton() & Controller::PRESS_X) || (mController1->getButton() & Controller::PRESS_Y)
+	        || (mController1->getButton() & Controller::PRESS_Z) || (mController1->getButton() & Controller::PRESS_L)
+	        || (mController1->getButton() & Controller::PRESS_R) || (mController1->getButton() & Controller::PRESS_DPAD_UP)
+	        || (mController1->getButton() & Controller::PRESS_DPAD_DOWN) || (mController1->getButton() & Controller::PRESS_DPAD_LEFT)
+	        || (mController1->getButton() & Controller::PRESS_DPAD_RIGHT))) {
+		mSceneAnimationTimer = 0.0f;
+	} else {
+		mSceneAnimationTimer += sys->mDeltaTime;
+	}
+
+	f32 ax = 0.0f;
+	f32 az = ax;
+	if (mController1) {
+		ax = -mController1->getMainStickX();
+		az = mController1->getMainStickY();
+	}
+	Vector3f inputPos(ax, 0.0f, az);
+	reviseController(inputPos);
+
+	f32 x = inputPos.x;
+	f32 z = inputPos.z;
+
+	Vector3f side = mCamera->getSideVector();
+	Vector3f up   = mCamera->getUpVector();
+	Vector3f view = mCamera->getViewVector();
+	Vector3f side2D(side.x, 0.0f, side.z);
+	side2D.qNormalise();
+
+	Vector3f front;
+	if (up.y > view.y) {
+		front = view;
+	} else {
+		front = up;
+	}
+	Vector3f front2D(front.x, 0.0f, front.z);
+	front2D.qNormalise();
+
+	Vector3f result(side2D * x + front2D * z);
+
+	f32 speed;
+	if (playData->mOlimarData->hasItem(OlimarData::ODII_RepugnantAppendage)) {
+		speed = naviMgr->mNaviParms->mNaviParms.mRushBootSpeed();
+	} else {
+		speed = naviMgr->mNaviParms->mNaviParms.mMoveSpeed();
+	}
+	f32 dist = result.qLength();
+	if (dist > naviMgr->mNaviParms->mNaviParms.mNeutralStickThreshold()) {
+		mSceneAnimationTimer = 0.0f;
+	}
+
+	f32 mod         = 1.0f;
+#ifdef PIKI_PC_PORT
+	mod = pc_settings_get_navi_speed_scale(); // cheat "Captain Speed"
+#endif
+	mTargetVelocity = result * speed * mod;
+
+	if (mController1) {
+		NaviParms* parms  = naviMgr->mNaviParms;
+		bool turnToCursor = false;
+		if (mSceneAnimationTimer >= parms->mNaviParms.mCursorLookTime()) {
+			turnToCursor = true;
+		}
+		if ((turnToCursor || (!turnToCursor && dist > parms->mNaviParms.mNeutralStickThreshold()))
+		    && (dist <= parms->mNaviParms.mCursorMovementStick())) {
+			mTargetVelocity = 0.0f;
+			f32 rad         = pikmin2_atan2f(mWhistle->mNaviOffsetVec.x, mWhistle->mNaviOffsetVec.z);
+			rad             = roundAng(rad);
+			rad             = angDist(rad, mFaceDir);
+			mFaceDir += rad * PC_LERP(0.2f);
+			mFaceDir = roundAng(mFaceDir);
+			setMoveRotation(false);
+		} else {
+			setMoveRotation(true);
+		}
+	}
+#ifdef PIKI_PC_PORT
+	// Modo "Mouse Cursor": el raton desplaza el cursor respecto a la camara,
+	// sumandose al stick (que sigue funcionando igual).
+	// "Gyro Recenter": el cursor vuelve delante del capitan, en la direccion
+	// de la camara, para corregir la deriva acumulada del giroscopio.
+	if (mController1 && pc_gyro_take_recenter_cursor()) {
+		mWhistle->mNaviOffsetVec = front2D * (naviMgr->mNaviParms->mNaviParms.mMaxCursorMoveRadius() * 0.5f);
+		pc_window_clear_mouse_cursor_delta();
+	}
+	if (mController1) {
+		f32 mdx = pc_window_get_mouse_cursor_delta_x();
+		f32 mdy = pc_window_get_mouse_cursor_delta_y();
+		pc_window_clear_mouse_cursor_delta();
+		if (mdx != 0.0f || mdy != 0.0f) {
+			const f32 kUnitsPerCount = 0.25f;
+			Vector3f& ofs = mWhistle->mNaviOffsetVec;
+			ofs -= side2D * (mdx * kUnitsPerCount);
+			ofs -= front2D * (mdy * kUnitsPerCount);
+			f32 maxRad = naviMgr->mNaviParms->mNaviParms.mMaxCursorMoveRadius();
+			f32 len    = ofs.length();
+			if (len > maxRad) {
+				const Vector3f wanted = ofs;
+				ofs = ofs * (maxRad / len);
+				// Mod "Free Camera": empujar el cursor más allá de su límite hacia
+				// un lado de la pantalla gira la cámara hacia ese lado (y el
+				// cursor gira con ella, ver PlayCamera::changeTargetTheta).
+				if (pc_settings_get_free_camera() && !pc_first_person_active() && !sPcLockTarget) {
+					const Vector3f excess = wanted - ofs;
+					// side2D apunta a la izquierda de la pantalla (el ratón a la
+					// derecha resta side2D).
+					const f32 lateralRight = -(excess.x * side2D.x + excess.z * side2D.z);
+					if (lateralRight != 0.0f) {
+						pc_window_add_camera_drag(-(lateralRight / maxRad) / 3.2f);
+					}
+				}
+			}
+			// Lock-On + Free Camera: el cursor visible está clavado en el
+			// objetivo, pero el libre (sPcAimOffset) sigue al ratón. Empujarlo
+			// contra su límite gira la cámara igual que sin objetivo, y el
+			// bloqueo se queda.
+			if (sPcLockTarget && sPcLockNavi == this && pc_settings_get_free_camera() && !pc_first_person_active()) {
+				const Vector3f delta  = (side2D * (mdx * kUnitsPerCount) + front2D * (mdy * kUnitsPerCount)) * -1.0f;
+				const Vector3f wanted = sPcAimOffset + delta;
+				const f32 len         = wanted.length();
+				if (len > maxRad) {
+					const Vector3f excess    = wanted - wanted * (maxRad / len);
+					const f32 lateralRight = -(excess.x * side2D.x + excess.z * side2D.z);
+					if (lateralRight != 0.0f) {
+						pc_window_add_camera_drag(-(lateralRight / maxRad) / 3.2f);
+					}
+				}
+			}
+			mSceneAnimationTimer = 0.0f;
+		}
+	}
+	// Lock-On: el cursor se clava en el objetivo (anillo, estela y destino del
+	// lanzamiento salen de este desplazamiento). First Person: el cursor va a
+	// distancia fija delante de la vista; se apunta girando.
+	if (mController1 && pcPinCursorToLock(this)) {
+	} else if (mController1 && pc_first_person_active()) {
+		mWhistle->mNaviOffsetVec = front2D * (naviMgr->mNaviParms->mNaviParms.mMaxCursorMoveRadius() * 0.8f);
+	}
+	// Modo "Mouse Cursor": el cursor solo lo mueve el raton. El stick/WASD sigue
+	// moviendo al capitan, pero no arrastra el cursor (vector nulo = stick en reposo).
+	Vector3f cursorStick = result;
+	if (pc_window_get_control_mode() == 1) { // PC_CONTROL_MOUSE_CURSOR
+		cursorStick = Vector3f(0.0f);
+	}
+	mWhistle->update(cursorStick, false);
+#else
+	mWhistle->update(result, false);
+#endif
+}
+
+/**
+ * @note Address: 0x80143FF4
+ * @note Size: 0x1A4
+ */
+void Navi::reviseController(Vector3f& input)
+{
+	// get input magnitude and angle
+	f32 stickMag = input.qLength();
+	f32 theta    = roundAng(pikmin2_atan2f(input.x, input.z));
+
+	// bin angle in amounts set by navi parameter
+	f32 binWidth    = TORADIANS(naviMgr->mNaviParms->mNaviParms.mShakePreventionAngle());
+	f32 binnedAngle = binWidth * int((binWidth * 0.5f + theta) / binWidth);
+
+	// calculate amount to boost stick magnitude by
+	f32 boostFactor = -((int)(binnedAngle / QUARTER_PI) * QUARTER_PI - binnedAngle);
+	theta           = pikmin2_sinf(QUARTER_PI - boostFactor);
+	boostFactor     = pikmin2_sinf(boostFactor);
+	boostFactor += theta;
+
+	// boost stick magnitude
+	stickMag *= (1.0f / (pikmin2_sinf(QUARTER_PI) / boostFactor)); // same as * boostFactor * sqrt(2)
+
+	// make 'close enough' good enough (mClampStick = 0.85 in vanilla)
+	if (stickMag >= naviMgr->mNaviParms->mNaviParms.mClampStick()) {
+		stickMag = 1.0f;
+	}
+
+	// enforce dead zone
+	if (stickMag < naviMgr->mNaviParms->mNaviParms.mNeutralStickThreshold()) {
+		stickMag = 0.0f;
+	}
+
+	// recalculate input vector based on adjusted angle and magnitude
+	input = getDirectionP2(binnedAngle, stickMag);
+}
+
+/**
+ * @note Address: 0x80144198
+ * @note Size: 0x1D4
+ */
+void Navi::callPikis()
+{
+	numSearch = 0;
+	Vector3f mPos(mWhistle->mPosition);
+	Sys::Sphere bounds(mPos, mWhistle->mRadius);
+	CellIteratorArg arg(bounds);
+	CellIterator iterator(arg);
+	f32 time       = 0.0f;
+	FakePiki* last = nullptr;
+	CI_LOOP(iterator)
+	{
+		time += sys->mDeltaTime;
+		JUT_ASSERTLINE(3156, !(time > 15.0f), "timeout %d,%d:%d\n%d,%d-%d,%d\n", iterator.mCurrX, iterator.mCurrY, iterator.mCurrLayerIdx,
+		               iterator.mMinX, iterator.mMinY, iterator.mMaxX, iterator.mMaxY);
+
+		FakePiki* piki = static_cast<FakePiki*>(*iterator);
+
+		JUT_ASSERTLINE(3169, (!last || last != piki), "infloop %d,%d:%d\n%d,%d-%d,%d\n", iterator.mCurrX, iterator.mCurrY,
+		               iterator.mCurrLayerIdx, iterator.mMinX, iterator.mMinY, iterator.mMaxX, iterator.mMaxY);
+
+		last = piki;
+		if (piki && piki != this) {
+			InteractFue act(this, false, true); // don't combine parties, is new to party
+			piki->stimulate(act);
+		}
+	}
+}
+
+// /**
+//  * @note Address: N/A
+//  * @note Size: 0x14C
+//  */
+// void Navi::applyForceObjectsInWhistle(CellObject*)
+// {
+// 	// UNUSED FUNCTION
+// }
+
+/**
+ * @note Address: 0x8014436C
+ * @note Size: 0x8C
+ */
+bool Navi::invincible()
+{
+	if (moviePlayer && moviePlayer->mDemoState != DEMOSTATE_Inactive) {
+		return true;
+	}
+	if (mInvincibleTimer) {
+		return true;
+	}
+	if (!gameSystem->isFlag(GAMESYS_IsGameWorldActive)) {
+		return true;
+	}
+	if (mCurrentState) {
+		return mCurrentState->invincible();
+	}
+	return true;
+}
+
+/**
+ * @note Address: 0x80144400
+ * @note Size: 0x8
+ */
+void Navi::setInvincibleTimer(u8 timer)
+{
+	mInvincibleTimer = timer;
+}
+
+/**
+ * @note Address: 0x80144408
+ * @note Size: 0x208
+ */
+void Navi::startDamage(f32 damage)
+{
+	if (!isAlive() || invincible()) {
+		return;
+	}
+
+	if (playData->mOlimarData->hasItem(OlimarData::ODII_JusticeAlloy)) {
+		damage *= naviMgr->mNaviParms->mNaviParms.mShieldDamageReductionRate();
+	}
+#ifdef PIKI_PC_PORT
+	damage = pcNaviHurt(damage);
+#endif
+	if (getStateID() != NSID_Damaged) {
+		NaviDamageArg arg(damage);
+		mFsm->transit(this, NSID_Damaged, &arg);
+		mHealth -= damage;
+		mSoundObj->startSound(PSSE_PL_ORIMA_DAMAGE, 0);
+		cameraMgr->startVibration(VIBTYPE_NaviDamage, mNaviIndex);
+		rumbleMgr->startRumble(RUMBLETYPE_NaviDamage, mNaviIndex);
+		mEffectsObj->createOrimadamage_(mEffectsObj->mHeadMtx->mMatrix.mtxView);
+		PSM::DamageDirector* director = PSMGetDamageD();
+		if (director) {
+			director->directOn();
+		}
+		if (mHealth < 1.0f) {
+			if (getStateID() != NSID_Dead) {
+				mFsm->transit(this, NSID_Dead, nullptr);
+			}
+		}
+	}
+}
+
+/**
+ * @note Address: 0x80144610
+ * @note Size: 0x214
+ */
+void Navi::addDamage(f32 damage, bool playSound)
+{
+	if ((!moviePlayer || moviePlayer->mDemoState == DEMOSTATE_Inactive) && gameSystem->isFlag(GAMESYS_IsGameWorldActive)) {
+		if (playData->mOlimarData->hasItem(OlimarData::ODII_JusticeAlloy)) {
+			damage *= naviMgr->mNaviParms->mNaviParms.mShieldDamageReductionRate();
+		}
+#ifdef PIKI_PC_PORT
+		damage = pcNaviHurt(damage);
+#endif
+
+		if (!isAlive() || mCurrentState->invincible()) {
+			return;
+		} else if (invincible()) {
+			return;
+		}
+
+		mHealth -= damage;
+
+		if (playSound) {
+			mSoundObj->startSound(PSSE_PL_ORIMA_DAMAGE, 0);
+			cameraMgr->startVibration(VIBTYPE_NaviDamage, mNaviIndex);
+			rumbleMgr->startRumble(RUMBLETYPE_NaviDamage, mNaviIndex);
+			mEffectsObj->createOrimadamage_(mEffectsObj->mHeadMtx->mMatrix.mtxView);
+			PSM::DamageDirector* director = PSMGetDamageD();
+			if (director) {
+				director->directOn();
+			}
+		}
+
+		if (mHealth < 1.0f) {
+			if (getStateID() != NSID_Dead) {
+				mFsm->transit(this, NSID_Dead, nullptr);
+			}
+		}
+	}
+}
+
+/**
+ * @note Address: 0x80144824
+ * @note Size: 0x29C
+ */
+void Navi::enterAllPikis()
+{
+	Iterator<Piki> iterator(pikiMgr);
+	int pikis = 0;
+	Piki* buffer[MAX_PIKI_COUNT];
+	CI_LOOP(iterator)
+	{
+		Piki* piki = *iterator;
+		if (piki->isAlive()) {
+			buffer[pikis++] = piki;
+		}
+	}
+
+	for (int i = 0; i < pikis; i++) {
+		Onyon* target = nullptr;
+		Piki* piki    = buffer[i];
+		if (piki->getKind() <= Yellow) {
+			target = ItemOnyon::mgr->getOnyon(piki->getKind());
+		} else {
+			target = ItemOnyon::mgr->mUfo;
+		}
+
+		if (target) {
+			PikiAI::CreatureActionArg arg(target);
+			piki->mBrain->start(PikiAI::ACT_Enter, &arg);
+		}
+	}
+}
+
+/**
+ * @note Address: 0x80144AC0
+ * @note Size: 0x14
+ */
+bool Navi::formationable()
+{
+	return mDisbandTimer == 0;
+}
+
+// /**
+//  * @note Address: N/A
+//  * @note Size: 0xC
+//  */
+// void Navi::startKaisanDisable()
+// {
+// 	// UNUSED FUNCTION
+// }
+
+/**
+ * @note Address: 0x80144AD4
+ * @note Size: 0x70
+ */
+void Navi::updateKaisanDisable()
+{
+	if (mDisbandTimer > 0 && mTargetVelocity.qLength() > 20.0f) {
+		if (PC_ORIG_TICK()) mDisbandTimer--;
+	}
+}
+
+/**
+ * @note Address: 0x80144B44
+ * @note Size: 0xC
+ */
+void Navi::clearKaisanDisable()
+{
+	mDisbandTimer = 0;
+}
+
+/**
+ * @note Address: 0x80144B50
+ * @note Size: 0x10
+ */
+bool Navi::throwable()
+{
+	return mThrowTimer == 0;
+}
+
+/**
+ * @note Address: 0x80144B60
+ * @note Size: 0xC
+ */
+void Navi::startThrowDisable()
+{
+	mThrowTimer = NAVI_THROWTIMER_LENGTH;
+}
+
+/**
+ * @note Address: 0x80144B6C
+ * @note Size: 0x3C
+ */
+void Navi::updateThrowDisable()
+{
+	if (mThrowTimer == 0) {
+		return;
+	}
+
+	if (mController1 && mController1->getButton() & Controller::PRESS_A) {
+		mThrowTimer = NAVI_THROWTIMER_LENGTH;
+	}
+
+	if (PC_ORIG_TICK()) mThrowTimer--;
+}
+
+/**
+ * @note Address: 0x80144BA8
+ * @note Size: 0xC
+ */
+void Navi::clearThrowDisable()
+{
+	mThrowTimer = 0;
+}
+
+/**
+ * @note Address: 0x80144BB4
+ * @note Size: 0x2FC
+ */
+void Navi::holeinAllPikis(Vector3f& pos)
+{
+	naviMgr->getAliveOrima(ALIVEORIMA_Active);
+	Piki* buffer[MAX_PIKI_COUNT];
+	int pikis = 0;
+
+	Iterator<Creature> iterator(mCPlateMgr);
+	CI_LOOP(iterator)
+	{
+		Piki* piki = static_cast<Piki*>(*iterator);
+		if (piki->isAlive()) {
+			if (piki->mCurrentState->transittable(PIKISTATE_Holein) && piki->mCurrentState->soft_transittable(PIKISTATE_Holein)) {
+				buffer[pikis] = piki;
+				pikis++;
+			} else {
+				piki->mFsm->transitForce(piki, PIKISTATE_Walk, nullptr);
+				buffer[pikis] = piki;
+				pikis++;
+			}
+		}
+	}
+
+	for (int i = 0; i < pikis; i++) {
+		Piki* piki = buffer[i];
+		HoleinStateArg arg(pos);
+		piki->mFsm->transit(piki, PIKISTATE_Holein, &arg);
+	}
+}
+
+/**
+ * @note Address: 0x80144EC0
+ * @note Size: 0x2F8
+ */
+void Navi::fountainonAllPikis(Vector3f& pos)
+{
+	Piki* buffer[MAX_PIKI_COUNT];
+	int pikis = 0;
+
+	Iterator<Creature> iterator(mCPlateMgr);
+	CI_LOOP(iterator)
+	{
+		Piki* piki = static_cast<Piki*>(*iterator);
+		if (piki->isAlive() && (int)piki->getKind() != Bulbmin) {
+			if (piki->mCurrentState->transittable(PIKISTATE_Fountainon) && piki->mCurrentState->soft_transittable(PIKISTATE_Fountainon)) {
+				buffer[pikis] = piki;
+				pikis++;
+			} else {
+				piki->mFsm->transitForce(piki, PIKISTATE_Walk, nullptr);
+				buffer[pikis] = piki;
+				pikis++;
+			}
+		}
+	}
+
+	for (int i = 0; i < pikis; i++) {
+		Piki* piki = buffer[i];
+		FountainonStateArg arg(pos);
+		piki->mFsm->transit(piki, PIKISTATE_Fountainon, &arg);
+	}
+}
+
+/**
+ * @note Address: 0x801451B8
+ * @note Size: 0x2D4
+ */
+void Navi::demowaitAllPikis()
+{
+	Piki* buffer[MAX_PIKI_COUNT];
+	int pikis = 0;
+
+	Iterator<Creature> iterator(mCPlateMgr);
+	CI_LOOP(iterator)
+	{
+		Piki* piki = static_cast<Piki*>(*iterator);
+		if (piki->isAlive() && (int)piki->getKind() != Bulbmin) {
+			if (piki->mCurrentState->transittable(PIKISTATE_DemoWait) && piki->mCurrentState->soft_transittable(PIKISTATE_DemoWait)) {
+				buffer[pikis] = piki;
+				pikis++;
+			} else {
+				piki->mFsm->transitForce(piki, PIKISTATE_Walk, nullptr);
+				buffer[pikis] = piki;
+				pikis++;
+			}
+		}
+	}
+
+	for (int i = 0; i < pikis; i++) {
+		Piki* piki = buffer[i];
+		piki->mFsm->transit(piki, PIKISTATE_DemoWait, nullptr);
+	}
+}
+
+/**
+ * @note Address: 0x8014548C
+ * @note Size: 0x954
+ */
+bool Navi::releasePikis()
+{
+	if (!gameSystem->isFlag(2)) {
+		return false;
+	}
+
+	bool dismissnavi = false;
+	Navi* loozy      = naviMgr->getAt(GET_OTHER_NAVI(this));
+	int id           = loozy->getStateID();
+	if (id == NSID_Follow) {
+		dismissnavi = true;
+	}
+	InteractKaisan act(this);
+	loozy->stimulate(act);
+
+	Iterator<Creature> iterator(mCPlateMgr);
+	Piki* buffer[MAX_PIKI_COUNT];
+	s32 pikis = 0;
+	CI_LOOP(iterator)
+	{
+		Piki* piki = static_cast<Piki*>(*iterator);
+		piki->getStateID();
+		if ((!piki->mCurrentState || piki->mCurrentState->releasable()) && piki->isAlive()) {
+			piki            = static_cast<Piki*>(*iterator);
+			buffer[pikis++] = piki;
+		}
+	}
+
+	if (dismissnavi || pikis > 0) {
+		mSoundObj->playKaisanSE();
+	}
+
+	if (pikis == 0) {
+		return dismissnavi;
+	}
+
+	int number[8];
+	Vector3f position[8];
+	for (int i = 0; i != 8; i++) {
+		position[i] = 0;
+		number[i]   = 0;
+	}
+	int i;
+	for (int cColor = 0; cColor < 8; cColor++) {
+		for (i = 0; i < pikis; i++) {
+			if (cColor != Yellow) {
+				if (cColor == buffer[i]->getKind()) {
+					number[cColor]++;
+					position[cColor] += buffer[i]->getPosition();
+				} // WHY WHAT WHY / WHY IS YELLOW SPECIAL
+			} else if (buffer[i]->getKind() == Yellow) {
+				number[Yellow]++;
+				position[Yellow] += buffer[i]->getPosition();
+			}
+		}
+	}
+
+	f32 distList[8];
+	for (int cColor = 0; cColor < 8; cColor++) {
+		if (number[cColor] > 0) {
+			f32 num  = number[cColor];
+			f32 mean = 1.0f / number[cColor];
+			position[cColor] *= mean;
+			distList[cColor] = pikmin2_sqrtf(num) * 6.25f;
+		}
+	}
+
+	Navi* otherNavi = naviMgr->getAt(GET_OTHER_NAVI(this));
+	for (int i = 0; i < 4; i++) {
+		for (int cColor = 0; cColor < 8; cColor++) {
+			if (number[cColor] > 0) {
+				Vector3f naviPos = getPosition();
+				Vector3f diff    = position[cColor] - naviPos;
+				f32 dist         = diff.qNormalise();
+				dist             = dist - distList[cColor] - 25.0f;
+				if (dist < 20.0f) {
+					dist = 20.0f - dist;
+					position[cColor] += diff * dist;
+				}
+				if (otherNavi->isAlive()) {
+					Vector3f naviPos = otherNavi->getPosition();
+					Vector3f diff    = position[cColor] - naviPos;
+					f32 dist         = diff.qNormalise();
+					dist             = dist - distList[cColor] - 25.0f;
+					if (dist < 20.0f) {
+						dist = 20.0f - dist;
+						position[cColor] += diff * dist;
+					}
+				}
+			}
+
+			for (int j = cColor + 1; j < 8; j++) {
+				if (number[cColor] > 0 && number[j] > 0) {
+					Vector3f diff = position[cColor] - position[j];
+					f32 dist      = diff.qNormalise();
+					dist          = dist - distList[cColor] - distList[j];
+					if (dist < 20.0f) {
+						dist          = 20.0f - dist;
+						Vector3f push = diff * dist;
+						position[cColor] += push;
+						position[j] -= push;
+					}
+				}
+			}
+		}
+	}
+
+	for (int i = 0; i < pikis; i++) {
+		Piki* piki = buffer[i];
+		int kind   = piki->getKind();
+		PikiAI::ActFreeArg arg(position[kind], distList[piki->getKind()], true);
+		buffer[i]->mSoundObj->startFreePikiSound(PSSE_PK_VC_BREAKUP, 0x5a, 0);
+		buffer[i]->mBrain->start(PikiAI::ACT_Free, &arg);
+	}
+	mDisbandTimer = 60;
+	return true;
+}
+
+/**
+ * @note Address: 0x80145DE8
+ * @note Size: 0x920
+ */
+
+void Navi::makeCStick(bool disable)
+{
+	f32 x = 0.0f;
+	f32 z = x;
+
+	if (mController1 && moviePlayer->mDemoState == DEMOSTATE_Inactive) {
+		x = -mController1->getSubStickX();
+		z = mController1->getSubStickY();
+	}
+
+	Vector3f cameraSide = mCamera->getSideVector();
+	Vector3f cameraUp   = mCamera->getUpVector();
+	Vector3f cameraView = mCamera->getViewVector();
+	Vector3f side2D(cameraSide.x, 0.0f, cameraSide.z);
+	side2D.qNormalise();
+
+	Vector3f cameraFront;
+	if (cameraUp.y > cameraView.y) {
+		cameraFront = cameraView;
+	} else {
+		cameraFront = cameraUp;
+	}
+
+	// Transform the C-Stick according to the direction of the camera
+	Vector3f front2D(cameraFront.x, 0.0f, cameraFront.z);
+	front2D.qNormalise();
+
+	Vector3f transformedMotion = (side2D * x) + (front2D * z);
+#ifdef PIKI_PC_PORT
+	// Boton Swarm (necesario con Free Camera, que quita el stick derecho al
+	// enjambre): el grupo carga hacia el cursor a plena fuerza.
+	// Durante el Charge el empuje va al objetivo fijado en vez de al cursor.
+	const bool pcCharging = sPcChargeTime > 0.0f && sPcLockTarget && sPcLockNavi == this;
+	if (pcCharging || (mController1 && pc_window_swarm_held())) {
+		Vector3f toCursor = pcCharging ? sPcLockTarget->getPosition() - getPosition() : mWhistle->mNaviOffsetVec;
+		toCursor.y        = 0.0f;
+		const f32 len     = toCursor.length();
+		if (len > 1.0f) {
+			transformedMotion = toCursor * (1.0f / len);
+		}
+	}
+#endif
+	if (disable) {
+		transformedMotion = 0.0f;
+	}
+
+	mCStickPosition  = 0.0f;
+	f32 moveStrength = transformedMotion.sqrLength();
+	mCommandOn2      = false;
+
+	// If the C-Stick is being used
+	if (pikmin2_sqrtf(moveStrength) > 0.05f) {
+		mCommandOn2          = true;
+		mSceneAnimationTimer = 0.0f;
+		mCStickPosition      = transformedMotion;
+
+		// transformedMotion is the direction of the C-Stick,
+		// So calling atan2f gets the directional angle of the C-Stick
+		f32 stickAngle = pikmin2_atan2f(transformedMotion.x, transformedMotion.z);
+		f32 plateAngle = mCPlateMgr->mAngle;
+
+		f32 stickAngleCos  = pikmin2_cosf(stickAngle);
+		f32 stickAngleSine = pikmin2_sinf(stickAngle);
+
+		f32 plateAngleCos  = pikmin2_cosf(plateAngle);
+		f32 plateSineAngle = pikmin2_sinf(plateAngle);
+
+		f32 newAngle = 0.0f;
+
+		// If the angle of the C-Stick is greater than the angle limit
+		if ((stickAngleSine * plateSineAngle + newAngle) + (stickAngleCos * plateAngleCos) > pikmin2_cosf(2.0f * PI / 3.0f)) {
+			// Interpolate from the Plate angle to the C-Stick angle
+			newAngle = angDist(stickAngle, plateAngle) * 0.4f + plateAngle;
+		} else {
+			newAngle = stickAngle;
+		}
+
+		stickAngle   = roundAng(newAngle);
+		mCStickAngle = stickAngle;
+
+		// Normalise the moveStrength value
+		f32 normalizedMoveStrength = (pikmin2_sqrtf(moveStrength) - 0.05f) / 0.95f;
+		if (normalizedMoveStrength >= 0.9f) {
+			normalizedMoveStrength = 1.0f;
+		} else {
+			normalizedMoveStrength = (normalizedMoveStrength / 0.9f) * 0.6f;
+		}
+
+		mCPlateMgr->refresh(mCPlateMgr->mSlotCount, normalizedMoveStrength);
+		if (mPlateScaleTimer < 40) {
+			if (PC_ORIG_TICK()) mPlateScaleTimer++;
+		}
+
+		Vector3f position = getPosition();
+		f32 scale;
+		if (mPlateScaleTimer >= 40) {
+			scale = 3.0f;
+		} else {
+			scale = 1.0f;
+		}
+
+		mCPlateMgr->setPos(position, stickAngle, mVelocity, scale);
+		_2FC        = 0;
+		mCommandOn1 = false;
+
+	} else {
+		mPlateScaleTimer = 0;
+
+		if (!_2FC) {
+			mCommandOn1 = true;
+		}
+
+		f32 dir = mFaceDir + PI;
+		if ((!_2FC && mTargetVelocity.qLength() < 50.0f) && getStateID() != NSID_ThrowWait) {
+			dir          = mCStickAngle;
+			Vector3f pos = getPosition();
+			mCPlateMgr->setPos(pos, dir, mVelocity, 1.0f);
+		} else {
+			_2FC = true;
+		}
+
+		mCPlateMgr->refresh(mCPlateMgr->mSlotCount, 0.0f);
+
+		f32 minDist = 12800.0f;
+		Iterator<Creature> iterator(mCPlateMgr);
+		CI_LOOP(iterator)
+		{
+			Creature* piki = *iterator;
+			static_cast<Piki*>(piki)->getStateID();
+			Vector3f diff = piki->getPosition() - getPosition();
+			f32 dist      = diff.qLength();
+			if (dist < minDist) {
+				minDist = dist;
+			}
+		}
+
+		if (minDist < naviMgr->mNaviParms->mNaviParms.mPikiWaitRange()) {
+			if (mCStickState == 0) {
+				mCStickIncrement++;
+			} else {
+				mCStickIncrement = 0;
+				mCStickState     = 0;
+			}
+		} else if (minDist < naviMgr->mNaviParms->mNaviParms.mPikiChangeFormationRange()) {
+			if (mCStickState == 1) {
+				mCStickIncrement++;
+			} else {
+				mCStickIncrement = 0;
+				mCStickState     = 1;
+			}
+		} else {
+			if (mCStickState == 2) {
+				mCStickIncrement++;
+			} else {
+				mCStickIncrement = 0;
+				mCStickState     = 2;
+			}
+		}
+
+		if (mCStickState == 0) {
+			_2FD = 1;
+		} else if (mCStickState == 1) {
+			_2FD          = 1;
+			Vector3f pos  = getPosition();
+			Vector3f diff = mCPlateMgr->mMaxPositionOffset - pos;
+			diff.qNormalise();
+			dir           = pikmin2_atan2f(diff.x, diff.z);
+			Vector3f pos2 = getPosition();
+			mCPlateMgr->setPosGray(pos2, dir, mVelocity, 1.0f);
+		} else if (mCStickState == 2) {
+			mCommandOn1 = false;
+			if (_2FD) {
+				Vector3f pos = getPosition();
+				mCPlateMgr->rearrangeSlot(pos, dir, mVelocity);
+				_2FD = 0;
+			}
+			Vector3f pos = getPosition();
+			mCPlateMgr->setPos(pos, dir, mVelocity, 1.0f);
+		}
+	}
+
+	mCStickTargetVector = transformedMotion;
+}
+
+/**
+ * @note Address: 0x80146708
+ * @note Size: 0x64
+ */
+bool Navi::isCStickNetural()
+{
+	NaviParms::Parms& parms = naviMgr->mNaviParms->mNaviParms;
+	return mCStickPosition.qLength() <= parms.mNeutralStickThreshold.mValue;
+}
+
+/**
+ * @note Address: 0x8014676C
+ * @note Size: 0x2BC
+ */
+void Navi::findNextThrowPiki()
+{
+	mNextThrowPiki = nullptr;
+	Iterator<Creature> iterator(mCPlateMgr);
+	f32 minDist = 200.0f;
+
+	CI_LOOP(iterator)
+	{
+		Piki* piki       = static_cast<Piki*>(*iterator);
+		Vector3f naviPos = getPosition();
+		Vector3f pikiPos = piki->getPosition();
+		f32 dist         = pikmin2_sqrtf(naviPos.sqrDistance2D(pikiPos));
+		if (piki->mNavi == this && dist < minDist && piki->getStateID() == PIKISTATE_Walk && piki->isThrowable()) {
+			mNextThrowPiki = piki;
+			minDist        = dist;
+		}
+	}
+}
+
+/**
+ * @note Address: 0x80146A28
+ * @note Size: 0x2C
+ */
+u32 Navi::ogGetNextThrowPiki()
+{
+	Piki* nextPiki = mNextThrowPiki;
+	return (!nextPiki) ? 0 : ((PikiGrowthStageCount * nextPiki->mPikiKind) + 1) + nextPiki->mHappaKind;
+}
+
+// extern f32 pikmin2_cosf(f32 theta);
+// extern f32 pikmin2_sinf(f32 theta);
+
+/**
+ * @note Address: 0x80146A54
+ * @note Size: 0x2C0
+ */
+void Navi::throwPiki(Piki* piki, Vector3f& cursorPosIn)
+{
+#ifdef PIKI_PC_PORT
+	// Lock-On: con objetivo fijado el Pikmin va a el, mire donde mire el
+	// capitan (la posicion del silbato va suavizada y limitada al alcance).
+	Vector3f cursorPos = cursorPosIn;
+	if (sPcLockTarget && sPcLockNavi == this) {
+		cursorPos = sPcLockTarget->getPosition();
+	}
+#else
+	Vector3f& cursorPos = cursorPosIn;
+#endif
+	// Play throw sound.
+	mSoundObj->startSound(PSSE_PL_THROW, 0);
+
+	// Set piki start position, which is captain position + an offset:
+	// -- horizontally, 15 units 'behind' captain (based on face direction), and
+	// -- vertically, 10 units above captain.
+	Vector3f startPos = getPosition();
+	f32 cosTheta      = (f32)cos(mFaceDir);
+	f32 sinTheta      = (f32)sin(mFaceDir);
+	startPos          = startPos + Vector3f(-15.0f * sinTheta, 0.0f, -15.0f * cosTheta);
+	startPos.y += 10.0f;
+	piki->setPosition(startPos, false);
+
+	// Work out where we're meant to be going (distance and angle).
+	Vector3f pikiPos = piki->getPosition();
+	Vector2f sepXZ   = Vector2f(cursorPos.x - pikiPos.x, cursorPos.z - pikiPos.z);
+
+	// How far away is the cursor from the piki, in the 2D plane? (i.e., x distance in a 2D motion problem)
+	f32 dist2D = pikmin2_sqrtf(sepXZ.x * sepXZ.x + sepXZ.y * sepXZ.y);
+	// How far do we have to rotate to aim there? (i.e., how much do we have to rotate our axes by to get a 2D motion problem)
+	f32 angDist = pikmin2_atan2f(sepXZ.x, sepXZ.y);
+
+	// Make sure piki is facing in its direction of travel.
+	piki->mFaceDir = roundAng(angDist);
+
+	// -- Calculate mechanics of flight. --
+	// We know where we want to be at the peak, and how long the arc should take.
+	// So, we should be able to work out what our initial velocity should be to get there.
+
+	// NaviParm p026 is 'landing time', i.e. total flight time, so time to peak is half that.
+	f32 timeToPeak = 0.5f * naviMgr->mNaviParms->mNaviParms.mLandingTime.mValue;
+
+	// "Actual" height at peak is navi elevation + 10.0f + throwHeight, but this is fine for our mechanics, mostly.
+	f32 throwHeight = piki->getThrowHeight();
+
+	int pikiColor = piki->mPikiKind;
+
+	// If we're throwing a purple, travel time is 'half' as we stop at the peak (to pound).
+	// Effectively, makes purples have more initial velocity.
+	if (pikiColor == Purple) {
+		timeToPeak *= 0.5f;
+	}
+
+	// If you rearrange parabolic motion equations, y velocity is (y_peak + (g/2 * (t/2)^2)) / (t/2), if initial y pos is 0.
+	f32 ySpeed = timeToPeak * (0.5f * _aiConstants->mGravity.mData) + (throwHeight / timeToPeak);
+
+	// Idk why we use this rather than the navi parameter like before, but w/e.
+	// Back-calculate the time at peak given that the y velocity is 0 at the peak.
+	// So, 0 = -g * t + ySpeed  ==>  t = ySpeed / g
+	f32 newTimeToPeak = ySpeed / _aiConstants->mGravity.mData;
+
+	// Again, halve it for purples.
+	if (pikiColor == Purple) {
+		newTimeToPeak *= 0.5f;
+	}
+
+	// 'x' (2D plane) velocity is constant (no accel), so distance / time.
+	f32 xSpeed = dist2D / (2.0f * newTimeToPeak);
+
+	// Velocity to use in movement calcs needs to be in 3D, not 2D, so adjust XZ components.
+	piki->mVelocity.set(xSpeed * pikmin2_sinf(angDist), ySpeed, xSpeed * pikmin2_cosf(angDist));
+
+	// Add navi 'momentum' to piki (XZ) velocity - ignore y.
+	// Momentum is navi simulation velocity components, scaled by 1.0f.
+	//  -- I suspect devs toyed around with this value in development.
+	Vector3f momentum = mVelocity;
+	momentum          = Vector3f(momentum.x, 0.0f, momentum.z) * 1.0f;
+
+	// Normalise vector into just a 'direction' and grab the 'length' - this is just navi ground speed.
+	f32 magnitude = momentum.qNormalise();
+
+	// If the player is in a cutscene, disregard movement
+	if (mSceneAnimationTimer > 0.0f) {
+		magnitude = 0.0f;
+	}
+#ifdef PIKI_PC_PORT
+	// Lock-On: el objetivo esta quieto aunque el capitan corra; con la
+	// inercia del capitan el Pikmin caeria desviado.
+	if (sPcLockTarget && sPcLockNavi == this) {
+		magnitude = 0.0f;
+	}
+#endif
+
+	// Adjust piki sim and real velocities.
+	Vector3f addVel = momentum;
+	addVel *= magnitude;
+	piki->mVelocity += addVel;
+	piki->mTargetVelocity = piki->mVelocity;
+}
+
+/**
+ * @note Address: 0x80146D14
+ * @note Size: 0x8
+ */
+bool Navi::commandOn()
+{
+	return mCommandOn2;
+}
+
+} // namespace Game

@@ -1,0 +1,2026 @@
+#include "Dolphin/OS/OSCache.h"
+#include "math.h"
+#include "JSystem/JAudio/JAS/JASBank.h"
+#include "JSystem/JAudio/JAS/JASCalc.h"
+#include "JSystem/JAudio/JAS/JASChannel.h"
+#include "JSystem/JAudio/JAS/JASDriver.h"
+#include "JSystem/JAudio/JAS/JASPlayer.h"
+#include "JSystem/JAudio/JAS/JASSeqParser.h"
+#ifdef PIKI_PC_PORT
+#include <cstdio>
+#include <cstdlib>
+#endif
+#include "JSystem/JAudio/JAS/JASTrack.h"
+#include "JSystem/JSupport/JSUList.h"
+#include "JSystem/JMath.h"
+#include "trig.h"
+
+#if defined(VERSION_US_DEMO) || defined(VERSION_PAL)
+// Demo and PAL define this (as an array) near rootCallback instead
+#else
+static f32 c32 = 1.0f;
+#endif
+
+JASTrack::SeqCallback JASTrack::sCallBackFunc;
+JASSeqParser JASTrack::sParser;
+JASTrack* JASTrack::sFreeList;
+JASTrack* JASTrack::sFreeListEnd;
+
+/**
+ * @note Address: 0x8009EF94
+ * @note Size: 0x12C
+ */
+JASTrack::JASTrack()
+    : mVibrate()
+    , mChannelUpdater()
+    , mNoteOnCallback(nullptr)
+    , mTimedParam()
+    , mRegisterParam()
+    , mParentTrack(nullptr)
+    , _340(0.0f)
+    , mCurrentTempo(0.0f)
+    , _348(0)
+    , mUpdateFlags(0)
+    , _350(0)
+    , mTempo(120)
+    , mTimeBase(120)
+    , mTranspose(0)
+    , _357(0)
+    , mPauseStatus(0)
+    , mVolumeMode(0)
+    , mNoteMask(0)
+    , _35B(0)
+    , mIsPaused(false)
+    , mIsMuted(0)
+    , mTimeRelate(0)
+    , _365(0)
+    , _366(0)
+{
+	mChannelUpdater.init();
+	for (int i = 0; i < 12; i++) {
+		_2E0[i] = JASPlayer::sAdsTable[i];
+	}
+	JASCalc::bzero(&mTimedParam, sizeof(TimedParam_));
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x54
+ */
+// void JSUList<JASChannel>::~JSUList()
+// {
+// 	// UNUSED FUNCTION
+// }
+
+/**
+ * @note Address: N/A
+ * @note Size: 0xC8
+ */
+JASTrack::~JASTrack()
+{
+	JSUListIterator<JASChannel> it(this);
+	while (it != getEnd()) {
+		JSULink<JASChannel>* next = it.getObject()->getNext();
+		it.getObject()->release(0);
+		it.getObject()->free();
+		remove(it.getObject()->getObject());
+		it = next;
+	}
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: 0x8009F254
+ * @note Size: 0x1E8
+ */
+void JASTrack::init()
+{
+	mSeqCtrl.init();
+	mTrackPort.init();
+	mIntrMgr.init();
+	_E0 = 0;
+	_E4 = 0;
+	_E5 = 0;
+	_E6 = 0;
+	for (int i = 0; i < 8; i++) {
+		mChannels[i] = nullptr;
+	}
+	mChannelUpdater.init();
+	mNoteOnCallback = nullptr;
+	initTimed();
+	mRegisterParam.init();
+
+	initOscillators();
+
+	mParentTrack  = nullptr;
+	mChildList[0] = nullptr;
+
+	for (int i = 1; i < 16; i++) {
+		mChildList[i] = 0;
+	}
+	if (mExtBuffer) {
+		mExtBuffer->initExtBuffer();
+	}
+	_340          = 0.0f;
+	mCurrentTempo = 1.0f;
+	_348          = 0;
+	mVibrate.init();
+	mUpdateFlags = 0;
+	_350         = 0;
+	mTempo       = 120;
+	mTimeBase    = 48;
+	updateTempo();
+	mTranspose   = 0;
+	_357         = 0;
+	mPauseStatus = 10;
+	mVolumeMode  = 0;
+	mNoteMask    = 0;
+	_35B         = 0;
+
+	mPanCalcType                 = 0;
+	mParentPanCalcType           = 0;
+	mChannelUpdater.mPanCalcType = JASChannel::CALC_AddAll;
+
+	mFxmixCalcType                 = 0;
+	mParentFxmixCalcType           = 0;
+	mChannelUpdater.mFxMixCalcType = JASChannel::CALC_AddAll;
+
+	mDolbyCalcType                 = 0;
+	mParentDolbyCalcType           = 0;
+	mChannelUpdater.mDolbyCalcType = JASChannel::CALC_AddAll;
+
+	mIsPaused   = false;
+	mIsMuted    = 0;
+	mTimeRelate = 1;
+	_365        = 0;
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x120
+ */
+int JASTrack::inherit()
+{
+	if (mParentTrack) {
+		mTempo        = mParentTrack->mTempo;
+		_365          = 0;
+		mCurrentTempo = mParentTrack->mCurrentTempo;
+		mTimeBase     = mParentTrack->mTimeBase;
+		mTimeRelate   = mParentTrack->mTimeRelate;
+		mIsPaused     = mParentTrack->mIsPaused;
+		mPauseStatus  = mParentTrack->mPauseStatus;
+		mVolumeMode   = mParentTrack->mVolumeMode;
+		mIsMuted      = mParentTrack->mIsMuted;
+		if (_357 & 0x2) {
+			return 0;
+		}
+
+		mRegisterParam.inherit(mParentTrack->mRegisterParam);
+		mPanCalcType                 = mParentTrack->mPanCalcType;
+		mParentPanCalcType           = mParentTrack->mParentPanCalcType;
+		mChannelUpdater.mPanCalcType = mParentTrack->mChannelUpdater.mPanCalcType;
+
+		mFxmixCalcType                 = mParentTrack->mFxmixCalcType;
+		mParentFxmixCalcType           = mParentTrack->mParentFxmixCalcType;
+		mChannelUpdater.mFxMixCalcType = mParentTrack->mChannelUpdater.mFxMixCalcType;
+
+		mDolbyCalcType                 = mParentTrack->mDolbyCalcType;
+		mParentDolbyCalcType           = mParentTrack->mParentDolbyCalcType;
+		mChannelUpdater.mDolbyCalcType = mParentTrack->mChannelUpdater.mDolbyCalcType;
+	}
+	return 0;
+}
+
+/**
+ * @note Address: 0x8009F43C
+ * @note Size: 0x20C
+ */
+s8 JASTrack::mainProc()
+{
+	int seqRes = 0;
+	if (_365 != 0 && mParentTrack != nullptr) {
+		f32 tempoProportion = (f32)mTempo;
+		tempoProportion /= (f32)mParentTrack->mTempo;
+		if (tempoProportion > 1.0f) {
+			tempoProportion = 1.0f;
+		}
+		_340 += tempoProportion;
+		if (_340 < 1.0f) {
+			return 0;
+		}
+		_340 -= 1.0f;
+	}
+
+	mIntrMgr.request(7);
+	mIntrMgr.timerProcess();
+	tryInterrupt();
+	if (!mIsPaused || !(mPauseStatus & 2)) {
+		if (mSeqCtrl.mWaitTimer == -1) {
+			if (checkNoteStop(0)) {
+				mSeqCtrl.mWaitTimer = 0;
+			} else {
+				goto timed;
+			}
+		}
+
+		if (mSeqCtrl.mState.w > 0) {
+			mSeqCtrl.mState.w--;
+		}
+
+		if (mSeqCtrl.mWaitTimer > 0) {
+			if (mSeqCtrl.waitCountDown()) {
+				if (_E0 != -1 && _E4 == 0) {
+					mChannels[0] = nullptr;
+				}
+			} else {
+				goto timed;
+			}
+		}
+		seqRes = sParser.parseSeq(this);
+
+	// would i love to get rid of this goto? yes.
+	// can i work out how to do it? god no.
+	timed:
+		updateTimedParam();
+	}
+
+	updateSeq(0, false);
+	if (seqRes < 0) {
+		return -1;
+	}
+
+	for (int i = 0; i < 16; i++) {
+		JASTrack* childTrack = mChildList[i];
+		if (childTrack && childTrack->_35B != 0 && childTrack->mainProc() == -1) {
+			childTrack->close();
+			mChildList[i] = nullptr;
+		}
+	}
+	return 0;
+}
+
+/**
+ * @note Address: 0x8009F648
+ * @note Size: 0x28
+ */
+void JASTrack::setInterrupt(u16 interrupt)
+{
+	mIntrMgr.request(interrupt);
+}
+
+/**
+ * @note Address: 0x8009F670
+ * @note Size: 0x60
+ */
+bool JASTrack::tryInterrupt()
+{
+	if (mSeqCtrl.mPreviousFilePtr) {
+		return false;
+	}
+	void* intr = mIntrMgr.checkIntr();
+	if (intr == nullptr) {
+		return false;
+	}
+	return mSeqCtrl.callIntr(intr);
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x28
+ */
+void JASTrack::setBankNumber(u8)
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: 0x8009F6D0
+ * @note Size: 0x8
+ */
+void JASTrack::assignExtBuffer(JASOuterParam* buffer)
+{
+	mExtBuffer = buffer;
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0xC
+ */
+void JASTrack::setPanSwitchExt(u8, int)
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0xC
+ */
+void JASTrack::setPanSwitchParent(u8, int)
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0xC
+ */
+void JASTrack::setPanSwitchJcs(u8, int)
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x24
+ */
+void JASTrack::getBank() const
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x24
+ */
+void JASTrack::getProgramNumber() const
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x8
+ */
+void JASTrack::getVolume() const
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x8
+ */
+void JASTrack::getPitch() const
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x8
+ */
+void JASTrack::getPan() const
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x8
+ */
+void JASTrack::getFxmix() const
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x8
+ */
+void JASTrack::getDolby() const
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: 0x8009F6D8
+ * @note Size: 0xCC
+ */
+void JASTrack::initTimed()
+{
+	// initialise all params
+	for (u8 i = 0; i < TIMED_Count; i++) {
+		mTimedParam.mMoveParams[i].mMoveTime = 0.0f;
+		mTimedParam.mMoveParams[i].set(1.0f);
+	}
+
+	// not all params should be initialised to 1.0f
+	// i.e. only volume, Osc params, and IIR_Unk0 are 1.0f - change the rest
+	mTimedParam.mMoveParams[TIMED_Pitch].set(0.0f);
+	mTimedParam.mMoveParams[TIMED_Pan].set(0.5f);
+	mTimedParam.mMoveParams[TIMED_Unk16].set(0.5f);
+	mTimedParam.mMoveParams[TIMED_Unk17].set(0.0f);
+	mTimedParam.mMoveParams[TIMED_Fxmix].set(0.0f);
+	mTimedParam.mMoveParams[TIMED_Dolby].set(0.0f);
+	mTimedParam.mMoveParams[TIMED_IIR_Unk1].set(0.0f);
+	mTimedParam.mMoveParams[TIMED_IIR_Unk2].set(0.0f);
+	mTimedParam.mMoveParams[TIMED_IIR_Unk3].set(0.0f);
+	mTimedParam.mMoveParams[TIMED_Unk5].set(0.0f);
+}
+
+/**
+ * @note Address: 0x8009F7A4
+ * @note Size: 0x10
+ */
+void JASTrack::connectBus(int mixConfigIdx, int value)
+{
+	mChannelUpdater.mMixConfigs[mixConfigIdx] = value;
+}
+
+/**
+ * @note Address: 0x8009F7B4
+ * @note Size: 0x1A4
+ */
+int JASTrack::noteOn(u8 channelIndex, s32 p2, s32 p3, s32 p4, u32 p5)
+{
+	if (mIsMuted && (mPauseStatus & 0x40)) {
+		return -1;
+	}
+	if ((mNoteMask & 1 << channelIndex)) {
+		return -1;
+	}
+	noteOff(channelIndex, 0);
+	u8 physicalNumber   = JASBankMgr::getPhysicalNumber(mRegisterParam.getBankNumber());
+	u8 programNumber    = mRegisterParam.getProgramNumber();
+	JASChannel* channel = !mNoteOnCallback
+	                        ? JASBankMgr::noteOn(physicalNumber, programNumber, p2, p3, mRegisterParam._1A, channelUpdateCallback, this)
+	                        : mNoteOnCallback(this, physicalNumber, programNumber, p2, p3, mRegisterParam._1A);
+	if (channel == nullptr) {
+		return -1;
+	}
+	channel->mUpdateTimer = p4;
+	append(channel);
+	mChannels[channelIndex] = channel;
+	channel->_C8            = p5;
+	channel->setPanPower(mRegisterParam._10, mRegisterParam._12, mRegisterParam._14);
+	overwriteOsc(channel);
+	if (_350) {
+		channel->directReleaseOsc(_350);
+	}
+	return 0;
+}
+
+/**
+ * @note Address: 0x8009F958
+ * @note Size: 0xA4
+ */
+void JASTrack::overwriteOsc(JASChannel* channel)
+{
+	for (int i = 0; i < 2; i++) {
+		u32 flag = mOscRoute[i];
+		if (flag != 0xF) {
+			u8 index = flag & 3;
+			if (flag & 8) {
+				channel->copyOsc(index, &mOscData[i]);
+			} else if (flag & 4) {
+				s16* release = (s16*)mOscData[i].mRelease;
+				channel->copyOsc(index, &mOscData[i]);
+				mOscData[i].mRelease = release;
+			}
+			channel->overwriteOsc(index, &mOscData[i]);
+		}
+	}
+}
+
+/**
+ * @note Address: 0x8009F9FC
+ * @note Size: 0x68
+ */
+bool JASTrack::noteOff(u8 channelIndex, u16 p2)
+{
+	if (mChannels[channelIndex] == nullptr) {
+		return false;
+	}
+	if (p2 == 0) {
+		mChannels[channelIndex]->release(0);
+	} else {
+		mChannels[channelIndex]->release(p2);
+	}
+	mChannels[channelIndex] = nullptr;
+	return true;
+}
+
+/**
+ * @note Address: 0x8009FA64
+ * @note Size: 0x64
+ */
+int JASTrack::gateOn(u8 chanIdx, s32 p2, s32 p3, s32 updateTimer)
+{
+	JASChannel* channel = mChannels[chanIdx];
+	if (channel == nullptr) {
+		return -1;
+	}
+	JASBankMgr::gateOn(channel, p2, p3);
+	channel->mUpdateTimer = updateTimer;
+	return 0;
+}
+
+/**
+ * @note Address: 0x8009FAC8
+ * @note Size: 0x2C
+ */
+bool JASTrack::checkNoteStop(s32 chanIdx)
+{
+	if (mChannels[chanIdx] == nullptr) {
+		return true;
+	}
+	return (u8)(mChannels[chanIdx]->mStatus == JASChannel::STATUS_INACTIVE);
+}
+
+/**
+ * @note Address: 0x8009FAF4
+ * @note Size: 0xE0
+ */
+void JASTrack::oscSetupFull(u8 route, u32 attackOffset, u32 releaseOffset)
+{
+	u8 oscIdx           = (route & 0x10) >> 4;
+	int target          = route & 0xF;
+	bool doSetupEnv     = (route & 0x80) ? true : false;
+	bool doSetupAttack  = route & 0x40 ? true : false;
+	bool doSetupRelease = route & 0x20 ? true : false;
+	if (doSetupEnv) {
+		mOscData[oscIdx]         = JASPlayer::sEnvelopeDef;
+		mOscData[oscIdx].mTarget = target;
+		if (target != JASOscillator::TARGET_Pitch) {
+			mOscData[oscIdx].mVertex = mOscData[oscIdx].mVertex;
+		} else {
+			mOscData[oscIdx].mVertex = 1.0f;
+		}
+	}
+
+	if (doSetupAttack) {
+		if (attackOffset == 0) {
+			mOscData[oscIdx].mAttack = nullptr;
+		}
+		mOscData[oscIdx].mAttack = (s16*)(mSeqCtrl.mRawFilePtr + attackOffset);
+	}
+
+	if (doSetupRelease) {
+		if (releaseOffset == 0) {
+			mOscData[oscIdx].mRelease = JASPlayer::sRelTable;
+		}
+		mOscData[oscIdx].mRelease = (s16*)(mSeqCtrl.mRawFilePtr + releaseOffset);
+	}
+}
+
+/**
+ * @note Address: 0x8009FBD4
+ * @note Size: 0x70
+ */
+void JASTrack::oscSetupSimpleEnv(u8 setupType, u32 offset)
+{
+	switch (setupType) {
+	case 0:
+		mOscData[0]         = JASPlayer::sEnvelopeDef;
+		mOscData[0].mAttack = reinterpret_cast<s16*>(mSeqCtrl.mRawFilePtr + offset);
+		break;
+	case 1:
+		mOscData[0].mRelease = reinterpret_cast<const s16*>(mSeqCtrl.mRawFilePtr + offset);
+		break;
+	}
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x64
+ */
+void JASTrack::updateOscParam(int id, f32 value)
+{
+	switch (id) {
+	case TIMED_Osc0_Width:
+		mOscData[0].mWidth = value;
+		break;
+	case TIMED_Osc0_Rate:
+		mOscData[0].mRate = value;
+		break;
+	case TIMED_Osc0_Vertex:
+		mOscData[0].mVertex = value;
+		break;
+	case TIMED_Osc1_Width:
+		mOscData[1].mWidth = value;
+		break;
+	case TIMED_Osc1_Rate:
+		mOscData[1].mRate = value;
+		break;
+	case TIMED_Osc1_Vertex:
+		mOscData[1].mVertex = value;
+		break;
+	}
+}
+
+/**
+ * @note Address: 0x8009FC44
+ * @note Size: 0xDC
+ */
+void JASTrack::oscSetupSimple(u8 p1)
+{
+	switch (p1) {
+	case 0:
+		mOscData[1] = JASPlayer::sVibratoDef;
+		break;
+	case 1:
+		mOscData[0] = JASPlayer::sTremoroDef;
+		break;
+	case 2:
+		mOscData[1] = JASPlayer::sTremoroDef;
+		break;
+	default:
+		break;
+	}
+}
+
+/**
+ * @note Address: 0x8009FD20
+ * @note Size: 0xE8
+ */
+void JASTrack::updateTimedParam()
+{
+	for (int i = 0; i < TIMED_Count; i++) {
+		// move and update parameter
+		if (mTimedParam.mMoveParams[i].mMoveTime > 0.0f) {
+			mTimedParam.mMoveParams[i].mCurrentValue += mTimedParam.mMoveParams[i].mMoveAmount;
+			mTimedParam.mMoveParams[i].mMoveTime -= 1.0f;
+			if (i <= TIMED_Unk5 || i >= TIMED_Osc1_Vertex) {
+				mUpdateFlags |= (1 << i);
+				continue;
+			}
+			updateOscParam(i, mTimedParam.mMoveParams[i].mCurrentValue);
+		}
+	}
+	mUpdateFlags |= OUTERPARAM_Pitch;
+}
+
+/**
+ * @note Address: 0x8009FE08
+ * @note Size: 0x3E8
+ */
+void JASTrack::updateTrackAll()
+{
+	f32 panWeight = mRegisterParam._16[0] / (SHORT_FLOAT_MAX - 1.0f);
+	f32 delayF    = 128.0f * mTimedParam.mInnerParam._110.mCurrentValue;
+	s8 delay0     = 0;
+	s8 delay1;
+	OSf32tos8(&delayF, &delay1);
+	if (delay1 < 0) {
+		delay0 = -delay1;
+		delay1 = 0;
+	}
+
+	mChannelUpdater.mDelayMax        = 16;
+	mChannelUpdater.mDelaySamples[0] = delay0;
+	mChannelUpdater.mDelaySamples[1] = delay1;
+
+	f32 vol, pitch, pan, fxmix, dolby;
+
+	vol = mTimedParam.mInnerParam.mVolume.mCurrentValue;
+	if (mVolumeMode == 0) {
+		vol *= vol;
+	}
+
+	if (mIsMuted) {
+		vol = 0.0f;
+	}
+
+	f32 cent = JASPlayer::pitchToCent(mTimedParam.mInnerParam.mPitch.mCurrentValue, mRegisterParam._0E);
+	pitch    = cent * mVibrate.getValue();
+#ifdef PIKI_PC_PORT
+	if (getenv("PIKMIN_AUDIO_LOG")) {
+		static unsigned n;
+		if (n++ < 6)
+			fprintf(stderr, "[jaudio] updTrack %p parent=%p pitchCur=%f reg0E=%u cent=%f vib=%f depth=%f vol=%f\n", (void*)this, (void*)mParentTrack,
+			        mTimedParam.mInnerParam.mPitch.mCurrentValue, (unsigned)mRegisterParam._0E, cent, mVibrate.getValue(), mVibrate.mDepth, vol);
+	}
+#endif
+
+	pan   = mTimedParam.mInnerParam.mPan.mCurrentValue;
+	fxmix = mTimedParam.mInnerParam.mFxmix.mCurrentValue;
+	dolby = mTimedParam.mInnerParam.mDolby.mCurrentValue;
+
+	if (mExtBuffer) {
+		if (mExtBuffer->checkOuterSwitch(OUTERPARAM_Volume)) {
+			vol *= mExtBuffer->mVolume;
+		}
+
+		if (mExtBuffer->checkOuterSwitch(OUTERPARAM_Pitch)) {
+			pitch *= mExtBuffer->mPitch;
+		}
+
+		if (mExtBuffer->checkOuterSwitch(OUTERPARAM_Fxmix)) {
+			fxmix = panCalc(fxmix, mExtBuffer->mFxmix, panWeight, mFxmixCalcType);
+		}
+
+		if (mExtBuffer->checkOuterSwitch(OUTERPARAM_Dolby)) {
+			dolby = panCalc(dolby, mExtBuffer->mDolby, panWeight, mDolbyCalcType);
+		}
+
+		if (mExtBuffer->checkOuterSwitch(OUTERPARAM_Pan)) {
+			pan = panCalc(pan, mExtBuffer->mPan, panWeight, mPanCalcType);
+		}
+	}
+
+#ifdef PIKI_PC_PORT
+	if (getenv("PIKMIN_AUDIO_LOG")) {
+		static unsigned n;
+		if (n++ < 6)
+			fprintf(stderr, "[jaudio] updTrack2 %p ext=%p pitch=%f extPitch=%f sw=%x _357=%x parentPitch=%f\n", (void*)this, (void*)mExtBuffer, pitch,
+			        mExtBuffer ? mExtBuffer->mPitch : -1.0f, mExtBuffer ? (unsigned)mExtBuffer->mOuterSwitch : 0u, (unsigned)_357,
+			        mParentTrack ? mParentTrack->mChannelUpdater.mPitch : -1.0f);
+	}
+#endif
+	if (!mParentTrack || _357 & 1) {
+		mChannelUpdater.mVolume = vol;
+		mChannelUpdater.mPitch  = pitch;
+		mChannelUpdater.mPan    = pan;
+		mChannelUpdater.mFxMix  = fxmix;
+		mChannelUpdater.mDolby  = dolby;
+		return;
+	}
+
+	panWeight               = f32(mRegisterParam._16[1]) / (SHORT_FLOAT_MAX - 1.0f);
+	mChannelUpdater.mVolume = mParentTrack->mChannelUpdater.mVolume * vol;
+	mChannelUpdater.mPitch  = mParentTrack->mChannelUpdater.mPitch * pitch;
+	mChannelUpdater.mPan    = panCalc(pan, mParentTrack->mChannelUpdater.mPan, panWeight, mParentPanCalcType);
+	mChannelUpdater.mFxMix  = panCalc(fxmix, mParentTrack->mChannelUpdater.mFxMix, panWeight, mParentFxmixCalcType);
+	mChannelUpdater.mDolby  = panCalc(dolby, mParentTrack->mChannelUpdater.mDolby, panWeight, mParentDolbyCalcType);
+
+	if (mExtBuffer && mExtBuffer->checkOuterSwitch(OUTERPARAM_FIR8Filter)) {
+		for (u8 i = 0; i < 8; i++) {
+			mChannelUpdater.mFIR8FilterParams[i] = mExtBuffer->getIntFirFilter(i);
+		}
+		mChannelUpdater.mFilterMode = 8;
+	}
+
+	for (int i = 0; i < 4; i++) {
+		mChannelUpdater.mIIRFilterParams[i] = (SHORT_FLOAT_MAX - 1.0f) * mTimedParam.mInnerParam.mIIRs[i].mCurrentValue;
+	}
+
+	mChannelUpdater.mFilterMode |= 0x20;
+	mChannelUpdater._34 = (SHORT_FLOAT_MAX - 1.0f) * mTimedParam.mInnerParam._50.mCurrentValue;
+}
+
+/**
+ * @note Address: 0x800A01F0
+ * @note Size: 0x4E0
+ */
+void JASTrack::updateTrack(u32 flag)
+{
+	f32 panWeight = f32(mRegisterParam._16[0]) / (SHORT_FLOAT_MAX - 1.0f);
+	if (flag & OUTERPARAM_Unk18) {
+		s8 val0 = 0;
+		s8 val1;
+		f32 delayF = 128.0f * mTimedParam.mInnerParam._110.mCurrentValue;
+		OSf32tos8(&delayF, &val1);
+		if (val1 < 0) {
+			val0 = -val1;
+			val1 = 0;
+		}
+		mChannelUpdater.mDelaySamples[0] = val0;
+		mChannelUpdater.mDelaySamples[1] = val1;
+	}
+
+	if (flag & OUTERPARAM_Tempo && !mParentTrack) {
+		updateTempo();
+	}
+
+	f32 vol;
+	f32 pitch = 1.0f;
+	f32 pan;
+	f32 fxmix;
+	f32 dolby;
+	u32 isVol = flag & OUTERPARAM_Volume;
+	if (isVol) {
+		vol = mTimedParam.mInnerParam.mVolume.mCurrentValue;
+		if (mVolumeMode == 0) {
+			vol *= vol;
+		}
+		if (mIsMuted) {
+			vol = 0.0f;
+		}
+		if (mExtBuffer && mExtBuffer->checkOuterSwitch(OUTERPARAM_Volume)) {
+			vol *= mExtBuffer->mVolume;
+		}
+		if (mIsPaused && mPauseStatus & 0x1) {
+			vol *= mTimedParam.mInnerParam._100.mCurrentValue;
+		}
+	}
+
+	u32 isPitch = flag & OUTERPARAM_Pitch;
+	if (isPitch) {
+		pitch = JASPlayer::pitchToCent(mTimedParam.mInnerParam.mPitch.mCurrentValue, f32(mRegisterParam._0E));
+		pitch *= mVibrate.getValue();
+		if (mExtBuffer && mExtBuffer->checkOuterSwitch(OUTERPARAM_Pitch)) {
+			pitch *= mExtBuffer->mPitch;
+		}
+	}
+
+	u32 isPan = flag & OUTERPARAM_Pan;
+	if (isPan) {
+		pan = mTimedParam.mInnerParam.mPan.mCurrentValue;
+		if (mExtBuffer && mExtBuffer->checkOuterSwitch(OUTERPARAM_Pan)) {
+			pan = panCalc(pan, mExtBuffer->mPan, panWeight, mPanCalcType);
+		}
+	}
+
+	u32 isFxmix = flag & OUTERPARAM_Fxmix;
+	if (isFxmix) {
+		fxmix = mTimedParam.mInnerParam.mFxmix.mCurrentValue;
+		if (mExtBuffer && mExtBuffer->checkOuterSwitch(OUTERPARAM_Fxmix)) {
+			fxmix = panCalc(fxmix, mExtBuffer->mFxmix, panWeight, mFxmixCalcType);
+		}
+	}
+
+	u32 isDolby = flag & OUTERPARAM_Dolby;
+	if (isDolby) {
+		dolby = mTimedParam.mInnerParam.mDolby.mCurrentValue;
+		if (mExtBuffer && mExtBuffer->checkOuterSwitch(OUTERPARAM_Dolby)) {
+			dolby = panCalc(dolby, mExtBuffer->mDolby, panWeight, mDolbyCalcType);
+		}
+	}
+
+	if (flag & OUTERPARAM_IIRFilter) {
+		for (int i = 0; i < 4; i++) {
+			mChannelUpdater.mIIRFilterParams[i] = (SHORT_FLOAT_MAX - 1.0f) * mTimedParam.mInnerParam.mIIRs[i].mCurrentValue;
+		}
+
+		mChannelUpdater.mFilterMode |= 0x20;
+	}
+
+	if (mExtBuffer && flag & OUTERPARAM_FIR8Filter && mExtBuffer->checkOuterSwitch(OUTERPARAM_FIR8Filter)) {
+		for (u8 i = 0; i < 8; i++) {
+			mChannelUpdater.mFIR8FilterParams[i] = mExtBuffer->getIntFirFilter(i);
+		}
+		mChannelUpdater.mFilterMode = (mChannelUpdater.mFilterMode & 0x20) + 8;
+	}
+
+	if (flag & OUTERPARAM_Unk6) {
+		mChannelUpdater._34 = (SHORT_FLOAT_MAX - 1.0f) * mTimedParam.mInnerParam._50.mCurrentValue;
+	}
+
+#ifdef PIKI_PC_PORT
+	if (getenv("PIKMIN_AUDIO_LOG") && isVol && (vol == 0.0f || mChannelUpdater.mVolume == 0.0f || (mParentTrack && mParentTrack->mChannelUpdater.mVolume == 0.0f))) {
+		static unsigned n;
+		if (n++ < 400)
+			fprintf(stderr, "[jaudio] updVol0 track=%p parent=%p vol=%f pVol=%f updaterVol=%f pitch=%f updPitch=%f flags=%x muted=%d ext=%p extSw=%x extVol=%f paused=%d pstat=%x\n",
+			        (void*)this, (void*)mParentTrack, vol, mParentTrack ? mParentTrack->mChannelUpdater.mVolume : -1.0f,
+			        mChannelUpdater.mVolume, mChannelUpdater.mPitch, pitch, (unsigned)flag, (int)mIsMuted, (void*)mExtBuffer,
+			        mExtBuffer ? (unsigned)mExtBuffer->mOuterSwitch : 0u, mExtBuffer ? mExtBuffer->mVolume : -1.0f, (int)mIsPaused,
+			        (unsigned)mPauseStatus);
+	}
+#endif
+	if (!mParentTrack || _357 & 0x1) {
+		if (isVol) {
+			mChannelUpdater.mVolume = vol;
+		}
+		if (isPitch) {
+			mChannelUpdater.mPitch = pitch;
+		}
+		if (isPan) {
+			mChannelUpdater.mPan = pan;
+		}
+		if (isFxmix) {
+			mChannelUpdater.mFxMix = fxmix;
+		}
+		if (isDolby) {
+			mChannelUpdater.mDolby = dolby;
+		}
+		return;
+	}
+
+	panWeight = f32(mRegisterParam._16[1]) / (SHORT_FLOAT_MAX - 1.0f);
+	if (isVol) {
+		mChannelUpdater.mVolume = mParentTrack->mChannelUpdater.mVolume * vol;
+	}
+	if (isPitch) {
+		mChannelUpdater.mPitch = mParentTrack->mChannelUpdater.mPitch * pitch;
+	}
+	if (isPan) {
+		mChannelUpdater.mPan = panCalc(pan, mParentTrack->mChannelUpdater.mPan, panWeight, mParentPanCalcType);
+	}
+	if (isFxmix) {
+		mChannelUpdater.mFxMix = panCalc(fxmix, mParentTrack->mChannelUpdater.mFxMix, panWeight, mParentFxmixCalcType);
+	}
+	if (isDolby) {
+		mChannelUpdater.mDolby = panCalc(dolby, mParentTrack->mChannelUpdater.mDolby, panWeight, mParentDolbyCalcType);
+	}
+}
+
+/**
+ * @note Address: 0x800A06D0
+ * @note Size: 0x3B4
+ */
+void JASTrack::updateTempo()
+{
+	if (!mParentTrack) {
+		mCurrentTempo = (f32)mTimeBase;
+		mCurrentTempo *= mTempo;
+		mCurrentTempo /= JASDriver::getDacRate();
+		mCurrentTempo *= 1.33333333f;
+		if (mExtBuffer && mExtBuffer->checkOuterSwitch(OUTERPARAM_Tempo)) {
+			mCurrentTempo *= mExtBuffer->getTempo();
+		}
+	} else {
+		mCurrentTempo = mParentTrack->mCurrentTempo;
+		mTimeBase     = mParentTrack->mTimeBase;
+	}
+
+	for (int i = 0; i < 16; i++) {
+		JASTrack* track = mChildList[i];
+		if (track && track->_35B) {
+			track->updateTempo();
+		}
+	}
+}
+
+/**
+ * @note Address: 0x800A0A8C
+ * @note Size: 0x294
+ */
+void JASTrack::updateSeq(u32 flags, bool recursive)
+{
+	u32 newFlags = flags | mUpdateFlags;
+	if (mExtBuffer) {
+		newFlags |= mExtBuffer->getOuterUpdate();
+		mExtBuffer->setOuterUpdate(0);
+	}
+
+	mVibrate.incCounter();
+	mUpdateFlags = 0;
+
+	if (newFlags) {
+		updateTrack(newFlags);
+	}
+
+	for (int i = 0; i < 16; i++) {
+		JASTrack* childTrack = mChildList[i];
+		if (childTrack && childTrack->_35B) {
+			u32 childFlags = newFlags;
+			if (recursive) {
+				childTrack->updateSeq(childFlags, recursive);
+			} else {
+				childTrack->mUpdateFlags |= childFlags;
+			}
+		}
+	}
+}
+
+/**
+ * @note Address: 0x800A0D20
+ * @note Size: 0xD8
+ */
+s32 JASTrack::seqTimeToDspTime(s32 p1, u8 p2)
+{
+	f32 dspTime = (f32)p1;
+	dspTime *= (f32)p2;
+	dspTime /= 100.0f;
+
+	if (mTimeRelate) {
+		dspTime /= mCurrentTempo;
+
+	} else {
+		dspTime *= 120.0f / (f32)mTimeBase;
+		dspTime *= (f32)JASDriver::getSubFrames() / 10.0f;
+	}
+	return dspTime;
+}
+
+/**
+ * @note Address: 0x800A0DF8
+ * @note Size: 0x84
+ */
+void JASTrack::setParam(int paramIndex, f32 value, int moveTime)
+{
+#ifdef PIKI_PC_PORT
+	if (getenv("PIKMIN_AUDIO_LOG") && paramIndex == 0) {
+		static unsigned n;
+		if (n++ < 100)
+			fprintf(stderr, "[jaudio] setParamVol track=%p value=%f moveTime=%d cur=%f\n", (void*)this, value, moveTime,
+			        mTimedParam.mMoveParams[paramIndex].mCurrentValue);
+	}
+#endif
+	MoveParam_* moveParam   = &mTimedParam.mMoveParams[paramIndex];
+	moveParam->mTargetValue = value;
+	if (moveTime <= 0) {
+		moveParam->mCurrentValue = moveParam->mTargetValue;
+		moveParam->mMoveAmount   = 0.0f;
+		moveParam->mMoveTime     = 1.0f;
+	} else {
+		moveParam->mMoveAmount = (moveParam->mTargetValue - moveParam->mCurrentValue) / moveTime;
+		moveParam->mMoveTime   = moveTime;
+	}
+}
+
+/**
+ * @note Address: 0x800A0E7C
+ * @note Size: 0x64
+ */
+bool JASTrack::setSeqData(u8* file, s32 size)
+{
+	init();
+	_357 = 3;
+	mSeqCtrl.start(file, 0);
+	updateTrackAll();
+	_35B = 2;
+	return true;
+}
+
+/**
+ * @note Address: 0x800A0EE0
+ * @note Size: 0x78
+ */
+bool JASTrack::startSeq()
+{
+	switch (_35B) {
+	case 0:
+		return false;
+		break;
+	case 1:
+		return false;
+		break;
+	case 3:
+		return false;
+		break;
+	case 2:
+		_35B = 1;
+		break;
+	}
+	bool registered = JASDriver::registerSubFrameCallback(rootCallback, this);
+#ifdef PIKI_PC_PORT
+	if (getenv("PIKMIN_AUDIO_LOG")) {
+		fprintf(stderr, "[jaudio] startSeq track=%p registered=%d tempo=%f data=%p\n", (void*)this,
+		        registered ? 1 : 0, mCurrentTempo, (void*)mSeqCtrl.mRawFilePtr);
+	}
+#endif
+	return registered;
+}
+
+/**
+ * @note Address: 0x800A0F58
+ * @note Size: 0xFC
+ */
+bool JASTrack::stopSeq()
+{
+	switch (_35B) {
+	case 0:
+		break;
+	case 2:
+		_35B = 0;
+		if (_366) {
+			delete this;
+		}
+		break;
+	default:
+		_35B = 3;
+		break;
+	}
+
+	return true;
+}
+
+/**
+ * @note Address: 0x800A1054
+ * @note Size: 0x3C
+ */
+void JASTrack::stopSeqMain()
+{
+	updateSeq(0, true);
+	close();
+}
+
+/**
+ * @note Address: 0x800A1090
+ * @note Size: 0x1D4
+ */
+void JASTrack::close()
+{
+	if (!_35B) {
+		return;
+	}
+
+	if (!mParentTrack) {
+		for (u8 i = 0; i < 8; i++) {
+			if (mChannels[i]) {
+				mChannels[i]->release(10);
+				mChannels[i] = nullptr;
+			}
+		}
+	} else {
+		for (u8 i = 0; i < 8; i++) {
+			if (mChannels[i]) {
+				mChannels[i]->release(0);
+				mChannels[i] = nullptr;
+			}
+		}
+	}
+
+	_35B = 0;
+
+	for (int i = 0; i < 16; i++) {
+		if (mChildList[i]) {
+			mChildList[i]->close();
+			mChildList[i] = nullptr;
+		}
+	}
+
+	mIsMuted = false;
+
+	JSUListIterator<JASChannel> it(this);
+	while (it != getEnd()) {
+		JSULink<JASChannel>* next = it.getObject()->getNext();
+		it.getObject()->release(0);
+		it.getObject()->free();
+		remove(it.getObject()->getObject());
+		it = next;
+	}
+
+	if (_366) {
+		delete this;
+	}
+}
+
+/**
+ * @note Address: 0x800A1264
+ * @note Size: 0x80
+ */
+void JASTrack::setNoteMask(u8 noteMask)
+{
+	mNoteMask = noteMask;
+
+	for (u8 i = 0; i < 8; i++) {
+		if (noteMask & 1 << i) {
+			noteOff(i, 10);
+		}
+	}
+}
+
+/**
+ * @note Address: 0x800A12E4
+ * @note Size: 0x234
+ */
+void JASTrack::muteTrack(bool doMute)
+{
+	mIsMuted = doMute;
+	mUpdateFlags |= OUTERPARAM_Volume;
+
+	if (mIsMuted && mPauseStatus & 0x20) {
+		for (u8 i = 0; i < 8; i++) {
+			noteOff(i, 10);
+		}
+	}
+
+	for (int i = 0; i < 16; i++) {
+		JASTrack* track = mChildList[i];
+		if (track) {
+			track->muteTrack(doMute);
+		}
+	}
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x68
+ */
+void JASTrack::muteChildTracks(u16)
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: 0x800A1518
+ * @note Size: 0x44
+ */
+bool JASTrack::start(void* file, u32 offset)
+{
+	mSeqCtrl.start(file, offset);
+	_35B = 1;
+	updateTrackAll();
+	return false;
+}
+
+/**
+ * @note Address: 0x800A155C
+ * @note Size: 0x1DC
+ */
+JASTrack* JASTrack::openChild(u8 index, u8 p2)
+{
+	if (mChildList[index]) {
+		mChildList[index]->close();
+		mChildList[index] = nullptr;
+	}
+
+	JASTrack* newTrack = new JASTrack();
+	if (!newTrack) {
+		return nullptr;
+	}
+
+	newTrack->init();
+	newTrack->_366         = 1;
+	newTrack->mParentTrack = this;
+	newTrack->_357         = p2;
+	newTrack->_348         = (((_348 << 4) | (index & 0xFF)) & ~0xF0000000) | ((_348 & 0xF0000000) + 0x10000000);
+	mChildList[index]      = newTrack;
+	newTrack->inherit();
+	return newTrack;
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0xB8
+ */
+u32 JASTrack::loadTbl(u32 ofs, u32 idx, u32 param_4)
+{
+	u32 result;
+	switch (param_4) {
+	case 4:
+		result = mSeqCtrl.mRawFilePtr[ofs + idx];
+		break;
+	case 5:
+		idx    = idx * 2;
+		result = mSeqCtrl.get16(ofs + idx);
+		break;
+	case 6:
+		idx    = idx * 2 + idx; // Roundabout way to multiply by 3.
+		result = mSeqCtrl.get24(ofs + idx);
+		break;
+	case 7:
+		idx    = idx * 4;
+		result = mSeqCtrl.get32(ofs + idx);
+		break;
+	case 8:
+		result = mSeqCtrl.get32(ofs + idx);
+		break;
+	}
+	return result;
+}
+
+/**
+ * @note Address: 0x800A1738
+ * @note Size: 0x40
+ */
+u32 JASTrack::exchangeRegisterValue(u8 val)
+{
+	if (val < 64) {
+		return readReg32(val);
+	}
+
+	u8 calc = val - 64;
+	return mTrackPort.mValue[calc];
+}
+
+/**
+ * @note Address: 0x800A1778
+ * @note Size: 0x94
+ */
+u32 JASTrack::readReg32(u8 reg)
+{
+	u32 result;
+	switch (reg) {
+	case JASREG_Unk40:
+	case JASREG_Unk41:
+	case JASREG_Unk42:
+	case JASREG_Unk43:
+		result = mRegisterParam._20[reg - 0x28];
+		break;
+
+	case JASREG_Unk35:
+		// screaming crying throwing up
+		result = readReg16(JASREG_Unk4);
+		result <<= 16;
+		result |= readReg16(JASREG_Unk5);
+		break;
+
+	default:
+		result = readReg16(reg);
+		break;
+	}
+
+	return result;
+}
+
+/**
+ * @note Address: 0x800A180C
+ * @note Size: 0x218
+ */
+u16 JASTrack::readReg16(u8 reg)
+{
+	u16 result;
+	switch (reg) {
+	case JASREG_BankNumber:
+		result = mRegisterParam.getBankNumber();
+		break;
+	case JASREG_ProgramNumber:
+		result = mRegisterParam.getProgramNumber();
+		break;
+	case JASREG_Unk34:
+		result = readReg16(JASREG_Unk0) << 8;
+		result |= readReg16(JASREG_Unk1);
+		break;
+	case JASREG_Unk44:
+		result = 0;
+		for (int i = 15; i >= 0; i--) {
+			result <<= 1;
+			if (mChildList[i] && mChildList[i]->_35B) {
+				result |= 1;
+			}
+		}
+		break;
+	case JASREG_Unk45:
+		result = 0;
+		for (int i = 7; i >= 0; i--) {
+			result <<= 1;
+			JASChannel* channel = getChannel(i);
+			u8 val;
+			if (!channel) {
+				val = 1;
+			} else if (channel->mStatus == 0) {
+				val = 1;
+			} else {
+				val = 0;
+			}
+			result |= val;
+		}
+		break;
+	case JASREG_SeqLoopTimer:
+		result = mSeqCtrl.getLoopCount();
+		break;
+
+	default:
+		result = mRegisterParam._00[reg];
+		break;
+	}
+
+	return result;
+}
+
+/**
+ * @note Address: 0x800A1A24
+ * @note Size: 0xD0
+ */
+#pragma dont_inline on
+void JASTrack::writeRegDirect(u8 reg, u16 value)
+{
+	u16 newVal;
+	switch (reg) {
+	case JASREG_Unk0:
+	case JASREG_Unk1:
+	case JASREG_Unk2: {
+		u8 val3 = value & 0xFF;
+		value   = val3;
+		newVal  = JASPlayer::extend8to16(val3);
+		break;
+		return;
+
+			}	case JASREG_BankNumber:
+	case JASREG_ProgramNumber: {
+		return;
+
+			}	case JASREG_Unk34: {
+		u8 val31              = value >> 8;
+		u16 val30             = value & 0xFFFF;
+		s16 extend            = JASPlayer::extend8to16(val31);
+		mRegisterParam._00[0] = val31;
+		mRegisterParam._00[3] = extend;
+		reg                   = 1;
+		newVal                = value;
+		value                 = val30 & 0xFF;
+		break;
+
+			}	default: {
+		newVal = value;
+		break;
+			}	}
+
+	mRegisterParam._00[reg] = value;
+	mRegisterParam._00[3]   = newVal;
+}
+#pragma dont_inline reset
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x8
+ */
+void JASRegisterParam::setFlag(u16)
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: 0x800A1AF4
+ * @note Size: 0x5B0
+ */
+void JASTrack::writeRegParam(u8 p1)
+{
+	u32 val28;
+	u32 val27;
+	u32 val26;
+	u32 val25;
+	u32 val24;
+	s16 val23;
+
+	u8 val = p1 & 0xFF;
+	switch (p1 & 0xF) {
+	case 11:
+		val27 = 0;
+		val26 = 11;
+		break;
+	case 10: {
+		u8 currByte = mSeqCtrl.readByte();
+		val26       = 10;
+		val27       = currByte & 0xC;
+		val25       = (currByte >> 4) + 4;
+	} break;
+	case 9: {
+		u8 currByte = mSeqCtrl.readByte();
+		val27       = currByte & 0xC;
+		val26       = currByte & 0xF0;
+		if (val27 == 8) {
+			val27 = 16;
+		}
+	} break;
+	default:
+		val27 = val & 0xC;
+		val26 = val & 3;
+		break;
+	}
+
+	u8 nextByte = mSeqCtrl.readByte();
+
+	if (val26 == 10) {
+		u8 nextNextByte = mSeqCtrl.readByte();
+		val24           = readReg32(nextNextByte);
+	}
+
+	switch (val27) {
+	case 0: {
+		val23 = readReg16(mSeqCtrl.readByte());
+		break;
+			}	case 4: {
+		val23 = mSeqCtrl.readByte();
+		break;
+			}	case 12: {
+		val23 = mSeqCtrl.read16();
+		break;
+			}	case 8: {
+		u32 byte = mSeqCtrl.readByte();
+		if (byte & 0x80) {
+			val23 = byte << 8;
+		} else {
+			val23 = (byte << 8) | (byte << 1);
+		}
+		break;
+			}	case 0x10: {
+		val23 = -1;
+		break;
+			}	}
+
+	s16 regVal = readReg16(nextByte);
+
+	switch (val26) {
+	case 0:
+		break;
+	case 0x1:
+		if (val27 == 4) {
+			val23 = JASPlayer::extend8to16(val23);
+		}
+		val23 += regVal;
+		break;
+	case 0x2: {
+		u32 product = regVal * val23;
+		writeRegDirect(4, product >> 16);
+		writeRegDirect(5, product & 0xFFFF);
+		return;
+	}
+	case 0x3:
+		mRegisterParam._00[3] = regVal - val23;
+		return;
+	case 0xB:
+		val23 = regVal - val23;
+		break;
+	case 0x10:
+		if (val27 == 4) {
+			val23 = JASPlayer::extend8to16(val23);
+		}
+		if (val23 < 0) {
+			val23 = (u16)regVal >> -val23;
+		} else {
+			val23 = (u16)regVal << val23;
+		}
+		break;
+	case 0x20:
+		if (val27 == 4) {
+			val23 = JASPlayer::extend8to16(val23);
+		}
+		if (val23 < 0) {
+			val23 = regVal >> -val23;
+		} else {
+			val23 = regVal << val23;
+		}
+		break;
+	case 0x30:
+		val23 &= regVal;
+		break;
+	case 0x40:
+		val23 |= regVal;
+		break;
+	case 0x50:
+		val23 ^= regVal;
+		break;
+	case 0x60:
+		val23 = -regVal;
+		break;
+	case 0x90: {
+		val28 = JASPlayer::getRandomS32();
+#ifdef PIKI_PC_PORT
+		// A zero range is legal in sequence data (the cave AutoBgm hits it).
+		// On the GameCube `%` is divw/mullw/subf: division by zero does not
+		// trap and the remainder comes out as the dividend. x86 raises SIGFPE.
+		val23 = ((u16)val23 != 0) ? val28 % (u16)val23 : val28;
+#else
+		val23 = val28 % (u16)val23;
+#endif
+	} break;
+	case 0xA:
+		val28 = loadTbl(val24, val23, val25);
+		val23 = (u16)val28;
+		break;
+	}
+
+	u16 val29;
+	switch (nextByte) {
+	case 0:
+	case 1:
+	case 2: {
+		u8 val3 = val23 & 0xFF;
+		val23   = val3;
+		val29   = JASPlayer::extend8to16(val3);
+		break;
+			}	case 0x21: {
+		u8 bankNo = mRegisterParam.getBankNumber();
+		nextByte  = 6;
+		val23     = (bankNo << 8) | val23 & 0xFF;
+		break;
+			}	case 0x20: {
+		u8 progNo = mRegisterParam.getProgramNumber();
+		nextByte  = 6;
+		val23     = (progNo & 0xFFFF) | (val23 << 8);
+		break;
+			}	case 0x2E: {
+		nextByte = 13;
+		val23    = (mRegisterParam._1A & 0xFF00) | (val23 & 0xFF);
+		break;
+			}	case 0x2F: {
+		nextByte = 13;
+		val23    = (val23 << 8) | (mRegisterParam._1A & 0xFF);
+		break;
+			}	case 0x22: {
+		int temp = val23;
+		writeRegDirect(0, temp >> 8);
+		nextByte = 1;
+		val23    = temp & 0xFF;
+		val29    = temp & 0xFF;
+		break;
+			}	case 0x28:
+	case 0x29:
+	case 0x2A:
+	case 0x2B: {
+		mRegisterParam._20[nextByte - 0x28] = val28;
+		return;
+			}	default: {
+		val29 = val23;
+		break;
+			}	}
+
+	mRegisterParam._00[nextByte] = val23;
+	mRegisterParam._00[3]        = val29;
+
+	switch (nextByte) {
+	case 6:
+		mOscRoute[0] = 0xF;
+		mOscRoute[1] = 0xF;
+		break;
+	case 7:
+		mUpdateFlags |= OUTERPARAM_Pitch;
+		break;
+	}
+}
+
+/**
+ * @note Address: 0x800A20A4
+ * @note Size: 0x24
+ */
+u16 JASTrack::readSelfPort(int portNo)
+{
+	return mTrackPort.readImport(portNo);
+}
+
+/**
+ * @note Address: 0x800A20C8
+ * @note Size: 0x24
+ */
+void JASTrack::writeSelfPort(int portNo, u16 value)
+{
+	mTrackPort.writeExport(portNo, value);
+}
+
+/**
+ * @note Address: 0x800A20EC
+ * @note Size: 0x68
+ */
+bool JASTrack::writePortAppDirect(u32 portNo, u16 value)
+{
+	mTrackPort.writeImport(portNo, value);
+	if (portNo == 0 || portNo == 1) {
+		JASIntrMgr* intrMgr = &mIntrMgr;
+		u32 v1              = 4;
+		if (portNo == 0) {
+			v1 = 3;
+		}
+		intrMgr->request(v1);
+	}
+	return true;
+}
+
+/**
+ * @note Address: 0x800A2154
+ * @note Size: 0x38
+ */
+bool JASTrack::readPortAppDirect(u32 portNo, u16* outValue)
+{
+	*outValue = mTrackPort.readExport(portNo);
+	return true;
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x38
+ */
+JASTrack* JASTrack::routeTrack(u32 route)
+{
+	JASTrack* owning_track = this;
+
+	u32 depth = route >> 28;
+	for (u32 i = 0; i < depth; i++) {
+		owning_track = owning_track->mChildList[route & 0xF];
+		if (owning_track == nullptr) {
+			return nullptr;
+		}
+		route >>= 4;
+	}
+	return owning_track;
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x38
+ */
+void JASTrack::routeTrack(u32) const
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: 0x800A218C
+ * @note Size: 0xB4
+ */
+bool JASTrack::writePortApp(u32 route, u16 value)
+{
+	JASTrack* track = routeTrack(route);
+	if (!track) {
+		return false;
+	}
+
+	return track->writePortAppDirect((route >> 16) & 0xFF, value);
+}
+
+/**
+ * @note Address: 0x800A2240
+ * @note Size: 0x84
+ */
+bool JASTrack::readPortApp(u32 route, u16* outValue)
+{
+	JASTrack* track = routeTrack(route);
+	if (!track) {
+		return false;
+	}
+
+	return track->readPortAppDirect((route >> 16) & 0xFF, outValue);
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x58
+ */
+void JASTrack::checkExportApp(u32) const
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x58
+ */
+void JASTrack::checkImportApp(u32) const
+{
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: 0x800A22C4
+ * @note Size: 0x168
+ */
+void JASTrack::pause(bool doPause, bool pauseChildren)
+{
+	mIsPaused = doPause;
+	if (doPause) {
+
+		if (mPauseStatus & 1) {
+			mUpdateFlags |= OUTERPARAM_Volume;
+		}
+
+		if (mPauseStatus & 4) {
+			for (u8 i = 0; i < 8; i++) {
+				noteOff(i, 10);
+			}
+		}
+
+		if (mPauseStatus & 8) {
+			for (int i = 0; i < 8; i++) {
+				if (mChannels[i])
+					mChannels[i]->setPauseFlag(true);
+			}
+		}
+
+	} else {
+		mUpdateFlags |= OUTERPARAM_Volume;
+		for (int i = 0; i < 8; i++) {
+			if (mChannels[i])
+				mChannels[i]->setPauseFlag(false);
+		}
+	}
+
+	mIntrMgr.request(doPause ? 0 : 1);
+
+	if (pauseChildren) {
+		for (int i = 0; i < 16; i++) {
+			JASTrack* track = mChildList[i];
+			if (track && track->_35B) {
+				track->pause(doPause, true);
+			}
+		}
+	}
+}
+
+/**
+ * @note Address: 0x800A242C
+ * @note Size: 0x170
+ */
+int JASTrack::getTranspose() const
+{
+	if (mParentTrack) {
+		return mTranspose + mParentTrack->getTranspose();
+	}
+	return mTranspose;
+}
+
+/**
+ * @note Address: 0x800A259C
+ * @note Size: 0x3C
+ */
+void JASTrack::setTempo(u16 tempo)
+{
+	mTempo = tempo;
+	if (mParentTrack == nullptr) {
+		updateTempo();
+	} else {
+		_365 = 1;
+	}
+}
+
+/**
+ * @note Address: 0x800A25D8
+ * @note Size: 0x30
+ */
+void JASTrack::setTimebase(u16 timebase)
+{
+	mTimeBase = timebase;
+	if (mParentTrack == nullptr) {
+		updateTempo();
+	}
+}
+
+/**
+ * @note Address: 0x800A2608
+ * @note Size: 0x50
+ */
+f32 JASTrack::panCalc(f32 valA, f32 valB, f32 weight, u8 calcType)
+{
+	switch (calcType) {
+	case 0:
+		return valA;
+	case 1:
+		return valB;
+	case 2:
+		return (valA * (1.0f - weight) + (valB * weight));
+	}
+	return 0.0f;
+}
+
+#if defined(VERSION_US_DEMO) || defined(VERSION_PAL)
+// sure.
+static volatile f32 c32[8] ATTRIBUTE_ALIGN(32) = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+#endif
+
+/**
+ * @note Address: 0x800A2658
+ * @note Size: 0xF4
+ */
+s32 JASTrack::rootCallback(void* obj)
+{
+	JASTrack* track = static_cast<JASTrack*>(obj);
+#ifdef PIKI_PC_PORT
+	static unsigned pcRootCalls;
+	if (getenv("PIKMIN_AUDIO_LOG") && pcRootCalls++ < 12) {
+		fprintf(stderr, "[jaudio] seq tick track=%p state=%u tempo=%f accum=%f pc=%p\n", (void*)track,
+		        track ? (unsigned)track->_35B : 0, track ? track->mCurrentTempo : 0.0f,
+		        track ? track->_340 : 0.0f, track ? (void*)track->mSeqCtrl.mCurrentFilePtr : nullptr);
+	}
+#endif
+	if (track == nullptr) {
+		return -1;
+	}
+	if (track->_35B == 0) {
+		return -1;
+	}
+	if (track->_35B == 3) {
+		track->stopSeqMain();
+		return -1;
+	}
+	track->_340 += track->mCurrentTempo;
+
+#if defined(VERSION_US_DEMO) || defined(VERSION_PAL)
+	if (track->_340 < c32[0]) {
+		track->updateSeq(0, true);
+	} else {
+		while (track->_340 >= c32[0]) {
+			track->_340 -= c32[0];
+			if (track->mainProc() == -1) {
+				track->stopSeqMain();
+				return -1;
+			}
+		}
+	}
+#else
+	DCInvalidateRange(&c32, sizeof(c32));
+	if (track->_340 < c32) {
+		track->updateSeq(0, true);
+	} else {
+		while (track->_340 >= c32) {
+			DCInvalidateRange(&c32, sizeof(c32));
+			track->_340 -= c32;
+			if (track->mainProc() == -1) {
+				track->stopSeqMain();
+				return -1;
+			}
+		}
+	}
+#endif
+	return 0;
+}
+
+/**
+ * @note Address: 0x800A274C
+ * @note Size: 0x8
+ */
+void JASTrack::registerSeqCallback(JASTrack::SeqCallback cb)
+{
+	sCallBackFunc = cb;
+}
+
+/**
+ * @note Address: 0x800A2754
+ * @note Size: 0xD4
+ */
+void JASTrack::newMemPool(int id)
+{
+	JASTrack* track   = (JASTrack*)new (JASDram, 0) u8[sizeof(JASTrack)];
+	track->mExtBuffer = new (JASDram, 0) JASOuterParam;
+	sFreeList         = track;
+
+	JASTrack** list = reinterpret_cast<JASTrack**>(track);
+	for (int i = 1; i < id; i++) {
+		list[0]             = (JASTrack*)new (JASDram, 0) u8[sizeof(JASTrack)];
+		list[0]->mExtBuffer = new (JASDram, 0) JASOuterParam;
+		list                = (JASTrack**)list[0];
+
+		sFreeListEnd = (JASTrack*)list;
+	}
+
+	list[0] = nullptr;
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x4C
+ */
+int JASTrack::getFreeMemCount()
+{
+	// UNUSED FUNCTION
+	P2_UNUSED_FUNCTION_TRAP();
+}
+
+/**
+ * @note Address: 0x800A2828
+ * @note Size: 0x30
+ */
+JASVibrate::JASVibrate()
+{
+	init();
+}
+
+/**
+ * @note Address: 0x800A2858
+ * @note Size: 0x18
+ */
+void JASVibrate::init()
+{
+	mPitch = 0.055555556f;
+	mDepth = 0.0f;
+	_00    = 0.0f;
+}
+
+/**
+ * @note Address: 0x800A2870
+ * @note Size: 0x34
+ */
+void JASVibrate::incCounter()
+{
+	_00 += mPitch;
+	if (_00 >= 4.0) { // intentional double
+		_00 -= 4.0f;
+	}
+}
+
+/**
+ * @note Address: 0x800A28A4
+ * @note Size: 0xA4
+ */
+f32 JASVibrate::getValue() const
+{
+	if (mDepth == 0.0f) {
+		return 1.0f;
+	}
+
+	f32 result = _00 * HALF_PI;
+	result     = sinf(result);
+	result *= mDepth;
+	result = JASPlayer::pitchToCent(result, 12.0f);
+	return result;
+}
+
+/**
+ * @note Address: 0x800A2948
+ * @note Size: 0xB0
+ */
+void JASTrack::channelUpdateCallback(u32 p1, JASChannel* chan, JASDsp::TChannel* dspChan, void* p4)
+{
+	switch (p1) {
+	case 0:
+		static_cast<JASTrack*>(p4)->mChannelUpdater.updateChannel(chan, dspChan);
+		break;
+	case 1:
+		static_cast<JASTrack*>(p4)->mChannelUpdater.initialUpdateChannel(chan, dspChan);
+		break;
+	case 3:
+		chan->release(0);
+		break;
+	case 2:
+		JASTrack* track = static_cast<JASTrack*>(p4);
+		for (int i = 0; i < 8; i++) {
+			if (chan == track->mChannels[i]) {
+				track->mChannels[i] = nullptr;
+				break;
+			}
+		}
+		track->remove(chan);
+		break;
+	}
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x8
+ */
+int JASTrack::getChannelCount() const
+{
+	// UNUSED FUNCTION
+	P2_UNUSED_FUNCTION_TRAP();
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x30
+ */
+int JASTrack::getReleaseChannelCount() const
+{
+	// UNUSED FUNCTION
+	P2_UNUSED_FUNCTION_TRAP();
+}

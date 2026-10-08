@@ -1,0 +1,218 @@
+#include "jaudio/jamosc.h"
+#include "jaudio/jammain_2.h"
+#include <stddef.h>
+
+s16 VIB_TABLE[] = { 0, 0, 0, 0, 20, 0x7fff, 0, 20, 0, 0, 0x14, -0x4000, 0, 20, 0, 13, 0, 1 };
+s16 TRE_TABLE[] = { 0, 0, 0x7fff, 0, 20, 0, 0, 20, -0x7fff, 0, 0x14, 0, 0, 0x14, 0x7fff, 13, 0, 1 };
+s16 REL_TABLE[] = { 0, 10, 0, 15, 1, 0 };
+
+Osc_ VIBRATO_DEF  = { 1, 0.8f, VIB_TABLE, VIB_TABLE, 0.0f, 1.0f };
+Osc_ TREMOLO_DEF  = { 0, 1.0f, TRE_TABLE, TRE_TABLE, 0.0f, 1.0f };
+Osc_ ENVELOPE_DEF = { 0, 1.0f, NULL, REL_TABLE, 1.0f, 0.0f };
+
+s16 ADS_TABLE[] = { 0, 0, 0x7fff, 0, 0, 0x7fff, 0, 0, 0, 14, 0, 0 };
+Osc_ ADSR_DEF   = { 0, 1.0f, NULL, NULL, 1.0f, 0.0f };
+Osc_ OSC_DEF    = { 0, 1.0f, NULL, REL_TABLE, 1.0f, 0.0f };
+
+/*
+ * Note: Equivalent to `JASTrack::updateOscParam` in later JAudio.
+ */
+void Osc_Update_Param(seqp_* track, u8 id, f32 val)
+{
+	u8* REF_id   = &id;
+	f32* REF_val = &val;
+
+	switch (id) {
+	case 6:
+	{
+		track->oscillators[0].width = val;
+		break;
+	}
+	case 7:
+	{
+		track->oscillators[0].rate = val;
+		break;
+	}
+	case 8:
+	{
+		track->oscillators[0].vertex = val;
+		break;
+	}
+	case 9:
+	{
+		track->oscillators[1].width = val;
+		break;
+	}
+	case 10:
+	{
+		track->oscillators[1].rate = val;
+		break;
+	}
+	case 11:
+	{
+		track->oscillators[1].vertex = val;
+		break;
+	}
+	}
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Osc_Setup_Vibrato(seqp_* track, u8 id)
+{
+	track->oscillators[id] = VIBRATO_DEF;
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Osc_Setup_Tremolo(seqp_* track, u8 id)
+{
+	track->oscillators[id] = TREMOLO_DEF;
+}
+
+/*
+ * Note: Equivalent to `JASTrack::oscSetupSimple` in later JAudio.
+ */
+void Osc_Setup_Simple(seqp_* track, u8 id)
+{
+	switch (id) {
+	case 0:
+	{
+		Osc_Setup_Vibrato(track, 1);
+		break;
+	}
+	case 1:
+	{
+		Osc_Setup_Tremolo(track, 0);
+		break;
+	}
+	case 2:
+	{
+		Osc_Setup_Tremolo(track, 1);
+		break;
+	}
+	}
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Osc_Clear_Overwrite(seqp_* track)
+{
+	track->oscillatorRouting[0] = 15;
+	track->oscillatorRouting[1] = 15;
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Osc_Init_Env(seqp_* track)
+{
+	track->oscillators[0] = ENVELOPE_DEF;
+
+	Osc_Clear_Overwrite(track);
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Osc_Setup_SimpleEnv(seqp_* track, u8 id, u32 val)
+{
+	STACK_PAD_VAR(2);
+	switch (id) {
+	case 0:
+	{
+		track->oscillators[0]                 = ENVELOPE_DEF;
+		track->oscillators[0].attackVecOffset = (s16*)Jam_OfsToAddr(track, val);
+#ifdef PIKI_PC_PORT
+		track->oscillators[0].attackVecBigEndian = TRUE;
+#endif
+		break;
+	}
+	case 1:
+	{
+		track->oscillators[0].releaseVecOffset = (s16*)Jam_OfsToAddr(track, val);
+#ifdef PIKI_PC_PORT
+		track->oscillators[0].releaseVecBigEndian = TRUE;
+#endif
+		break;
+	}
+	}
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Osc_Setup_ADSR(seqp_* track, s16* addr)
+{
+	track->oscillators[0] = ADSR_DEF;
+
+	track->oscillators[0].attackVecOffset  = track->adsTable;
+	track->oscillators[0].releaseVecOffset = track->relTable;
+#ifdef PIKI_PC_PORT
+	track->oscillators[0].attackVecBigEndian  = FALSE;
+	track->oscillators[0].releaseVecBigEndian = FALSE;
+#endif
+
+	for (int i = 0; i < 12; i++) {
+		track->adsTable[i] = ADS_TABLE[i];
+	}
+
+	for (int i = 0; i < 6; i++) {
+		track->relTable[i] = REL_TABLE[i];
+	}
+
+	track->adsTable[1] = addr[0];
+	track->adsTable[4] = addr[1];
+	track->adsTable[7] = addr[2];
+	track->adsTable[8] = addr[3];
+	track->relTable[1] = addr[4];
+}
+
+/**
+ * @TODO: Documentation
+ */
+void Osc_Setup_Full(seqp_* track, u8 flag, u32 offs1, u32 offs2)
+{
+	u32 a   = flag & 0xF;
+	u32 b   = flag & 0x40;
+	u32 idx = (flag >> 4) & 0x1;
+	u32 c   = flag & 0x20;
+	u32 d   = flag & 0x80;
+	if (d) {
+		track->oscillators[idx] = ENVELOPE_DEF;
+
+		track->oscillators[idx].mode = a;
+		switch (a) {
+		case 1:
+		{
+			track->oscillators[idx].vertex = 1.0f;
+			break;
+		}
+		}
+	}
+
+	if (b) {
+		if (offs1 == 0) {
+			track->oscillators[idx].attackVecOffset = NULL;
+		} else {
+			track->oscillators[idx].attackVecOffset = (s16*)Jam_OfsToAddr(track, offs1);
+		}
+#ifdef PIKI_PC_PORT
+		track->oscillators[idx].attackVecBigEndian = offs1 != 0;
+#endif
+	}
+
+	if (c) {
+		if (offs2 == 0) {
+			track->oscillators[idx].releaseVecOffset = REL_TABLE;
+		} else {
+			track->oscillators[idx].releaseVecOffset = (s16*)Jam_OfsToAddr(track, offs2);
+		}
+#ifdef PIKI_PC_PORT
+		track->oscillators[idx].releaseVecBigEndian = offs2 != 0;
+#endif
+	}
+}

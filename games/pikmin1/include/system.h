@@ -1,0 +1,629 @@
+#ifndef _SYSTEM_H
+#define _SYSTEM_H
+
+#include "AyuStack.h"
+#include "Controller.h"
+#include "CoreNode.h"
+#include "Delegate.h"
+#include "Dolphin/ar.h"
+#include "Dolphin/dvd.h"
+#include "Dolphin/os.h"
+#include "GfxObject.h"
+#include "Stream.h"
+#include "types.h"
+#include <stddef.h>
+#include <stdlib.h>
+
+struct DGXGraphics;
+class BaseApp;
+class CacheTexture;
+class TextureCacher;
+class LoadIdler;
+class Timers;
+class Font;
+class BaseShape;
+class CoreNode;
+class LFInfo;
+class LightFlare;
+class LFlareGroup;
+class Matrix4f;
+class AtxRouter;
+class ControllerMgr;
+struct OSContext;
+struct OSThread;
+class Shape;
+class AnimData;
+class AnimFrameCacher;
+class MemInfo;
+class CacheInfo;
+
+/**
+ * @brief Used to seperate the memory arenas held in StdSystem.
+ */
+enum SystemHeapType {
+	SYSHEAP_NULL    = -1, // No heap active
+	SYSHEAP_Sys     = 0,  // General system heap
+	SYSHEAP_Ovl     = 1,  // Overlay heap
+	SYSHEAP_App     = 2,  // Application heap
+	SYSHEAP_Load    = 3,  // Load heap
+	SYSHEAP_Teki    = 4,  // Enemy heap
+	SYSHEAP_Movie   = 5,  // Movie heap
+	SYSHEAP_Message = 6,  // Message heap
+	SYSHEAP_Lang    = 7,  // Language heap
+	SYSHEAP_COUNT,        // 8, total number of heaps
+};
+
+/**
+ * @brief TODO
+ */
+enum TimerState {
+	TS_Off = 0, // 0
+	TS_On,      // 1
+	TS_Full     // 2
+};
+
+/**
+ * @brief Language ID. For PAL, these are mapped to OS languages in `GamePrefs::Initialise()`.
+ */
+enum LanguageID {
+	LANG_FORCE_CHANGE = -1, ///< -1, index to set if language requires re-loading.
+#if defined(VERSION_GPIP01)
+	LANG_English = 0, ///< 0, PAL English. NB: for PAL, Dutch OS language also maps to this.
+	LANG_French  = 1, ///< 1, PAL French.
+	LANG_German  = 2, ///< 2, PAL Italian.
+	LANG_Spanish = 3, ///< 3, PAL Spanish.
+	LANG_Italian = 4, ///< 4, PAL Italian.
+
+	LANG_MIN = LANG_English, ///< 0, for bounds checks.
+	LANG_MAX = LANG_Italian, ///< 4, for bounds checks.
+
+#else
+	LANG_Adult = 0, ///< 0, "otona", only different in the demo, both are just "eng" in the US retail release.
+	LANG_Child = 1, ///< 1, "kodomo", only different in the demo, both are just "eng" in the US retail release.
+#endif
+
+	LANG_CAPACITY = 8,
+};
+
+/**
+ * @brief TODO
+ */
+struct AddressNode : public CoreNode {
+	AddressNode()
+	    : CoreNode("")
+	{
+	}
+
+	// _00     = VTBL
+	// _00-_14 = CoreNode
+	// TODO: members
+};
+
+/**
+ * @brief TODO
+ */
+struct DirEntry : public CoreNode {
+	DirEntry()
+	    : CoreNode("")
+	{
+	}
+
+	// _00     = VTBL
+	// _00-_14 = CoreNode
+	int mPending; // _14
+	u32 mAddress; // _18
+};
+
+/**
+ * @brief TODO
+ */
+class BinobjInfo : public GfxobjInfo {
+public:
+	BinobjInfo()
+	    : mData(nullptr)
+	{
+	}
+
+	// _1C     = VTBL
+	// _00-_20 = GfxobjInfo
+	u8* mData; // _20
+};
+
+/**
+ * @brief TODO
+ */
+struct SystemCache : public ARQRequest {
+	void remove()
+	{
+		mNext->mPrev = mPrev;
+		mPrev->mNext = mNext;
+	}
+
+	void insertAfter(SystemCache* other)
+	{
+		other->mNext = mNext;
+		other->mPrev = this;
+
+		mNext->mPrev = other;
+		mNext        = other;
+	}
+
+	// _00-_20 = ARQRequest
+	SystemCache* mNext; // _20
+	SystemCache* mPrev; // _24
+};
+
+/**
+ * @brief Enum for bitfield `StdSystem::mSystemFlags`.
+ */
+BEGIN_ENUM_TYPE(SystemFlags)
+enum {
+	Active   = 0x00200000,
+	Shutdown = 0x80000000,
+} END_ENUM_TYPE;
+
+/**
+ * @brief Base system class for shared behavior across Dolphin OS and Windows OS.
+ *
+ * @note Size: 0x244.
+ */
+class SYSCORE_API StdSystem {
+public:
+	StdSystem();
+
+	void onceInit();
+	AyuHeap* getHeap(int heapIdx);
+	void resetHeap(int heapIdx, int flag);
+	int setHeap(int);
+	GfxobjInfo* findGfxObject(immut char*, u32);
+	Texture* loadTexture(immut char* path, bool isRelativePath);
+	Shape* loadShape(immut char* modelPath, bool checkCache);
+	AnimData* findAnimation(immut char*);
+	int findAnyIndex(immut char*, immut char*);
+	AnimData* loadAnimation(Shape* model, immut char* dataPath, bool isRelativePath);
+	void addAnimation(AnimData*, immut char*);
+	void addGfxObject(GfxobjInfo*);
+	void attachObjs();
+	void detachObjs();
+	void invalidateObjs(uintptr_t, uintptr_t);
+	void invalidateObjsForHeap(int heapIdx);
+	void addTexture(Texture*, immut char*);
+	Shape* getShape(immut char*, immut char*, immut char*, bool);
+	void initLFlares(int);
+	void resetLFlares();
+	LFInfo* getLFlareInfo();
+	LFlareGroup* registerLFlare(Texture*);
+	void flushLFlares(Graphics&);
+	void loadBundle(immut char* pPath, bool loadWithCache);
+
+	void getAppMemory(char*);
+	GfxobjInfo* findAnyGfxObject(immut char*, u32);
+	GfxobjInfo* findTexture(Texture*);
+	AnimData* findAnyAnimation(immut char*);
+	AnimData* findIndexAnimation(immut char*, int);
+
+	// Static functions
+	static char* stringDup(immut char*);
+
+	// Inline functions
+	f32 getRand(f32 max) { return max * (rand() / f32(RAND_MAX)); }
+	f32 getHalfRand(f32 max) { return max * (rand() / f32(RAND_MAX) - 0.5f); }
+	f32 getFade() { return mCurrentFade; }
+	void setFade(f32 target, f32 rate = 3.0f)
+	{
+		mTargetFade = target;
+		mFadeRate   = rate;
+	}
+	void set2DRoot(immut char* bloDir, immut char* texDir)
+	{
+		mBloDir = bloDir;
+		mTexDir = texDir;
+	}
+	void setTextureBase(immut char* base1, immut char* base2)
+	{
+		mTextureBase1 = base1;
+		mTextureBase2 = base2;
+	}
+	void setDataRoot(immut char* dir) { mDataRoot = dir; }
+	void softReset() { mSoftResetPending = true; }
+	void Shutdown() { mSystemFlags = SystemFlags::Shutdown; }
+	bool isShutdown() { return mSystemFlags == SystemFlags::Shutdown; }
+	bool resetPending() { return mSoftResetPending; }
+	void setFrameClamp(int frameRate)
+	{
+		mFrameRate = frameRate;
+	}
+#if defined(PIKI_PC_PORT)
+	/**
+	 * Ticks de lógica por cada fotograma de 30 Hz del juego original: 1 a
+	 * 30 FPS, 2 a 60 y 4 a 120 (clamp 0). Para lo que cuenta fotogramas en
+	 * vez de tiempo, que si no va el doble o el cuádruple de rápido.
+	 */
+	int pcTicksPer30Hz() { return mFrameRate == 0 ? 4 : (mFrameRate == 1 ? 2 : 1); }
+#endif
+	int getHeapNum() { return mActiveHeapIdx; }
+
+	void setActive(bool set)
+	{
+		u32 unused; // why?
+		if (set) {
+			mSystemFlags |= SystemFlags::Active;
+			unused = mSystemFlags;
+		} else {
+			mSystemFlags &= ~SystemFlags::Active;
+			unused = mSystemFlags;
+		}
+		Activate(set);
+	}
+	bool isActive(void) { return (mSystemFlags & SystemFlags::Active) == SystemFlags::Active; }
+
+	// Remaining DLL inlines TODO:
+	// public: void __thiscall StdSystem::genAge(class AgeServer &)
+
+	bool mSoftResetPending;        // _00
+	f32 mCurrentFade;              // _04
+	f32 mTargetFade;               // _08
+	f32 mFadeRate;                 // _0C
+	Font* mConsFont;               // _10
+	s32 mFrameRate;                // _14
+	u32 mTimerState;               // _18, see TimerState enum
+	u32 mTogglePrint;              // _1C
+	u32 mToggleDebugInfo;          // _20
+	u32 mToggleDebugExtra;         // _24
+	u32 mToggleBlur;               // _28
+	u32 mToggleFileInfo;           // _2C
+	u32 mToggleColls;              // _30
+	Timers* mTimer;                // _34
+	TextureCacher* mCacher;        // _38
+	u32 mMatrixCount;              // _3C
+	Matrix4f* mMatrices;           // _40
+	immut char* mBloDir;           // _44
+	immut char* mTexDir;           // _48
+	immut char* mActiveDir;        // _4C
+	immut char* mDataRoot;         // _50
+	AyuHeap mHeaps[SYSHEAP_COUNT]; // _54 (54:sys, 7C:ovl, A4:app, CC:load, F4:teki, 11C:movie, 144:message, 16C:lang)
+	int mActiveHeapIdx;            // _194
+	BOOL mForcePrint;              // _198
+	MemInfo* mCurrMemInfo;         // _19C
+#if defined(VERSION_GPIP01)
+	LanguageID mLanguageID; // _1A0, language ID for PAL.
+#endif
+
+	// the vtable has to be at 0x1A0, so it's in the middle, yes.
+	virtual void initSoftReset();                                                                                       // _08
+	virtual RandomAccessStream* openFile(immut char* path, bool isRelativePath = true, bool = true) { return nullptr; } // _0C
+	virtual u32 copyRamToCache(u32, u32, u32) { return 0; }                                                             // _10
+	virtual void copyCacheToRam(u32, u32, u32) { }                                                                      // _14
+	virtual void copyWaitUntilDone() { }                                                                                // _18
+	virtual void copyCacheToTexture(CacheTexture*) { }                                                                  // _1C
+#if defined(VERSION_PIKIDEMO)                                                                                           //
+	virtual void forceHardReset() { }                                                                                   // _20
+#endif                                                                                                                  //
+	virtual void Activate(bool) { }                                                                                     // _20
+	virtual void parseArchiveDirectory(immut char* arcPath, immut char* dirPath) { }                                    // _24
+	virtual void sndPlaySe(u32) = 0;                                                                                    // _28
+	virtual void startLoading(LoadIdler*, bool, u32) { }                                                                // _2C
+	virtual void endLoading() { }                                                                                       // _30
+
+	int mPolygonCount;            // _1A4
+	u32 mMaterialCount;           // _1A8
+	u32 mDispCount;               // _1AC
+	u32 mLightCount;              // _1B0
+	s32 mActiveLightCount;        // _1B4
+	u32 mAnimatedPolygons;        // _1B8
+	u32 mLightingSkips;           // _1BC
+	u32 mLightingSets;            // _1C0
+	u32 mLightSetNum;             // _1C4
+	u32 mSystemFlags;             // _1C8
+	Graphics* mGraphics;          // _1CC
+	GfxobjInfo mGfxobjInfo;       // _1D0
+	bool mHasGfxObjects;          // _1F0
+	immut char* mTextureBase1;    // _1F4
+	immut char* mTextureBase2;    // _1F8
+	Shape* mCurrentShape;         // _1FC
+	CoreNode mDvdRoot;            // _200
+	CoreNode mAramRoot;           // _214
+	CoreNode* mFileList;          // _228, root receiving DirEntry children
+	int mFlareCount;              // _22C
+	int mLfInfoCount;             // _230
+	LFInfo* mFlareInfoList;       // _234
+	LFlareGroup* mFlareGroupList; // _238
+	int mDvdOpenFiles;            // _23C
+	u32 mDvdBytesRead;            // _240
+
+	// .dll only functions
+	void ageAnyAnimations(AgeServer&, immut char*);
+};
+
+/**
+ * @brief Fabricated - some structure needs to live at 0x310 in System.
+ */
+struct AramAllocator {
+
+	void init(u32 start, u32 size)
+	{
+		mStartAddress = start;
+		mTotalSize    = size;
+		reset();
+	}
+
+	void reset() { mNextFreeAddress = mStartAddress; }
+
+	u32 alloc(u32 numBytes)
+	{
+		u32 allocAddr = 0;
+		u32 nextFree  = mNextFreeAddress;
+		if (nextFree + numBytes <= mStartAddress + mTotalSize) {
+			allocAddr        = nextFree;
+			mNextFreeAddress = nextFree + numBytes;
+		}
+		return allocAddr;
+	}
+
+	u32 getFreeSize() { return mStartAddress + mTotalSize - mNextFreeAddress; }
+
+	u32 mStartAddress;    ///< _00
+	u32 mNextFreeAddress; ///< _04
+	u32 mTotalSize;       ///< _08
+};
+
+/**
+ * @brief DVD error states for disc reading operations
+ */
+BEGIN_ENUM_TYPE(DvdError)
+enum {
+	None        = -1, // No error, normal operation
+	ReadingDisc = 0,  // Currently reading game disc
+	FatalError  = 1,  // Fatal disc read error occurred
+	RetryError  = 2,  // Disc read error, retrying
+	NoDisc      = 3,  // No disc inserted
+	CoverOpen   = 4,  // Disc cover is open
+	WrongDisc   = 5   // Non-Pikmin disc inserted
+} END_ENUM_TYPE;
+
+/**
+ * @brief FABRICATED - No other class we currently know of has a virtual table like this.
+ */
+struct SystemClass250 {
+	virtual void method(Graphics& gfx) = 0; // _00
+
+	// _00     = VTBL
+};
+
+/**
+ * @brief FABRICATED - Singly-linked list of symbolic information (See `ParseMapFile`)
+ */
+struct SymbolInfo {
+	SymbolInfo* mNext;     // _00
+	u32 mVirtualAddress;   // _04
+	char mDemangledName[]; // _08, Flexible array member, also contains translation unit name.
+};
+
+/**
+ * @brief TODO
+ *
+ * @note Size: 0x334.
+ */
+class SYSCORE_API System : public StdSystem {
+public:
+	System();
+
+	virtual void initSoftReset();                                                                    // _08
+	virtual RandomAccessStream* openFile(immut char* path, bool isRelativePath = true, bool = true); // _0C
+	virtual u32 copyRamToCache(u32, u32, u32);                                                       // _10
+	virtual void copyCacheToRam(u32, u32, u32);                                                      // _14
+	virtual void copyWaitUntilDone();                                                                // _18
+	virtual void copyCacheToTexture(CacheTexture*);                                                  // _1C
+#if defined(VERSION_PIKIDEMO)                                                                        //
+	virtual void forceHardReset() { mIsDemoTimeUp = TRUE; }                                          // _20
+#endif                                                                                               //
+	virtual void parseArchiveDirectory(immut char* arcPath, immut char* dirPath);                    // _24
+	virtual void sndPlaySe(u32);                                                                     // _28
+	virtual void startLoading(LoadIdler* idler, bool useLoadScreen, u32 loadDelay);                  // _2C
+	virtual void endLoading();                                                                       // _30
+
+	~System();
+
+	void run(BaseApp* app);
+	void beginRender();
+	void doneRender();
+	void waitRetrace();
+	f32 getTime();
+	void updateSysClock();
+	void hardReset();
+	void showDvdError(Graphics&);
+	void nudgeLoading();
+	void nudgeDvdThread();
+	void startDvdThread();
+	void Initialise();
+	RandomAccessStream* createFile(immut char*, BOOL);
+
+	// unused/inlined:
+	immut char* findAddress(u32);
+	bool hasDebugInfo();
+	static void halt(immut char* file, int line, immut char* message);
+	void sleep(f32 seconds);
+
+	static void* alloc(size_t);
+
+	AtxRouter* getAtxRouter() { return mAtxRouter; }
+	void setAtxRouter(AtxRouter* router) { mAtxRouter = router; }
+	f32 getFrameTime() { return mDeltaTime; }
+	f32 getFrameRate() { return mFPS; }
+	int setStreamType(int); // TODO
+
+	void setActiveAramAllocator(AramAllocator* allocator) { mActiveAramAllocator = allocator; }
+
+	// Remaining DLL inlines TODO:
+	// public: __int32 __thiscall System::getFrameCount(void)
+	// public: void __thiscall System::genAge(class AgeServer &)
+	// public: void __thiscall System::buildModeList(void)
+	// public: bool __thiscall System::setVideoMode(bool,int,int,int)
+	// public: class UIWindow * __thiscall System::createDebugStream(class UIWindow *)
+	// public: class BaseApp * __thiscall System::firstApp(void)
+	// public: void __thiscall System::searchFiles(char *,char *,class IDelegate2<char *,unsigned __int32> *,bool)
+
+	// _00      = VTBL
+	// _00-_248 = StdSystem
+	#if defined(PIKI_PC_PORT)
+	uintptr_t mHeapStart;
+	#else
+	u32 mHeapStart;                                  // _244
+	#endif
+	u32 mHeapEnd;                                    // _248
+	Graphics* mDGXGfx;                               // _24C, cast to DGXGraphics in DOL
+	SystemClass250* mHaltCallback;                   // _250, vestigial callback used by `System::halt`
+	Delegate1<System, Graphics&>* mDvdErrorCallback; // _254
+	int mDvdErrorCode;                               // _258
+	u32 mDvdBufferSize;                              // _25C
+	u32 mIsLoadingActive;                            // _260
+	u32 mLoadTimeBeforeIdling;                       // _264
+	u32 mIsLoadScreenActive;                         // _268
+	vu32 mIsRendering;                               // _26C
+#if defined(VERSION_PIKIDEMO)                        //
+	u32 mIsDemoTimeUp;                               // _270
+#endif                                               //
+	u32 mIsCardSaving;                               // _270
+	OSThread* mCurrentThread;                        // _274
+	AtxRouter* mAtxRouter;                           // _278
+	ControllerMgr mControllerMgr;                    // _27C
+	u32 mPrevTick;                                   // _280
+	u32 mFpsSampleStart;                             // _284
+	int mFrameTicks;                                 // _288
+	f32 mDeltaTime;                                  // _28C
+	f32 mFPS;                                        // _290
+	u32 mEngineFrames;                               // _294
+	u32 mFramesAtSampleStart;                        // _298
+	u32 mTotalFrames;                                // _29C
+	u32 mRetraceCount;                               // _2A0
+	BOOL mPrevAllocType;                             // _2A4, member name is seriously suspect
+	AddressNode _2A8;                                // _2A8
+	SymbolInfo* mBuildMapFuncList;                   // _2BC
+	SystemCache mActiveCacheList;                    // _2C0
+	SystemCache mFreeCacheList;                      // _2E8
+	AramAllocator mShapeAramAllocator;               // _310
+	AramAllocator mBaseAramAllocator;                // _31C
+	AramAllocator* mActiveAramAllocator;             // _328
+	vu32 mDmaComplete;                               // _32C
+	vu32 mTexComplete;                               // _330
+#if defined(WIN32)                                   // The WIN32 `System` class was very different.
+	u8 _334[0x3B8 - 0x334];                          // _334
+	char _3B8[];                                     // _3B8, major TODO here.
+#endif
+};
+
+extern SYSCORE_API System* gsys;
+
+// Escala de los contadores por fotograma (ver System::pcTicksPer30Hz).
+#if defined(PIKI_PC_PORT)
+#define PC_TICKS30 (gsys->pcTicksPer30Hz())
+#else
+#define PC_TICKS30 1
+#endif
+
+#if defined(PIKI_PC_PORT) && defined(VERSION_GPIP01)
+/// The language chosen before the System object existed. See stdSystem.cpp.
+LanguageID pcPendingLanguage();
+/// Records the language, and applies it immediately if gsys is already up.
+void pcSetLanguage(LanguageID language);
+#endif
+
+// SYSTEM STREAMS
+
+/**
+ * @brief TODO
+ */
+struct LogStream : public Stream {
+	LogStream()
+	{
+		mBufPosition = 0;
+		_UNUSED0C    = 0;
+	}
+
+	virtual void flush() // _54 (weak)
+	{
+		mBuffer[mBufPosition] = 0;
+		if (gsys->mTogglePrint) {
+			OSReport("%s\n", mBuffer);
+		}
+
+		mBufPosition = 0;
+	}
+	virtual void write(immut void* data, int size) // _40 (weak)
+	{
+		for (int i = 0; i < size; i++) {
+			char c = ((immut char*)data)[i];
+			if (c == 0xA) { // line feed
+				flush();
+				continue;
+			}
+
+			if (c == 0x9) { // horizontal tab
+				if (mBufPosition >= 255) {
+					flush();
+				}
+
+				mBuffer[mBufPosition++] = ' ';
+				if (mBufPosition >= 255) {
+					flush();
+				}
+
+				mBuffer[mBufPosition++] = ' ';
+				continue;
+			}
+
+			if (mBufPosition >= 255) {
+				flush();
+			}
+
+			mBuffer[mBufPosition++] = c;
+		}
+	}
+
+	// _04     = VTBL
+	// _00-_08 = Stream
+	int mBufPosition;    // _08
+	u32 _UNUSED0C;       // _0C
+	char mBuffer[0x100]; // _10
+};
+
+/**
+ * @brief TODO
+ */
+struct AramStream : public RandomAccessStream {
+	virtual int getPending() { return mPending; } // _44 (weak)
+	virtual void read(void* data, int size)       // _3C (weak)
+	{
+		int readSize = OSRoundUp32B(size);
+		#if defined(PIKI_PC_PORT)
+		OSPanic(__FILE__, __LINE__, "AramStream::read reached on PC for '%s'", mPath ? mPath : "<unknown>");
+		#else
+		gsys->copyCacheToRam((u32)data, mBaseAddress + mOffset, readSize);
+		gsys->copyWaitUntilDone();
+		#endif
+		mOffset += readSize;
+	}
+
+	void init(immut char* path, u32 address, int pending)
+	{
+		mPath        = path;
+		mPending     = pending;
+		mBaseAddress = address;
+		mOffset      = 0;
+	}
+
+	// _04     = VTBL
+	// _00-_08 = RandomAccessStream
+	u32 mBaseAddress; // _08, start address maybe?
+	u32 mOffset;      // _0C, offset/position maybe?
+	int mPending;     // _10
+};
+
+#ifdef WIN32
+extern SYSCORE_API HWND sysCurrWnd;
+extern SYSCORE_API HINSTANCE sysHInst;
+#endif
+extern SYSCORE_API int glnWidth;
+extern SYSCORE_API int glnHeight;
+
+#endif

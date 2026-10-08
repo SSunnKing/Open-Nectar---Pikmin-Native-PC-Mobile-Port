@@ -1,0 +1,143 @@
+#include "DebugLog.h"
+#include "MapCode.h"
+#include "MapMgr.h"
+#include "RumbleMgr.h"
+#include "TAI/Aeffect.h"
+#include "teki.h"
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(14)
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F4
+ */
+DEFINE_PRINT("TAIAeffect")
+
+const int TAIAeffCloudOfDust::RUMBLE_NONE = -1;
+
+/**
+ * @todo: Documentation
+ */
+void TAIAeffCloudOfDust::init(EffectMgr::effTypeTable effID, bool p2, int soundID, int rumbleType, f32 sinkThreshold, int footNum,
+                              int jointID0, int jointID1, int jointID2, int jointID3)
+{
+	_20 = p2;
+	if (footNum > Teki::FOOT_COUNT) {
+		PRINT("foot Max is %d" MISSING_NEWLINE, Teki::FOOT_COUNT);
+		ERROR("foot Max is %d", Teki::FOOT_COUNT);
+		return;
+	}
+
+	mEffectType        = effID;
+	mSoundID           = soundID;
+	mRumbleType        = rumbleType;
+	mFootSinkThreshold = sinkThreshold;
+	mFootNum           = footNum;
+	mFootJointID       = new int[mFootNum];
+	if (mFootNum > Teki::FOOT_0) {
+		mFootJointID[0] = jointID0;
+	}
+	if (mFootNum > Teki::FOOT_1) {
+		mFootJointID[1] = jointID1;
+	}
+	if (mFootNum > Teki::FOOT_2) {
+		mFootJointID[2] = jointID2;
+	}
+	if (mFootNum > Teki::FOOT_3) {
+		mFootJointID[3] = jointID3;
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void TAIAeffCloudOfDust::start(Teki& teki)
+{
+	for (int i = 0; i < mFootNum; i++) {
+		CollPart* foot = getCollPart(teki, mFootJointID[i]);
+		if (foot) {
+			teki.setFootPosY((YTeki::effFootIndexFlag)i, foot->mCentre.y);
+			teki.setFootEffectSwitch((YTeki::effFootIndexFlag)i, true);
+			teki.setMapCode(ATTR_NULL);
+		}
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+bool TAIAeffCloudOfDust::act(Teki& teki)
+{
+	for (int i = 0; i < mFootNum; i++) {
+		createCloudOfDust(teki, i);
+	}
+	return false;
+}
+
+/**
+ * @todo: Documentation
+ */
+void TAIAeffCloudOfDust::setType(Vector3f& pos, int mapAttr, int jointID)
+{
+	pos.y = mapMgr->getMinY(pos.x, pos.z, true);
+}
+
+/**
+ * @todo: Documentation
+ */
+void TAIAeffCloudOfDust::createCloudOfDust(Teki& teki, int footIdx)
+{
+	CollPart* foot = getCollPart(teki, mFootJointID[footIdx]);
+	if (!foot) {
+		return;
+	}
+
+	f32 yDiff = foot->mCentre.y - teki.getFootPosY((YTeki::effFootIndexFlag)footIdx);
+
+	if (teki.getFootEffectSwitch((YTeki::effFootIndexFlag)footIdx)) {
+		if (foot->mCentre.y - foot->mRadius < mapMgr->getMinY(foot->mCentre.x, foot->mCentre.z, true)
+		    && foot->mCentre.y - foot->mRadius < teki.getPosition().y && yDiff < mFootSinkThreshold) {
+			CollTriInfo* tri = mapMgr->getCurrTri(foot->mCentre.x, foot->mCentre.z, true);
+			if (tri) {
+				int attr = MapCode::getAttribute(tri);
+				Vector3f footPos(foot->mCentre);
+				setType(footPos, attr, mFootJointID[footIdx]);
+				if (mEffectType != EffectMgr::EFF_NULL) {
+					effectMgr->create(mEffectType, footPos, nullptr, nullptr);
+				}
+
+				if (mSoundID != -1) {
+					teki.playEventSound(&teki, mSoundID);
+				}
+
+				if (mRumbleType != -1) {
+					rumbleMgr->start(mRumbleType, 0, footPos);
+				}
+				teki.setMapCode(attr);
+				teki.setFootEffectSwitch((YTeki::effFootIndexFlag)footIdx, false);
+			}
+		}
+	} else if (yDiff > 0.0f) {
+		teki.setFootEffectSwitch((YTeki::effFootIndexFlag)footIdx, true);
+	}
+
+	teki.setFootPosY((YTeki::effFootIndexFlag)footIdx, foot->mCentre.y);
+}
+
+/**
+ * @todo: Documentation
+ */
+CollPart* TAIAeffCloudOfDust::getCollPart(Teki& teki, int partID)
+{
+	CollPart* part = teki.mCollInfo->getSphere(partID);
+	if (!part && _20) {
+		PRINT("collPart [%c%c%c%c] is not found.\n", (partID & 0xFF000000) >> 24, (partID & 0xFF0000) >> 16, (partID & 0xFF00) >> 8,
+		      partID & 0xFF);
+		ERROR("collPart is not found.\n");
+	}
+	return part;
+}

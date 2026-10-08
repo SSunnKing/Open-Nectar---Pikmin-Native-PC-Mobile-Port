@@ -1,0 +1,125 @@
+#include "zen/DamageEffect.h"
+#include "zen/DrawGameInfo.h"
+#include "Graphics.h"
+#include "NaviMgr.h"
+#include "gameflow.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_gfx.h"
+#endif
+
+/**
+ * @todo: Documentation
+ */
+zen::DamageEffect::DamageEffect()
+{
+	mDamageAlpha = 0.0f;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool zen::DamageEffect::update()
+{
+	if (!gameflow.mIsUIOverlayActive) {
+		Navi* navi;
+		if (naviMgr) {
+			navi = naviMgr->getNavi(zen::gHudNaviIndex);
+		}
+
+		// hmm.
+		if (navi->orimaDamaged() && mDamageAlpha == 0.0f) {
+			mDamageAlpha = 2.0f;
+		}
+
+		mDamageAlpha -= gsys->getFrameTime();
+		if (mDamageAlpha < 0.0f) {
+			mDamageAlpha = 0.0f;
+		}
+	}
+	return false;
+}
+
+/**
+ * @todo: Documentation
+ */
+void zen::DamageEffect::draw(Graphics& gfx)
+{
+#if defined(PIKI_PC_PORT)
+	// El efecto original tiñe de rojo la escena desenfocada del frame
+	// anterior (mBlurResultTexture). En el port el blur está desactivado
+	// (GXCopyTex es un stub), así que esa textura nunca se rellena y su
+	// memoria trae lo que hubiera antes: en Android salía la textura del
+	// silbato a pantalla completa. En su lugar, un tinte rojo plano que se
+	// apaga con la misma curva.
+	if (mDamageAlpha > 0.0f) {
+		const int screenW = pc_gfx_get_hud_wide() ? pc_gfx_get_hud_virtual_width() : gfx.mScreenWidth;
+		const bool lighting = gfx.setLighting(false, nullptr);
+		gfx.setFog(false);
+		const int blend = gfx.setCBlending(BLEND_Alpha);
+		gfx.setColour(Colour(235, 96, 96, RoundOff(56.0f * mDamageAlpha)), true);
+		gfx.useTexture(nullptr, GX_TEXMAP0);
+		gfx.fillRectangle(RectArea(0, 0, screenW, gfx.mScreenHeight));
+		gfx.setCBlending(blend);
+		gfx.setLighting(lighting, nullptr);
+	}
+	return;
+#endif
+	if (mDamageAlpha > 0.0f) {
+		gfx.useTexture(mapMgr->mBlurResultTexture, GX_TEXMAP0);
+		GXSetTevSwapModeTable(GX_TEV_SWAP0, GX_CH_RED, GX_CH_GREEN, GX_CH_BLUE, GX_CH_ALPHA);
+		GXSetTevSwapModeTable(GX_TEV_SWAP1, GX_CH_RED, GX_CH_RED, GX_CH_RED, GX_CH_ALPHA);
+		GXSetTevSwapModeTable(GX_TEV_SWAP2, GX_CH_RED, GX_CH_RED, GX_CH_RED, GX_CH_ALPHA);
+		GXSetTevSwapModeTable(GX_TEV_SWAP3, GX_CH_RED, GX_CH_RED, GX_CH_RED, GX_CH_ALPHA);
+
+		GXSetNumTevStages(4);
+
+		GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
+		GXSetTevOrder(GX_TEVSTAGE1, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
+		GXSetTevOrder(GX_TEVSTAGE2, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
+		GXSetTevOrder(GX_TEVSTAGE3, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
+
+		GXSetTevSwapMode(GX_TEVSTAGE0, GX_TEV_SWAP1, GX_TEV_SWAP1);
+
+		GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_TEXC);
+		GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_KONST);
+		GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+		GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+
+		GXSetTevSwapMode(GX_TEVSTAGE1, GX_TEV_SWAP2, GX_TEV_SWAP2);
+
+		GXSetTevColorIn(GX_TEVSTAGE1, GX_CC_CPREV, GX_CC_ZERO, GX_CC_ZERO, GX_CC_TEXC);
+		GXSetTevAlphaIn(GX_TEVSTAGE1, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_KONST);
+		GXSetTevColorOp(GX_TEVSTAGE1, GX_TEV_COMP_RGB8_GT, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+
+		GXSetTevSwapMode(GX_TEVSTAGE2, GX_TEV_SWAP3, GX_TEV_SWAP3);
+
+		GXSetTevColorIn(GX_TEVSTAGE2, GX_CC_CPREV, GX_CC_ZERO, GX_CC_ZERO, GX_CC_TEXC);
+		GXSetTevAlphaIn(GX_TEVSTAGE2, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_KONST);
+		GXSetTevColorOp(GX_TEVSTAGE2, GX_TEV_COMP_RGB8_GT, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+
+		GXColor color;
+		color.r = 235;
+		color.g = 127;
+		color.b = 127;
+		color.a = RoundOff(64.0f * mDamageAlpha);
+
+		GXSetTevKColorSel(GX_TEVSTAGE3, GX_TEV_KCSEL_K0);
+		GXSetTevKColor(GX_KCOLOR0, color);
+		GXSetTevColorIn(GX_TEVSTAGE3, GX_CC_ZERO, GX_CC_CPREV, GX_CC_KONST, GX_CC_ZERO);
+		GXSetTevAlphaIn(GX_TEVSTAGE3, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_KONST);
+		GXSetTevColorOp(GX_TEVSTAGE3, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+
+		f32 scale = 1.0f;
+#if defined(PIKI_PC_PORT)
+		const int screenW = pc_gfx_get_hud_wide() ? pc_gfx_get_hud_virtual_width() : gfx.mScreenWidth;
+#else
+		const int screenW = gfx.mScreenWidth;
+#endif
+		gfx.drawRectangle(RectArea(0, 0, (f32)screenW * scale, (f32)gfx.mScreenHeight * scale),
+		                  RectArea(0, 0, 0.5f * (f32)gfx.mScreenWidth, 0.5f * (f32)gfx.mScreenHeight), nullptr);
+
+		GXSetTevSwapMode(GX_TEVSTAGE0, GX_TEV_SWAP0, GX_TEV_SWAP0);
+		GXSetTevSwapMode(GX_TEVSTAGE1, GX_TEV_SWAP0, GX_TEV_SWAP0);
+		GXSetTevSwapMode(GX_TEVSTAGE2, GX_TEV_SWAP0, GX_TEV_SWAP0);
+	}
+}

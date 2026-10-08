@@ -1,0 +1,2 @@
+// Icono del ejecutable (juego e instalador) en Windows.
+IDI_ICON1 ICON "../icon/nectar.ico"

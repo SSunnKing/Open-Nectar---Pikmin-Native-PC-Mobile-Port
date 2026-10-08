@@ -1,0 +1,105 @@
+#ifndef _ATXSTREAM_H
+#define _ATXSTREAM_H
+
+#include "Stream.h"
+#include "types.h"
+
+// TODO: We shouldn't be defining this.  It comes from <WinDef.h> of the Win32 API.
+typedef u32 HWND;
+
+// Misc. definitions
+#define ATX_SERVICE_NAME_SIZE (4)     // 3 chars + null terminator
+#define ATX_SERVICE_FILE      ("fil") // For requesting file operations
+#define ATX_SERVICE_AGE       ("age") // For requesting AgeServer operations
+#define ATX_SERVICE_APP       ("app") // For requesting App control operations
+
+// TODO: There are some identifier numbers that I THINK reference which service
+// is being requested But I'm not 100% sure, see all instances of open(const
+// char*, int) in the codebase for more info.
+
+// Opcodes from client to server.
+#define ATX_CMD_ID    (1)       // Retrieves identification
+#define ATX_CMD_START ('age\0') // Starts the server
+#define ATX_CMD_CLOSE (0xFFFFu) // Closes the server
+
+// Generic error reply from server.
+// Note: This matches ATX_CMD_CLOSE on purpose in the original protocol.
+#define ATX_REPLY_ERROR (0xFFFFu)
+
+// Request opcodes for AtxFileStream.
+#define ATX_FILE_CMD_READ    (100) // Read data
+#define ATX_FILE_CMD_WRITE   (101) // Write data
+#define ATX_FILE_CMD_SET_POS (102) // Set file position
+#define ATX_FILE_CMD_CLOSE   (103) // Close file
+
+class BaseApp;
+
+/**
+ * @brief TCP communication stream used across a network.
+ * @details This is used to communicate between developer tools, allowing for
+ * debug GUIs.
+ *
+ * @note Size: 0x10.
+ */
+class SYSCORE_API AtxStream : public Stream {
+public:
+	AtxStream() { init(); }
+
+	virtual void read(void* buffer, int size);        // _3C
+	virtual void write(immut void* buffer, int size); // _40
+	virtual int getPending();                         // _44
+	virtual void close();                             // _4C
+	virtual void flush();                             // _54
+
+	bool open(immut char* name, int unused);
+
+	void init() { _0C = 0; }
+
+	// _04     = VTBL
+	// _00-_08 = Stream
+	Stream* mStream;    // _08, underlying TCP stream used for communication
+	int _0C;            // _0C
+};
+
+/**
+ * @brief ATX command stream for handling incoming commands.
+ * @details Used by PlugPikiApp to process commands from a connected ATX server.
+ */
+class SYSCORE_API AtxCommandStream : public AtxStream {
+public:
+	AtxCommandStream(BaseApp* app)
+	    : mParentApp(app)
+	{
+	}
+
+	BOOL checkCommands();
+
+	// _04     = VTBL
+	// _00-_08 = AtxStream
+	BaseApp* mParentApp; // _08, pointer to the parent application
+};
+
+/**
+ * @brief Wrapper for handling file operations over the ATX protocol.
+ */
+class SYSCORE_API AtxFileStream : public RandomAccessStream {
+public:
+	virtual void read(void*, int);        // _3C
+	virtual void write(immut void*, int); // _40
+	virtual int getPending();             // _44 (weak)
+	virtual void close();                 // _4C
+	virtual int getPosition();            // _58 (weak)
+	virtual void setPosition(int);        // _5C
+	virtual int getLength();              // _60 (weak)
+	virtual void setLength(int);          // _64 (weak)
+
+	bool open(immut char*, u32);
+
+	// _04     = VTBL
+	// _00-_08 = RandomAccessStream
+	int mPosition;        // _08, current position in the file
+	int mLength;          // _0C, length of the file
+	AtxStream mAtxStream; // _10, underlying ATX stream used for communication
+};
+
+#endif

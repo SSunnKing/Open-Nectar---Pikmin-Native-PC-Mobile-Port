@@ -1,0 +1,261 @@
+#include "Colour.h"
+#include "DebugLog.h"
+#include "Dolphin/gx.h"
+#include "P2D/Graph.h"
+#include "PUT/Geometry.h"
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(__LINE__) // Never used in the DLL
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F4
+ */
+DEFINE_PRINT("P2DGrafContext");
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C (Matching by size)
+ */
+P2DGrafContext::P2DGrafContext(const PUTRect& rect)
+    : mViewportBounds(rect)
+    , mScissorBounds(rect)
+{
+	setColor(COLOUR_WHITE);
+	setLineWidth(6);
+}
+
+/**
+ * @todo: Documentation
+ */
+P2DGrafContext::P2DGrafContext(int x0, int y0, int width, int height)
+    : mViewportBounds(x0, y0, x0 + width, y0 + height)
+    , mScissorBounds(x0, y0, x0 + width, y0 + height)
+{
+	setColor(COLOUR_WHITE);
+	setLineWidth(6);
+}
+
+/**
+ * @todo: Documentation
+ */
+void P2DGrafContext::setPort()
+{
+	GXSetViewport(mViewportBounds.mMinX, mViewportBounds.mMinY, mViewportBounds.getWidth(), mViewportBounds.getHeight(), 0.0f, 1.0f);
+	setScissor();
+	setup2D();
+}
+
+/**
+ * @todo: Documentation
+ */
+void P2DGrafContext::setup2D()
+{
+	GXClearVtxDesc();
+	GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+	GXSetVtxDesc(GX_VA_CLR0, GX_DIRECT);
+	GXSetVtxDesc(GX_VA_TEX0, GX_NONE);
+	GXLoadPosMtxImm(mViewMtx.mMtx, 0);
+	GXSetNumChans(1);
+	GXSetNumTexGens(0);
+	GXSetNumTevStages(1);
+	GXSetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
+	GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
+	GXSetChanCtrl(GX_COLOR0A0, GX_FALSE, GX_SRC_REG, GX_SRC_VTX, 0, GX_DF_NONE, GX_AF_NONE);
+
+	Matrix4f mtx;
+	mtx.makeIdentity();
+	GXLoadTexMtxImm(mtx.mMtx, GX_IDENTITY, GX_MTX3x4);
+	GXSetCurrentMtx(GX_TEXMTX_NULL);
+	GXSetZMode(GX_FALSE, GX_LEQUAL, GX_FALSE);
+	GXSetTexCoordGen2(GX_TEXCOORD0, GX_TG_MTX3X4, GX_TG_TEX0, GX_IDENTITY, GX_FALSE, GX_PTIDENTITY);
+	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_S16, 0);
+	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_POS_XYZ, GX_RGBA8, 0);
+	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_POS_XYZ, GX_U16, 15);
+	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX1, GX_POS_XYZ, GX_U16, 15);
+	GXSetLineWidth(mLineWidth, GX_TO_ZERO);
+	GXSetCullMode(GX_CULL_NONE);
+}
+
+/**
+ * @todo: Documentation
+ */
+void P2DGrafContext::setScissor()
+{
+	// GC HUD is 640×480; 1000×1000 was “big enough”. Widescreen HUD B uses
+	// V = 480×aspect (1120 at 21:9). Intersecting with 1000 clips the
+	// right-anchored pikmin/day counter.
+	int capW = 1000;
+	int capH = 1000;
+#if defined(PIKI_PC_PORT)
+	if (mViewportBounds.mMaxX > capW) {
+		capW = mViewportBounds.mMaxX;
+	}
+	if (mViewportBounds.mMaxY > capH) {
+		capH = mViewportBounds.mMaxY;
+	}
+#endif
+	PUTRect bounds(0, 0, capW, capH);
+	PUTRect scissor = mScissorBounds;
+	mScissorBounds.intersect(bounds);
+	scissor.normalize();
+	scissor.add(0, -1);
+	if (scissor.intersect(bounds)) {
+		GXSetScissor(scissor.mMinX, scissor.mMinY, scissor.getWidth(), scissor.getHeight());
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void P2DGrafContext::scissor(const PUTRect& rect)
+{
+	mScissorBounds = rect;
+}
+
+/**
+ * @todo: Documentation
+ */
+void P2DGrafContext::place(const PUTRect& position)
+{
+	mViewportBounds = position;
+	mScissorBounds  = position;
+}
+
+/**
+ * @todo: Documentation
+ */
+void P2DGrafContext::setColor(immut Colour& p1, immut Colour& p2, immut Colour& p3, immut Colour& p4)
+{
+	_18 = p1;
+	_1C = p2;
+	_20 = p3;
+	_24 = p4;
+
+	_B0[0] = 1;
+	_B0[1] = 4;
+	_B8    = 5;
+
+	_BC[0] = 1;
+	_BC[1] = 4;
+	_C4    = 5;
+
+	_C8[0] = 1;
+	_C8[1] = 4;
+	_D0    = 5;
+
+	if (_18.a != 255) {
+		return;
+	}
+	_B0[0] = 0;
+	_B0[1] = 1;
+	_B8    = 0;
+
+	if (_20.a != 255) {
+		return;
+	}
+
+	_BC[0] = 0;
+	_BC[1] = 1;
+	_C4    = 0;
+
+	if (_1C.a == 255 && _24.a == 255) {
+		_C8[0] = 0;
+		_C8[1] = 1;
+		_D0    = 0;
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void P2DGrafContext::setLineWidth(u8 width)
+{
+	mLineWidth = width;
+	GXSetLineWidth(mLineWidth, GX_TO_ZERO);
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00016C
+ */
+void P2DGrafContext::fillBox(const PUTRect&)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000DC
+ */
+void P2DGrafContext::drawFrame(const PUTRect&)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000B0
+ */
+void P2DGrafContext::line(PUTPoint, PUTPoint)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000A4
+ */
+void P2DGrafContext::lineTo(PUTPoint)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0001D0
+ */
+void P2DGrafContext::polyline(PUTPoint* param_1, int param_2)
+{
+	TRAP_UNIMPLEMENTED;
+	if (param_2 > 1) {
+		PRINT("polyline \n");
+	}
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0001E4
+ */
+void P2DGrafContext::polyline(int* param_1, int param_2)
+{
+	TRAP_UNIMPLEMENTED;
+	if (param_2 > 1) {
+		PRINT("polyline \n");
+	}
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0001F8
+ */
+void P2DGrafContext::polylineTo(PUTPoint* param_1, int param_2)
+{
+	TRAP_UNIMPLEMENTED;
+	PRINT("polylineTo \n");
+	// more stuff
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000218
+ */
+void P2DGrafContext::polylineTo(int* param_1, int param_2)
+{
+	TRAP_UNIMPLEMENTED;
+	PRINT("polyLineTo \n");
+	// more stuff
+}

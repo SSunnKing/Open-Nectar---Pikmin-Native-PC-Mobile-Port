@@ -1,0 +1,124 @@
+#ifndef _TITLE_H
+#define _TITLE_H
+
+#include "DvdThreadCommand.h"
+#include "Game/BaseHIO.h"
+#include "Section.h"
+#include "ebi/Option.h"
+#include "ebi/Omake.h"
+#include "ebi/TMainTitleMgr.h"
+#include "PSSystem/PSSystemIF.h"
+#include "PSSystem/PSGame.h"
+#include "PSSystem/PSCommon.h"
+#include "PSM/ObjMgr.h"
+
+template <typename T>
+struct IDelegate1;
+struct JUTTexture;
+struct Menu;
+
+namespace Game {
+struct THPPlayer;
+}
+
+namespace TitleDummy {
+struct Section {
+	Section(JKRHeap*);
+
+	virtual ~Section();
+	void init();
+	void loadResource();
+	bool doUpdate();
+	void doDraw(Graphics& gfx);
+};
+} // namespace TitleDummy
+
+struct HIORootNode : public Game::HIORootNode {
+	HIORootNode(Section* sect, const char* name)
+	    : Game::HIORootNode(sect)
+	{
+		mName = name;
+	}
+};
+
+namespace Title {
+
+// Size: 0x2F70 (US), 0x3100 (PAL).
+struct Section : public Game::BaseHIOSection {
+	enum BGMIndex { BGM_MainTheme = 0, BGM_Options, BGM_HiScore, BGM_Bonus };
+	enum State { State_Init, State_MainTitle, State_Options, State_Bonus, State_HiScore, State_ReloadMessages };
+	Section(JKRHeap* heap);
+
+	virtual ~Section();                         // _08
+	virtual void run();                         // _0C
+	virtual void init();                        // _18
+	virtual void doExit();                      // _24
+#if !defined(VERSION_JP)                        //
+	virtual bool forceReset() { return false; } // _2C (weak)
+#endif                                          //
+	virtual void doLoadingStart();              // _34
+	virtual bool doLoading();                   // _38
+	virtual bool doUpdate();                    // _3C
+	virtual void doDraw(Graphics& gfx);         // _40
+	virtual bool isFinishable();                // _44
+	virtual void loadResource();                // _50
+
+	void loadResident();
+
+#if defined(VERSION_PAL)
+	void reloadMessageResource();
+#endif
+	void doUpdateMainTitle();
+	void doUpdateOmake();
+	void menuCancel(Menu&);
+	void menuSelect(Menu& menu);
+	void drawShortCuts(Graphics& gfx);
+	void drawShortCut(Graphics&, int, int, int, char*);
+	void drawDebugInfo(Graphics& gfx);
+	void updateMenu();
+	void doUpdateHiScore();
+	void doUpdateOption();
+
+	inline void startMainMenu(s32 selection)
+	{
+		int unused; // no clue what this used to even be, but it has to pass *something*
+		mMainTitleMgr.startMenuSet(unused, selection);
+	}
+
+	inline void returnToMainTitle(s32 selection)
+	{
+		mState = State_MainTitle;
+		startMainMenu(selection);
+		PSSystem::Scene* scene = PSSystem::getChildSceneCheck(PSMGetSceneMgrCheck());
+		PSSystem::getSeqFromScene(scene, BGM_MainTheme)->startSeq();
+	}
+
+	// _00		= VTBL
+	// _00-_48	= Game::BaseHIOSection
+	int mState;                                // _0048
+	f32 mGoToDemoTimer;                        // _004C
+	Menu* mMenu;                               // _0050
+	DvdThreadCommand mThreadCommand;           // _0054
+	Delegate<Section>* mButtonCallback;        // _00C0
+#if defined(VERSION_PAL)                       //
+	Delegate<Section>* mReloadMessageCallback; // _00C4
+#endif                                         //
+	Controller* mController1;                  // _00C4
+	Controller* mController2;                  // _00C8
+	ebi::TMainTitleMgr mMainTitleMgr;          // _00CC
+	ebi::Option::TMgr mOptionMgr;              // _1730
+	ebi::Omake::TMgr mOmakeMgr;                // _2678
+	Game::THPPlayer* mThpPlayer;               // _2F38
+	int mMovieIndex;                           // _2F3C
+	JKRArchive* mHiScoreTex;                   // _2F40
+	bool mDoCheckShortCut;                     // _2F44
+	int mLanguageID;                           // _2F48
+	u8 _2F4C[32];                              // _2F4C, unknown (PAL: _30D4)
+#if defined(VERSION_PAL)                       //
+	u32 mDebugKeyIndex;                        // _30F4
+	bool mShowBuildInfo;                       // _30F8
+#endif
+};
+} // namespace Title
+
+#endif

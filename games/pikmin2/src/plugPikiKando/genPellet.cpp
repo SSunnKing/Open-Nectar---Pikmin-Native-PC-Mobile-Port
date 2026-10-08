@@ -1,0 +1,135 @@
+#include "Age.h"
+#include "DebugLog.h"
+#include "Dolphin/os.h"
+#include "Generator.h"
+#include "Pellet.h"
+#include "PelletState.h"
+#include "PlayerState.h"
+#include "sysNew.h"
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(__LINE__) // Never used in the DLL
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F4
+ */
+DEFINE_PRINT("genPellet")
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000070
+ */
+GenObjectPellet::GenObjectPellet()
+    : GenObject('pelt', "ペレットをうむ")
+{
+	mIndex = 0;
+}
+
+/**
+ * @todo: Documentation
+ */
+static GenObject* makeObjectPellet()
+{
+	return new GenObjectPellet();
+}
+
+/**
+ * @todo: Documentation
+ */
+void GenObjectPellet::initialise()
+{
+	GenObjectFactory::factory->registerMember('pelt', makeObjectPellet, "ペレットをうむ", 'v0.0');
+}
+
+/**
+ * @todo: Documentation
+ */
+void GenObjectPellet::doRead(RandomAccessStream& stream)
+{
+	mPelletId.read(stream);
+#if defined(PIKI_PC_PORT)
+	mPelletId.mId = __builtin_bswap32(mPelletId.mId);
+	mPelletId.updateString();
+#endif
+	mIndex = pelletMgr->getConfigIndex(mPelletId.mId);
+	if (mIndex == -1) {
+		mIndex = 0;
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void GenObjectPellet::doWrite(RandomAccessStream& stream)
+{
+	mPelletId = pelletMgr->getConfigFromIdx(mIndex)->mModelId;
+#if defined(PIKI_PC_PORT)
+	stream.writeInt(__builtin_bswap32(mPelletId.mId));
+#else
+	mPelletId.write(stream);
+#endif
+	PRINT("******* WRITE \n");
+	mPelletId.print();
+}
+
+/**
+ * @todo: Documentation
+ */
+void GenObjectPellet::updateUseList(Generator*, int)
+{
+	PelletConfig* cfg = pelletMgr->getConfig(mPelletId.mId);
+	if (cfg) {
+		pelletMgr->addUseList(cfg->mPelletId.mId);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+Creature* GenObjectPellet::birth(BirthInfo& info)
+{
+	mPelletId.print();
+	PelletConfig* config = pelletMgr->getConfig(mPelletId.mId);
+	// A recovered init.gen must never recreate a ship part that is already on
+	// the ship or waiting in the stage cache. Collecting a duplicate increments
+	// PlayerState's counters unconditionally, so prevent it at the source.
+	if (config && config->mPelletType() == PELTYPE_UfoPart && playerState->existUfoParts(mPelletId.mId)) {
+		PRINT("Skipping duplicate UFO part %s\n", mPelletId.mStringID);
+		return nullptr;
+	}
+	Pellet* pelt = pelletMgr->newPellet(mPelletId.mId, nullptr);
+	if (pelt) {
+		pelt->init(info.mPosition);
+		pelt->mSRT.r         = info.mRotation;
+		pelt->mFaceDirection = pelt->mSRT.r.y;
+		pelt->mGenerator     = info.mGenerator;
+		pelt->startAI(0);
+		if (info.mGenerator->doAdjustFaceDir()) {
+			pelt->enableFaceDirAdjust();
+		}
+		f32 scale = pelt->mConfig->mPelletScale();
+		pelt->mSRT.s.set(scale, scale, scale);
+		pelt->mStateMachine->transit(pelt, 0);
+	} else {
+		PRINT("FAILED!!!\n");
+	}
+	return pelt;
+}
+
+#ifdef WIN32
+
+void GenObjectPellet::doGenAge(AgeServer& server)
+{
+	server.StartOptionBox("ペレット", (int*)&mPelletId.mId, 252);
+	for (int i = 0; i < pelletMgr->getNumConfigs(); i++) {
+		PelletConfig* config = pelletMgr->getConfigFromIdx(i);
+		server.NewOption(config->mPelletName().mString, config->mPelletId.mId);
+	}
+	server.EndOptionBox();
+}
+
+#endif

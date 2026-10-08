@@ -1,0 +1,162 @@
+#ifndef _JSYSTEM_JAS_JASKERNEL_H
+#define _JSYSTEM_JAS_JASKERNEL_H
+
+#include "JSystem/JAudio/JAS/JASHeap.h"
+#include "JSystem/JAudio/JAS/JASMutexLock.h"
+#include "JSystem/JAudio/JAS/JASProbe.h"
+#include "JSystem/JKernel/JKRHeap.h"
+#include "types.h"
+
+struct JASCmdHeap;
+
+namespace JASKernel {
+void setupRootHeap(JKRSolidHeap*, u32);
+JKRExpHeap* getSystemHeap();
+JASCmdHeap* getCommandHeap();
+JASHeap* getAramHeap();
+void setupAramHeap(u32, u32);
+
+void probeFinish(s32);
+void probeStart(s32, char*);
+
+// unused/inlined:
+JKRSolidHeap* getRootHeap();
+int getAramFreeSize();
+int getAramSize();
+void initProbe(s32);
+void resetProbe();
+const char* getProbeName(s32);
+void getProbeLast(s32);
+void getProbeAvg(s32);
+void getProbeTotalAvg(s32);
+void getProbeMax(s32);
+
+}; // namespace JASKernel
+
+/**
+ * @fabricated
+ * @size{0x1C}
+ * Not really a heap, but it's the object pointed to by JASKernel::sCommandHeap, so... :shrug:
+ * It's more like a stack...
+ */
+struct JASCmdHeap {
+	JASCmdHeap()
+	    : mHead(nullptr)
+	{
+		OSInitMutex(&mMutex); // this might be JASMutexLock
+		grow();
+	}
+
+	typedef void (*Command)(void*);
+	struct Header {
+		Command mCommand; // _00
+		int mMsgLength;   // _04 - I don't think this is right?
+	};
+	/**
+	 * @fabricated
+	 * @size{0x40C}
+	 */
+	struct Block {
+		inline Block(Block* next)
+		    : mNext(next)
+		    , mUsedLength(0)
+		    , mMsgCount(0)
+		{
+		}
+
+		inline bool contains(void* msg)
+		{
+			bool res = false;
+			if ((uintptr_t)mBuffer <= (uintptr_t)msg && (uintptr_t)msg < (uintptr_t)(this + 1)) {
+				res = true;
+			}
+			return res;
+		}
+
+		Block* getNextChunk() { return mNext; }
+		void setNextChunk(Block* next) { mNext = next; }
+		bool isEmpty() const { return mMsgCount == 0; }
+		void* alloc(u32 size)
+		{
+			u8* result = mBuffer + mUsedLength;
+			mUsedLength += size;
+			mMsgCount++;
+			return result;
+		}
+		void free(void*) { mMsgCount--; }
+		u32 getFreeSize() const { return 0x400 - mUsedLength; }
+		void revive() { mUsedLength = 0; }
+
+		Block* mNext;       // _00
+		u32 mUsedLength; // _04
+		u32 mMsgCount;      // _08
+		u8 mBuffer[0x400];  // _0C
+	};
+
+	inline bool grow()
+	{
+		JASCmdHeap::Block* previousHead = mHead;
+
+		if (previousHead != nullptr && previousHead->isEmpty()) {
+			// No need!
+			previousHead->revive();
+			return true;
+		}
+		// Try to alloc into JASKernel sys heap:
+		mHead = new (JASKernel::getSystemHeap(), 0) Block(previousHead);
+		if (mHead != nullptr) {
+			return true;
+		}
+		// Failed to alloc into JASKernel sys heap. Use general sys heap instead.
+		mHead = new (JKRHeap::sSystemHeap, 0) Block(previousHead);
+		if (mHead != nullptr) {
+			return true;
+		}
+		// Failed to grow. Restore the previous head, and return false.
+		mHead = previousHead;
+		return false;
+	}
+
+	inline void* alloc(u32 msgLength)
+	{
+		JASMutexLock lock(&mMutex);
+		u32 freeSize = mHead->getFreeSize();
+		if (freeSize < msgLength) {
+			if (0x400 < msgLength) {
+				// too large!
+				return nullptr;
+			}
+			if (!grow()) {
+				// failed to alloc more space
+				return nullptr;
+			}
+		}
+
+		return mHead->alloc(msgLength);
+	}
+
+	inline void free(void* block)
+	{
+		JASMutexLock lock(&mMutex);
+		Block* current = mHead;
+		Block* prev    = nullptr;
+		while (current != nullptr) {
+			if (current->contains(block)) {
+				current->free(block);
+				if (current != mHead && current->isEmpty()) {
+					Block* next = current->getNextChunk();
+					delete current;
+					prev->setNextChunk(next);
+				}
+				return;
+			}
+			prev    = current;
+			current = current->getNextChunk();
+		}
+	}
+
+	Block* mHead;   // _00
+	OSMutex mMutex; // _04
+};
+
+#endif

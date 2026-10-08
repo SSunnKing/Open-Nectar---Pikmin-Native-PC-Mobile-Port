@@ -1,0 +1,1716 @@
+#include "system.h"
+#include <cstdint>
+#if PIKI_PC_PORT
+#include "pc_window.h"
+#include <chrono>
+#include <thread>
+#include "timing/pc_frame_scheduler.h"
+#include "timing/pc_tick_profiler.h"
+#include "audio/pc_audio.h"
+#include "timing/pc_render_phase.h"
+#include "pc_gfx.h"
+#include "settings/pc_settings.h"
+#include "timing/pc_render_packet.h"
+#include "mods/pc_vs_arena.h"
+#if defined(PIKI_PC_VR)
+#include "vr/pc_vr.h"
+#endif
+#endif
+
+#include "bigFont.h"
+
+#include "AtxStream.h"
+#include "BaseApp.h"
+#include "DebugLog.h"
+#include "Delegate.h"
+#include "Dolphin/ar.h"
+#include "Dolphin/card.h"
+#include "Dolphin/gx.h"
+#include "Dolphin/os.h"
+#include "Dolphin/pad.h"
+#include "Font.h"
+#include "Graphics.h"
+#include "LoadIdler.h"
+#include "gameflow.h"
+#include "jaudio/interface.h"
+#include "jaudio/verysimple.h"
+#include "sysNew.h"
+#include "timers.h"
+#include <stddef.h>
+
+#if defined(WIN32)
+#include <windows.h>
+#endif
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(23)
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F0
+ */
+DEFINE_PRINT("System")
+
+/**
+ * @brief TODO
+ */
+struct DVDStream : public RandomAccessStream {
+	DVDStream() { mSize = 0x40000; }
+
+	virtual void read(void* addr, int size) // _3C (weak)
+	{
+		int roundedSize = ALIGN_NEXT(size, 32);
+		s32 result      = -1;
+		gsys->mDvdBytesRead += roundedSize;
+		while (result == -1) {
+			result = DVDReadPrio(&mFileInfo, addr, roundedSize, mOffset, 2);
+		}
+
+		if (result != roundedSize) {
+			ERROR("Could not read expected amount, only got %d / %d bytes!\n", result, roundedSize);
+		}
+
+		mOffset += roundedSize;
+	}
+	virtual int getPending()
+	{
+		int remaining = mPending - mOffset;
+		return remaining > 0 ? remaining : 0;
+	} // _44 (weak)
+	virtual void close()                          // _4C (weak)
+	{
+		numOpen--;
+		if (mIsOpen) {
+			DVDClose(&mFileInfo);
+		}
+	}
+
+	void init();
+
+	static int numOpen;
+	static u8* readBuffer;
+
+	// _04     = VTBL
+	// _00-_08 = RandomAccessStream
+	DVDFileInfo mFileInfo; // _08
+	u32 mOffset;           // _44
+	int mPending;          // _48
+	bool mIsOpen;          // _4C, trigger to do DVDClose on close()
+	int mSize;             // _50
+};
+
+System sys;
+
+static bool useSymbols = false;
+#if defined(WIN32)
+SYSCORE_API HWND sysCurrWnd;
+SYSCORE_API HINSTANCE sysHInst;
+#endif
+SYSCORE_API System* gsys = nullptr;
+
+#if defined(PIKI_PC_PORT) && defined(VERSION_GPIP01)
+// Deliberately a function-local static rather than a file-scope one: this is
+// read and written from other translation units during static initialisation,
+// which is precisely the situation a file-scope global cannot be trusted in.
+static LanguageID& pendingLanguageSlot()
+{
+	static LanguageID slot = LANG_English;
+	return slot;
+}
+
+LanguageID pcPendingLanguage() { return pendingLanguageSlot(); }
+
+void pcSetLanguage(LanguageID language)
+{
+	pendingLanguageSlot() = language;
+	if (gsys) {
+		gsys->mLanguageID = language;
+	}
+}
+#endif
+SYSCORE_API Stream* sysCon;
+SYSCORE_API Stream* errCon;
+static OSMessage dvdMesgBuffer;
+static OSMessage loadMesgBuffer;
+static OSMessage sysMesgBuffer;
+
+SYSCORE_API int glnWidth  = 640;
+SYSCORE_API int glnHeight = 480;
+
+static OSMessageQueue dvdMesgQueue;
+static OSMessageQueue loadMesgQueue;
+static OSMessageQueue sysMesgQueue;
+
+u8* DVDStream::readBuffer = nullptr;
+int DVDStream::numOpen    = 0;
+static Font* bigFont;
+
+static AramStream aramStream;
+static char lastName[PATH_MAX];
+static DVDStream dvdStream;
+static BufferedInputStream dvdBufferedStream;
+
+#if defined(PIKI_PC_PORT)
+extern "C" void* PCResolveARQToken(u32 token);
+#endif
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000044 (Matching by size)
+ */
+void DVDStream::init()
+{
+	mOffset  = 0;
+	mPending = mFileInfo.length;
+	sprintf(lastName, mPath);
+}
+
+/**
+ * @brief Opens a file from the DVD at a given path as a buffered input stream.
+ *
+ * @param path Path to the file to open.
+ * @param isRelativePath Whether the path supplied is relative (true, requires directories to be appended) or absolute (false, from root).
+ * @return Buffered input stream of file.
+ */
+RandomAccessStream* System::openFile(immut char* path, bool isRelativePath, bool)
+{
+#if defined(PIKI_PC_PORT)
+	// Arena del modo VS: rutas virtuales montadas en memoria desde los datos
+	// del juego (sin archivos nuevos en disco).
+	if (isRelativePath) {
+		if (RandomAccessStream* arena = pc_vs_arena_open(path)) {
+			return arena;
+		}
+	}
+#endif
+	char strPath[PATH_MAX];
+	sprintf(strPath, "%s", isRelativePath ? mActiveDir : "");
+	sprintf(strPath, "%s%s%s", strPath, isRelativePath ? mDataRoot : "", path);
+
+	// The original game serves many resources from a 32-bit ARAM address space.
+	// On the native 64-bit port the assets are already extracted under dataDir;
+	// using the emulated ARAM entries truncates host pointers and returns corrupt
+	// streams. Prefer the extracted files on PC and retain the archive path on GC.
+#if !defined(PIKI_PC_PORT)
+	if (isRelativePath && (mDvdRoot.getChildCount() || mAramRoot.getChildCount())) {
+
+		FOREACH_NODE(DirEntry, mDvdRoot.mChild, dvdDirEnt)
+		{
+			if (strcmp(dvdDirEnt->mName, path) == 0) {
+				aramStream.init(path, dvdDirEnt->mAddress, dvdDirEnt->mPending);
+				return new BufferedInputStream(&aramStream, DVDStream::readBuffer, dvdStream.mSize);
+			}
+		}
+
+		FOREACH_NODE(DirEntry, mAramRoot.mChild, aramDirEnt)
+		{
+			if (!strcmp(aramDirEnt->mName, path)) {
+				aramStream.init(path, aramDirEnt->mAddress, aramDirEnt->mPending);
+				return new BufferedInputStream(&aramStream, DVDStream::readBuffer, dvdStream.mSize);
+			}
+		}
+	}
+#endif
+
+#if defined(VERSION_GPIJ01) || defined(VERSION_DPIJ01_PIKIDEMO)
+	if (DVDStream::numOpen != 0) {
+		ERROR("Cannot open '%s' while '%s' is open!!\n", path, lastName);
+	}
+#endif
+
+	mDvdOpenFiles++;
+	dvdStream.mPath   = strPath;
+	dvdStream.mIsOpen = DVDOpen(strPath, &dvdStream.mFileInfo);
+	dvdStream.init();
+	DVDStream::numOpen++;
+
+	if (!dvdStream.mIsOpen) {
+		dvdStream.close();
+		return nullptr;
+	}
+
+	BOOL old           = gsys->mTogglePrint;
+	gsys->mTogglePrint = TRUE;
+#if defined(VERSION_PIKIDEMO)
+	_Print("Opened file %s\n", strPath);
+#else
+	PRINT("Opened file %s\n", strPath);
+#endif
+	gsys->mTogglePrint = old;
+	dvdStream.mPath    = path;
+	dvdBufferedStream.init(&dvdStream, dvdStream.readBuffer, mDvdBufferSize);
+	return &dvdBufferedStream;
+
+#if defined(VERSION_GPIJ01) || defined(VERSION_DPIJ01_PIKIDEMO)
+#else
+	STACK_PAD_VAR(2);
+#endif
+}
+
+/**
+ * @todo: Documentation
+ */
+void System::initSoftReset()
+{
+	gsys->mPrevAllocType = FALSE;
+	StdSystem::initSoftReset();
+	if (mDGXGfx) {
+		static_cast<DGXGraphics*>(mDGXGfx)->setupRender();
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void System::beginRender()
+{
+	mRetraceCount = 0;
+	static_cast<DGXGraphics*>(mDGXGfx)->beginRender();
+	mDGXGfx->clearBuffer(Graphics::ClearBufferFlag::Both, false);
+	GXSetViewport(0.0f, 0.0f, glnWidth, glnHeight, 0.0f, 1.0f);
+	GXSetScissor(0, 0, glnWidth, glnHeight);
+	GXSetColorUpdate(GX_TRUE);
+	mDGXGfx->useTexture(nullptr, GX_TEXMAP0);
+	mDGXGfx->initRender(glnWidth, glnHeight);
+}
+
+/**
+ * @todo: Documentation
+ */
+void System::doneRender()
+{
+	static_cast<DGXGraphics*>(mDGXGfx)->doneRender();
+}
+
+/**
+ * @todo: Documentation
+ */
+void System::waitRetrace()
+{
+	static_cast<DGXGraphics*>(mDGXGfx)->waitRetrace();
+}
+
+/**
+ * @todo: Documentation
+ */
+#if PIKI_PC_PORT
+// Read once; see the call site below for why this is not the 60 FPS switch.
+static bool pc_replay_test_enabled()
+{
+	static const bool enabled = [] {
+		const char* value = getenv("PIKMIN_REPLAY_TEST");
+		return value != nullptr && value[0] == '1';
+	}();
+	return enabled;
+}
+#endif
+
+void System::run(BaseApp* app)
+{
+	GXInvalidateTexAll();
+    printf("[PC Port] Starting System::run main loop...\n");
+
+    auto lastFpsPrint = std::chrono::steady_clock::now();
+
+    // Initialize frame scheduler for fixed-step timing
+    PcFrameScheduler frameScheduler;
+    frameScheduler.reset(std::chrono::steady_clock::now().time_since_epoch().count() / 1e9, mFrameRate);
+
+    // Render packet capture only pays for itself in the experimental 60 FPS
+    // mode. Left on unconditionally it copied every display list on the default
+    // 30 FPS path for nothing. Re-evaluated each tick so the settings menu can
+    // switch modes at runtime.
+
+	while (true) {
+		Jac_Gsync();
+		CARDProbe(0);
+		CARDProbe(1);
+#if !PIKI_PC_PORT
+		mControllerMgr.update();
+#endif
+
+#if PIKI_PC_PORT
+		if (pc_window_should_close()) {
+			break;
+		}
+#endif
+
+		// Get schedule from fixed-step scheduler
+		double now = std::chrono::steady_clock::now().time_since_epoch().count() / 1e9;
+#if defined(PIKI_PC_VR)
+		// A headset's compositor paces the loop through xrWaitFrame, at 72-120 Hz. Scheduling at the 120 Hz clamp means
+		// there is always a tick ready when the headset wants a frame, instead of the loop sleeping through one.
+		PcFrameSchedule schedule = frameScheduler.advance(now, pc_vr_session_running() ? 0 : mFrameRate);
+#else
+		PcFrameSchedule schedule = frameScheduler.advance(now, mFrameRate);
+#endif
+
+		if (schedule.logicalTicks > 0) {
+#if PIKI_PC_PORT
+			// Sample input once per logical tick, not once per loop iteration.
+			// Only a tick consumes it, and the pad reader is edge shaped: a
+			// press seen by two polls before the tick that would read it is a
+			// press the game never sees. The loop can spin several times per
+			// tick -- the deadline sleep leaves a margin, and Windows' default
+			// timer granularity is coarse enough to overshoot it -- which lost
+			// walking and throw inputs at high refresh rates.
+			mControllerMgr.update();
+			pc_gfx_enable_capture(pc_replay_test_enabled());
+#endif
+			updateSysClock();
+			OSCheckActiveThreads();
+			app->idle();
+
+			// Identity-replay experiment: re-execute the tick's captured display
+			// lists into a cleared framebuffer and present that. It is NOT the
+			// 60 FPS mode -- it repaints the same frame rather than running the
+			// game faster; the frame rate comes from setFrameClamp(1) instead.
+			//
+			// It is off by default because the replay does not restore the GX
+			// vertex descriptor that was in force when each list was captured:
+			// the lists are then stepped with whatever descriptor the last draw
+			// left, 9 bytes per vertex where the data holds 11, which reads
+			// vertex indices out of neighbouring fields and stretches triangles
+			// across the screen. Enable with PIKMIN_REPLAY_TEST=1 to work on it.
+#if PIKI_PC_PORT
+			if (pc_replay_test_enabled()) {
+				if (pc_gfx_replay_captured_frame()) {
+					pc_window_swap_buffers();
+				}
+			}
+#endif
+		}
+
+#if PIKI_PC_PORT
+		// Without a tick to run there is nothing to do until the next deadline.
+		// Spinning here burns a core and, worse, polls the pad thousands of
+		// times per tick; anything edge- or delta-shaped in the input path gets
+		// resampled away before the tick that would consume it. Sleep instead,
+		// keeping a short margin so the wake-up cannot overshoot the deadline.
+		if (schedule.logicalTicks == 0) {
+			const double margin  = 0.001;
+			const double wakeAt  = schedule.nextDeadline - margin;
+			const double timeNow = std::chrono::steady_clock::now().time_since_epoch().count() / 1e9;
+			double waitFor       = wakeAt - timeNow;
+			if (waitFor > 0.0) {
+				// Never sleep past one whole frame: a clock jump or a clamp
+				// change must not park the loop for an unbounded stretch.
+				if (waitFor > schedule.fixedDelta) waitFor = schedule.fixedDelta;
+				std::this_thread::sleep_for(std::chrono::duration<double>(waitFor));
+			} else {
+				std::this_thread::yield();
+			}
+		}
+#endif
+
+        // Print FPS every 2 seconds
+        auto nowChrono = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(nowChrono - lastFpsPrint).count();
+        if (elapsed > 2000) {
+            // mFrameRate is the game's own setFrameClamp value: 1 means the
+            // section asked for 60 Hz, 2 for 30. Printing it says which
+            // sections the 60 FPS setting actually reaches, rather than
+            // inferring it from where the setting is read in the source.
+            pc_audio_report_levels();
+            int matrixPeak = 0, matrixMax = 0, shapePeak = 0, shapeMax = 0;
+            pc_gfx_get_pool_peaks(&matrixPeak, &matrixMax, &shapePeak, &shapeMax);
+            size_t texLive = 0, texBytes = 0, texPeak = 0, texMade = 0, texFreed = 0;
+            pc_gfx_get_texture_stats(&texLive, &texBytes, &texPeak, &texMade, &texFreed);
+            printf("[PC Port] FPS: %.1f, DeltaTime: %.4fms, clamp: %d, TEV programs: %zu%s, "
+                   "matrices: %d/%d, shapes: %d/%d\n",
+                   getFrameRate(), mDeltaTime * 1000.0, mFrameRate,
+                   pc_gfx_get_specialised_program_count(),
+                   pc_gfx_get_shader_specialisation() ? "" : " (ubershader)",
+                   matrixPeak, matrixMax, shapePeak, shapeMax);
+            // Texture memory on its own line: it is the port's largest single
+            // consumer and, until heap resets started giving it back, it only
+            // ever grew.
+            printf("[PC Port] Textures: %zu live, %zu MB (peak %zu MB), %zu made / %zu freed\n",
+                   texLive, texBytes >> 20, texPeak >> 20, texMade, texFreed);
+            // The budget is always the 60 Hz one: the question this answers is
+            // whether a tick would fit there, not whether it fits the 30 Hz
+            // period it is currently running at.
+            if (pc_tick_profiler_enabled()) {
+                fputs(pc_tick_profiler_report(1000.0 / 60.0).c_str(), stdout);
+            }
+            // Fase 7: where the native heap is, every ~10 s, when measuring.
+            if (getenv("PIKMIN_PERF_STATS")) {
+                static int allocReportGate = 0;
+                if (++allocReportGate % 5 == 0) piki_pc_dump_alloc_stats();
+            }
+            fflush(stdout);
+            lastFpsPrint = nowChrono;
+        }
+	}
+
+#if PIKI_PC_PORT
+	pc_gfx_enable_capture(false);
+	pc_window_shutdown();
+#endif
+
+	STACK_PAD_VAR(2);
+}
+
+/**
+ * @todo: Documentation
+ */
+f32 System::getTime()
+{
+	return OSTicksToMilliseconds(OSGetTick());
+}
+
+/**
+ * @todo: Documentation
+ */
+void System::updateSysClock()
+{
+	OSTick tick = OSGetTick();
+	mEngineFrames++;
+	mFrameTicks = tick - mPrevTick;
+	mDeltaTime  = mFrameTicks / (f64)OS_TIMER_CLOCK;
+	mTotalFrames++;
+	if (mDeltaTime > f32(1.0f / 30.0f)) {
+		mDeltaTime = f32(1.0f / 30.0f);
+	}
+	if (mDeltaTime < 0.0f) {
+		mDeltaTime = 0.0f;
+	}
+	
+	int time = tick - mFpsSampleStart;
+	if (time > OS_TIMER_CLOCK) {
+		mFPS                 = (f64)(OS_TIMER_CLOCK * (mEngineFrames - mFramesAtSampleStart)) / time;
+		mFpsSampleStart      = tick;
+		mFramesAtSampleStart = mEngineFrames;
+	}
+	mPrevTick = tick;
+}
+
+/**
+ * @brief Reads .arc and .dir pairs from the DVD and stores them in the file list.
+ *
+ * @param arcPath Path to archive (.arc) file - relative to dataDir directory.
+ * @param dirPath Path to directory (.dir) file - absolute path from DVD root.
+ */
+void System::parseArchiveDirectory(immut char* arcPath, immut char* dirPath)
+{
+	int free      = gsys->getHeap(gsys->mActiveHeapIdx)->getFree();
+	f32 startTime = getTime();
+	DVDStream stream;
+	stream.mPath   = dirPath;
+	stream.mIsOpen = DVDOpen(dirPath, &stream.mFileInfo) != 0;
+	stream.init();
+	DVDStream::numOpen++;
+	if (!stream.mIsOpen) {
+		stream.close();
+		ERROR("Could not open archive file!!\n");
+	}
+
+	// inline?
+	u32 a               = 0;
+	AramAllocator* list = mActiveAramAllocator;
+	u32 addr            = list->mNextFreeAddress + ALIGN_NEXT(stream.mPending, 0x20);
+	if (addr <= mActiveAramAllocator->mStartAddress + mActiveAramAllocator->mTotalSize) {
+		a                      = mActiveAramAllocator->mNextFreeAddress;
+		list->mNextFreeAddress = addr;
+	}
+
+	u32 unused;
+	f32 unused2;
+	STACK_PAD_VAR(1);
+
+	// this is necessary to get it to call the vtable ptr not just inline it.
+	((DVDStream*)&stream)->getPending();
+	u32 size, pend, pos;
+	pos  = 0;
+	pend = ((DVDStream*)&stream)->getPending();
+	while (pend != 0) {
+		size = pend;
+		if (pend > stream.mSize) {
+			size = stream.mSize;
+		}
+		((DVDStream*)&stream)->read(DVDStream::readBuffer, size);
+		gsys->copyRamToCache((u32)(uintptr_t)DVDStream::readBuffer, size, a + pos);
+		gsys->copyWaitUntilDone();
+		pos += size;
+		pend -= size;
+	}
+
+	stream.close();
+
+	RandomAccessStream* file = gsys->openFile(arcPath);
+	if (file) {
+		file->readInt();
+		u32 num = file->readInt();
+		for (int i = 0; i < num; i++) {
+			u32 b = file->readInt();
+			u32 c = file->readInt();
+			String str(0);
+			file->readString(str);
+
+			DirEntry* entry = new DirEntry();
+			entry->mName    = str.mString;
+			entry->mPending = c;
+			entry->mAddress = a + b;
+			mFileList->add(entry);
+		}
+		file->close();
+	}
+	!unused;
+	(getTime() - startTime - unused2); // duration? (fakematch)
+	int freeEnd = gsys->getHeap(gsys->mActiveHeapIdx)->getFree();
+}
+
+/**
+ * @brief Parses the .text section layout of a 3-column MetroWerks linker map for symbolic information on functions.
+ * @note This is the text-based linker map format only produced by MWLDEPPC 1.0 through 2.6.  MWLDEPPC 2.7+ changed the format.
+ * @result The results of this function are a singly-linked list stored in `gsys->mBuildMapFuncList`.
+ */
+static void ParseMapFile()
+{
+#if defined(__MWERKS__)
+	RandomAccessStream* file = gsys->openFile("build.map");
+	if (!file) {
+		return;
+	}
+
+	CmdStream* cmds = new CmdStream(file);
+	while (!cmds->endOfCmds() && !cmds->endOfSection()) {
+		// Keep scanning and discarding tokens until the prologue of the .text section layout is detected.
+		cmds->getToken(true);
+		if (!cmds->isToken(".text")) {
+			continue;
+		}
+
+		// Skip the rest of the .text section layout prologue.
+		cmds->skipLine(); // .text section layout
+		cmds->skipLine(); //   Starting        Virtual
+		cmds->skipLine(); //   address  Size   address
+		cmds->skipLine(); //   -----------------------
+
+		SymbolInfo* prevSymbol = nullptr;
+
+		// Lines of a 3-column MetroWerks linker map section layout can take three forms:
+		// Normal : "  00085780 0001f8 8008ace0  4 kill__8CreatureFb 	plugPikiKando.a creature.cpp"
+		// Unused : "  UNUSED   000008 ........ getAtariType__8CreatureFv plugPikiKando.a creature.cpp"
+		// Entry  : "  0020f8dc 000000 80214e3c _savefpr_20 (entry of __save_fpr) 	Runtime.PPCEABI.H.a runtime.c"
+
+		// The following loop parses these three formats until the .ctor section layout (the one following .text) is detected.
+		while (!cmds->endOfCmds()) {
+			// First we parse the starting address column to detect worthless (to this program) "UNUSED" symbol lines and skip them.
+			cmds->getToken(true);
+			if (cmds->isToken("UNUSED")) {
+				cmds->skipLine();
+			} else {
+				// The starting address column has already been parsed; next we read the size, virtual address, and alignment.
+				// Alignment is not present for entry symbols, but silently failing to scan them causes no issues as the value is unused.
+				// Entry symbols in general aren't handled very well by this function, but they're pretty rare in .text sections.
+				u32 symbolSize /* 0x28 */, symbolVirtualAddress /* 0x24 */, symbolAlignment /* 0x20 */;
+				sscanf(cmds->getToken(true), "%08x", &symbolSize); // "%06x" would be more accurate, but it doesn't matter.
+				sscanf(cmds->getToken(true), "%08x", &symbolVirtualAddress);
+				sscanf(cmds->getToken(true), "%d", &symbolAlignment);
+
+				// Despite its name, `CmdStream::skipLine` actually stores the remainder of the line as the current token.
+				// i.e. `cmds->mCurrentToken` = "kill__8CreatureFb 	plugPikiKando.a creature.cpp"
+				cmds->skipLine();
+
+				bool isLastCharValid = false;
+				int i;
+				int funcNameLength  = 0;
+				int classNameLength = 0;
+				int classNameOffset = 0;
+				int fileInfoOffset  = 0;
+				int fileInfoLength  = 0;
+				for (i = 0; i < strlen(cmds->mCurrentToken); i++) {
+					char currChar = cmds->mCurrentToken[i];
+
+					if (currChar != ' ' && currChar != '_') {
+						isLastCharValid = true;
+						funcNameLength++;
+						continue;
+					}
+
+					if (!isLastCharValid) {
+						funcNameLength++;
+						break;
+					}
+
+					if (!isLastCharValid) {
+						break;
+					}
+
+					if (currChar != '_') {
+						break;
+					}
+
+					if (cmds->mCurrentToken[i + 1] == '_') {
+						// look ahead to find the length/namespace length for the class
+						// BUG: This doesn't handle class names from nested namespaces, e.g. `getGPos__Q23zen17particleGeneratorFv`.
+						char digit1 = cmds->mCurrentToken[i + 2];
+						if (digit1 >= '0' && digit1 <= '9') {
+							char digit2 = cmds->mCurrentToken[i + 3];
+							if (digit2 >= '0' && digit2 <= '9') {
+								// two digit class length
+								classNameLength = digit2 + (digit1 - '0') * 10;
+								classNameLength -= '0';
+								// skip two underscores and the class length
+								classNameOffset = i + 4;
+							} else {
+								// one digit class length
+								classNameLength = digit1 - '0';
+								// skip two underscores and the class length
+								classNameOffset = i + 3;
+							}
+
+							for (int j = i; j < strlen(cmds->mCurrentToken); j++) {
+								if (cmds->mCurrentToken[j] == ' ') {
+									fileInfoOffset = j + 1;
+									fileInfoLength = strlen(cmds->mCurrentToken) - fileInfoOffset;
+									break;
+								}
+							}
+						}
+						break;
+					}
+
+					funcNameLength++;
+				}
+
+				int size;
+				if (classNameLength != 0) {
+					size = classNameLength + 2;
+				} else {
+					size = 0;
+				}
+
+				size = funcNameLength + size + 3 + fileInfoLength;
+
+				// NOTE: Using `operator new` is explicitly the *wrong* way to allocate a struct containing a flexible array member.
+				SymbolInfo* symbol      = (SymbolInfo*)System::alloc(ALIGN_NEXT(size, 4) + sizeof(SymbolInfo));
+				symbol->mNext           = nullptr;
+				symbol->mVirtualAddress = symbolVirtualAddress;
+
+				// It's evident from the codegen (MWCC is needlessly inefficient with flexible array members) that the devs didn't access
+				// `SymbolInfo::mDemangledName` by name and instead manually wrote to memory with pointer arithmetic and type aliasing.
+				int offs = sizeof(SymbolInfo); // Therefore, we must start the string offset at 8 instead of 0.
+
+				if (prevSymbol) {
+					prevSymbol->mNext = symbol;
+				} else {
+					gsys->mBuildMapFuncList = symbol;
+				}
+				prevSymbol = symbol;
+
+				// demangle! example: kill__8CreatureFb 	plugPikiKando.a creature.cpp
+				// write class name (e.g. Creature::)
+				if (classNameLength != 0) {
+					for (int j = 0; j < classNameLength; j++) {
+						((char*)symbol)[offs++] = cmds->mCurrentToken[j + classNameOffset];
+					}
+					((char*)symbol)[offs++] = ':';
+					((char*)symbol)[offs++] = ':';
+				}
+
+				// write function name (e.g. kill)
+				for (int j = 0; j < funcNameLength; j++) {
+					((char*)symbol)[offs++] = cmds->mCurrentToken[j];
+				}
+
+				((char*)symbol)[offs++] = ' ';
+				((char*)symbol)[offs++] = ' ';
+
+				// write file name and library (e.g. plugPikiKando.a creature.cpp)
+				for (int j = 0; j < fileInfoLength; j++) {
+					((char*)symbol)[offs++] = cmds->mCurrentToken[j + fileInfoOffset];
+				}
+
+				((char*)symbol)[offs++] = '\0';
+			}
+
+			// .ctors section layout prologue detected!  Time to bail!
+			if (cmds->isToken(".ctors")) {
+				break;
+			}
+		}
+	}
+	// ...What are you doing?  The show is over!
+	if (!cmds->endOfCmds()) {
+		cmds->getToken(true);
+	}
+
+	STACK_PAD_VAR(3);
+	file->close();
+#endif
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000040
+ */
+immut char* System::findAddress(u32 address)
+{
+	for (SymbolInfo* curr = mBuildMapFuncList; curr != nullptr; curr = curr->mNext) {
+		u32 minAddr = curr->mVirtualAddress;
+		u32 maxAddr = curr->mNext->mVirtualAddress;
+		if (address >= minAddr && address < maxAddr)
+			return curr->mDemangledName;
+	}
+	return nullptr;
+}
+
+/**
+ * @todo: Documentation
+ */
+void System::hardReset()
+{
+	bool old    = mForcePrint;
+	mForcePrint = FALSE;
+	if (useSymbols) {
+		int a = gsys->getHeap(gsys->mActiveHeapIdx)->getFree();
+		int c = OSTicksToMilliseconds(OSGetTick());
+		ParseMapFile();
+		int d = OSTicksToMilliseconds(OSGetTick());
+		int b = gsys->getHeap(gsys->mActiveHeapIdx)->getFree();
+	}
+	mForcePrint = old;
+
+	mCacher  = new TextureCacher(0x96000);
+#if defined(PIKI_PC_PORT)
+	int size = 0x800000; // 8MB
+#else
+	int size = 0x20000;
+#endif
+	gsys->mHeaps[SYSHEAP_Lang].init("language", AYU_STACK_GROW_UP, alloc(size), size);
+	preloadLanguage();
+
+	mTotalFrames = 0;
+
+	STACK_PAD_VAR(4);
+}
+
+/**
+ * @todo: Documentation
+ */
+System::System()
+{
+	mTimerState       = TS_Off;
+	mTogglePrint      = TERNARY_DEVELOP(TRUE, FALSE);
+	mToggleDebugInfo  = FALSE;
+	mToggleDebugExtra = FALSE;
+	mToggleBlur       = TRUE;
+	mToggleColls      = FALSE;
+#if defined(VERSION_PIKIDEMO)
+	mIsDemoTimeUp = FALSE;
+#endif
+	mDvdBufferSize    = 0x40000;
+	mCurrentThread    = OSGetCurrentThread();
+	mDvdErrorCallback = nullptr;
+	mDvdErrorCode     = DvdError::None;
+	mPrevAllocType    = FALSE;
+	mDmaComplete      = TRUE;
+	mTexComplete      = TRUE;
+	mActiveDir        = "";
+	mAtxRouter        = nullptr;
+	mActiveHeapIdx    = -1;
+	gsys              = this;
+	mBuildMapFuncList = nullptr;
+	mTimer            = nullptr;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000BC
+ */
+void sysErrorHandler(u16, OSContext*, u32, u32)
+{
+	TRAP_UNIMPLEMENTED;
+}
+
+/**
+ * @todo: Documentation
+ */
+void initBigFont()
+{
+	Texture* tex = new Texture;
+	TexImg* img  = new TexImg;
+	gsys->addTexture(tex, "bigFont.bti");
+
+	img->mFormat      = TEX_FMT_IA4;
+	img->mWidth       = 504;
+	img->mHeight      = 1008;
+	tex->mTexFlags    = Texture::TEX_CLAMP_S | Texture::TEX_CLAMP_T;
+	img->mDataSize    = img->calcDataSize(img->mFormat, img->mWidth, img->mHeight);
+	img->mTextureData = bigFont_data;
+	img->getTileSize(img->mFormat, tex->mTileSizeX, tex->mTileSizeY);
+	tex->mWidthFactor  = 1.0f / img->mWidth;
+	tex->mHeightFactor = 1.0f / img->mHeight;
+	tex->decodeData(img);
+	tex->attach();
+}
+
+#if defined(VERSION_GPIP01)
+static immut char* e_errorMessages[] = {
+	"Reading Game Disc...",
+	nullptr,
+	"An error has occurred.",
+	"Turn the power OFF and",
+	"check the NINTENDO GAMECUBE",
+	"Instruction Booklet for",
+	"instructions.",
+	nullptr,
+	"The Game Disc could not be read.",
+	"Please read the",
+	"NINTENDO GAMECUBE",
+	"Instruction Booklet",
+	"for more information.",
+	nullptr,
+	"Please insert a",
+	"Pikmin Game Disc.",
+	nullptr,
+	"Please close the",
+	"Disc Cover.",
+	nullptr,
+	"This is not a",
+	"Pikmin Game Disc.",
+	"Please insert a",
+	"Pikmin Game Disc.",
+	nullptr,
+};
+
+static immut char* f_msg0 = "Le disque ne peut \xEAtre lu.";
+static immut char* f_msg1 = "Veuillez ins\xE9rer un";
+
+static immut char* f_errorMessages[] = {
+	"Lecture du disque...",
+	nullptr,
+	"Une erreur est survenue.",
+	"Eteignez la console et",
+	"reportez-vous au manuel",
+	"d'instructions de votre",
+	"NINTENDO GAMCUBE.", // Gamcube.
+	nullptr,
+	"Le disque ne peut \xEAtre lu.",
+	"Reportez-vous au manuel",
+	"d'instructions de votre",
+	"NINTENDO GAMECUBE",
+	"pour plus d'informations.",
+	nullptr,
+	"Veuillez ins\xE9rer un",
+	"disque Pikmin.",
+	nullptr,
+	"Veuillez refermer le",
+	"couvercle.",
+	nullptr,
+	"Ce n'est pas un",
+	"disque Pikmin.",
+	"Veuillez ins\xE9rer un",
+	"disque Pikmin.",
+	nullptr,
+};
+
+static immut char* g_msg0 = "Bedienungsanleitung f\xFCr";
+static immut char* g_msg1 = "Bitte schlie\xDF\x65n Sie den";
+
+static immut char* g_errorMessages[] = {
+	"Disc wird gelesen...",
+	nullptr,
+	"Ein Fehler ist aufgetreten.",
+	"Bitte schalten sie den",
+	"NINTENDO GAMECUBE(TM) aus",
+	"und lesen Sie die",
+	"Bedienungsanleitung f\xFCr",
+	"weitere Informationen.",
+	nullptr,
+	"Diese Disc kann nicht gelesen",
+	"werden. Bitte lesen Sie die",
+	"Bedienungsanleitung, um weitere",
+	"Informationen zu erhalten.",
+	nullptr,
+	"Bitte legen Sie eine",
+	"Pikmin Game Disc ein.",
+	nullptr,
+	"Bitte schlie\xDF\x65n Sie den",
+	"Disc-Deckel.",
+	nullptr,
+	"Diese Disc beinhaltet",
+	"nicht Pikmin.",
+	"Bitte legen Sie eine",
+	"Pikmin Game Disc ein.",
+	nullptr,
+};
+
+static immut char* s_msg0 = "para obtener m\xE1s informaci\xF3n.";
+static immut char* s_msg1 = "\xC9ste no es el";
+
+static immut char* s_errorMessages[] = {
+	"Leyendo el disco...",
+	nullptr,
+	"Se ha producido un error.",
+	"Apaga la consola y consulta",
+	"el manual de instrucciones",
+	"de NINTENDO GAMECUBE",
+	"para obtener m\xE1s informaci\xF3n.",
+	nullptr,
+	"No se puede leer el disco.",
+	"Consulta el manual de",
+	"instrucciones de",
+	"NINTENDO GAMECUBE",
+	"para obtener m\xE1s informaci\xF3n.",
+	nullptr,
+	"Coloca el disco",
+	"de Pikmin.",
+	nullptr,
+	"Cierra la tapa",
+	"de la consola.",
+	nullptr,
+	"\xC9ste no es el",
+	"disco de Pikmin.",
+	"Coloca el disco",
+	"apropiado.",
+	nullptr,
+};
+
+static immut char* i_msg0 = "Si \xE8 verificato un errore.";
+static immut char* i_msg1 = "Questo non \xE8 un";
+
+static immut char* i_errorMessages[] = {
+	"Lettura del disco...",
+	nullptr,
+	"Si \xE8 verificato un errore.",
+	"Spegnere il",
+	"NINTENDO GAMECUBE",
+	"e consultare il",
+	"relativo manuale d'istruzioni.",
+	nullptr,
+	"Impossibile leggere il disco.",
+	"Consultare il",
+	"manuale d'istruzioni",
+	"del NINTENDO GAMECUBE.",
+	"",
+	nullptr,
+	"Inserire il",
+	"disco di Pikmin.",
+	nullptr,
+	"Chiudere il coperchio",
+	"del disco.",
+	nullptr,
+	"Questo non \xE8 un",
+	"disco di Pikmin.",
+	"Inserire un",
+	"disco di Pikmin.",
+	nullptr,
+};
+
+static immut char** errorList[30] = {
+	&e_errorMessages[0], &e_errorMessages[2], &e_errorMessages[8], &e_errorMessages[14], &e_errorMessages[17], &e_errorMessages[20],
+	&f_errorMessages[0], &f_errorMessages[2], &f_errorMessages[8], &f_errorMessages[14], &f_errorMessages[17], &f_errorMessages[20],
+	&g_errorMessages[0], &g_errorMessages[2], &g_errorMessages[9], &g_errorMessages[14], &g_errorMessages[17], &g_errorMessages[20],
+	&s_errorMessages[0], &s_errorMessages[2], &s_errorMessages[8], &s_errorMessages[14], &s_errorMessages[17], &s_errorMessages[20],
+	&i_errorMessages[0], &i_errorMessages[2], &i_errorMessages[8], &i_errorMessages[14], &i_errorMessages[17], &i_errorMessages[20],
+};
+#elif defined(VERSION_GPIJ01) || defined(VERSION_G98P01_PIKIDEMO) || defined(VERSION_DPIJ01_PIKIDEMO)
+static immut char* errorMessages[] = {
+	"ディスクを読み込んでいます。",
+	nullptr,
+	"エラーが発生しました。",
+	"本体のパワーボタンを押し",
+	"電源をOFFにし",
+	"取り扱い説明書の指示に",
+	"したがってください。",
+	nullptr,
+	"ディスクを読み込めませんでした。",
+	"くわしくは、本体の取り扱い",
+	"説明書をお読みください。",
+	nullptr,
+	"「ピクミン」のディスクを",
+	"セットしてください。",
+	nullptr,
+	"ディスクカバーを",
+	"閉めてください。",
+	nullptr,
+	"このディスクは「ピクミン」の",
+	"ディスクではありません。",
+	"「ピクミン」のディスクを",
+	"セットしてください。",
+	nullptr,
+};
+
+static immut char** errorList[6] = {
+	&errorMessages[0], &errorMessages[2], &errorMessages[8], &errorMessages[12], &errorMessages[15], &errorMessages[18],
+};
+#else
+static immut char* errorMessages[] = {
+	"Reading Game Disc...",
+	nullptr,
+	"An error has occurred.",
+	"Turn the power OFF and",
+	"check the NINTENDO GAMECUBE",
+	"Instruction Booklet for",
+	"instructions.",
+	nullptr,
+	"The Game Disc could not be read.",
+	"Please read the",
+	"NINTENDO GAMECUBE",
+	"Instruction Booklet",
+	"for more information.",
+	nullptr,
+	"Please insert a",
+	"Pikmin Game Disc.",
+	nullptr,
+	"Please close the",
+	"Disc Cover.",
+	nullptr,
+	"This is not a",
+	"Pikmin Game Disc.",
+	"Please insert a",
+	"Pikmin Game Disc.",
+	nullptr,
+};
+
+static immut char** errorList[6] = {
+	&errorMessages[0], &errorMessages[2], &errorMessages[8], &errorMessages[14], &errorMessages[17], &errorMessages[20],
+};
+#endif
+
+/**
+ * @todo: Documentation
+ */
+void System::showDvdError(Graphics& gfx)
+{
+	if (mDvdErrorCode < DvdError::ReadingDisc) {
+		return;
+	}
+
+	gfx.setColour(COLOUR_BLACK, true);
+	gfx.fillRectangle(AREA_FULL_SCREEN(gfx));
+	gfx.setColour(COLOUR_WHITE, true);
+	gfx.setAuxColour(COLOUR_WHITE);
+
+	if (mDvdErrorCode) { // DvdError::ReadingDisc or higher
+		int y = 160;
+#if defined(VERSION_GPIP01)
+		immut char** errors = errorList[mDvdErrorCode + mLanguageID * 6];
+#else
+		immut char** errors = errorList[mDvdErrorCode];
+#endif
+		while (*errors) {
+			gfx.texturePrintf(bigFont, 320 - (bigFont->stringWidth(*errors) / 2), y += 28, *errors);
+			errors++;
+		}
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void System::Initialise()
+{
+	OSInit();
+	CARDInit();
+	void* lo   = OSGetArenaLo();
+	void* hi   = OSGetArenaHi();
+	#if defined(PIKI_PC_PORT)
+	mHeapStart = (reinterpret_cast<uintptr_t>(OSInitAlloc(lo, hi, 1)) + 0x1f) & ~uintptr_t(0x1f);
+	uintptr_t heapHi = reinterpret_cast<uintptr_t>(hi) & ~uintptr_t(0x1f);
+	mHeapEnd = static_cast<u32>(heapHi - mHeapStart);
+	#else
+	mHeapStart = OSRoundUp32B(OSInitAlloc(lo, hi, 1));
+	hi         = (void*)OSRoundDown32B(hi);
+	mHeapEnd   = (u32)hi - mHeapStart;
+	#endif
+#if defined(VERSION_GPIP01)
+	if (mHeapEnd <= 0x1800000)
+#else
+	if (mHeapEnd < 0x1800000)
+#endif
+	{
+		useSymbols = false;
+	}
+	mHeaps[SYSHEAP_Sys].init("sys", AYU_STACK_GROW_DOWN, (void*)mHeapStart, mHeapEnd);
+	setHeap(SYSHEAP_Sys);
+	sysCon = new LogStream;
+	errCon = sysCon;
+	DVDInit();
+	if (!dvdStream.readBuffer) {
+		dvdStream.readBuffer = new (PIKI_ALIGNED(0x20)) u8[dvdStream.mSize];
+	}
+	!mHeapStart;
+	(gsys->getHeap(SYSHEAP_Sys)->getFree() / 1024.0f); // fakematch free size KB print?
+	static u32 mMemoryTable[3];
+	ARInit(mMemoryTable, 3);
+	ARQInit();
+
+	mActiveCacheList.mNext = mActiveCacheList.mPrev = &mActiveCacheList;
+	mFreeCacheList.mNext = mFreeCacheList.mPrev = &mFreeCacheList;
+
+	SystemCache* cacheStack = new SystemCache[64];
+	for (int i = 0; i < 64; i++) {
+		mFreeCacheList.insertAfter(&cacheStack[i]);
+	}
+
+	onceInit();
+
+	mDGXGfx          = new DGXGraphics(false);
+	mGraphics        = mDGXGfx;
+	mIsRendering     = 0;
+	mIsLoadingActive = 0;
+
+	OSInitMessageQueue(&dvdMesgQueue, &dvdMesgBuffer, 1);
+	OSInitMessageQueue(&loadMesgQueue, &loadMesgBuffer, 1);
+	OSInitMessageQueue(&sysMesgQueue, &sysMesgBuffer, 1);
+	initBigFont();
+	startDvdThread();
+
+	bigFont = new Font;
+	bigFont->setTexture(loadTexture("bigFont.bti", true), 21, 42);
+	mDvdErrorCallback = new Delegate1<System, Graphics&>(this, &System::showDvdError);
+	startLoading(nullptr, true, 0);
+
+	u32 audioHeapSize = 0x80000;
+	Jac_Start(new (PIKI_ALIGNED(0x20)) u8[audioHeapSize], audioHeapSize, 0x800000, "/dataDir/SndData/");
+	Jac_AddDVDBuffer((u8*)mMatrices, mMatrixCount * sizeof(Matrix4f));
+
+	mBaseAramAllocator.init(0x800000, 0x800000);
+	setActiveAramAllocator(&mBaseAramAllocator);
+
+	mDvdRoot.initCore("");
+	mAramRoot.initCore("");
+	mFileList = &mDvdRoot;
+
+	mControllerMgr.init();
+	mTimer = new Timers();
+
+	Font* cons = new Font;
+	cons->setTexture(loadTexture("consFont.bti", true), 16, 8);
+	cons->mTexture->attach();
+	mConsFont = cons;
+
+	endLoading();
+}
+
+/**
+ * @todo: Documentation
+ */
+void System::sndPlaySe(u32)
+{
+}
+
+/**
+ * @todo: Documentation
+ */
+System::~System()
+{
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000028
+ */
+bool System::hasDebugInfo()
+{
+	return false;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000030 (VERSION_GPIJ01 || VERSION_GPIE01 || VERSION_GPIP01)
+ * @note UNUSED Size: 0000b8 (VERSION_PIKIDEMO)
+ */
+void System::halt(immut char* file, int line, immut char* message)
+{
+#ifdef WIN32
+	char buffer[2048];
+	sprintf(buffer, "%s\n\nClick OK to quit now !", message);
+	MessageBox(NULL, buffer, "Error!", MB_ICONEXCLAMATION);
+	exit(0); // Failure!
+#else
+
+#if defined(VERSION_PIKIDEMO) || defined(DEVELOP)
+	if (gsys->mHaltCallback) {
+		gsys->mHaltCallback->method(*gsys->mDGXGfx);
+		const int startTick = OSGetTick();
+		while (OSGetTick() - startTick < OS_TIMER_CLOCK * 5) { }
+	}
+	OSDumpContext(&gsys->mCurrentThread->context);
+	static_cast<DGXGraphics*>(gsys->mDGXGfx)->showError(message, file, line);
+#endif
+
+#if defined(VERSION_GPIJ01) || defined(VERSION_GPIE01) || defined(VERSION_GPIP01)
+	OSErrorLine(1075, message);
+#elif defined(VERSION_PIKIDEMO)
+	OSErrorLine(1077, message);
+#else
+	OSPanic(file, line, message);
+#endif
+
+#endif
+}
+
+#if defined(WIN32)
+/**
+ * @todo: Documentation
+ */
+void System::sleep(f32 seconds)
+{
+	SleepEx(seconds * 1000, TRUE);
+}
+#endif
+
+/**
+ * @todo: Documentation
+ */
+void* loadFunc(void* idler)
+{
+	LoadIdler* loadIdler = (LoadIdler*)idler;
+	if (idler) {
+		loadIdler->init();
+	}
+
+	int frameCount = 0; // r23
+#if defined(VERSION_G98E01_PIKIDEMO)
+	int b = 4; // r22
+#else
+	int b = 2; // r22
+#endif
+	GXSetCurrentGXThread();
+	OSGetTick();
+
+	while (true) {
+		OSMessage msg;
+		OSReceiveMessage(&loadMesgQueue, &msg, OS_MESSAGE_BLOCK);
+		if ((u32)(uintptr_t)msg == 'QUIT') {
+			OSSendMessage(&sysMesgQueue, (OSMessage)'CONT', OS_MESSAGE_NOBLOCK);
+			break;
+		}
+
+		if (gsys->mIsRendering) {
+			continue;
+		}
+		OSGetTick();
+		frameCount++;
+		GXSetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
+		if (!gsys->mIsLoadScreenActive) {
+			GXCopyDisp(static_cast<DGXGraphics*>(gsys->mDGXGfx)->mDisplayBuffer, GX_FALSE);
+		} else {
+			GXCopyDisp(static_cast<DGXGraphics*>(gsys->mDGXGfx)->mDisplayBuffer,
+			           (frameCount >= gsys->mLoadTimeBeforeIdling) ? GX_TRUE : GX_FALSE);
+		}
+
+		gsys->beginRender();
+		STACK_PAD_VAR(1);
+		Matrix4f mtx;
+		DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+		gfx->setOrthogonal(mtx.mMtx, RectArea(0, 0, gfx->mScreenWidth, gfx->mScreenHeight));
+
+		if (gsys->mIsLoadScreenActive) {
+			gfx->setColour(Colour(0, 0, 0, 32), true);
+			gfx->setAuxColour(Colour(0, 0, 0, 32));
+			gfx->fillRectangle(RectArea(0, 0, gfx->mScreenWidth, gfx->mScreenHeight));
+		}
+
+		if (loadIdler && frameCount >= gsys->mLoadTimeBeforeIdling) {
+			loadIdler->draw(*gfx);
+		}
+
+		if (gsys->mDvdErrorCallback) {
+			// gross but necessary to avoid a Delegate1 weak function spawning too early
+			static_cast<IDelegate1<Graphics&>*>(gsys->mDvdErrorCallback)->invoke(*gsys->mDGXGfx);
+		}
+
+		static_cast<DGXGraphics*>(gsys->mDGXGfx)->doneRender();
+		if (b && --b == 0) {
+			VISetBlack(FALSE);
+			VIFlush();
+		}
+	}
+
+	STACK_PAD_TERNARY(frameCount, 4);
+	return nullptr;
+}
+
+OSThread Thread;
+u8 ThreadStack[0x2000] ATTRIBUTE_ALIGN(32);
+OSThread dvdThread;
+u8 dvdThreadStack[0x2000] ATTRIBUTE_ALIGN(32);
+
+/**
+ * @brief Prompts the game to enter a loading state, calling `loadFunc`.
+ *
+ * @param idler Pointer to the relevant load screen manager/idler.
+ * @param useLoadScreen Whether to use a loading screen or not.
+ * @param loadDelay Number of frames to wait before calling the load screen manager/idler.
+ */
+void System::startLoading(LoadIdler* idler, bool useLoadScreen, u32 loadDelay)
+{
+	gsys->mPrevAllocType = FALSE;
+	if (mIsLoadingActive == 0) {
+		mLoadTimeBeforeIdling = loadDelay;
+		mIsLoadScreenActive   = useLoadScreen;
+#if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01)
+		// demo removes the loading thread after it's finished, while other versions maintain it.
+		OSCreateThread(&Thread, loadFunc, idler, ThreadStack + sizeof(ThreadStack), sizeof(ThreadStack), 15, OS_THREAD_ATTR_DETACH);
+#else
+		OSCreateThread(&Thread, loadFunc, idler, ThreadStack + sizeof(ThreadStack), sizeof(ThreadStack), 15, 0);
+#endif
+		mIsLoadingActive = 1;
+		OSResumeThread(&Thread);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void System::nudgeLoading()
+{
+	OSSendMessage(&loadMesgQueue, (OSMessage)'NEWF', 0);
+}
+
+/**
+ * @todo: Documentation
+ */
+void System::endLoading()
+{
+	gsys->mPrevAllocType = TRUE;
+	if (mIsLoadingActive) {
+		OSSendMessage(&loadMesgQueue, (OSMessage)'QUIT', OS_MESSAGE_BLOCK);
+#if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01)
+		OSReceiveMessage(&sysMesgQueue, nullptr, OS_MESSAGE_BLOCK);
+		OSCancelThread(&Thread);
+#else
+		OSJoinThread(&Thread, nullptr);
+#endif
+		GXSetCurrentGXThread();
+		mIsLoadingActive    = 0;
+		mIsLoadScreenActive = 0;
+	}
+}
+
+/**
+ * @brief Callback on DMA copy completion to free the system cache entry and unlock DMA copy requests.
+ *
+ * @param cache Pointer to system cache entry assigned to the DMA operation (aliased as a u32).
+ */
+void doneDMA(u32 cache)
+{
+	// free the cache
+	#if defined(PIKI_PC_PORT)
+	SystemCache* sysCache = static_cast<SystemCache*>(PCResolveARQToken(cache));
+	#else
+	SystemCache* sysCache = (SystemCache*)((SystemCache*)cache)->owner;
+	#endif
+	sysCache->remove();
+	gsys->mFreeCacheList.insertAfter(sysCache);
+
+	// update free flag
+	gsys->mDmaComplete = TRUE;
+}
+
+/**
+ * @brief Forces system to wait until the previous DMA copy operation has been completed before starting the next.
+ */
+void System::copyWaitUntilDone()
+{
+	while (mDmaComplete == FALSE) { }
+}
+
+/**
+ * @brief Copies a block of data from main RAM to the ARAM cache.
+ *
+ * @param mainMemAddr Address of data to copy in main RAM.
+ * @param size Size of data to copy (bytes).
+ * @param aramCacheAddr Address to copy data to in ARAM - if 0, it will attempt to allocate the next free ARAM address.
+ * @return Address that data has been copied to in ARAM.
+ */
+u32 System::copyRamToCache(u32 mainMemAddr, u32 size, u32 aramCacheAddr)
+{
+	// wait until any active DMA requests are done
+	copyWaitUntilDone();
+
+	u32 adjustedCacheAddr = aramCacheAddr;
+
+	// if we supplied 0, we want to put it in the next available aram address, so find that
+	if (adjustedCacheAddr == 0) {
+		adjustedCacheAddr = mActiveAramAllocator->alloc(size);
+		if (adjustedCacheAddr == 0) {
+			ERROR("Cannot fit data into aram!\n");
+		}
+	}
+
+	// grab a new cache to own the aram transfer request
+	BOOL inter = OSDisableInterrupts();
+
+	if (mFreeCacheList.mNext == &mFreeCacheList) {
+		ERROR("NO ARAM TRANS BLOCKS LEFT !!!\n");
+	}
+
+	SystemCache* cache = mFreeCacheList.mNext;
+	cache->remove();
+	mActiveCacheList.insertAfter(cache);
+
+	OSRestoreInterrupts(inter);
+
+	gsys->mDmaComplete = FALSE;
+
+	// sync data cache and RAM
+	DCStoreRange((void*)mainMemAddr, size);
+
+	// send request to the aram queue (high priority)
+	ARQPostRequest(cache, (u32)(uintptr_t)cache, ARQ_TYPE_MRAM_TO_ARAM, ARQ_PRIORITY_HIGH, mainMemAddr, adjustedCacheAddr, size, doneDMA);
+
+	return adjustedCacheAddr;
+
+	STACK_PAD_VAR(1);
+}
+
+/**
+ * @brief Copies a block of data from the ARAM cache to main RAM.
+ *
+ * @param mainMemAddr Destination address in main RAM to copy data to.
+ * @param aramCacheAddr Address to copy data from in ARAM.
+ * @param size Size of data to copy (bytes).
+ */
+void System::copyCacheToRam(u32 mainMemAddr, u32 aramCacheAddr, u32 size)
+{
+	// wait until any active DMA requests are done
+	copyWaitUntilDone();
+
+	// grab a new cache to own the aram transfer request
+	BOOL inter = OSDisableInterrupts();
+
+	if (mFreeCacheList.mNext == &mFreeCacheList) {
+		ERROR("NO ARAM TRANS BLOCKS LEFT !!!\n");
+	}
+
+	SystemCache* cache = mFreeCacheList.mNext;
+	cache->remove();
+	mActiveCacheList.insertAfter(cache);
+	OSRestoreInterrupts(inter);
+
+	gsys->mDmaComplete = FALSE;
+
+	// make sure data cache is clear for where we're putting this
+	DCInvalidateRange((void*)mainMemAddr, size);
+
+	// send request to the aram queue (high priority)
+	ARQPostRequest(cache, (u32)(uintptr_t)cache, ARQ_TYPE_ARAM_TO_MRAM, ARQ_PRIORITY_HIGH, aramCacheAddr, mainMemAddr, size, doneDMA);
+}
+
+/**
+ * @brief Callback on texture copy completion to free the system and texture cache entries and unlock texture copy requests.
+ *
+ * @param cache Pointer to system cache entry assigned to the texture copy operation (aliased as a u32).
+ */
+void freeBuffer(u32 cache)
+{
+	CacheTexture* texCache = (CacheTexture*)(((SystemCache*)cache)->owner);
+
+	// sync data cache of texture to main mem
+	texCache->mPixelData = texCache->mTexImage->mTextureData;
+	DCStoreRange(texCache->mPixelData, texCache->mTexImage->mDataSize);
+
+	// free the texture cache entry
+	texCache->mSystemCache->remove();
+	gsys->mFreeCacheList.insertAfter(texCache->mSystemCache);
+	texCache->mSystemCache = nullptr;
+	texCache->detach();
+	texCache->attach();
+
+	// update free flag
+	gsys->mTexComplete = TRUE;
+
+	STACK_PAD_VAR(2);
+}
+
+/**
+ * @brief Copies data for a texture from the ARAM cache to its main RAM texture entry.
+ *
+ * @param tex Texture cache entry, containing the ARAM cache address to copy from, and a pointer to the main RAM texture entry to copy to.
+ */
+void System::copyCacheToTexture(CacheTexture* tex)
+{
+	// grab a new cache to own the aram transfer request
+	BOOL inter = OSDisableInterrupts();
+
+	if (mFreeCacheList.mNext == &mFreeCacheList) {
+		ERROR("NO TEXTURE ARAM TRANS BLOCKS LEFT!!!\n");
+	}
+
+	SystemCache* cache = mFreeCacheList.mNext;
+	cache->remove();
+	mActiveCacheList.insertAfter(cache);
+
+	if (tex->mSystemCache) {
+		ERROR("Already transfering texture!!!!\n");
+	}
+
+	tex->mSystemCache = cache;
+
+	u32 mainMemAddr = (u32)(uintptr_t)tex->mTexImage->mTextureData;
+	u32 aramAddr    = tex->mAramAddress;
+	u32 size        = tex->mTexImage->mDataSize;
+
+	OSRestoreInterrupts(inter);
+
+	gsys->mTexComplete = FALSE;
+	#if defined(PIKI_PC_PORT)
+	// The PC ARAM backend is currently synchronous and does not copy texture
+	// bytes. Complete the bookkeeping without truncating either 64-bit pointer
+	// through ARQRequest::owner.
+	cache->remove();
+	mFreeCacheList.insertAfter(cache);
+	tex->mSystemCache = nullptr;
+	tex->mPixelData = tex->mTexImage->mTextureData;
+	mTexComplete = TRUE;
+	#else
+	DCInvalidateRange((void*)mainMemAddr, size);
+	ARQPostRequest(cache, (u32)tex, ARQ_TYPE_ARAM_TO_MRAM, ARQ_PRIORITY_HIGH, aramAddr, (u32)mainMemAddr, size, freeBuffer);
+	#endif
+
+	while (mTexComplete == FALSE) { }
+}
+
+/**
+ * @todo: Documentation
+ */
+void* dvdFunc(void*)
+{
+	int stopped      = false;
+	int playedSe     = false;
+	int inputCounter = 0;
+
+	while (true) {
+		OSReceiveMessage(&dvdMesgQueue, nullptr, OS_MESSAGE_BLOCK);
+		if (!stopped) {
+#if defined(VERSION_G98P01_PIKIDEMO) || defined(VERSION_DPIJ01_PIKIDEMO)
+			if (gsys->mIsDemoTimeUp) {
+				Jac_Freeze_Precall();
+				stopped = true;
+			}
+#endif
+
+			if (gsys->mControllerMgr.keyDown(KBBTN_DPAD_UP) && gsys->mControllerMgr.keyDown(KBBTN_DPAD_RIGHT)
+			    && gsys->mControllerMgr.keyDown(KBBTN_A)) {
+				inputCounter++;
+				if (inputCounter == 30) {
+					Jac_Freeze_Precall();
+					stopped = true;
+				}
+			} else {
+				inputCounter = 0;
+			}
+#if defined(VERSION_G98E01_PIKIDEMO)
+			if (gsys->mIsDemoTimeUp || OSGetResetSwitchState())
+#elif defined(VERSION_G98P01_PIKIDEMO) || defined(VERSION_DPIJ01_PIKIDEMO)
+			if (OSGetResetButtonState())
+#else
+			if (OSGetResetSwitchState())
+#endif
+			{
+				Jac_Freeze_Precall();
+				stopped = true;
+			}
+		} else {
+#if defined(VERSION_G98P01_PIKIDEMO) || defined(VERSION_DPIJ01_PIKIDEMO)
+			if (!OSGetResetButtonState() && !gsys->mIsRendering && !gsys->mIsCardSaving)
+#else
+			if (!OSGetResetSwitchState() && !gsys->mIsRendering && !gsys->mIsCardSaving)
+#endif
+			{
+				PADRecalibrate(0xf0000000);
+				Jac_Freeze();
+#if defined(VERSION_GPIJ01) || defined(VERSION_DPIJ01_PIKIDEMO)
+				GXAbortFrame();
+#else
+#endif
+				VISetBlack(1);
+				VIFlush();
+				VIWaitForRetrace();
+				VIWaitForRetrace();
+				OSResetSystem(0, 0, 0);
+			}
+		}
+
+		s32 stat = DVDGetDriveStatus();
+		if (stat == DVD_STATE_FATAL_ERROR) {
+			gsys->mDvdErrorCode = DvdError::FatalError;
+		} else if (stat == DVD_STATE_RETRY) {
+			gsys->mDvdErrorCode = DvdError::RetryError;
+		} else if (stat == DVD_STATE_NO_DISK) {
+			gsys->mDvdErrorCode = DvdError::NoDisc;
+		} else if (stat == DVD_STATE_COVER_OPEN) {
+			gsys->mDvdErrorCode = DvdError::CoverOpen;
+		} else if (stat == DVD_STATE_WRONG_DISK) {
+			gsys->mDvdErrorCode = DvdError::WrongDisc;
+		} else {
+			int* dvdErrorCode = &gsys->mDvdErrorCode;
+			if (*dvdErrorCode != DvdError::None && stat == DVD_STATE_BUSY) {
+				*dvdErrorCode = DvdError::ReadingDisc;
+			} else {
+				*dvdErrorCode = DvdError::None;
+			}
+		}
+
+		if (gsys->mDvdErrorCode >= DvdError::ReadingDisc && !playedSe) {
+			Jac_PlaySystemSe(JACSYS_DVDPause);
+			playedSe = true;
+		} else if (gsys->mDvdErrorCode < DvdError::ReadingDisc && playedSe) {
+			Jac_PlaySystemSe(JACSYS_DVDUnpause);
+			playedSe = false;
+		}
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void System::nudgeDvdThread()
+{
+	OSSendMessage(&dvdMesgQueue, (OSMessage)'NEWF', 0);
+}
+
+/**
+ * @todo: Documentation
+ */
+void System::startDvdThread()
+{
+	OSCreateThread(&dvdThread, dvdFunc, nullptr, dvdThreadStack + sizeof(dvdThreadStack), sizeof(dvdThreadStack), 0xf,
+	               OS_THREAD_ATTR_DETACH);
+	OSResumeThread(&dvdThread);
+}
+
+#ifdef WIN32
+
+// TODO, this function is pulled from MSVCRTD.dll
+FILE* fopen(char*, char*)
+{
+	return nullptr;
+}
+
+RandomAccessStream* System::createFile(immut char* name, BOOL useRoot)
+{
+	const char* b;
+	const char* c;
+
+	if (useRoot) {
+		b = mActiveDir;
+	} else {
+		b = "";
+	}
+	char path[PATH_MAX];
+	sprintf(path, "%s", b);
+	if (useRoot) {
+		c = mDataRoot;
+	} else {
+		c = "";
+	}
+	sprintf(path, "%s%s", c, name);
+	FILE* file = fopen(path, "wb");
+	if (file) {
+		return new AtxFileStream(); // file, name
+	}
+	return nullptr;
+}
+
+#endif

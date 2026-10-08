@@ -1,0 +1,97 @@
+#ifndef MSL_ALGORITHM_H_
+#define MSL_ALGORITHM_H_
+
+#include "mem.h"
+#include "stl/iterator.h"
+
+namespace std {
+template <class ForwardIterator, class T>
+ForwardIterator lower_bound(ForwardIterator first, ForwardIterator last, const T& val)
+{
+	iterator_traits<ForwardIterator>::difference_type count = std::distance<ForwardIterator>(first, last);
+
+	while (count > 0) {
+		ForwardIterator it                                     = first;
+		iterator_traits<ForwardIterator>::difference_type step = count / 2;
+		std::advance(it, step);
+
+		if (*it < val) {
+			first = ++it;
+			count -= step + 1;
+		} else {
+			count = step;
+		}
+	}
+
+	return first;
+}
+
+template <class ForwardIterator, class T, class Predicate>
+ForwardIterator upper_bound(ForwardIterator first, ForwardIterator last, const T& val, Predicate p)
+{
+	iterator_traits<ForwardIterator>::difference_type count = std::distance<ForwardIterator>(first, last);
+
+	while (count > 0) {
+		ForwardIterator it                                     = first;
+		iterator_traits<ForwardIterator>::difference_type step = count / 2;
+		std::advance(it, step);
+
+		if (!(val < *it)) {
+			first = ++it;
+			count -= step + 1;
+		} else {
+			count = step;
+		}
+	}
+
+	return first;
+}
+
+template <class InputIt, class UnaryPredicate>
+InputIt find_if(InputIt first, InputIt last, UnaryPredicate p);
+
+template <class ForwardIt, class T>
+void fill(ForwardIt first, ForwardIt last, const T& value)
+{
+	for (; first != last; ++first) {
+		*first = value;
+	}
+}
+
+template <class InputIt, class OutputIt>
+inline OutputIt copy(InputIt first, InputIt last, OutputIt d_first)
+{
+	for (; first < last;) {
+		*d_first++ = *first++;
+	}
+	return d_first;
+}
+
+template <class T, int N>
+class __copy_backward {
+public:
+	static T* copy_backward(T* begin, T* end, T* dest)
+	{
+#ifdef DEBUG
+		size_t size = (end - begin);
+		dest -= size;
+		memmove(dest, begin, size * sizeof(begin));
+		return dest;
+#else
+		for (; end > begin;) {
+			*--dest = *--end;
+		}
+		return end;
+#endif
+	}
+};
+
+template <class T>
+inline T* copy_backward(T* first, T* last, T* d_last)
+{
+	return __copy_backward<T, 1>::copy_backward(first, last, d_last);
+}
+
+} // namespace std
+
+#endif

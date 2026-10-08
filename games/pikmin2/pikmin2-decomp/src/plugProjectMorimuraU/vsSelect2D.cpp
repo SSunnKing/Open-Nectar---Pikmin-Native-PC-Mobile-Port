@@ -1,0 +1,3852 @@
+#include "Morimura/VsSelect.h"
+#ifdef PIKI_PC_PORT
+extern "C" void pc_gfx_p2_extend_shade(float gxY0, float gxY1, float stripW);
+#endif
+#include "og/newScreen/ogUtil.h"
+#include "og/Screen/ArrowAlphaBlink.h"
+#include "JSystem/JKernel/JKRArchive.h"
+#include "Game/gameChallenge2D.h"
+#include "efx2d/T2DBattleDive.h"
+#include "Dolphin/rand.h"
+#include "Screen/Game2DMgr.h"
+#include "Controller.h"
+
+static const char unusedName[] = "vsSelect2D";
+namespace Morimura {
+f32 TVsSelect::mAngRate       = 0.2f;
+f32 TVsSelect::mMoveSpeed     = 25.0f;
+f32 TVsSelect::mIndVal        = 0.05f;
+f32 TVsSelect::mIndShuki      = 0.3f;
+f32 TVsSelect::mZoomFrameMax  = 25.0f;
+f32 TVsSelect::mTestVal       = 10.0f;
+f32 TVsSelect::mAngUp         = 0.03f;
+f32 TVsSelect::mWindowScale   = 1.0f;
+f32 TVsSelect::mDemoScaleMax  = 2.2f;
+f32 TVsSelect::mDemoScale     = 1.0f;
+f32 TVsSelect::mDemoOffsetMax = 290.0f;
+f32 TVsSelect::mFireAlphaRate = 0.5f;
+JKRHeap* TVsSelect::mDebugHeapParent;
+JKRHeap* TVsSelect::mDebugHeap;
+Vector2f TVsPiki::mPikiOffset   = Vector2f(12.5f, -0.5f);
+bool TVsSelect::mForceDemoStart = false;
+bool TVsSelect::mLoopDrum       = false;
+bool TVsSelect::mCanCancel      = false;
+TVsSelect::StaticValues TVsSelect::mScrollParm;
+
+u32 unk[]                            = { 1, 2, 3, 0 };
+ResTIMG* TVsSelect::mOrimaTexture[5] = { nullptr };
+ResTIMG* TVsSelect::mLouieTexture[5] = { nullptr };
+
+TVsSelectSlotIndex slotIDInfo[12] = {
+	{ 6, 0, MC8("2042_00") },  // "Supercharge all Pikmin!"
+	{ 7, 1, MC8("2041_00") },  // "Bury enemy Pikmin!"
+	{ 8, 5, MC8("2049_00") },  // "Volatile Dweevil drops on opponent."
+	{ 9, 3, MC8("2044_00") },  // "Blowhog drops on opponent."
+	{ 10, 4, MC8("2045_00") }, // "Blowhog drops on opponent."
+	{ 11, 2, MC8("2052_00") }, // "Swooping Snitchbug drops on opponent."
+	{ 0, 6, MC8("2046_00") },  // "Recover stolen marble."
+	{ 1, 7, MC8("2050_00") },  // "Boulders drop on opponent."
+	{ 2, 8, MC8("2051_00") },  // "All Pikmin bloom."
+	{ 3, 9, MC8("2047_00") },  // "Increase Pikmin by five."
+	{ 4, 10, MC8("2048_00") }, // "Increase Pikmin by ten."
+	{ 5, 11, MC8("2043_00") }, // "Vanish from opponent's view."
+};
+
+/**
+ * @note Address: 0x8039982C
+ * @note Size: 0x314
+ */
+void TVsSelectIndPane::draw()
+{
+	J2DOrthoGraph graf(0.0f, 0.0f, 640.0f, 480.0f, -1.0f, 1.0f);
+	graf.setPort();
+	P2ASSERTLINE(49, mTexture1);
+	P2ASSERTLINE(50, mTexture2);
+	mTexture1->load(GX_TEXMAP0);
+	mTexture2->load(GX_TEXMAP1);
+	GXSetNumTevStages(1);
+	GXSetNumIndStages(1);
+	GXSetNumChans(0);
+	GXSetNumTexGens(1);
+	GXSetBlendMode(GX_BM_BLEND, GX_BL_DSTALPHA, GX_BL_INVDSTALPHA, GX_LO_CLEAR);
+	GXSetTexCoordGen2(GX_TEXCOORD0, GX_TG_MTX3X4, GX_TG_TEX0, 0x1e, GX_FALSE, 0x7d);
+	GXSetIndTexOrder(GX_IND_TEX_STAGE_0, GX_TEXCOORD0, GX_TEXMAP1);
+	GXSetIndTexCoordScale(GX_IND_TEX_STAGE_0, GX_ITS_1, GX_ITS_1);
+
+	Mtx mtx;
+	Mtx23 indMtx;
+	if (mMtxUseType) {
+		indMtx[0][0] = mMtxXOffset;
+		indMtx[0][1] = 0.0f;
+		indMtx[0][2] = 0.0f;
+		indMtx[1][0] = 0.0f;
+		indMtx[1][1] = mMtxYOffset;
+		indMtx[1][2] = 0.0f;
+	} else {
+		PSMTXRotRad(mtx, J2DROTATE_Z, MTXDegToRad(mRotation));
+		indMtx[0][0] = mtx[0][0] * 0.5f;
+		indMtx[0][1] = mtx[0][1] * 0.5f;
+		indMtx[0][2] = 0.0f;
+		indMtx[1][0] = mtx[1][0] * 0.5f;
+		indMtx[1][1] = mtx[1][1] * 0.5f;
+		indMtx[1][2] = 0.0f;
+	}
+
+	GXSetIndTexMtx(GX_ITM_0, indMtx, mTexMtxScale);
+	GXSetTevIndWarp(GX_TEVSTAGE0, GX_IND_TEX_STAGE_0, GX_TRUE, GX_FALSE, GX_ITM_0);
+	GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
+	GXSetTevOp(GX_TEVSTAGE0, GX_REPLACE);
+	GXClearVtxDesc();
+	GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+	GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_POS_XYZ, GX_F32, 0);
+
+	Mtx mtx2;
+	PSMTXIdentity(mtx2);
+	GXLoadPosMtxImm(mtx2, 0);
+	GXLoadTexMtxImm(mtx2, 0x1e, GX_MTX2x4);
+	GXBegin(GX_QUADS, GX_VTXFMT0, 4);
+
+	f32 zero = 0.0f;
+	f32 one  = 1.0f;
+	// Top Left
+	GXTexCoord2f32(mMinPos.x, mMinPos.y);
+	GXPosition3f32(zero, zero, zero);
+
+	// Top Right
+	GXTexCoord2f32(mMaxPos.x, mMinPos.y);
+	GXPosition3f32(zero, one, zero);
+
+	// Bottom Right
+	GXTexCoord2f32(mMaxPos.x, mMaxPos.y);
+	GXPosition3f32(zero, one, one);
+
+	// Bottom Left
+	GXTexCoord2f32(mMinPos.x, mMaxPos.y);
+	GXPosition3f32(zero, zero, one);
+}
+
+/**
+ * @note Address: 0x80399B40
+ * @note Size: 0x3C
+ */
+void TVsSelectExplanationWindow::create(char const* path, u32 flags)
+{
+	TScreenBase::create(path, flags);
+	mTransXModifier = 0.0f;
+	mTransYModifier = -800.0f;
+}
+
+/**
+ * @note Address: 0x80399B7C
+ * @note Size: 0x4
+ */
+void TVsSelectExplanationWindow::screenScaleUp()
+{
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0xEC
+ */
+TVsPiki::TVsPiki(J2DPane* left, J2DPane* right, J2DPane* flower)
+{
+	mPikminLeft = static_cast<J2DPicture*>(left);
+	left->setBasePosition(J2DPOS_TopRight);
+
+	mPikminRight = static_cast<J2DPicture*>(right);
+	right->setBasePosition(J2DPOS_TopLeft);
+
+	mPikminFlower = static_cast<J2DPicture*>(flower);
+	flower->setBasePosition(J2DPOS_Center);
+
+	for (int i = 0; i < 3; i++) {
+		P2ASSERTLINE(176, (&mPikminLeft)[i]);
+	}
+}
+
+/**
+ * @note Address: 0x80399B80
+ * @note Size: 0x4
+ */
+TVsPiki::posInfo::posInfo()
+{
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0xC0
+ */
+void TVsPiki::init(int sel)
+{
+	for (int i = 0; i < 10; i++) {
+		mPosInfos[i].mPosition.x = mPikiOffset.x * i;
+		mPosInfos[i].mStateTimer = 0.0f;
+		if (i < sel) {
+			mPosInfos[i].mState      = posInfo::Idle;
+			mPosInfos[i].mPosition.y = 0.0f;
+		} else {
+			mPosInfos[i].mState      = posInfo::Sprout;
+			mPosInfos[i].mPosition.y = 20.0f;
+		}
+	}
+	// UNUSED FUNCTION
+}
+
+/**
+ * @note Address: 0x80399B84
+ * @note Size: 0x2C8
+ */
+void TVsPiki::update(int pikis)
+{
+	mPikminLeft->setBasePosition(J2DPOS_TopRight);
+	mPikminRight->setBasePosition(J2DPOS_TopLeft);
+	mPikminFlower->setBasePosition(J2DPOS_Center);
+
+	mBounds[0] = Vector2f(mPikminLeft->getGlbVtx(GLBVTX_BtmLeft).x - mPikminRight->getGlbVtx(GLBVTX_BtmRight).x,
+	                      mPikminLeft->getGlbVtx(GLBVTX_BtmLeft).y - mPikminRight->getGlbVtx(GLBVTX_BtmRight).y);
+	mBounds[1] = Vector2f(mPikminLeft->getGlbVtx(GLBVTX_BtmLeft).x - mPikminFlower->getGlbVtx(GLBVTX_BtmLeft).x,
+	                      mPikminLeft->getGlbVtx(GLBVTX_BtmLeft).y - mPikminFlower->getGlbVtx(GLBVTX_BtmLeft).y);
+
+	for (int i = 0; i < 10; i++) {
+		if (i < pikis) {
+			if (mPosInfos[i].mState == posInfo::Sprout) {
+				mPosInfos[i].mState = posInfo::Pluck;
+			}
+		} else if (mPosInfos[i].mState == posInfo::Idle) {
+			mPosInfos[i].mState = posInfo::Bury;
+		}
+
+		switch (mPosInfos[i].mState) {
+		case posInfo::Idle:
+		case posInfo::Sprout:
+			mPosInfos[i].mStateTimer = 0.0f;
+			break;
+		case posInfo::Pluck:
+			if (mPosInfos[i].mPosition.y > 0.0f) {
+				mPosInfos[i].mPosition.y -= 5.0f;
+				if (mPosInfos[i].mPosition.y <= 0.0f) {
+					mPosInfos[i].mPosition.y = 0.0f;
+				}
+			} else {
+				mPosInfos[i].mStateTimer += PI / 10;
+				if (mPosInfos[i].mStateTimer >= PI) {
+					mPosInfos[i].mStateTimer = PI;
+					mPosInfos[i].mState      = posInfo::Idle;
+				}
+				mPosInfos[i].mPosition.y = sinf(mPosInfos[i].mStateTimer) * -20.0f;
+			}
+			break;
+		case posInfo::Bury:
+			if (mPosInfos[i].mPosition.y < 20.0f) {
+				mPosInfos[i].mPosition.y += 5.0f;
+				if (mPosInfos[i].mPosition.y >= 20.0f) {
+					mPosInfos[i].mPosition.y = 20.0f;
+					mPosInfos[i].mState      = posInfo::Sprout;
+				}
+			}
+			break;
+		}
+	}
+}
+
+/**
+ * @note Address: 0x80399E4C
+ * @note Size: 0x280
+ */
+void TVsPiki::draw()
+{
+	const JGeometry::TVec3f& pos = mPikminLeft->getGlbVtx(GLBVTX_TopLeft);
+	Vector2f origin(pos.x, pos.y);
+	f32 xoffs = mPikiOffset.x;
+	origin.x -= xoffs;
+	origin.y -= 50.0f;
+	f32 x1 = origin.x;
+	f32 y1 = origin.y;
+	f32 y2 = mPikminLeft->getGlbVtx(GLBVTX_TopLeft).y - y1;
+	f32 x2 = (xoffs * 12.0f + x1) - x1;
+	GXSetScissor(x1, y1, x2, y2);
+
+	for (int i = 0; i < 10; i++) {
+		Vector2f* offs  = &mPikiOffset;
+		J2DPicture* pic = mPikminLeft;
+		f32 calc        = TVsSelect::mDemoScale;
+		Vector2f pos(mPosInfos[i].mPosition.x * calc + pic->getGlbVtx(GLBVTX_BtmLeft).x,
+		             mPosInfos[i].mPosition.y * calc + pic->getGlbVtx(GLBVTX_BtmLeft).y);
+		pic->draw(pos.x, pos.y, calc * pic->getWidth(), calc * pic->getHeight(), false, false, false);
+		pic->calcMtx();
+
+		pic = mPikminRight;
+		pic->draw(pos.x - mBounds[0].x, pos.y - mBounds[0].y, calc * -pic->getWidth(), calc * pic->getHeight(), false, false, false);
+		pic->calcMtx();
+
+		pic = mPikminFlower;
+		pic->draw(offs->y + (pos.x + mBounds[1].x), pos.y - mBounds[1].y, calc * pic->getWidth(), calc * pic->getHeight(), false, false,
+		          false);
+		pic->calcMtx();
+	}
+
+	GXSetScissor(0, 0, 640, 480);
+
+	FORCE_DONT_INLINE;
+
+	/*
+	stwu     r1, -0x80(r1)
+	mflr     r0
+	stw      r0, 0x84(r1)
+	stfd     f31, 0x70(r1)
+	psq_st   f31, 120(r1), 0, qr0
+	stfd     f30, 0x60(r1)
+	psq_st   f30, 104(r1), 0, qr0
+	stfd     f29, 0x50(r1)
+	psq_st   f29, 88(r1), 0, qr0
+	stmw     r27, 0x3c(r1)
+	lwz      r4, 0(r3)
+	mr       r27, r3
+	addi     r3, r1, 0x2c
+	li       r5, 2
+	bl       getGlbVtx__7J2DPaneCFUc
+	lfs      f29, 0x2c(r1)
+	addi     r3, r1, 0x20
+	lfs      f31, mPikiOffset__Q28Morimura7TVsPiki@sda21(r13)
+	li       r5, 2
+	lfs      f30, 0x30(r1)
+	lfs      f0, lbl_8051F1B8@sda21(r2)
+	fsubs    f29, f29, f31
+	lwz      r4, 0(r27)
+	fsubs    f30, f30, f0
+	bl       getGlbVtx__7J2DPaneCFUc
+	lfs      f0, 0x24(r1)
+	fsubs    f1, f0, f30
+	bl       __cvt_fp2unsigned
+	lfs      f0, lbl_8051F1BC@sda21(r2)
+	mr       r29, r3
+	fmadds   f0, f0, f31, f29
+	fsubs    f1, f0, f29
+	bl       __cvt_fp2unsigned
+	fmr      f1, f30
+	mr       r30, r3
+	bl       __cvt_fp2unsigned
+	fmr      f1, f29
+	mr       r31, r3
+	bl       __cvt_fp2unsigned
+	mr       r4, r31
+	mr       r5, r30
+	mr       r6, r29
+	bl       GXSetScissor
+	mr       r29, r27
+	li       r28, 0
+	addi     r30, r13, mPikiOffset__Q28Morimura7TVsPiki@sda21
+
+lbl_80399F04:
+	lwz      r31, 0(r27)
+	addi     r3, r1, 8
+	lfs      f29, mDemoScale__Q28Morimura9TVsSelect@sda21(r13)
+	li       r5, 0
+	mr       r4, r31
+	bl       getGlbVtx__7J2DPaneCFUc
+	lfs      f1, 0xc(r1)
+	mr       r4, r31
+	lfs      f0, 0x18(r29)
+	addi     r3, r1, 0x14
+	li       r5, 0
+	fmadds   f30, f0, f29, f1
+	bl       getGlbVtx__7J2DPaneCFUc
+	lfs      f1, 0x14(r1)
+	mr       r3, r31
+	lfs      f0, 0x14(r29)
+	fmr      f2, f30
+	lwz      r12, 0(r31)
+	li       r4, 0
+	fmadds   f31, f0, f29, f1
+	lfs      f4, 0x28(r31)
+	lfs      f3, 0x20(r31)
+	lfs      f1, 0x2c(r31)
+	li       r5, 0
+	lfs      f0, 0x24(r31)
+	fsubs    f3, f4, f3
+	lwz      r12, 0xec(r12)
+	fsubs    f0, f1, f0
+	li       r6, 0
+	fmr      f1, f31
+	fmuls    f3, f29, f3
+	fmuls    f4, f29, f0
+	mtctr    r12
+	bctrl
+	mr       r3, r31
+	lwz      r12, 0(r31)
+	lwz      r12, 0x2c(r12)
+	mtctr    r12
+	bctrl
+	lwz      r31, 4(r27)
+	li       r4, 0
+	lfs      f1, 0xac(r27)
+	li       r5, 0
+	lfs      f2, 0x28(r31)
+	mr       r3, r31
+	lfs      f0, 0x20(r31)
+	fsubs    f1, f31, f1
+	lwz      r12, 0(r31)
+	li       r6, 0
+	fsubs    f3, f2, f0
+	lfs      f2, 0x2c(r31)
+	lfs      f0, 0x24(r31)
+	lfs      f4, 0xb0(r27)
+	fneg     f3, f3
+	lwz      r12, 0xec(r12)
+	fsubs    f0, f2, f0
+	fsubs    f2, f30, f4
+	fmuls    f3, f29, f3
+	fmuls    f4, f29, f0
+	mtctr    r12
+	bctrl
+	mr       r3, r31
+	lwz      r12, 0(r31)
+	lwz      r12, 0x2c(r12)
+	mtctr    r12
+	bctrl
+	lwz      r31, 8(r27)
+	li       r4, 0
+	lfs      f2, 0xb4(r27)
+	li       r5, 0
+	lfs      f1, 0x28(r31)
+	mr       r3, r31
+	lfs      f0, 0x20(r31)
+	fadds    f5, f31, f2
+	lwz      r12, 0(r31)
+	li       r6, 0
+	fsubs    f4, f1, f0
+	lfs      f0, 4(r30)
+	lfs      f2, 0xb8(r27)
+	lfs      f3, 0x2c(r31)
+	fadds    f1, f0, f5
+	lfs      f0, 0x24(r31)
+	lwz      r12, 0xec(r12)
+	fsubs    f2, f30, f2
+	fsubs    f0, f3, f0
+	fmuls    f3, f29, f4
+	fmuls    f4, f29, f0
+	mtctr    r12
+	bctrl
+	mr       r3, r31
+	lwz      r12, 0(r31)
+	lwz      r12, 0x2c(r12)
+	mtctr    r12
+	bctrl
+	addi     r28, r28, 1
+	addi     r29, r29, 0x10
+	cmpwi    r28, 0xa
+	blt      lbl_80399F04
+	li       r3, 0
+	li       r4, 0
+	li       r5, 0x280
+	li       r6, 0x1e0
+	bl       GXSetScissor
+	psq_l    f31, 120(r1), 0, qr0
+	lfd      f31, 0x70(r1)
+	psq_l    f30, 104(r1), 0, qr0
+	lfd      f30, 0x60(r1)
+	psq_l    f29, 88(r1), 0, qr0
+	lfd      f29, 0x50(r1)
+	lmw      r27, 0x3c(r1)
+	lwz      r0, 0x84(r1)
+	mtlr     r0
+	addi     r1, r1, 0x80
+	blr
+	*/
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x68
+ */
+void TVsPiki::setAlpha(u8 alpha)
+{
+	for (int i = 0; i < 3; i++) {
+		(&mPikminLeft)[i]->setAlpha(alpha);
+	}
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x108
+ */
+void TVsSelectOnyon::reset()
+{
+	mCurrentPosition = Vector2f(-100.0f, 0.0f);
+	int test         = randInt(20);
+	mCounter         = -(int(TVsSelect::mTestVal) + test);
+	_30              = 0.0f;
+	_3C              = true;
+	mOnyonPane->hide();
+	mGoalAngle = 0.0f;
+	if (randFloat() > 0.5f) {
+		mGoalAngle = PI;
+	}
+	mVelocity   = 0.0f;
+	mAngleDef   = 0.0f;
+	mAngleTimer = TVsSelect::mAngRate;
+}
+
+/**
+ * @note Address: 0x8039A0CC
+ * @note Size: 0x308
+ */
+void TVsSelectOnyon::posUpdate(f32 rate)
+{
+	if (PC_ORIG_TICK()) mCounter++;
+	if (mCounter > 0) {
+		if (rate == 1.0f) {
+			mAngleTimer += TVsSelect::mAngUp;
+			if (mAngleTimer > 1.0f) {
+				mAngleTimer = 1.0f;
+			}
+		} else {
+			mAngleTimer -= TVsSelect::mAngUp;
+			if (mAngleTimer < 0.0f) {
+				mAngleTimer = 0.0f;
+			}
+		}
+	}
+
+	f32 dist  = mAngleTimer * getAngDist();
+	f32 clamp = TAU;
+	if (FABS(dist) > clamp) {
+		if (dist > 0.0f) {
+			dist = clamp;
+		} else {
+			dist = -clamp;
+		}
+	}
+
+	mGoalAngle  = roundAng(mGoalAngle + dist);
+	f32 speed   = TVsSelect::mMoveSpeed * rate;
+	mAngleDef.x = speed * sinf(mGoalAngle);
+	mAngleDef.y = speed * -cosf(mGoalAngle);
+
+	f32 scale = mAngleTimer;
+	if (scale < 0.05f) {
+		scale = 0.05f;
+	}
+	scale = 0.4f / scale;
+	if (scale <= 0.4f) {
+		mAngleDef = 0.0f;
+		mVelocity = 0.0f;
+	} else {
+		f32 calc = roundAng(TAU - mGoalAngle);
+		mOnyonPane->setAngle((calc * 360.0f) / TAU);
+	}
+	mVelocity = mVelocity + (mAngleDef - mVelocity) * 0.1f;
+	mCurrentPosition += mVelocity;
+	mOnyonPane->setOffset(mCurrentPosition.x + -320.0f, mCurrentPosition.y + -240.0f);
+
+	if (scale > 1.25f) {
+		scale = 1.25f;
+	}
+	if (scale <= 0.4f) {
+		mOnyonPane->hide();
+		scale = 0.4f;
+	} else {
+		mOnyonPane->show();
+	}
+	mOnyonPane->updateScale(scale);
+}
+
+/**
+ * @note Address: 0x8039A3D4
+ * @note Size: 0x7C
+ */
+f32 TVsSelectOnyon::getAngDist()
+{
+	f32 x = mGoalPosition.x - mCurrentPosition.x;
+	if (x == 0.0f) {
+		x = 0.1f;
+	}
+
+	f32 y = mGoalPosition.y - mCurrentPosition.y;
+	if (y == 0.0f) {
+		y = 0.1f;
+	}
+
+	f32 angle = JMAAtan2Radian(x, -y);
+	return angDist(roundAng(angle), mGoalAngle);
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x198
+ */
+void TVsSelectOnyon::draw()
+{
+	if (0.4f == mOnyonPane->mScaleX) {
+		mNaviPane->setBasePosition(J2DPOS_Center);
+		f32 offs = -30.0f;
+		mNaviPane->draw(mCurrentPosition.x + offs, mCurrentPosition.y + offs, false, false, false);
+		mNaviPane->calcMtx();
+		_30 += 0.05f;
+		mOnyonPane->hide();
+		if (_30 > 2.0f) {
+			_30 = 2.0f;
+		}
+		if (_3C) {
+			_3C = false;
+			PSSystem::spSysIF->playSystemSe(PSSE_SY_2PTOP_ONY_ENTER, 0);
+			Vector2f pos(mCurrentPosition.x - 16.0f, mCurrentPosition.y - 16.0f);
+			efx2d::Arg arg(pos);
+			efx2d::T2DBattleDive efx;
+			efx.create(&arg);
+		}
+	}
+}
+
+/**
+ * @note Address: 0x8039A450
+ * @note Size: 0x2B0
+ */
+void TVsSelectScreen::create(char const* name, u32 flags)
+{
+	mScreenObj = new P2DScreen::Mgr_tuning;
+	mScreenObj->set(name, flags, mArchive);
+	J2DPane* menu = mScreenObj->search(MC8("Tbmenu11"));
+	P2ASSERTLINE(489, menu);
+
+	mCallbackScissor          = new TCallbackScissor;
+	mCallbackScissor->mBounds = JGeometry::TBox2f(0.0f, 0.0f, 640.0f, 480.0f);
+	mScreenObj->addCallBack(MC8("Pblo1"), mCallbackScissor);
+
+	mScreenObj->addCallBack(MC8("Tbmenu11"), new og::Screen::CallBack_Message);
+
+	TCallbackScissor* scis = new TCallbackScissor;
+	scis->mBounds          = JGeometry::TBox2f(0.0f, 0.0f, 640.0f, 480.0f);
+	mScreenObj->addCallBack(MC8("Tbmenu11"), scis);
+
+	menu->removeFromParent();
+	og::Screen::setCallBackMessage(mScreenObj);
+	mScreenObj->search(MC8("Ncourse"))->appendChild(menu);
+
+	mAnimScreens = new og::Screen::AnimScreen*[mAnimScreenCountMax];
+	og::Screen::setAlphaScreen(mScreenObj);
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x64
+ */
+TVsSelectCBWinNum::TVsSelectCBWinNum(char** p1, u16 p2, JKRArchive* arc)
+    : og::Screen::CallBack_CounterDay(p1, p2, arc)
+    , mIsNeedUp(false)
+    , mScaleMgr(nullptr)
+{
+	mScaleMgr = new og::Screen::ScaleMgr;
+}
+
+/**
+ * @note Address: 0x8039A700
+ * @note Size: 0x58
+ */
+void TVsSelectCBWinNum::update()
+{
+	CallBack_CounterRV::update();
+	CallBack_CounterDay::setValue();
+	mDayPic->updateScale(mScaleMgr->calc());
+}
+
+/**
+ * @note Address: 0x8039A758
+ * @note Size: 0x68
+ */
+void TVsSelectCBWinNum::setValue(bool a1, bool a2)
+{
+	if (mIsNeedUp) {
+		CallBack_CounterRV::setValue(true, false);
+		mScaleMgr->up(0.5f, 30.0f, 0.8f, 0.0f);
+		mIsNeedUp = false;
+	} else {
+		CallBack_CounterRV::setValue(a1, a2);
+	}
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x4C
+ */
+TVsSelectSlotIndex* TVsSelectSlotIndex::getIndexInfo(int id)
+{
+	for (int i = 0; i < 12; i++) {
+		if (slotIDInfo[i].mIndex == id) {
+			return &slotIDInfo[i];
+		}
+	}
+	return &slotIDInfo[0];
+}
+
+/**
+ * @note Address: 0x8039A7C0
+ * @note Size: 0x3A0
+ */
+TVsSelect::TVsSelect()
+    : TScrollList("vsSelect")
+    , mVsSelectTextureArc(nullptr)
+    , mController2(nullptr)
+    , mListScreen(nullptr)
+    , mBackgroundScreen(nullptr)
+    , mRedPodScreen(nullptr)
+    , mBluePodScreen(nullptr)
+    , mSlotTexturesScreen(nullptr)
+    , mFireScreen(nullptr)
+    , mRulesWindow(nullptr)
+    , mIndPane(nullptr)
+    , mPane3DStick(nullptr)
+    , mPaneSpot(nullptr)
+    , mPaneStageList(nullptr)
+    , mPaneStageNameBg(nullptr)
+    , mPaneStars(nullptr)
+    , mPaneLevelName(nullptr)
+    , mPaneRulesInfo(nullptr)
+    , mIndPic(nullptr)
+    , mMesgData(nullptr)
+    , mEfxCountKira(nullptr)
+    , mStickImage(nullptr)
+    , mStickAnim(nullptr)
+    , mArrowBlink(nullptr)
+    , mIsDemoStarted(true)
+    , mIsOnyonHitGoal(false)
+    , mIsUpdatedScore(true)
+    , mCurrentRulesPage(0)
+    , mDoChangeRulesPage(false)
+    , mIsRulesPageChanging(true)
+    , mLevelNameYPos(0.0f)
+    , _234(1.0f)
+    , mPaneStarAlpha(1.0f)
+    , mDrawAlpha(0)
+    , mIsSelectIndexChange(0)
+    , mZoomState(0)
+    , mStickAnimState(0)
+    , mChangeFaceState(-1)
+    , mZoomLevel(0.0f)
+    , mOtherLevelsFadeAlpha(1.0f)
+    , mRulesMoveXPos(0.0f)
+    , mRuleChangeTimer(0.0f)
+    , mRulePageChangeSpeed(0.25f)
+    , mChangeFaceTimer(0.0f)
+    , mFaceChangeSpeed(60.0f)
+    , mDoDebugScores(false)
+{
+	mNumActiveRows = 5; // 5 course thumbnails are loaded at a time
+	for (int i = 0; i < mNumActiveRows; i++) {
+		mActiveCourseThumbs[i] = nullptr;
+		mPaneLevelWindows[i]   = nullptr;
+	}
+
+	for (int i = 0; i < 2; i++) {
+		mHandicapSel[i]        = 3;
+		mOnyonObj[i]           = nullptr;
+		mVsPiki[i]             = nullptr;
+		mWinCounter[i]         = nullptr;
+		mPaneRulesLR[i]        = nullptr;
+		mPlayerWinCounts[i]    = false;
+		mDebugWinCounts[i]     = 0;
+		mCharacterMainIcons[i] = nullptr;
+		mPlayerIconOffset[i]   = 0.0f;
+	}
+
+	for (int i = 0; i < 3; i++) {
+		mButtonMsgTags[i] = nullptr;
+	}
+
+	for (int i = 0; i < 5; i++) {
+		mOlimarFaceScales[i] = 1.0f;
+		mLouieFaceScales[i]  = 1.0f;
+	}
+	mPowerIconOffset = 0.0f;
+
+	for (int i = 0; i < 6; i++) {
+		mPaneRulesDesc1[i]  = nullptr;
+		mPaneRulesDesc2[i]  = nullptr;
+		mPaneRulesIcons[i]  = nullptr;
+		mOlimarFacePanes[i] = nullptr;
+		mLouieFacePanes[i]  = nullptr;
+	}
+
+	for (int i = 0; i < 12; i++) {
+		mPowerIconPanes[i] = nullptr;
+	}
+	mDemoScale         = 1.0f;
+	mScreenXPos        = 0.0f;
+	_290               = 115.0f;
+	_294               = 170.0f;
+	_298               = 470.0f;
+	_29C               = 420.0f;
+	mOnyonGoalOffset.x = -15.0f;
+	mOnyonGoalOffset.y = -15.0f;
+	mScrollParm._00    = 20.0f;
+	mScrollParm._04    = 0.99f;
+	mScrollParm._08    = 1.5f;
+	mScrollParm._0C    = 1.25f;
+	mScrollParm._10    = 2.5f;
+	mCanCancel         = false;
+}
+
+/**
+ * @note Address: 0x8039AB60
+ * @note Size: 0x10C
+ */
+TVsSelect::~TVsSelect()
+{
+	if (mDebugHeap) {
+		mDispMember->mDebugExpHeap->freeAll();
+		mDebugHeap->destroy();
+	}
+	mDebugHeap = nullptr;
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x44
+ */
+void TVsSelect::setDebugHeapParent(JKRHeap* heap)
+{
+	mDebugHeapParent = heap;
+	P2ASSERTLINE(769, mDebugHeapParent);
+}
+
+/**
+ * @note Address: 0x8039AC6C
+ * @note Size: 0x2554
+ */
+void TVsSelect::doCreate(JKRArchive* arc)
+{
+	mController2 = new Controller(JUTGamePad::PORT_1);
+	P2ASSERTLINE(783, mController2);
+	mArchive = arc;
+
+	DispMemberVsSelect* disp = static_cast<DispMemberVsSelect*>(getDispMember());
+	int something            = 0;
+	if (disp->isID(OWNER_MRMR, MEMBER_VS_SELECT)) {
+		mDispMember = disp;
+		something   = mDispMember->mStageNumber;
+	} else {
+		mIsSection = true;
+	}
+
+	if (mIsSection) {
+		if (mDebugHeapParent) {
+			mDebugHeap = JKRExpHeap::create(0x200000, mDebugHeapParent, true);
+			P2ASSERTLINE(800, mDebugHeap);
+			mDispMember                        = new (mDebugHeap, 0) DispMemberVsSelect;
+			mDispMember->mDebugExpHeap         = mDebugHeap;
+			mDispMember->mDispWorldMapInfoWin0 = new og::Screen::DispMemberWorldMapInfoWin0;
+			mDispMember->mRedWinCount          = randInt(99);
+			mDispMember->mBlueWinCount         = randInt(99);
+			mDispMember->mRedWinCount          = 2;
+			mDispMember->mBlueWinCount         = 0;
+			mDispMember->mStageCount           = VS_Stage_Count;
+			if (randFloat() > 0.5f) {
+				mDispMember->mVsWinner = 0;
+			} else {
+				mDispMember->mVsWinner = 1;
+			}
+			mDispMember->mVsWinner = 0; // so much for the random thing we just did
+			getOwner()->setDispMember(mDispMember);
+		} else {
+			JUT_PANICLINE(820, "set DebugHeapParent. mail to morimun.\n");
+		}
+	}
+
+	if (!mIsSection) {
+		mDispMember->mDispWorldMapInfoWin0 = new og::Screen::DispMemberWorldMapInfoWin0;
+	}
+
+	mController     = getGamePad();
+	mHandicapSel[0] = mDispMember->mOlimarHandicap;
+	mHandicapSel[1] = mDispMember->mLouieHandicap;
+
+	u64 tags[1] = { MC8("4771_00") };
+	mMesgData   = new TOffsetMsgSet(tags, MC8("4770_00"), 1);
+
+	mRedPodScreen = new TScreenBase(arc, 2);
+	mRedPodScreen->create("red_pod.blo", 0x20000);
+	mRedPodScreen->addAnim("red_pod.bck");
+	mRedPodScreen->addAnim("red_pod.btp");
+
+	mBluePodScreen = new TScreenBase(arc, 2);
+	mBluePodScreen->create("blue_pod.blo", 0x20000);
+	mBluePodScreen->addAnim("blue_pod.bck");
+	mBluePodScreen->addAnim("blue_pod.btp");
+
+	mStageCount    = mDispMember->mStageCount;
+	mLevelTextures = new ResTIMG*[mStageCount];
+
+	if (mIsSection) {
+		something = randFloat() * mStageCount;
+	}
+
+	JKRHeap* backup = JKRGetCurrentHeap();
+	mDispMember->mDebugExpHeap->becomeCurrentHeap();
+	sys->heapStatusStart("vsSelectTexture", nullptr);
+	mVsSelectTextureArc = nullptr;
+	char path[50];
+	const char* textureArchiveName = "res_vsSelectTexture.szs";
+	og::newScreen::makeLanguageResName(path, textureArchiveName);
+	mVsSelectTextureArc = JKRMountArchive(path, JKRArchive::EMM_Mem, nullptr, JKRArchive::EMD_Head);
+	JUT_ASSERTLINE(893, mVsSelectTextureArc, "arcName = %s\n", path);
+	sys->heapStatusEnd("vsSelectTexture");
+
+	const char* texNames[VS_Stage_Count]
+	    = { "timg/otegaru.bti",  "timg/ujyaujya.bti", "timg/hirobiro.bti", "timg/karakuchi.bti", "timg/semai.bti",
+	        "timg/hiyahiya.bti", "timg/nobinobi.bti", "timg/kakukaku.bti", "timg/meiro.bti",     "timg/tile.bti" };
+	for (int i = 0; i < mStageCount; i++) {
+		mLevelTextures[i] = JKRGetArchiveImageResource(mVsSelectTextureArc, texNames[i]);
+
+		// Use louie face as a default if level icon not found
+		if (!mLevelTextures[i]) {
+			mLevelTextures[i] = JKRGetArchiveImageResource(mArchive, "timg/loozy_icon.bti");
+		}
+	}
+
+	const char* olimarTexNames[5]
+	    = { "timg/orima001.bti", "timg/orima002.bti", "timg/orima003.bti", "timg/orima004.bti", "timg/orima005.bti" };
+	const char* louieTexNames[5] = { "timg/lui001.bti", "timg/lui002.bti", "timg/lui003.bti", "timg/lui004.bti", "timg/lui005.bti" };
+	for (int i = 0; i < 5; i++) {
+		mOrimaTexture[i] = JKRGetArchiveImageResource(mVsSelectTextureArc, olimarTexNames[i]);
+		P2ASSERTLINE(926, mOrimaTexture[i]);
+		mLouieTexture[i] = JKRGetArchiveImageResource(mVsSelectTextureArc, louieTexNames[i]);
+		P2ASSERTLINE(930, mLouieTexture[i]);
+	}
+
+	mSlotTexturesScreen = new TScreenBase(mVsSelectTextureArc, 0);
+	mSlotTexturesScreen->create("vs_slot_texture.blo", 0x20000);
+
+	u64 iconTags[12] = { MC8("P0icon00"), MC8("P0icon01"), MC8("P0icon02"), MC8("P0icon03"), MC8("P0icon04"), MC8("P0icon05"),
+	                     MC8("P1icon00"), MC8("P1icon01"), MC8("P1icon02"), MC8("P1icon03"), MC8("P1icon04"), MC8("P1icon05") };
+
+	for (int i = 0; i < 12; i++) {
+		TVsSelectSlotIndex info      = *TVsSelectSlotIndex::getIndexInfo(i);
+		mPowerIconPanes[info.mIndex] = mSlotTexturesScreen->mScreenObj->search(iconTags[info.mTagID]);
+		P2ASSERTLINE(949, mPowerIconPanes[info.mIndex]);
+	}
+
+	mArrowBlink = new og::Screen::ArrowAlphaBlink;
+	mIndPane    = new TVsSelectIndPane("otegaru.bti", 336.0, 240.0);
+	mIndPane->createIndTexture("AK_kagerouRR.bti");
+	mIndPane->mTexture2->mWrapS = GX_REPEAT;
+	mIndPane->mTexture2->mWrapT = GX_REPEAT;
+	mIndPane->createCaptureTexture(GX_TF_RGB5A3);
+	ResTIMG* timg = mIndPane->mTexture3->mTexInfo;
+	P2ASSERTLINE(962, timg);
+	timg->mTransparency = 2;
+	timg                = mIndPane->mTexture1->mTexInfo;
+	P2ASSERTLINE(966, timg);
+	timg->mTransparency = 2;
+	timg                = mIndPane->mTexture2->mTexInfo;
+	P2ASSERTLINE(970, timg);
+	timg->mTransparency = 2;
+
+	mIndPic = new J2DPictureEx(mIndPane->mTexture1->mTexInfo, 0x20000);
+
+	mMainScreen = new TVsSelectScreen(arc, 2);
+	mMainScreen->create("vs_select_main.blo", 0x1020000);
+	mMainScreen->addAnim("vs_select_main.btk");
+	mMainScreen->addAnim("vs_select_main_02.btk");
+
+	P2DScreen::Mgr_tuning* screen = mMainScreen->getScreenObj();
+	mOlimarFacePanes[0]           = static_cast<J2DPicture*>(screen->search(MC8("Porbody0"))); // big icon 1
+	mOlimarFacePanes[1]           = static_cast<J2DPicture*>(screen->search(MC8("Porbody1"))); // big icon 2
+	mOlimarFacePanes[2]           = static_cast<J2DPicture*>(screen->search(MC8("Porbody2"))); // big icon 3
+	mOlimarFacePanes[3]           = static_cast<J2DPicture*>(screen->search(MC8("Ph_or")));    // for handicap
+	mOlimarFacePanes[4]           = static_cast<J2DPicture*>(screen->search(MC8("Pbor0")));    // for curr score
+	mOlimarFacePanes[5]           = static_cast<J2DPicture*>(screen->search(MC8("Pbor1")));    // for curr score
+
+	mLouieFacePanes[0] = static_cast<J2DPicture*>(screen->search(MC8("Plobody0"))); // big icon 1
+	mLouieFacePanes[1] = static_cast<J2DPicture*>(screen->search(MC8("Plobody1"))); // big icon 2
+	mLouieFacePanes[2] = static_cast<J2DPicture*>(screen->search(MC8("Plobody2"))); // big icon 3
+	mLouieFacePanes[3] = static_cast<J2DPicture*>(screen->search(MC8("Ph_lo")));    // for handicap
+	mLouieFacePanes[4] = static_cast<J2DPicture*>(screen->search(MC8("Pblo0")));    // for curr score
+	mLouieFacePanes[5] = static_cast<J2DPicture*>(screen->search(MC8("Pblo1")));    // for curr score
+
+	for (int i = 0; i < 6; i++) {
+		P2ASSERTLINE(1004, mOlimarFacePanes[i]);
+		mOlimarFacePanes[i]->setBasePosition(J2DPOS_Center);
+		P2ASSERTLINE(1006, mLouieFacePanes[i]);
+		mLouieFacePanes[i]->setBasePosition(J2DPOS_Center);
+	}
+
+	mStickImage  = og::Screen::setCallBack_3DStickSmall(mArchive, screen, MC8("ota3dl"));
+	mPane3DStick = screen->search(MC8("ota3dl"));
+	P2ASSERTLINE(1018, mPane3DStick);
+	P2ASSERTLINE(1019, mStickImage);
+	mStickImage->mAnimGroup->setSpeed(2.0f);
+	mStickImage->mAnimGroup->start();
+	mStickAnim = new og::Screen::StickAnimMgr(mStickImage);
+	P2ASSERTLINE(1024, mStickAnim);
+
+	mCharacterMainIcons[0] = screen->search(MC8("Norima"));
+	P2ASSERTLINE(1027, mCharacterMainIcons[0]);
+	mPlayerMainIconPos[0].x = mCharacterMainIcons[0]->mTranslateX;
+	mPlayerMainIconPos[0].y = mCharacterMainIcons[0]->mTranslateY;
+
+	mCharacterMainIcons[1] = screen->search(MC8("Nluie"));
+	P2ASSERTLINE(1032, mCharacterMainIcons[1]);
+	mPlayerMainIconPos[1].x = mCharacterMainIcons[1]->mTranslateX;
+	mPlayerMainIconPos[1].y = mCharacterMainIcons[1]->mTranslateY;
+
+	J2DPane* light = screen->search(MC8("Ploligh2"));
+	P2ASSERTLINE(1039, light);
+
+	u64 btnmsg[3] = { MC8("Tbmenu3"), MC8("Tbmenu4"), MC8("Tbmenu5") };
+	for (int i = 0; i < 3; i++) {
+		mButtonMsgTags[i] = screen->search(btnmsg[i]);
+		JUT_ASSERTLINE(1046, mButtonMsgTags[i], "btnmsg[%d] is unknown", i);
+		mButtonMsgTags[i]->setInfluencedAlpha(false, false);
+	}
+
+	mOnyonObj[0] = new TVsSelectOnyon(light, mRedPodScreen->mScreenObj->search(MC8("Nyonyon")));
+	mOnyonObj[0]->reset();
+
+	light = mMainScreen->mScreenObj->search(MC8("Ploligh"));
+	P2ASSERTLINE(1056, light);
+
+	mOnyonObj[1] = new TVsSelectOnyon(light, mBluePodScreen->mScreenObj->search(MC8("Nyonyon")));
+	mOnyonObj[1]->reset();
+
+	mVsPiki[0]       = new TVsPiki(screen->search(MC8("Prp_l_00")), screen->search(MC8("Prp_r_00")), screen->search(MC8("Prp_f_00")));
+	u64 pikiTags[10] = { MC8("Nrp_00"), MC8("Nrp_01"), MC8("Nrp_02"), MC8("Nrp_03"), MC8("Nrp_04"), MC8("Nrp_05"), MC8("Nrp_06"), MC8("Nrp_07"), MC8("Nrp_08"), MC8("Nrp_09") };
+	for (int i = 0; i < 10; i++) {
+		J2DPane* pane = screen->search(pikiTags[i]);
+		if (pane) {
+			pane->hide();
+		}
+	}
+
+	mVsPiki[1]        = new TVsPiki(screen->search(MC8("Pbp_l_00")), screen->search(MC8("Pbp_r_00")), screen->search(MC8("Pbp_f_00")));
+	u64 pikiTags2[10] = { MC8("Nbp_00"), MC8("Nbp_01"), MC8("Nbp_02"), MC8("Nbp_03"), MC8("Nbp_04"), MC8("Nbp_05"), MC8("Nbp_06"), MC8("Nbp_07"), MC8("Nbp_08"), MC8("Nbp_09") };
+	for (int i = 0; i < 10; i++) {
+		J2DPane* pane = screen->search(pikiTags2[i]);
+		if (pane) {
+			pane->hide();
+		}
+	}
+
+	for (int i = 0; i < 2; i++) {
+		mVsPiki[i]->init(mHandicapSel[i]);
+		mDispPikiNum[i] = mHandicapSel[i] * 5;
+	}
+
+	og::Screen::setCallBack_CounterRV(screen, MC8("Prp_f_r"), MC8("Prp_f_l"), MC8("Prp_f_l"), &mDispPikiNum[0], 2, 0, 1, mArchive);
+	og::Screen::setCallBack_CounterRV(screen, MC8("Prp_f_r1"), MC8("Prp_f_l1"), MC8("Prp_f_l1"), &mDispPikiNum[1], 2, 0, 1, mArchive);
+
+	mWinCounter[0] = new TVsSelectCBWinNum(const_cast<char**>(og::Screen::SujiTex32), 4, mArchive);
+	mWinCounter[0]->init(screen, MC8("Pori_r"), MC8("Pori_l"), MC8("Pori_c"), &mPlayerWinCounts[0], true);
+	mWinCounter[0]->setPuyoAnim(true);
+	screen->addCallBack(MC8("Pori_r"), mWinCounter[0]);
+
+	mWinCounter[1] = new TVsSelectCBWinNum(const_cast<char**>(og::Screen::SujiTex32), 4, mArchive);
+	mWinCounter[1]->init(screen, MC8("Plui_r"), MC8("Plui_l"), MC8("Plui_c"), &mPlayerWinCounts[1], true);
+	mWinCounter[1]->setPuyoAnim(true);
+	screen->addCallBack(MC8("Plui_r"), mWinCounter[1]);
+
+	mEfxCountKira = new efx2d::T2DCountKira;
+
+	mListScreen = new TVsSelectListScreen(arc, 0);
+	mListScreen->create("vs_select_list.blo", 0x20000);
+	mPaneStageList = mMainScreen->mScreenObj->search(MC8("Nlist"));
+	P2ASSERTLINE(1110, mPaneStageList);
+
+	mBackgroundScreen = new TScreenBase(arc, 1);
+	mBackgroundScreen->create("vs_select_bg.blo", 0x1020000);
+	mBackgroundScreen->addAnim("vs_select_bg.btk");
+
+	mFireScreen = new TScreenBase(arc, 2);
+	mFireScreen->create("vs_select_fire.blo", 0x1020000);
+	mFireScreen->addAnim("vs_select_fire.btk");
+	mFireScreen->addAnim("vs_select_fire_02.btk");
+
+	mRulesWindow = new TVsSelectExplanationWindow(arc, 12);
+	mRulesWindow->create("vs_main_rule_window.blo", 0x1020000);
+	mRulesWindow->addAnim("vs_main_rule_window.btk");
+	mRulesWindow->addAnim("vs_main_rule_window_02.btk");
+	mRulesWindow->addAnim("vs_main_rule_window_03.btk");
+	mRulesWindow->addAnim("vs_main_rule_window_04.btk");
+	mRulesWindow->addAnim("vs_main_rule_window_05.btk");
+	mRulesWindow->addAnim("vs_main_rule_window_06.btk");
+	mRulesWindow->addAnim("vs_main_rule_window_07.btk");
+	mRulesWindow->addAnim("vs_main_rule_window_08.btk");
+	mRulesWindow->addAnim("vs_main_rule_window_09.btk");
+	mRulesWindow->addAnim("vs_main_rule_window_10.btk");
+	mRulesWindow->addAnim("vs_main_rule_window_11.btk");
+	mRulesWindow->addAnim("vs_main_rule_window_12.btk");
+
+	mPaneRulesInfo = mRulesWindow->mScreenObj->search('Nmg0');
+	P2ASSERTLINE(1142, mPaneRulesInfo);
+	JGeometry::TVec2f test = mPaneRulesInfo->getTranslate();
+	mRulesPanePos          = test;
+
+	mPaneRulesLR[0] = mRulesWindow->mScreenObj->search(MC8("Nyaji00"));
+	P2ASSERTLINE(1146, mPaneRulesLR[0]);
+	mPaneRulesLR[1] = mRulesWindow->mScreenObj->search(MC8("Nyaji01"));
+	P2ASSERTLINE(1149, mPaneRulesLR[1]);
+
+	mPaneRulesDesc1[0] = mRulesWindow->mScreenObj->search(MC8("T0mg00"));
+	P2ASSERTLINE(1152, mPaneRulesDesc1[0]);
+	mPaneRulesDesc2[0] = mRulesWindow->mScreenObj->search(MC8("T0mgs00"));
+	P2ASSERTLINE(1154, mPaneRulesDesc2[0]);
+
+	mPaneRulesDesc1[1] = mRulesWindow->mScreenObj->search(MC8("T0mg01"));
+	P2ASSERTLINE(1157, mPaneRulesDesc1[1]);
+	mPaneRulesDesc2[1] = mRulesWindow->mScreenObj->search(MC8("T0mgs01"));
+	P2ASSERTLINE(1159, mPaneRulesDesc2[1]);
+
+	mPaneRulesDesc1[2] = mRulesWindow->mScreenObj->search(MC8("T0mg02"));
+	P2ASSERTLINE(1162, mPaneRulesDesc1[2]);
+	mPaneRulesDesc2[2] = mRulesWindow->mScreenObj->search(MC8("T0mgs02"));
+	P2ASSERTLINE(1164, mPaneRulesDesc2[2]);
+
+	mPaneRulesDesc1[3] = mRulesWindow->mScreenObj->search(MC8("T0mg03"));
+	P2ASSERTLINE(1167, mPaneRulesDesc1[3]);
+	mPaneRulesDesc2[3] = mRulesWindow->mScreenObj->search(MC8("T0mgs03"));
+	P2ASSERTLINE(1169, mPaneRulesDesc2[3]);
+
+	mPaneRulesDesc1[4] = mRulesWindow->mScreenObj->search(MC8("T0mg04"));
+	P2ASSERTLINE(1172, mPaneRulesDesc1[4]);
+	mPaneRulesDesc2[4] = mRulesWindow->mScreenObj->search(MC8("T0mgs04"));
+	P2ASSERTLINE(1174, mPaneRulesDesc2[4]);
+
+	mPaneRulesDesc1[5] = mRulesWindow->mScreenObj->search(MC8("T0mg05"));
+	P2ASSERTLINE(1177, mPaneRulesDesc1[5]);
+	mPaneRulesDesc2[5] = mRulesWindow->mScreenObj->search(MC8("T0mgs05"));
+	P2ASSERTLINE(1179, mPaneRulesDesc2[5]);
+
+	mPaneRulesIcons[0] = mRulesWindow->mScreenObj->search(MC8("P0icon00"));
+	P2ASSERTLINE(1182, mPaneRulesIcons[0]);
+	mPaneRulesIcons[1] = mRulesWindow->mScreenObj->search(MC8("P0icon01"));
+	P2ASSERTLINE(1185, mPaneRulesIcons[1]);
+	mPaneRulesIcons[2] = mRulesWindow->mScreenObj->search(MC8("P0icon02"));
+	P2ASSERTLINE(1188, mPaneRulesIcons[2]);
+	mPaneRulesIcons[3] = mRulesWindow->mScreenObj->search(MC8("P0icon03"));
+	P2ASSERTLINE(1191, mPaneRulesIcons[3]);
+	mPaneRulesIcons[4] = mRulesWindow->mScreenObj->search(MC8("P0icon04"));
+	P2ASSERTLINE(1194, mPaneRulesIcons[4]);
+	mPaneRulesIcons[5] = mRulesWindow->mScreenObj->search(MC8("P0icon05"));
+	P2ASSERTLINE(1197, mPaneRulesIcons[5]);
+
+	for (int i = 0; i < 6; i++) {
+		mPaneRulesIcons[i]->hide();
+	}
+
+	J2DPane* desc = mRulesWindow->mScreenObj->search(MC8("Trule_11"));
+	P2ASSERTLINE(1204, desc);
+	desc->setMsgID(MC8("2013_00")); // "Get a cherry, spin the roulette!"
+
+	desc = mRulesWindow->mScreenObj->search(MC8("Trule_m6"));
+	P2ASSERTLINE(1208, desc);
+	desc->setMsgID(MC8("2013_00")); // "Get a cherry, spin the roulette!"
+
+	changeSlotPage();
+
+	screen            = mListScreen->getScreenObj();
+	mCurrMinActiveRow = 0;
+	mCurrActiveRowSel = 2;
+	mCurrMaxActiveRow = mNumActiveRows - 1;
+
+	u64 stageTags[5] = { MC8("Tmenu00"), MC8("Tmenu01"), MC8("Tmenu02"), MC8("Tmenu03"), MC8("Tmenu04") };
+	J2DPane* icon    = screen->search(stageTags[mCurrMinActiveRow]);
+	P2ASSERTLINE(1227, icon);
+	mMinSelYOffset = icon->mTranslateY;
+	icon           = screen->search(stageTags[mCurrMaxActiveRow]);
+	P2ASSERTLINE(1231, icon);
+	mMaxSelYOffset = icon->mTranslateY;
+	mIndexPaneList = new TIndexPane*[mNumActiveRows];
+	for (int i = 0; i < mNumActiveRows; i++) {
+		mIndexPaneList[i] = new TIndexPane(nullptr, screen, stageTags[i]);
+		mIndexPaneList[i]->mPane->setMsgID(MC8("0000_01"));
+		mIndexPaneList[i]->setIndex(i);
+		mIndexPaneList[i]->mPane->show();
+	}
+
+	f32 calc = getHeight();
+
+	mIndexGroup               = new TIndexGroup;
+	mIndexGroup->mHeight      = calc;
+	TIndexGroup* grp          = mIndexGroup;
+	grp->mMaxRollSpeed        = mScrollParm._00;
+	grp->mSpeedSlowdownFactor = mScrollParm._04;
+	grp->mRollSpeedMod        = mScrollParm._08;
+	grp->mSpeedSpeedupFactor  = mScrollParm._0C;
+	grp->mInitialRollSpeed    = mScrollParm._10;
+
+	paneInit();
+	changePaneInfo();
+
+	int num = mDispMember->mRedWinCount;
+	if (mDispMember->mVsWinner == 0) {
+		num--;
+	}
+	if (num < 0) {
+		num = 0;
+	}
+	mPlayerWinCounts[0] = num;
+
+	num = mDispMember->mBlueWinCount;
+	if (mDispMember->mVsWinner == 1) {
+		num--;
+	}
+	if (num < 0) {
+		num = 0;
+	}
+	mPlayerWinCounts[1] = num;
+
+	int max = mStageCount - something;
+	max += 2;
+	for (int i = 0; i < max; i++) {
+		for (int j = 0; j < mNumActiveRows; j++) {
+			mIndexPaneList[j]->setOffset(calc);
+			mIndexPaneList[j]->mYOffset = mIndexPaneList[j]->getPaneOffsetY();
+		}
+		updateIndex(0);
+		mIndexGroup->reset();
+		changePaneInfo();
+	}
+	changeFaceTexture();
+	backup->becomeCurrentHeap();
+}
+
+/**
+ * @note Address: 0x8039D1E0
+ * @note Size: 0x1244
+ */
+bool TVsSelect::doUpdate()
+{
+	if (mIsSection && mDoDebugScores) {
+		mPlayerWinCounts[0] = mDebugWinCounts[0];
+		mPlayerWinCounts[1] = mDebugWinCounts[1];
+		changeFaceTexture();
+	}
+	updateFacePicture();
+
+	if (mIsSection && mForceDemoStart) {
+		mForceDemoStart = false;
+		demoStart();
+	}
+
+	bool rulesinactive = false;
+	if (mRulesWindow->mState == 0) {
+		rulesinactive = true;
+	}
+
+	if (mCanInput && mDispMember->mState == Screen::Game2DMgr::CHECK2D_VsSelect_Default
+	    && !static_cast<TVsSelectScene*>(getOwner())->mConfirmEndWindow->mHasDrawn) {
+		if (mZoomState == 0) {
+			if (rulesinactive) {
+				if (mController->getButtonDown() & Controller::PRESS_R) {
+					mHandicapSel[0]++;
+					if (mHandicapSel[0] > 10) {
+						mHandicapSel[0] = 10;
+					} else {
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_PIKI_INCREMENT, 0);
+					}
+				}
+				if (mController->getButtonDown() & Controller::PRESS_L) {
+					mHandicapSel[0]--;
+					if (mHandicapSel[0] < 1) {
+						mHandicapSel[0] = 1;
+					} else {
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_PIKI_DECREMENT, 0);
+					}
+				}
+
+				if (mController2->getButtonDown() & Controller::PRESS_R) {
+					mHandicapSel[1]++;
+					if (mHandicapSel[1] > 10) {
+						mHandicapSel[1] = 10;
+					} else {
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_PIKI_INCREMENT, 0);
+					}
+				}
+				if (mController2->getButtonDown() & Controller::PRESS_L) {
+					mHandicapSel[1]--;
+					if (mHandicapSel[1] < 1) {
+						mHandicapSel[1] = 1;
+					} else {
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_PIKI_DECREMENT, 0);
+					}
+				}
+			} else {
+				if (mController->getButtonDown()
+				    & (Controller::CSTICK_RIGHT | Controller::ANALOG_RIGHT | Controller::PRESS_R | Controller::PRESS_DPAD_RIGHT)) {
+					if (mCurrentRulesPage == 0 && !mDoChangeRulesPage) {
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+						mDoChangeRulesPage = true;
+					}
+				} else if (mController->getButtonDown()
+				           & (Controller::CSTICK_LEFT | Controller::ANALOG_LEFT | Controller::PRESS_L | Controller::PRESS_DPAD_LEFT)) {
+					if (mCurrentRulesPage && !mDoChangeRulesPage) {
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+						mDoChangeRulesPage = true;
+					}
+				}
+			}
+
+			if (mController->getButtonDown() & Controller::PRESS_B) {
+				if (rulesinactive) {
+					mDrawAlpha = 0;
+					static_cast<TVsSelectScene*>(getOwner())->mConfirmEndWindow->start(nullptr);
+				} else {
+					mRulesWindow->closeWindow();
+					PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+				}
+			} else if (mController->getButtonDown() & Controller::PRESS_Z) {
+				mRulesWindow->openClose();
+			} else if (rulesinactive) {
+				if (mController->getButtonDown() & (Controller::PRESS_START | Controller::PRESS_A)) {
+					if (!mIsSection) {
+						mIsDemoStarted = 1;
+						demoStart();
+					}
+					PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_DECIDE, 0);
+					mRulesWindow->closeWindow();
+				} else if (mController->getButton() & (Controller::ANALOG_UP) || mController->getButton() & (Controller::PRESS_DPAD_UP)) {
+					if (mStickAnimState != 1) {
+						mIndexGroup->upIndex();
+					} else if (mIndexGroup->mStateID == TIndexGroup::IDGroup_Idle && !mIsSelectIndexChange) {
+						mIsSelectIndexChange = true;
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_ERROR, 0);
+					}
+				} else if (mController->getButton() & (Controller::ANALOG_DOWN)
+				           || mController->getButton() & (Controller::PRESS_DPAD_DOWN)) {
+					if (mStickAnimState != 2) {
+						mIndexGroup->downIndex();
+					} else if (mIndexGroup->mStateID == TIndexGroup::IDGroup_Idle && !mIsSelectIndexChange) {
+						mIsSelectIndexChange = true;
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_ERROR, 0);
+					}
+				}
+			}
+		} else if (mCanCancel && mController->getButtonDown() & Controller::PRESS_B) {
+			mCanCancel = false;
+			if (mZoomState != 1) {
+				mZoomLevel = mZoomFrameMax;
+			}
+			mZoomState = 2;
+			PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CANCEL, 0);
+			for (int i = 0; i < 2; i++) {
+				TVsSelectOnyon* onyon = mOnyonObj[i];
+				f32 calc              = onyon->mGoalAngle;
+				Vector2f pos          = onyon->mCurrentPosition;
+				pos.x += 400.0f * sinf(calc);
+				pos.y += 400.0f * cosf(calc);
+				onyon->mGoalPosition = pos;
+			}
+		}
+	}
+
+	mDispPikiNum[0] = mHandicapSel[0] * 5;
+	mDispPikiNum[1] = mHandicapSel[1] * 5;
+
+	if (mIsSelectIndexChange) {
+		mIsSelectIndexChange++;
+		if (mIsSelectIndexChange > 15) {
+			mIsSelectIndexChange = 0;
+		}
+	}
+
+	if (mDispMember->mState != Screen::Game2DMgr::CHECK2D_VsSelect_InDemo && mDispMember->mDispWorldMapInfoWin0->mResult == 1
+	    && !mIsSection) {
+		mIsDemoStarted      = 0;
+		mDispMember->mState = Screen::Game2DMgr::CHECK2D_VsSelect_InDemo;
+		getOwner()->endScene(nullptr);
+	}
+
+	mBackgroundScreen->update();
+	mListScreen->update();
+	mMainScreen->update();
+	mRulesWindow->update();
+	mRedPodScreen->update();
+	mBluePodScreen->update();
+	mFireScreen->update();
+
+	if (updateList()) {
+		changePaneInfo();
+		PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+	}
+
+	switch (mZoomState) {
+	case 1:
+	case 2:
+		doZoom();
+		doMoveOnyon();
+		break;
+	case 3:
+		doMoveOnyon();
+		doScreenEffect();
+		break;
+	default:
+		mZoomLevel += 1.0f;
+		if (mIsUpdatedScore && mZoomLevel == 35.0f) {
+			mIsUpdatedScore = false;
+			Vector2f pos;
+
+			if (mDispMember->mVsWinner == 0) {
+
+				f32 calc                  = 1.5f;
+				mPlayerWinCounts[0]       = mDispMember->mRedWinCount;
+				mWinCounter[0]->mIsNeedUp = true;
+				int num                   = mDispMember->mRedWinCount;
+				if (num >= 100) { // Are you telling me something changes from 100 WINS???
+					calc = 2.5f;
+				} else if (num >= 10) {
+					calc = 2.0f;
+				}
+				mEfxCountKira->mScale = calc;
+				J2DPane* pane         = mMainScreen->mScreenObj->search(MC8("Pori_c"));
+				pane->setBasePosition(J2DPOS_Center);
+				pos.x = pane->getGlbVtx(GLBVTX_BtmLeft).x + pane->getWidth() * 0.5f;
+				pos.y = pane->getGlbVtx(GLBVTX_BtmLeft).y + pane->getHeight() * 0.5f;
+				efx2d::Arg arg(pos);
+				mEfxCountKira->create(&arg);
+				PSSystem::spSysIF->playSystemSe(PSSE_SY_2P_WIN_COUNT, 0);
+			} else if (mDispMember->mVsWinner == 1) {
+				f32 calc                  = 1.5f;
+				mPlayerWinCounts[1]       = mDispMember->mBlueWinCount;
+				mWinCounter[1]->mIsNeedUp = true;
+				int num                   = mDispMember->mBlueWinCount;
+				if (num >= 100) {
+					calc = 2.5f;
+				} else if (num >= 10) {
+					calc = 2.0f;
+				}
+				mEfxCountKira->mScale = calc;
+				J2DPane* pane         = mMainScreen->mScreenObj->search(MC8("Plui_c"));
+				pane->setBasePosition(J2DPOS_Center);
+				pos.x = pane->getGlbVtx(GLBVTX_BtmLeft).x + pane->getWidth() * 0.5f;
+				pos.y = pane->getGlbVtx(GLBVTX_BtmLeft).y + pane->getHeight() * 0.5f;
+				efx2d::Arg arg(pos);
+				mEfxCountKira->create(&arg);
+				PSSystem::spSysIF->playSystemSe(PSSE_SY_2P_WIN_COUNT, 0);
+			}
+			changeFaceTexture();
+		}
+		if (mZoomLevel > 100.0f) {
+			mEfxCountKira->fade();
+		}
+	}
+
+	mBackgroundScreen->mScreenObj->setXY(mScreenXPos, 0.0f);
+	mMainScreen->mScreenObj->setXY(mScreenXPos, 0.0f);
+	mListScreen->mScreenObj->setXY(mScreenXPos, 0.0f);
+	mFireScreen->mScreenObj->setXY(mScreenXPos, 0.0f);
+
+	mBackgroundScreen->mScreenObj->scaleScreen(mDemoScale);
+	mMainScreen->mScreenObj->scaleScreen(mDemoScale);
+	mListScreen->mScreenObj->scaleScreen(mDemoScale);
+	mFireScreen->mScreenObj->scaleScreen(mDemoScale);
+
+	f32 x1, y1, x2, y2;
+	f32 spotOffsetX = -mScreenXPos / mDemoScale;
+	f32 scale       = 1.0f / mDemoScale;
+	mPaneSpot->updateScale(scale);
+	f32 x = 1.1f * spotOffsetX + 324.0f;
+	f32 y = 243.0f - 40.0f * (1.0f - 1.0f / mDemoScale);
+	mPaneSpot->setOffset(x, y);
+
+	f32 dist = 0.0f;
+	if (mIndexGroup->isState(TIndexGroup::IDGroup_Down) != false) {
+		dist = 30.0f;
+	}
+	if (mIndexGroup->mStateID == TIndexGroup::IDGroup_Up) {
+		dist = -30.0f;
+	}
+	mLevelNameYPos += (dist - mLevelNameYPos) * 0.3f;
+	if ((f32)fabs(mLevelNameYPos - dist) < 0.1f) {
+		mLevelNameYPos = dist;
+	}
+	mPaneLevelName->setOffset(0.0f, mLevelNameYPos + -3.0f);
+
+	mCharacterMainIcons[0]->setOffset(mPlayerMainIconPos[0].x + mPlayerIconOffset[0].x, mPlayerMainIconPos[0].y + mPlayerIconOffset[0].y);
+	mCharacterMainIcons[1]->setOffset(mPlayerMainIconPos[1].x + mPlayerIconOffset[1].x, mPlayerMainIconPos[1].y + mPlayerIconOffset[1].y);
+
+	if (mDoChangeRulesPage) {
+		mRuleChangeTimer += mRulePageChangeSpeed;
+		if (mRuleChangeTimer > PI) {
+			mRuleChangeTimer     = 0.0f;
+			mDoChangeRulesPage   = false;
+			mIsRulesPageChanging = true;
+		}
+		if (mCurrentRulesPage) {
+			mRulesMoveXPos = sinf(mRuleChangeTimer) * 600.0f;
+			if (mIsRulesPageChanging && mRuleChangeTimer > HALF_PI) {
+				mCurrentRulesPage    = 0;
+				mIsRulesPageChanging = false;
+				changeSlotPage();
+			}
+		} else {
+			mRulesMoveXPos = sinf(mRuleChangeTimer) * -600.0f;
+			if (mIsRulesPageChanging && mRuleChangeTimer > HALF_PI) {
+				mIsRulesPageChanging = false;
+				mCurrentRulesPage    = 1;
+				changeSlotPage();
+			}
+		}
+		mPaneRulesLR[0]->hide();
+		mPaneRulesLR[1]->hide();
+	} else {
+		// mRuleChangeTimer += mRulePageChangeSpeed;
+		f32 alpha = mArrowBlink->calc() * 255.0f;
+		for (int i = 0; i < 2; i++) {
+			mPaneRulesLR[i]->setAlpha(alpha);
+		}
+		if (mCurrentRulesPage == 0) {
+			mPaneRulesLR[0]->hide();
+			mPaneRulesLR[1]->show();
+		} else {
+			mPaneRulesLR[0]->show();
+			mPaneRulesLR[1]->hide();
+		}
+	}
+	mPaneRulesInfo->setOffset(mRulesPanePos.x + mRulesMoveXPos, mRulesPanePos.y);
+
+	const JGeometry::TVec3f& bottomLeft1 = mPaneStageNameBg->getGlbVtx(GLBVTX_BtmLeft);
+	x1                                   = bottomLeft1.x;
+	y1                                   = bottomLeft1.y;
+	const JGeometry::TVec3f& topRight1   = mPaneStageNameBg->getGlbVtx(GLBVTX_TopRight);
+	TVsSelectScreen* scrn                = static_cast<TVsSelectScreen*>(mMainScreen);
+	JGeometry::TBox2f box;
+	box.i.x                         = x1;
+	box.i.y                         = y1;
+	box.f.y                         = topRight1.y;
+	box.f.x                         = topRight1.x;
+	scrn->mCallbackScissor->mBounds = box;
+
+	const JGeometry::TVec3f& bottomLeft2 = mPaneStageList->getGlbVtx(GLBVTX_BtmLeft);
+	x2                                   = bottomLeft2.x;
+	y2                                   = bottomLeft2.y;
+	const JGeometry::TVec3f& topRight2   = mPaneStageList->getGlbVtx(GLBVTX_TopRight);
+	f32 right                            = topRight2.x;
+	f32 top                              = topRight2.y;
+	mScissorBounds.set(x2, y2, right, top);
+
+	for (int i = 0; i < 2; i++) {
+		mVsPiki[i]->update(mHandicapSel[i]);
+		mWinCounter[i]->update();
+	}
+
+	mFireScreen->mScreenObj->setAlpha(255.0f * mFireAlphaRate);
+	for (int i = 0; i < 3; i++) {
+		mButtonMsgTags[i]->setAlpha(255);
+	}
+
+	for (int i = 0; i < 2; i++) {
+		mVsPiki[i]->setAlpha(255);
+	}
+
+	if (mZoomState < 1) {
+		mPaneStarAlpha = 1.0f;
+		mOtherLevelsFadeAlpha += 0.2f;
+		if (mOtherLevelsFadeAlpha > 1.0f) {
+			mOtherLevelsFadeAlpha = 1.0f;
+		}
+	} else {
+		mPaneStarAlpha *= 0.9f;
+		mOtherLevelsFadeAlpha -= 0.1f;
+		if (mOtherLevelsFadeAlpha < 0.0f) {
+			mOtherLevelsFadeAlpha = 0.0f;
+		}
+	}
+	mPaneStars->setAlpha(mPaneStarAlpha * 255.0f);
+
+	for (int i = 0; i < mNumActiveRows; i++) {
+		mActiveCourseThumbs[i]->updateScale(mWindowScale);
+		mActiveCourseThumbs[i]->setBasePosition(J2DPOS_Center);
+		mPaneLevelWindows[i]->updateScale(mWindowScale);
+		mPaneLevelWindows[i]->setBasePosition(J2DPOS_Center);
+		if (i != mCurrActiveRowSel) {
+			mIndexPaneList[i]->mPane->setAlpha(mOtherLevelsFadeAlpha * 255.0f);
+		} else {
+			u8 alpha      = -1;
+			J2DPane* pane = mIndexPaneList[i]->mPane;
+			if (pane->getAlpha() < 200) {
+				alpha = pane->getAlpha() + 50;
+			}
+			pane->setAlpha(alpha);
+		}
+	}
+
+	if (mIndexGroup->mStateID == TIndexGroup::IDGroup_Idle) {
+		_234 += 0.05f;
+		if (_234 > 1.0f) {
+			_234 = 1.0f;
+		}
+	} else {
+		_234 *= 0.8f;
+	}
+
+	if (mForceResetParm) {
+		mForceResetParm           = false;
+		TIndexGroup* grp          = mIndexGroup;
+		grp->mMaxRollSpeed        = mScrollParm._00;
+		grp->mSpeedSlowdownFactor = mScrollParm._04;
+		grp->mRollSpeedMod        = mScrollParm._08;
+		grp->mSpeedSpeedupFactor  = mScrollParm._0C;
+		grp->mInitialRollSpeed    = mScrollParm._10;
+	}
+
+	return false;
+
+	/*
+	stwu     r1, -0x100(r1)
+	mflr     r0
+	stw      r0, 0x104(r1)
+	stfd     f31, 0xf0(r1)
+	psq_st   f31, 248(r1), 0, qr0
+	stfd     f30, 0xe0(r1)
+	psq_st   f30, 232(r1), 0, qr0
+	stmw     r27, 0xcc(r1)
+	lbz      r0, mIsSection__Q28Morimura9TTestBase@sda21(r13)
+	mr       r30, r3
+	cmplwi   r0, 0
+	beq      lbl_8039D230
+	lbz      r0, 0x28e(r30)
+	cmplwi   r0, 0
+	beq      lbl_8039D230
+	lbz      r0, 0x28c(r30)
+	stw      r0, 0x284(r30)
+	lbz      r0, 0x28d(r30)
+	stw      r0, 0x288(r30)
+	bl       changeFaceTexture__Q28Morimura9TVsSelectFv
+
+	lbl_8039D230:
+	mr       r3, r30
+	bl       updateFacePicture__Q28Morimura9TVsSelectFv
+	lbz      r0, mIsSection__Q28Morimura9TTestBase@sda21(r13)
+	cmplwi   r0, 0
+	beq      lbl_8039D260
+	lbz      r0, mForceDemoStart__Q28Morimura9TVsSelect@sda21(r13)
+	cmplwi   r0, 0
+	beq      lbl_8039D260
+	li       r0, 0
+	mr       r3, r30
+	stb      r0, mForceDemoStart__Q28Morimura9TVsSelect@sda21(r13)
+	bl       demoStart__Q28Morimura9TVsSelectFv
+
+	lbl_8039D260:
+	lwz      r3, 0xd4(r30)
+	li       r31, 0
+	lwz      r0, 0x18(r3)
+	cmpwi    r0, 0
+	bne      lbl_8039D278
+	li       r31, 1
+
+	lbl_8039D278:
+	lbz      r0, 0x45(r30)
+	cmplwi   r0, 0
+	beq      lbl_8039D74C
+	lwz      r3, 0x1f8(r30)
+	lwz      r0, 0x34(r3)
+	cmpwi    r0, 0
+	bne      lbl_8039D74C
+	mr       r3, r30
+	lwz      r12, 0(r30)
+	lwz      r12, 0x30(r12)
+	mtctr    r12
+	bctrl
+	lwz      r3, 0x224(r3)
+	lbz      r0, 0xd4(r3)
+	cmplwi   r0, 0
+	bne      lbl_8039D74C
+	lwz      r0, 0x240(r30)
+	cmpwi    r0, 0
+	bne      lbl_8039D634
+	clrlwi.  r0, r31, 0x18
+	beq      lbl_8039D3E0
+	lwz      r3, 0x80(r30)
+	lwz      r0, 0x1c(r3)
+	rlwinm.  r0, r0, 0, 0x1a, 0x1a
+	beq      lbl_8039D310
+	lwz      r3, 0x274(r30)
+	addi     r0, r3, 1
+	stw      r0, 0x274(r30)
+	lwz      r0, 0x274(r30)
+	cmplwi   r0, 0xa
+	ble      lbl_8039D300
+	li       r0, 0xa
+	stw      r0, 0x274(r30)
+	b        lbl_8039D310
+
+	lbl_8039D300:
+	lwz      r3, spSysIF__8PSSystem@sda21(r13)
+	li       r4, 0x1828
+	li       r5, 0
+	bl       playSystemSe__Q28PSSystem5SysIFFUlUl
+
+	lbl_8039D310:
+	lwz      r3, 0x80(r30)
+	lwz      r0, 0x1c(r3)
+	rlwinm.  r0, r0, 0, 0x19, 0x19
+	beq      lbl_8039D354
+	lwz      r3, 0x274(r30)
+	addi     r0, r3, -1
+	stw      r0, 0x274(r30)
+	lwz      r0, 0x274(r30)
+	cmplwi   r0, 1
+	bge      lbl_8039D344
+	li       r0, 1
+	stw      r0, 0x274(r30)
+	b        lbl_8039D354
+
+	lbl_8039D344:
+	lwz      r3, spSysIF__8PSSystem@sda21(r13)
+	li       r4, 0x182a
+	li       r5, 0
+	bl       playSystemSe__Q28PSSystem5SysIFFUlUl
+
+	lbl_8039D354:
+	lwz      r3, 0xb8(r30)
+	lwz      r0, 0x1c(r3)
+	rlwinm.  r0, r0, 0, 0x1a, 0x1a
+	beq      lbl_8039D398
+	lwz      r3, 0x278(r30)
+	addi     r0, r3, 1
+	stw      r0, 0x278(r30)
+	lwz      r0, 0x278(r30)
+	cmplwi   r0, 0xa
+	ble      lbl_8039D388
+	li       r0, 0xa
+	stw      r0, 0x278(r30)
+	b        lbl_8039D398
+
+	lbl_8039D388:
+	lwz      r3, spSysIF__8PSSystem@sda21(r13)
+	li       r4, 0x1828
+	li       r5, 0
+	bl       playSystemSe__Q28PSSystem5SysIFFUlUl
+
+	lbl_8039D398:
+	lwz      r3, 0xb8(r30)
+	lwz      r0, 0x1c(r3)
+	rlwinm.  r0, r0, 0, 0x19, 0x19
+	beq      lbl_8039D46C
+	lwz      r3, 0x278(r30)
+	addi     r0, r3, -1
+	stw      r0, 0x278(r30)
+	lwz      r0, 0x278(r30)
+	cmplwi   r0, 1
+	bge      lbl_8039D3CC
+	li       r0, 1
+	stw      r0, 0x278(r30)
+	b        lbl_8039D46C
+
+	lbl_8039D3CC:
+	lwz      r3, spSysIF__8PSSystem@sda21(r13)
+	li       r4, 0x182a
+	li       r5, 0
+	bl       playSystemSe__Q28PSSystem5SysIFFUlUl
+	b        lbl_8039D46C
+
+	lbl_8039D3E0:
+	lwz      r4, 0x80(r30)
+	lis      r3, 0x02020022@ha
+	addi     r0, r3, 0x02020022@l
+	lwz      r4, 0x1c(r4)
+	and.     r0, r4, r0
+	beq      lbl_8039D42C
+	lbz      r0, 0x22c(r30)
+	cmplwi   r0, 0
+	bne      lbl_8039D46C
+	lbz      r0, 0x22d(r30)
+	cmplwi   r0, 0
+	bne      lbl_8039D46C
+	lwz      r3, spSysIF__8PSSystem@sda21(r13)
+	li       r4, 0x1811
+	li       r5, 0
+	bl       playSystemSe__Q28PSSystem5SysIFFUlUl
+	li       r0, 1
+	stb      r0, 0x22d(r30)
+	b        lbl_8039D46C
+
+	lbl_8039D42C:
+	lis      r3, 0x01010041@ha
+	addi     r0, r3, 0x01010041@l
+	and.     r0, r4, r0
+	beq      lbl_8039D46C
+	lbz      r0, 0x22c(r30)
+	cmplwi   r0, 0
+	beq      lbl_8039D46C
+	lbz      r0, 0x22d(r30)
+	cmplwi   r0, 0
+	bne      lbl_8039D46C
+	lwz      r3, spSysIF__8PSSystem@sda21(r13)
+	li       r4, 0x1811
+	li       r5, 0
+	bl       playSystemSe__Q28PSSystem5SysIFFUlUl
+	li       r0, 1
+	stb      r0, 0x22d(r30)
+
+	lbl_8039D46C:
+	lwz      r4, 0x80(r30)
+	lwz      r3, 0x1c(r4)
+	rlwinm.  r0, r3, 0, 0x16, 0x16
+	beq      lbl_8039D4D8
+	clrlwi.  r0, r31, 0x18
+	beq      lbl_8039D4BC
+	li       r0, 0
+	mr       r3, r30
+	stb      r0, 0x23c(r30)
+	lwz      r12, 0(r30)
+	lwz      r12, 0x30(r12)
+	mtctr    r12
+	bctrl
+	lwz      r3, 0x224(r3)
+	li       r4, 0
+	lwz      r12, 0(r3)
+	lwz      r12, 0x24(r12)
+	mtctr    r12
+	bctrl
+	b        lbl_8039D74C
+
+	lbl_8039D4BC:
+	lwz      r3, 0xd4(r30)
+	bl       closeWindow__Q28Morimura24TSelectExplanationWindowFv
+	lwz      r3, spSysIF__8PSSystem@sda21(r13)
+	li       r4, 0x1811
+	li       r5, 0
+	bl       playSystemSe__Q28PSSystem5SysIFFUlUl
+	b        lbl_8039D74C
+
+	lbl_8039D4D8:
+	rlwinm.  r0, r3, 0, 0x1b, 0x1b
+	beq      lbl_8039D528
+	lwz      r3, 0xd4(r30)
+	lfs      f0, lbl_8051F170@sda21(r2)
+	lfs      f1, 0x24(r3)
+	fcmpo    cr0, f1, f0
+	cror     2, 0, 2
+	bne      lbl_8039D510
+	bl       openWindow__Q28Morimura24TSelectExplanationWindowFv
+	lwz      r3, spSysIF__8PSSystem@sda21(r13)
+	li       r4, 0x1811
+	li       r5, 0
+	bl       playSystemSe__Q28PSSystem5SysIFFUlUl
+	b        lbl_8039D74C
+
+	lbl_8039D510:
+	bl       closeWindow__Q28Morimura24TSelectExplanationWindowFv
+	lwz      r3, spSysIF__8PSSystem@sda21(r13)
+	li       r4, 0x1811
+	li       r5, 0
+	bl       playSystemSe__Q28PSSystem5SysIFFUlUl
+	b        lbl_8039D74C
+
+	lbl_8039D528:
+	clrlwi.  r0, r31, 0x18
+	beq      lbl_8039D74C
+	andi.    r0, r3, 0x1100
+	beq      lbl_8039D570
+	lbz      r0, mIsSection__Q28Morimura9TTestBase@sda21(r13)
+	cmplwi   r0, 0
+	bne      lbl_8039D554
+	li       r0, 1
+	mr       r3, r30
+	stb      r0, 0x228(r30)
+	bl       demoStart__Q28Morimura9TVsSelectFv
+
+	lbl_8039D554:
+	lwz      r3, spSysIF__8PSSystem@sda21(r13)
+	li       r4, 0x1800
+	li       r5, 0
+	bl       playSystemSe__Q28PSSystem5SysIFFUlUl
+	lwz      r3, 0xd4(r30)
+	bl       closeWindow__Q28Morimura24TSelectExplanationWindowFv
+	b        lbl_8039D74C
+
+	lbl_8039D570:
+	lwz      r3, 0x18(r4)
+	rlwinm.  r0, r3, 0, 4, 4
+	bne      lbl_8039D584
+	rlwinm.  r0, r3, 0, 0x1c, 0x1c
+	beq      lbl_8039D5D4
+
+	lbl_8039D584:
+	lwz      r0, 0x244(r30)
+	cmpwi    r0, 1
+	beq      lbl_8039D59C
+	lwz      r3, 0x84(r30)
+	bl       upIndex__Q28Morimura11TIndexGroupFv
+	b        lbl_8039D74C
+
+	lbl_8039D59C:
+	lwz      r3, 0x84(r30)
+	lwz      r0, 0x20(r3)
+	cmpwi    r0, 0
+	bne      lbl_8039D74C
+	lbz      r0, 0x23d(r30)
+	cmplwi   r0, 0
+	bne      lbl_8039D74C
+	li       r0, 1
+	li       r4, 0x1807
+	stb      r0, 0x23d(r30)
+	li       r5, 0
+	lwz      r3, spSysIF__8PSSystem@sda21(r13)
+	bl       playSystemSe__Q28PSSystem5SysIFFUlUl
+	b        lbl_8039D74C
+
+	lbl_8039D5D4:
+	rlwinm.  r0, r3, 0, 5, 5
+	bne      lbl_8039D5E4
+	rlwinm.  r0, r3, 0, 0x1d, 0x1d
+	beq      lbl_8039D74C
+
+	lbl_8039D5E4:
+	lwz      r0, 0x244(r30)
+	cmpwi    r0, 2
+	beq      lbl_8039D5FC
+	lwz      r3, 0x84(r30)
+	bl       downIndex__Q28Morimura11TIndexGroupFv
+	b        lbl_8039D74C
+
+	lbl_8039D5FC:
+	lwz      r3, 0x84(r30)
+	lwz      r0, 0x20(r3)
+	cmpwi    r0, 0
+	bne      lbl_8039D74C
+	lbz      r0, 0x23d(r30)
+	cmplwi   r0, 0
+	bne      lbl_8039D74C
+	li       r0, 1
+	li       r4, 0x1807
+	stb      r0, 0x23d(r30)
+	li       r5, 0
+	lwz      r3, spSysIF__8PSSystem@sda21(r13)
+	bl       playSystemSe__Q28PSSystem5SysIFFUlUl
+	b        lbl_8039D74C
+
+	lbl_8039D634:
+	lbz      r0, mCanCancel__Q28Morimura9TVsSelect@sda21(r13)
+	cmplwi   r0, 0
+	beq      lbl_8039D74C
+	lwz      r3, 0x80(r30)
+	lwz      r0, 0x1c(r3)
+	rlwinm.  r0, r0, 0, 0x16, 0x16
+	beq      lbl_8039D74C
+	li       r0, 0
+	stb      r0, mCanCancel__Q28Morimura9TVsSelect@sda21(r13)
+	lwz      r0, 0x240(r30)
+	cmpwi    r0, 1
+	beq      lbl_8039D66C
+	lfs      f0, mZoomFrameMax__Q28Morimura9TVsSelect@sda21(r13)
+	stfs     f0, 0x250(r30)
+
+	lbl_8039D66C:
+	li       r0, 2
+	li       r4, 0x1801
+	stw      r0, 0x240(r30)
+	li       r5, 0
+	lwz      r3, spSysIF__8PSSystem@sda21(r13)
+	bl       playSystemSe__Q28PSSystem5SysIFFUlUl
+	lis      r3, sincosTable___5JMath@ha
+	li       r0, 2
+	mr       r5, r30
+	lfs      f3, lbl_8051F244@sda21(r2)
+	addi     r4, r3, sincosTable___5JMath@l
+	lfs      f2, lbl_8051F170@sda21(r2)
+	lfs      f1, lbl_8051F1B4@sda21(r2)
+	mtctr    r0
+
+	lbl_8039D6A4:
+	lwz      r6, 0x1e8(r5)
+	lfs      f4, 0x2c(r6)
+	lfs      f5, 0xc(r6)
+	fcmpo    cr0, f4, f2
+	lfs      f6, 0x10(r6)
+	bge      lbl_8039D6E8
+	lfs      f0, lbl_8051F1B0@sda21(r2)
+	lis      r3, sincosTable___5JMath@ha
+	addi     r3, r3, sincosTable___5JMath@l
+	fmuls    f0, f4, f0
+	fctiwz   f0, f0
+	stfd     f0, 0xa8(r1)
+	lwz      r0, 0xac(r1)
+	rlwinm   r0, r0, 3, 0x12, 0x1c
+	lfsx     f0, r3, r0
+	fneg     f0, f0
+	b        lbl_8039D70C
+
+	lbl_8039D6E8:
+	lfs      f0, lbl_8051F1B4@sda21(r2)
+	lis      r3, sincosTable___5JMath@ha
+	addi     r3, r3, sincosTable___5JMath@l
+	fmuls    f0, f4, f0
+	fctiwz   f0, f0
+	stfd     f0, 0xb0(r1)
+	lwz      r0, 0xb4(r1)
+	rlwinm   r0, r0, 3, 0x12, 0x1c
+	lfsx     f0, r3, r0
+
+	lbl_8039D70C:
+	fcmpo    cr0, f4, f2
+	fmadds   f5, f3, f0, f5
+	bge      lbl_8039D71C
+	fneg     f4, f4
+
+	lbl_8039D71C:
+	fmuls    f0, f4, f1
+	addi     r5, r5, 4
+	fctiwz   f0, f0
+	stfd     f0, 0xb8(r1)
+	lwz      r0, 0xbc(r1)
+	rlwinm   r0, r0, 3, 0x12, 0x1c
+	add      r3, r4, r0
+	lfs      f0, 4(r3)
+	fmadds   f6, f3, f0, f6
+	stfs     f5, 0x14(r6)
+	stfs     f6, 0x18(r6)
+	bdnz     lbl_8039D6A4
+
+	lbl_8039D74C:
+	lwz      r0, 0x274(r30)
+	mulli    r0, r0, 5
+	stw      r0, 0x27c(r30)
+	lwz      r0, 0x278(r30)
+	mulli    r0, r0, 5
+	stw      r0, 0x280(r30)
+	lbz      r3, 0x23d(r30)
+	cmplwi   r3, 0
+	beq      lbl_8039D78C
+	addi     r0, r3, 1
+	stb      r0, 0x23d(r30)
+	lbz      r0, 0x23d(r30)
+	cmplwi   r0, 0xf
+	ble      lbl_8039D78C
+	li       r0, 0
+	stb      r0, 0x23d(r30)
+
+	lbl_8039D78C:
+	lwz      r3, 0x1f8(r30)
+	lwz      r0, 0x34(r3)
+	cmpwi    r0, 1
+	beq      lbl_8039D7E8
+	lwz      r3, 0x10(r3)
+	lwz      r0, 8(r3)
+	cmpwi    r0, 1
+	bne      lbl_8039D7E8
+	lbz      r0, mIsSection__Q28Morimura9TTestBase@sda21(r13)
+	cmplwi   r0, 0
+	bne      lbl_8039D7E8
+	li       r3, 0
+	li       r0, 1
+	stb      r3, 0x228(r30)
+	mr       r3, r30
+	lwz      r4, 0x1f8(r30)
+	stw      r0, 0x34(r4)
+	lwz      r12, 0(r30)
+	lwz      r12, 0x30(r12)
+	mtctr    r12
+	bctrl
+	li       r4, 0
+	bl       endScene__Q26Screen9SceneBaseFPQ26Screen11EndSceneArg
+
+	lbl_8039D7E8:
+	lwz      r3, 0xc0(r30)
+	lwz      r12, 0(r3)
+	lwz      r12, 0xc(r12)
+	mtctr    r12
+	bctrl
+	lwz      r3, 0xbc(r30)
+	lwz      r12, 0(r3)
+	lwz      r12, 0xc(r12)
+	mtctr    r12
+	bctrl
+	lwz      r3, 0x7c(r30)
+	lwz      r12, 0(r3)
+	lwz      r12, 0xc(r12)
+	mtctr    r12
+	bctrl
+	lwz      r3, 0xd4(r30)
+	lwz      r12, 0(r3)
+	lwz      r12, 0xc(r12)
+	mtctr    r12
+	bctrl
+	lwz      r3, 0xc4(r30)
+	lwz      r12, 0(r3)
+	lwz      r12, 0xc(r12)
+	mtctr    r12
+	bctrl
+	lwz      r3, 0xc8(r30)
+	lwz      r12, 0(r3)
+	lwz      r12, 0xc(r12)
+	mtctr    r12
+	bctrl
+	lwz      r3, 0xd0(r30)
+	lwz      r12, 0(r3)
+	lwz      r12, 0xc(r12)
+	mtctr    r12
+	bctrl
+	mr       r3, r30
+	bl       updateList__Q28Morimura11TScrollListFv
+	clrlwi.  r0, r3, 0x18
+	beq      lbl_8039D8A8
+	mr       r3, r30
+	lwz      r12, 0(r30)
+	lwz      r12, 0x84(r12)
+	mtctr    r12
+	bctrl
+	lwz      r3, spSysIF__8PSSystem@sda21(r13)
+	li       r4, 0x1802
+	li       r5, 0
+	bl       playSystemSe__Q28PSSystem5SysIFFUlUl
+
+	lbl_8039D8A8:
+	lwz      r0, 0x240(r30)
+	cmpwi    r0, 3
+	beq      lbl_8039D8D8
+	bge      lbl_8039D8EC
+	cmpwi    r0, 1
+	bge      lbl_8039D8C4
+	b        lbl_8039D8EC
+
+	lbl_8039D8C4:
+	mr       r3, r30
+	bl       doZoom__Q28Morimura9TVsSelectFv
+	mr       r3, r30
+	bl       doMoveOnyon__Q28Morimura9TVsSelectFv
+	b        lbl_8039DBA8
+
+	lbl_8039D8D8:
+	mr       r3, r30
+	bl       doMoveOnyon__Q28Morimura9TVsSelectFv
+	mr       r3, r30
+	bl       doScreenEffect__Q28Morimura9TVsSelectFv
+	b        lbl_8039DBA8
+
+	lbl_8039D8EC:
+	lfs      f1, 0x250(r30)
+	lfs      f0, lbl_8051F180@sda21(r2)
+	fadds    f0, f1, f0
+	stfs     f0, 0x250(r30)
+	lbz      r0, 0x22b(r30)
+	cmplwi   r0, 0
+	beq      lbl_8039DB84
+	lfs      f1, lbl_8051F248@sda21(r2)
+	lfs      f0, 0x250(r30)
+	fcmpu    cr0, f1, f0
+	bne      lbl_8039DB84
+	li       r0, 0
+	stb      r0, 0x22b(r30)
+	lwz      r3, 0x1f8(r30)
+	lwz      r0, 0x2c(r3)
+	cmpwi    r0, 0
+	bne      lbl_8039DA54
+	lwz      r3, 0x24(r3)
+	li       r0, 1
+	lfs      f0, lbl_8051F21C@sda21(r2)
+	stw      r3, 0x284(r30)
+	lwz      r3, 0x210(r30)
+	stb      r0, 0xac(r3)
+	lwz      r3, 0x1f8(r30)
+	lwz      r0, 0x24(r3)
+	cmpwi    r0, 0x64
+	blt      lbl_8039D960
+	lfs      f0, lbl_8051F220@sda21(r2)
+	b        lbl_8039D96C
+
+	lbl_8039D960:
+	cmpwi    r0, 0xa
+	blt      lbl_8039D96C
+	lfs      f0, lbl_8051F1EC@sda21(r2)
+
+	lbl_8039D96C:
+	lwz      r4, 0x200(r30)
+	lis      r3, 0x72695F63@ha
+	addi     r6, r3, 0x72695F63@l
+	li       r5, 0x506f
+	stfs     f0, 0x14(r4)
+	lwz      r3, 0x7c(r30)
+	lwz      r3, 8(r3)
+	lwz      r12, 0(r3)
+	lwz      r12, 0x3c(r12)
+	mtctr    r12
+	bctrl
+	li       r4, 4
+	mr       r28, r3
+	bl       setBasePosition__7J2DPaneF15J2DBasePosition
+	mr       r4, r28
+	addi     r3, r1, 0x74
+	li       r5, 0
+	bl       getGlbVtx__7J2DPaneCFUc
+	lfs      f1, 0x28(r28)
+	mr       r4, r28
+	lfs      f0, 0x20(r28)
+	addi     r3, r1, 0x68
+	lfs      f2, 0x74(r1)
+	li       r5, 0
+	fsubs    f0, f1, f0
+	lfs      f1, lbl_8051F188@sda21(r2)
+	fmadds   f0, f1, f0, f2
+	stfs     f0, 0x18(r1)
+	bl       getGlbVtx__7J2DPaneCFUc
+	lfs      f1, 0x2c(r28)
+	lis      r3, __vt__Q25efx2d3Arg@ha
+	lfs      f0, 0x24(r28)
+	addi     r0, r3, __vt__Q25efx2d3Arg@l
+	lwz      r3, 0x18(r1)
+	addi     r4, r1, 0x9c
+	fsubs    f0, f1, f0
+	lfs      f2, 0x6c(r1)
+	lfs      f1, lbl_8051F188@sda21(r2)
+	stw      r3, 0x10(r1)
+	fmadds   f1, f1, f0, f2
+	lfs      f0, 0x10(r1)
+	stw      r0, 0xa4(r1)
+	stfs     f1, 0x1c(r1)
+	lwz      r0, 0x1c(r1)
+	stfs     f0, 0x9c(r1)
+	stw      r0, 0x14(r1)
+	lfs      f0, 0x14(r1)
+	stfs     f0, 0xa0(r1)
+	lwz      r3, 0x200(r30)
+	lwz      r12, 0(r3)
+	lwz      r12, 8(r12)
+	mtctr    r12
+	bctrl
+	lwz      r3, spSysIF__8PSSystem@sda21(r13)
+	li       r4, 0x1873
+	li       r5, 0
+	bl       playSystemSe__Q28PSSystem5SysIFFUlUl
+	b        lbl_8039DB7C
+
+	lbl_8039DA54:
+	cmpwi    r0, 1
+	bne      lbl_8039DB7C
+	lwz      r3, 0x28(r3)
+	li       r0, 1
+	lfs      f0, lbl_8051F21C@sda21(r2)
+	stw      r3, 0x288(r30)
+	lwz      r3, 0x214(r30)
+	stb      r0, 0xac(r3)
+	lwz      r3, 0x1f8(r30)
+	lwz      r0, 0x28(r3)
+	cmpwi    r0, 0x64
+	blt      lbl_8039DA8C
+	lfs      f0, lbl_8051F220@sda21(r2)
+	b        lbl_8039DA98
+
+	lbl_8039DA8C:
+	cmpwi    r0, 0xa
+	blt      lbl_8039DA98
+	lfs      f0, lbl_8051F1EC@sda21(r2)
+
+	lbl_8039DA98:
+	lwz      r4, 0x200(r30)
+	lis      r3, 0x75695F63@ha
+	addi     r6, r3, 0x75695F63@l
+	li       r5, 0x506c
+	stfs     f0, 0x14(r4)
+	lwz      r3, 0x7c(r30)
+	lwz      r3, 8(r3)
+	lwz      r12, 0(r3)
+	lwz      r12, 0x3c(r12)
+	mtctr    r12
+	bctrl
+	li       r4, 4
+	mr       r28, r3
+	bl       setBasePosition__7J2DPaneF15J2DBasePosition
+	mr       r4, r28
+	addi     r3, r1, 0x5c
+	li       r5, 0
+	bl       getGlbVtx__7J2DPaneCFUc
+	lfs      f1, 0x28(r28)
+	mr       r4, r28
+	lfs      f0, 0x20(r28)
+	addi     r3, r1, 0x50
+	lfs      f2, 0x5c(r1)
+	li       r5, 0
+	fsubs    f0, f1, f0
+	lfs      f1, lbl_8051F188@sda21(r2)
+	fmadds   f0, f1, f0, f2
+	stfs     f0, 0x18(r1)
+	bl       getGlbVtx__7J2DPaneCFUc
+	lfs      f1, 0x2c(r28)
+	lis      r3, __vt__Q25efx2d3Arg@ha
+	lfs      f0, 0x24(r28)
+	addi     r0, r3, __vt__Q25efx2d3Arg@l
+	lwz      r3, 0x18(r1)
+	addi     r4, r1, 0x90
+	fsubs    f0, f1, f0
+	lfs      f2, 0x54(r1)
+	lfs      f1, lbl_8051F188@sda21(r2)
+	stw      r3, 8(r1)
+	fmadds   f1, f1, f0, f2
+	lfs      f0, 8(r1)
+	stw      r0, 0x98(r1)
+	stfs     f1, 0x1c(r1)
+	lwz      r0, 0x1c(r1)
+	stfs     f0, 0x90(r1)
+	stw      r0, 0xc(r1)
+	lfs      f0, 0xc(r1)
+	stfs     f0, 0x94(r1)
+	lwz      r3, 0x200(r30)
+	lwz      r12, 0(r3)
+	lwz      r12, 8(r12)
+	mtctr    r12
+	bctrl
+	lwz      r3, spSysIF__8PSSystem@sda21(r13)
+	li       r4, 0x1873
+	li       r5, 0
+	bl       playSystemSe__Q28PSSystem5SysIFFUlUl
+
+	lbl_8039DB7C:
+	mr       r3, r30
+	bl       changeFaceTexture__Q28Morimura9TVsSelectFv
+
+	lbl_8039DB84:
+	lfs      f1, 0x250(r30)
+	lfs      f0, lbl_8051F24C@sda21(r2)
+	fcmpo    cr0, f1, f0
+	ble      lbl_8039DBA8
+	lwz      r3, 0x200(r30)
+	lwz      r12, 0(r3)
+	lwz      r12, 0x10(r12)
+	mtctr    r12
+	bctrl
+
+	lbl_8039DBA8:
+	lfs      f0, 0x26c(r30)
+	lfs      f5, mstTuningTransX__Q29P2DScreen10Mgr_tuning@sda21(r2)
+	lwz      r3, 0xc0(r30)
+	fadds    f3, f0, f5
+	lfs      f1, lbl_8051F170@sda21(r2)
+	lfs      f0, mstTuningTransY__Q29P2DScreen10Mgr_tuning@sda21(r2)
+	lwz      r3, 8(r3)
+	fadds    f2, f1, f0
+	lfs      f4, mstTuningScaleX__Q29P2DScreen10Mgr_tuning@sda21(r2)
+	stfs     f3, 0x140(r3)
+	lfs      f3, mstTuningScaleY__Q29P2DScreen10Mgr_tuning@sda21(r2)
+	stfs     f2, 0x144(r3)
+	lfs      f0, lbl_8051F180@sda21(r2)
+	lfs      f1, 0x26c(r30)
+	lwz      r3, 0x7c(r30)
+	fadds    f1, f1, f5
+	lwz      r3, 8(r3)
+	stfs     f1, 0x140(r3)
+	stfs     f2, 0x144(r3)
+	lfs      f1, 0x26c(r30)
+	lwz      r3, 0xbc(r30)
+	fadds    f1, f1, f5
+	lwz      r3, 8(r3)
+	stfs     f1, 0x140(r3)
+	stfs     f2, 0x144(r3)
+	lfs      f1, 0x26c(r30)
+	lwz      r3, 0xd0(r30)
+	fadds    f1, f1, f5
+	lwz      r3, 8(r3)
+	stfs     f1, 0x140(r3)
+	stfs     f2, 0x144(r3)
+	lfs      f1, mDemoScale__Q28Morimura9TVsSelect@sda21(r13)
+	lwz      r3, 0xc0(r30)
+	fmuls    f2, f1, f4
+	lwz      r3, 8(r3)
+	fmuls    f1, f1, f3
+	stfs     f2, 0x138(r3)
+	stfs     f1, 0x13c(r3)
+	lfs      f1, mDemoScale__Q28Morimura9TVsSelect@sda21(r13)
+	lwz      r3, 0x7c(r30)
+	fmuls    f2, f1, f4
+	lwz      r3, 8(r3)
+	fmuls    f1, f1, f3
+	stfs     f2, 0x138(r3)
+	stfs     f1, 0x13c(r3)
+	lfs      f1, mDemoScale__Q28Morimura9TVsSelect@sda21(r13)
+	lwz      r3, 0xbc(r30)
+	fmuls    f2, f1, f4
+	lwz      r3, 8(r3)
+	fmuls    f1, f1, f3
+	stfs     f2, 0x138(r3)
+	stfs     f1, 0x13c(r3)
+	lfs      f1, mDemoScale__Q28Morimura9TVsSelect@sda21(r13)
+	lwz      r3, 0xd0(r30)
+	fmuls    f2, f1, f4
+	lwz      r3, 8(r3)
+	fmuls    f1, f1, f3
+	stfs     f2, 0x138(r3)
+	stfs     f1, 0x13c(r3)
+	lfs      f2, mDemoScale__Q28Morimura9TVsSelect@sda21(r13)
+	lfs      f1, 0x26c(r30)
+	fdivs    f3, f0, f2
+	lwz      r3, 0xe0(r30)
+	fneg     f0, f1
+	stfs     f3, 0xcc(r3)
+	stfs     f3, 0xd0(r3)
+	fdivs    f30, f0, f2
+	lwz      r12, 0(r3)
+	lwz      r12, 0x2c(r12)
+	mtctr    r12
+	bctrl
+	lfs      f4, lbl_8051F180@sda21(r2)
+	lfs      f0, mDemoScale__Q28Morimura9TVsSelect@sda21(r13)
+	lfs      f1, lbl_8051F25C@sda21(r2)
+	fdivs    f3, f4, f0
+	lfs      f0, lbl_8051F258@sda21(r2)
+	lfs      f5, lbl_8051F254@sda21(r2)
+	lfs      f2, lbl_8051F250@sda21(r2)
+	lwz      r3, 0xe0(r30)
+	fmadds   f0, f1, f30, f0
+	fsubs    f3, f4, f3
+	stfs     f0, 0xd4(r3)
+	fnmsubs  f1, f5, f3, f2
+	stfs     f1, 0xd8(r3)
+	lwz      r12, 0(r3)
+	lwz      r12, 0x2c(r12)
+	mtctr    r12
+	bctrl
+	lwz      r3, 0x84(r30)
+	lfs      f4, lbl_8051F170@sda21(r2)
+	lwz      r3, 0x20(r3)
+	subfic   r0, r3, 1
+	cntlzw   r0, r0
+	rlwinm.  r0, r0, 0x1b, 0x18, 0x1f
+	beq      lbl_8039DD28
+	lfs      f4, lbl_8051F1F4@sda21(r2)
+
+	lbl_8039DD28:
+	cmpwi    r3, 2
+	bne      lbl_8039DD34
+	lfs      f4, lbl_8051F1E8@sda21(r2)
+
+	lbl_8039DD34:
+	lfs      f2, 0x230(r30)
+	lfs      f3, lbl_8051F238@sda21(r2)
+	fsubs    f1, f4, f2
+	lfs      f0, lbl_8051F1D8@sda21(r2)
+	fmadds   f1, f3, f1, f2
+	stfs     f1, 0x230(r30)
+	lfs      f1, 0x230(r30)
+	fsubs    f1, f1, f4
+	fabs     f1, f1
+	frsp     f1, f1
+	fcmpo    cr0, f1, f0
+	bge      lbl_8039DD68
+	stfs     f4, 0x230(r30)
+
+	lbl_8039DD68:
+	lfs      f2, lbl_8051F260@sda21(r2)
+	lfs      f1, 0x230(r30)
+	lwz      r3, 0xf0(r30)
+	lfs      f0, lbl_8051F170@sda21(r2)
+	fadds    f1, f2, f1
+	stfs     f0, 0xd4(r3)
+	stfs     f1, 0xd8(r3)
+	lwz      r12, 0(r3)
+	lwz      r12, 0x2c(r12)
+	mtctr    r12
+	bctrl
+	lfs      f1, 0x2f8(r30)
+	lfs      f0, 0x308(r30)
+	lfs      f3, 0x2fc(r30)
+	lfs      f2, 0x30c(r30)
+	fadds    f0, f1, f0
+	lwz      r3, 0x100(r30)
+	fadds    f1, f3, f2
+	stfs     f0, 0xd4(r3)
+	stfs     f1, 0xd8(r3)
+	lwz      r12, 0(r3)
+	lwz      r12, 0x2c(r12)
+	mtctr    r12
+	bctrl
+	lfs      f1, 0x300(r30)
+	lfs      f0, 0x310(r30)
+	lfs      f3, 0x304(r30)
+	lfs      f2, 0x314(r30)
+	fadds    f0, f1, f0
+	lwz      r3, 0x104(r30)
+	fadds    f1, f3, f2
+	stfs     f0, 0xd4(r3)
+	stfs     f1, 0xd8(r3)
+	lwz      r12, 0(r3)
+	lwz      r12, 0x2c(r12)
+	mtctr    r12
+	bctrl
+	lbz      r0, 0x22d(r30)
+	cmplwi   r0, 0
+	beq      lbl_8039DFA4
+	lfs      f2, 0x260(r30)
+	lfs      f1, 0x264(r30)
+	lfs      f0, lbl_8051F1A8@sda21(r2)
+	fadds    f1, f2, f1
+	stfs     f1, 0x260(r30)
+	lfs      f1, 0x260(r30)
+	fcmpo    cr0, f1, f0
+	ble      lbl_8039DE40
+	lfs      f0, lbl_8051F170@sda21(r2)
+	li       r3, 0
+	li       r0, 1
+	stfs     f0, 0x260(r30)
+	stb      r3, 0x22d(r30)
+	stb      r0, 0x22e(r30)
+
+	lbl_8039DE40:
+	lbz      r0, 0x22c(r30)
+	cmplwi   r0, 0
+	beq      lbl_8039DEEC
+	lfs      f2, 0x260(r30)
+	lfs      f0, lbl_8051F170@sda21(r2)
+	lfs      f1, lbl_8051F264@sda21(r2)
+	fcmpo    cr0, f2, f0
+	bge      lbl_8039DE8C
+	lfs      f0, lbl_8051F1B0@sda21(r2)
+	lis      r3, sincosTable___5JMath@ha
+	addi     r3, r3, sincosTable___5JMath@l
+	fmuls    f0, f2, f0
+	fctiwz   f0, f0
+	stfd     f0, 0xb8(r1)
+	lwz      r0, 0xbc(r1)
+	rlwinm   r0, r0, 3, 0x12, 0x1c
+	lfsx     f0, r3, r0
+	fneg     f0, f0
+	b        lbl_8039DEB0
+
+	lbl_8039DE8C:
+	lfs      f0, lbl_8051F1B4@sda21(r2)
+	lis      r3, sincosTable___5JMath@ha
+	addi     r3, r3, sincosTable___5JMath@l
+	fmuls    f0, f2, f0
+	fctiwz   f0, f0
+	stfd     f0, 0xb0(r1)
+	lwz      r0, 0xb4(r1)
+	rlwinm   r0, r0, 3, 0x12, 0x1c
+	lfsx     f0, r3, r0
+
+	lbl_8039DEB0:
+	fmuls    f0, f1, f0
+	stfs     f0, 0x25c(r30)
+	lbz      r0, 0x22e(r30)
+	cmplwi   r0, 0
+	beq      lbl_8039DF8C
+	lfs      f1, 0x260(r30)
+	lfs      f0, lbl_8051F268@sda21(r2)
+	fcmpo    cr0, f1, f0
+	ble      lbl_8039DF8C
+	li       r0, 0
+	mr       r3, r30
+	stb      r0, 0x22c(r30)
+	stb      r0, 0x22e(r30)
+	bl       changeSlotPage__Q28Morimura9TVsSelectFv
+	b        lbl_8039DF8C
+
+	lbl_8039DEEC:
+	lfs      f2, 0x260(r30)
+	lfs      f0, lbl_8051F170@sda21(r2)
+	lfs      f1, lbl_8051F26C@sda21(r2)
+	fcmpo    cr0, f2, f0
+	bge      lbl_8039DF2C
+	lfs      f0, lbl_8051F1B0@sda21(r2)
+	lis      r3, sincosTable___5JMath@ha
+	addi     r3, r3, sincosTable___5JMath@l
+	fmuls    f0, f2, f0
+	fctiwz   f0, f0
+	stfd     f0, 0xb8(r1)
+	lwz      r0, 0xbc(r1)
+	rlwinm   r0, r0, 3, 0x12, 0x1c
+	lfsx     f0, r3, r0
+	fneg     f0, f0
+	b        lbl_8039DF50
+
+	lbl_8039DF2C:
+	lfs      f0, lbl_8051F1B4@sda21(r2)
+	lis      r3, sincosTable___5JMath@ha
+	addi     r3, r3, sincosTable___5JMath@l
+	fmuls    f0, f2, f0
+	fctiwz   f0, f0
+	stfd     f0, 0xb0(r1)
+	lwz      r0, 0xb4(r1)
+	rlwinm   r0, r0, 3, 0x12, 0x1c
+	lfsx     f0, r3, r0
+
+	lbl_8039DF50:
+	fmuls    f0, f1, f0
+	stfs     f0, 0x25c(r30)
+	lbz      r0, 0x22e(r30)
+	cmplwi   r0, 0
+	beq      lbl_8039DF8C
+	lfs      f1, 0x260(r30)
+	lfs      f0, lbl_8051F268@sda21(r2)
+	fcmpo    cr0, f1, f0
+	ble      lbl_8039DF8C
+	li       r3, 0
+	li       r0, 1
+	stb      r3, 0x22e(r30)
+	mr       r3, r30
+	stb      r0, 0x22c(r30)
+	bl       changeSlotPage__Q28Morimura9TVsSelectFv
+
+	lbl_8039DF8C:
+	lwz      r3, 0x108(r30)
+	li       r0, 0
+	stb      r0, 0xb0(r3)
+	lwz      r3, 0x10c(r30)
+	stb      r0, 0xb0(r3)
+	b        lbl_8039E02C
+
+	lbl_8039DFA4:
+	lwz      r3, 0x20c(r30)
+	bl       calc__Q32og6Screen15ArrowAlphaBlinkFv
+	lfs      f0, lbl_8051F270@sda21(r2)
+	mr       r31, r30
+	li       r28, 0
+	fmuls    f0, f0, f1
+	fctiwz   f31, f0
+
+	lbl_8039DFC0:
+	lwz      r3, 0x108(r31)
+	stfd     f31, 0xb8(r1)
+	lwz      r12, 0(r3)
+	lwz      r4, 0xbc(r1)
+	lwz      r12, 0x24(r12)
+	mtctr    r12
+	bctrl
+	addi     r28, r28, 1
+	addi     r31, r31, 4
+	cmpwi    r28, 2
+	blt      lbl_8039DFC0
+	lbz      r0, 0x22c(r30)
+	cmplwi   r0, 0
+	bne      lbl_8039E014
+	lwz      r3, 0x108(r30)
+	li       r4, 0
+	li       r0, 1
+	stb      r4, 0xb0(r3)
+	lwz      r3, 0x10c(r30)
+	stb      r0, 0xb0(r3)
+	b        lbl_8039E02C
+
+	lbl_8039E014:
+	lwz      r3, 0x108(r30)
+	li       r4, 1
+	li       r0, 0
+	stb      r4, 0xb0(r3)
+	lwz      r3, 0x10c(r30)
+	stb      r0, 0xb0(r3)
+
+	lbl_8039E02C:
+	lfs      f1, 0x318(r30)
+	lfs      f0, 0x25c(r30)
+	lwz      r3, 0x110(r30)
+	fadds    f0, f1, f0
+	lfs      f1, 0x31c(r30)
+	stfs     f0, 0xd4(r3)
+	stfs     f1, 0xd8(r3)
+	lwz      r12, 0(r3)
+	lwz      r12, 0x2c(r12)
+	mtctr    r12
+	bctrl
+	lwz      r4, 0xe8(r30)
+	addi     r3, r1, 0x44
+	li       r5, 0
+	bl       getGlbVtx__7J2DPaneCFUc
+	lfs      f31, 0x44(r1)
+	addi     r3, r1, 0x38
+	lfs      f30, 0x48(r1)
+	li       r5, 3
+	lwz      r4, 0xe8(r30)
+	bl       getGlbVtx__7J2DPaneCFUc
+	lwz      r4, 0x7c(r30)
+	addi     r3, r1, 0x2c
+	stfs     f31, 0x80(r1)
+	li       r5, 0
+	lfs      f1, 0x3c(r1)
+	stfs     f30, 0x84(r1)
+	lfs      f0, 0x38(r1)
+	lwz      r6, 0x18(r4)
+	lwz      r4, 0x80(r1)
+	stfs     f0, 0x88(r1)
+	lwz      r0, 0x84(r1)
+	stw      r4, 0x1c(r6)
+	lwz      r4, 0x88(r1)
+	stw      r0, 0x20(r6)
+	stfs     f1, 0x8c(r1)
+	lwz      r0, 0x8c(r1)
+	stw      r4, 0x24(r6)
+	stw      r0, 0x28(r6)
+	lwz      r4, 0xe4(r30)
+	bl       getGlbVtx__7J2DPaneCFUc
+	lfs      f30, 0x2c(r1)
+	addi     r3, r1, 0x20
+	lfs      f31, 0x30(r1)
+	li       r5, 3
+	lwz      r4, 0xe4(r30)
+	bl       getGlbVtx__7J2DPaneCFUc
+	lfs      f0, 0x20(r1)
+	mr       r31, r30
+	lfs      f1, 0x24(r1)
+	li       r28, 0
+	stfs     f30, 0x218(r30)
+	stfs     f31, 0x21c(r30)
+	stfs     f0, 0x220(r30)
+	stfs     f1, 0x224(r30)
+
+	lbl_8039E108:
+	lwz      r3, 0x1f0(r31)
+	lwz      r4, 0x274(r31)
+	bl       update__Q28Morimura7TVsPikiFi
+	lwz      r3, 0x210(r31)
+	lwz      r12, 0(r3)
+	lwz      r12, 0x10(r12)
+	mtctr    r12
+	bctrl
+	addi     r28, r28, 1
+	addi     r31, r31, 4
+	cmpwi    r28, 2
+	blt      lbl_8039E108
+	lfs      f1, lbl_8051F270@sda21(r2)
+	lfs      f0, mFireAlphaRate__Q28Morimura9TVsSelect@sda21(r13)
+	lwz      r3, 0xd0(r30)
+	fmuls    f0, f1, f0
+	lwz      r3, 8(r3)
+	fctiwz   f0, f0
+	lwz      r12, 0(r3)
+	lwz      r12, 0x24(r12)
+	stfd     f0, 0xb8(r1)
+	lwz      r4, 0xbc(r1)
+	mtctr    r12
+	bctrl
+	li       r28, 0
+	mr       r31, r30
+
+	lbl_8039E170:
+	lwz      r3, 0xf4(r31)
+	li       r4, 0xff
+	lwz      r12, 0(r3)
+	lwz      r12, 0x24(r12)
+	mtctr    r12
+	bctrl
+	addi     r28, r28, 1
+	addi     r31, r31, 4
+	cmpwi    r28, 3
+	blt      lbl_8039E170
+	li       r27, 0
+	mr       r28, r30
+
+	lbl_8039E1A0:
+	li       r31, 0
+	lwz      r29, 0x1f0(r28)
+
+	lbl_8039E1A8:
+	lwz      r3, 0(r29)
+	li       r4, 0xff
+	lwz      r12, 0(r3)
+	lwz      r12, 0x24(r12)
+	mtctr    r12
+	bctrl
+	addi     r31, r31, 1
+	addi     r29, r29, 4
+	cmpwi    r31, 3
+	blt      lbl_8039E1A8
+	addi     r27, r27, 1
+	addi     r28, r28, 4
+	cmpwi    r27, 2
+	blt      lbl_8039E1A0
+	lwz      r0, 0x240(r30)
+	cmpwi    r0, 1
+	bge      lbl_8039E218
+	lfs      f2, lbl_8051F180@sda21(r2)
+	lfs      f0, lbl_8051F274@sda21(r2)
+	stfs     f2, 0x238(r30)
+	lfs      f1, 0x258(r30)
+	fadds    f0, f1, f0
+	stfs     f0, 0x258(r30)
+	lfs      f0, 0x258(r30)
+	fcmpo    cr0, f0, f2
+	ble      lbl_8039E24C
+	stfs     f2, 0x258(r30)
+	b        lbl_8039E24C
+
+	lbl_8039E218:
+	lfs      f2, 0x238(r30)
+	lfs      f0, lbl_8051F278@sda21(r2)
+	lfs      f1, lbl_8051F1D8@sda21(r2)
+	fmuls    f2, f2, f0
+	lfs      f0, lbl_8051F170@sda21(r2)
+	stfs     f2, 0x238(r30)
+	lfs      f2, 0x258(r30)
+	fsubs    f1, f2, f1
+	stfs     f1, 0x258(r30)
+	lfs      f1, 0x258(r30)
+	fcmpo    cr0, f1, f0
+	bge      lbl_8039E24C
+	stfs     f0, 0x258(r30)
+
+	lbl_8039E24C:
+	lfs      f1, lbl_8051F270@sda21(r2)
+	lfs      f0, 0x238(r30)
+	lwz      r3, 0xec(r30)
+	fmuls    f0, f1, f0
+	lwz      r12, 0(r3)
+	fctiwz   f0, f0
+	lwz      r12, 0x24(r12)
+	stfd     f0, 0xb8(r1)
+	lwz      r4, 0xbc(r1)
+	mtctr    r12
+	bctrl
+	mr       r28, r30
+	li       r27, 0
+	li       r29, 0
+	b        lbl_8039E364
+
+	lbl_8039E288:
+	lwz      r3, 0x140(r28)
+	lfs      f0, mWindowScale__Q28Morimura9TVsSelect@sda21(r13)
+	stfs     f0, 0xcc(r3)
+	stfs     f0, 0xd0(r3)
+	lwz      r12, 0(r3)
+	lwz      r12, 0x2c(r12)
+	mtctr    r12
+	bctrl
+	lwz      r3, 0x140(r28)
+	li       r4, 4
+	bl       setBasePosition__7J2DPaneF15J2DBasePosition
+	lwz      r3, 0x12c(r28)
+	lfs      f0, mWindowScale__Q28Morimura9TVsSelect@sda21(r13)
+	stfs     f0, 0xcc(r3)
+	stfs     f0, 0xd0(r3)
+	lwz      r12, 0(r3)
+	lwz      r12, 0x2c(r12)
+	mtctr    r12
+	bctrl
+	lwz      r3, 0x12c(r28)
+	li       r4, 4
+	bl       setBasePosition__7J2DPaneF15J2DBasePosition
+	lwz      r0, 0x94(r30)
+	cmpw     r27, r0
+	beq      lbl_8039E324
+	lwz      r3, 0x88(r30)
+	lfs      f1, lbl_8051F270@sda21(r2)
+	lfs      f0, 0x258(r30)
+	lwzx     r3, r3, r29
+	fmuls    f0, f1, f0
+	lwz      r3, 4(r3)
+	fctiwz   f0, f0
+	lwz      r12, 0(r3)
+	lwz      r12, 0x24(r12)
+	stfd     f0, 0xb8(r1)
+	lwz      r4, 0xbc(r1)
+	mtctr    r12
+	bctrl
+	b        lbl_8039E358
+
+	lbl_8039E324:
+	lwz      r3, 0x88(r30)
+	li       r4, 0xff
+	lwzx     r3, r3, r29
+	lwz      r3, 4(r3)
+	lbz      r5, 0xb2(r3)
+	cmplwi   r5, 0xc8
+	bge      lbl_8039E348
+	addi     r0, r5, 0x32
+	clrlwi   r4, r0, 0x18
+
+	lbl_8039E348:
+	lwz      r12, 0(r3)
+	lwz      r12, 0x24(r12)
+	mtctr    r12
+	bctrl
+
+	lbl_8039E358:
+	addi     r28, r28, 4
+	addi     r29, r29, 4
+	addi     r27, r27, 1
+
+	lbl_8039E364:
+	lha      r0, 0x8e(r30)
+	cmpw     r27, r0
+	blt      lbl_8039E288
+	lwz      r3, 0x84(r30)
+	lwz      r0, 0x20(r3)
+	cmpwi    r0, 0
+	bne      lbl_8039E3A8
+	lfs      f2, 0x234(r30)
+	lfs      f1, lbl_8051F1CC@sda21(r2)
+	lfs      f0, lbl_8051F180@sda21(r2)
+	fadds    f1, f2, f1
+	stfs     f1, 0x234(r30)
+	lfs      f1, 0x234(r30)
+	fcmpo    cr0, f1, f0
+	ble      lbl_8039E3B8
+	stfs     f0, 0x234(r30)
+	b        lbl_8039E3B8
+
+	lbl_8039E3A8:
+	lfs      f1, 0x234(r30)
+	lfs      f0, lbl_8051F1F8@sda21(r2)
+	fmuls    f0, f1, f0
+	stfs     f0, 0x234(r30)
+
+	lbl_8039E3B8:
+	lbz      r0, mForceResetParm__Q28Morimura11TScrollList@sda21(r13)
+	cmplwi   r0, 0
+	beq      lbl_8039E3FC
+	li       r0, 0
+	lis      r3, mScrollParm__Q28Morimura9TVsSelect@ha
+	stb      r0, mForceResetParm__Q28Morimura11TScrollList@sda21(r13)
+	lfsu     f0, mScrollParm__Q28Morimura9TVsSelect@l(r3)
+	lwz      r4, 0x84(r30)
+	stfs     f0, 0(r4)
+	lfs      f0, 4(r3)
+	stfs     f0, 4(r4)
+	lfs      f0, 8(r3)
+	stfs     f0, 8(r4)
+	lfs      f0, 0xc(r3)
+	stfs     f0, 0xc(r4)
+	lfs      f0, 0x10(r3)
+	stfs     f0, 0x10(r4)
+
+	lbl_8039E3FC:
+	li       r3, 0
+	psq_l    f31, 248(r1), 0, qr0
+	lfd      f31, 0xf0(r1)
+	psq_l    f30, 232(r1), 0, qr0
+	lfd      f30, 0xe0(r1)
+	lmw      r27, 0xcc(r1)
+	lwz      r0, 0x104(r1)
+	mtlr     r0
+	addi     r1, r1, 0x100
+	blr
+	*/
+}
+
+/**
+ * @note Address: 0x8039E454
+ * @note Size: 0xAF0
+ */
+#ifdef PIKI_PC_PORT
+static int pcVsSkip()
+{
+	static int v = getenv("PIKMIN_VS_SKIP") ? atoi(getenv("PIKMIN_VS_SKIP")) : 0;
+	return v;
+}
+
+// TEMP debug VS select: dump / hide panes of the main screen
+static void pcVsTagStr(u64 tag, char* out)
+{
+	int n = 0;
+	for (int i = 7; i >= 0; i--) {
+		char c = (char)(tag >> (i * 8));
+		if (c) out[n++] = c;
+	}
+	out[n] = 0;
+}
+static void pcVsPanes(J2DPane* pane, int depth, bool dump, const char* hide)
+{
+	char tag[9];
+	pcVsTagStr(pane->mTag, tag);
+	if (hide && tag[0]) {
+		char key[12];
+		snprintf(key, sizeof(key), ",%s,", tag);
+		if (strstr(hide, key)) pane->hide();
+	}
+	if (dump) {
+		printf("[VSPANE] %*s%-8s type=%u vis=%d a=%d box=(%.0f,%.0f %.0fx%.0f) glb=(%.0f,%.0f)\n", depth * 2, "", tag,
+		       (unsigned)pane->getTypeID(), (int)pane->isVisible(), (int)pane->getAlpha(), pane->mBounds.i.x, pane->mBounds.i.y,
+		       pane->getWidth(), pane->getHeight(), pane->mGlobalMtx[0][3], pane->mGlobalMtx[1][3]);
+	}
+	for (J2DPane* c = pane->getFirstChildPane(); c; c = c->getNextChildPane()) {
+		pcVsPanes(c, depth + 1, dump, hide);
+	}
+}
+static void pcVsDebugPanes(J2DPane* root)
+{
+	static int frame = 0;
+	static char hide[256];
+	static bool init = false;
+	if (!init) {
+		init = true;
+		const char* h = getenv("PIKMIN_VS_HIDE");
+		snprintf(hide, sizeof(hide), ",%s,", h ? h : "");
+	}
+	frame++;
+	if (frame == 90) {
+		J2DScreen* scr = static_cast<J2DScreen*>(root);
+		printf("[VSPANE] screen color r=%d g=%d b=%d a=%d paneAlpha=%d\n", scr->mColor.r, scr->mColor.g, scr->mColor.b, scr->mColor.a,
+		       (int)root->getAlpha());
+	}
+	pcVsPanes(root, 0, frame == 90, hide[1] != ',' ? hide : nullptr);
+}
+#endif
+
+void TVsSelect::doDraw(Graphics& gfx)
+{
+	j3dSys.drawInit();
+	if (mZoomState > 0) {
+		if (mIsSection) {
+			GXSetPixelFmt(GX_PF_RGBA6_Z24, GX_ZC_LINEAR);
+		}
+		gfx.mOrthoGraph.setPort();
+		GXSetAlphaUpdate(GX_TRUE);
+		GXSetColorUpdate(GX_TRUE);
+		mIndPic->draw(0.0f, 0.0f, 336.0f, 240.0f, false, false, false);
+		Graphics::dirtyInitGX();
+		Graphics::initGX();
+		GXSetColorUpdate(GX_FALSE);
+		GXSetDstAlpha(GX_TRUE, 0);
+		GXSetBlendMode(GX_BM_BLEND, GX_BL_ONE, GX_BL_ZERO, GX_LO_CLEAR);
+		GXSetNumTexGens(0);
+		GXSetNumIndStages(0);
+		GXSetNumChans(1);
+
+		GXSetChanMatColor(GX_COLOR0A0, JUtility::TColor(0, 0, 0, 255));
+
+		GXSetChanCtrl(GX_COLOR0A0, GX_FALSE, GX_SRC_REG, GX_SRC_REG, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
+		GXSetCullMode(GX_CULL_NONE);
+		GXSetNumTevStages(1);
+		GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
+		GXSetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
+
+		Mtx mtx;
+		PSMTXIdentity(mtx);
+		GXLoadPosMtxImm(mtx, 0);
+		GXLoadTexMtxImm(mtx, 0x1e, GX_MTX2x4);
+
+		GXSetCurrentMtx(0);
+		GXClearVtxDesc();
+
+		GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+		GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+		GXBegin(GX_QUADS, GX_VTXFMT0, 4);
+
+		f32 zero = 0.0f;
+		f32 pos1 = 386.0f;
+		f32 pos2 = 290.0f;
+
+		GXTexCoord2f32(zero, zero);
+		GXTexCoord2f32(zero, pos1);
+
+		GXTexCoord2f32(zero, zero);
+		GXTexCoord2f32(pos1, pos2);
+
+		GXTexCoord2f32(zero, zero);
+		GXTexCoord2f32(pos2, zero);
+
+		J2DPicture pics[2];
+		pics[0] = J2DPicture("navi_l.bti");
+		pics[1] = J2DPicture("navi_l.bti");
+
+		GXSetDstAlpha(GX_TRUE, 0xff);
+
+		for (int i = 0; i < 2; i++) {
+			if (mOnyonObj[i]->_30 > 0.0f) {
+				mIsOnyonHitGoal       = true;
+				TVsSelectOnyon* onyon = mOnyonObj[i];
+				f32 coord, scale, x;
+				f32 calc = onyon->_30;
+				coord    = onyon->mCurrentPosition.x;
+				f32 minX = _290;
+				scale    = calc * 25.0f;
+				calc     = mOnyonGoalOffset.x + (coord - minX);
+				x        = calc / (_298 - minX);
+				f32 minY = _294;
+				coord    = 240.0f * ((mOnyonGoalOffset.y + (onyon->mCurrentPosition.y - minY)) / (_29C - minY));
+				pics[i].setBasePosition(J2DPOS_Center);
+				calc = x * 336.0f;
+				pics[i].draw(calc - (scale * 0.5f), coord - (scale * 0.5f), scale, scale, false, false, false);
+			}
+		}
+
+		GXSetDstAlpha(GX_TRUE, 0xff);
+		mIndPane->mTexture3->init();
+		GXSetDstAlpha(GX_FALSE, 0);
+		GXSetAlphaUpdate(GX_FALSE);
+		GXSetColorUpdate(GX_TRUE);
+		mIndPane->draw();
+		GXSetDstAlpha(GX_FALSE, 255);
+		GXSetAlphaUpdate(GX_TRUE);
+		GXSetColorUpdate(GX_FALSE);
+
+		gfx.mOrthoGraph.setPort();
+		mIndPic->draw(0.0f, 0.0f, 336.0f, 240.0f, false, false, false);
+		GXInvalidateTexAll();
+		mIndPane->mTexture3->capture(0, 0, (GXTexFmt)mIndPane->mTexture3->mTexInfo->mTextureFormat, false, 0);
+		GXSetColorUpdate(GX_TRUE);
+		gfx.mPerspGraph.setPort();
+	}
+
+	J2DPerspGraph* graf = gfx.getPerspGraph();
+	graf->setPort();
+	mBackgroundScreen->draw(gfx, graf);
+
+	JGeometry::TBox2f bounds;
+	bounds = mScissorBounds;
+	GXSetScissor(bounds.i.x, bounds.i.y, bounds.getWidth(), bounds.getHeight());
+	mListScreen->draw(gfx, graf);
+	GXSetScissor(0, 0, 640, 480);
+
+	mMainScreen->draw(gfx, graf);
+#ifdef PIKI_PC_PORT
+	// Pantallas anchas: la vineta (de mMainScreen) solo existe en el 4:3; su
+	// sombra se lleva a los laterales, que conservan su textura. La franja
+	// del borde interior es solo fondo.
+	pc_gfx_p2_extend_shade(0.0f, 448.0f, 6.0f);
+#endif
+
+	if (mZoomState) {
+		mRedPodScreen->draw(gfx, graf);
+		mBluePodScreen->draw(gfx, graf);
+	}
+
+	gfx.mOrthoGraph.setPort();
+
+	for (int i = 0; i < 2; i++) {
+		mVsPiki[i]->draw();
+	}
+
+	if (mZoomState >= 3) {
+		for (int i = 0; i < 2; i++) {
+			mOnyonObj[i]->draw();
+		}
+	}
+
+	gfx.mPerspGraph.setPort();
+	mRulesWindow->draw(gfx, graf);
+	mFireScreen->draw(gfx, graf);
+
+	bool needBG           = false;
+	TVsSelectScene* owner = static_cast<TVsSelectScene*>(getOwner());
+	if (owner->mConfirmEndWindow->mHasDrawn) {
+		needBG = true;
+
+		owner = static_cast<TVsSelectScene*>(getOwner());
+		if (owner->mConfirmEndWindow->mIsActive) {
+			mDrawAlpha += 20;
+			if (mDrawAlpha > 200) {
+				mDrawAlpha = 200;
+			}
+		} else {
+			if (mDrawAlpha > 20) {
+				mDrawAlpha -= 20;
+			} else {
+				mDrawAlpha = 0;
+			}
+		}
+	}
+
+	if (needBG) {
+		JUtility::TColor c;
+		c.set(0, 0, 0, 0);
+		c.a = mDrawAlpha;
+		drawFillScreen(graf, c);
+	}
+
+	if (mRulesWindow->mState) {
+		gfx.mOrthoGraph.setPort();
+		for (int i = 0; i < 6; i++) {
+			int baseID = 0;
+			if (mCurrentRulesPage == 0) {
+				baseID = 6;
+			}
+			J2DPictureEx* pane = (J2DPictureEx*)mPowerIconPanes[i + baseID];
+			f32 x              = mPowerIconOffset.x;
+			f32 y              = mPowerIconOffset.y;
+			Vector2f offset(x, y);
+			x = mPaneRulesIcons[i]->mGlobalMtx[0][3];
+			y = mPaneRulesIcons[i]->mGlobalMtx[1][3];
+			Vector2f pos(x, y);
+			f32 width  = pane->getWidth();
+			f32 height = pane->getHeight();
+			pane->draw(offset.x + (pos.x - width * 0.5f), offset.y + (pos.y - height * 0.5f), width, height, false, false, false);
+			mPowerIconPanes[i + baseID]->calcMtx();
+		}
+		gfx.mPerspGraph.setPort();
+	}
+
+	JUtility::TColor c;
+	c.set(0, 0, 0, 255 - mFadeAlpha);
+	drawFillScreen(graf, c);
+}
+
+/**
+ * @note Address: 0x8039F334
+ * @note Size: 0xC
+ */
+void TVsSelect::doUpdateFadeinFinish()
+{
+	mCanInput = true;
+}
+
+/**
+ * @note Address: 0x8039F340
+ * @note Size: 0xAC
+ */
+void TVsSelect::doUpdateFadeoutFinish()
+{
+#if defined(VERSION_JP)
+	P2ASSERTLINE(2094, mDispMember);
+#else
+	P2ASSERTLINE(2096, mDispMember);
+#endif
+	mDispMember->mOlimarHandicap     = mHandicapSel[0];
+	mDispMember->mLouieHandicap      = mHandicapSel[1];
+	mDispMember->mSelectedStageIndex = mIndexPaneList[mCurrActiveRowSel]->getIndex();
+	if (mIsDemoStarted) {
+		mDispMember->mState = Screen::Game2DMgr::CHECK2D_VsSelect_ExitFinished;
+	} else {
+		mDispMember->mState = Screen::Game2DMgr::CHECK2D_VsSelect_CancelToTitle;
+	}
+}
+
+/**
+ * @note Address: 0x8039F3EC
+ * @note Size: 0x3CC
+ */
+void TVsSelect::paneInit()
+{
+	mPaneStageNameBg = mMainScreen->mScreenObj->search(MC8("PICT_075"));
+#if defined(VERSION_JP)
+	P2ASSERTLINE(2116, mPaneStageNameBg);
+#else
+	P2ASSERTLINE(2119, mPaneStageNameBg);
+#endif
+
+	mPaneLevelName = mMainScreen->mScreenObj->search(MC8("Tbmenu11"));
+#if defined(VERSION_JP)
+	P2ASSERTLINE(2119, mPaneLevelName);
+#else
+	P2ASSERTLINE(2122, mPaneLevelName);
+#endif
+
+	mActiveCourseThumbs[0] = static_cast<J2DPicture*>(mListScreen->mScreenObj->search(MC8("Plistim0")));
+	mActiveCourseThumbs[1] = static_cast<J2DPicture*>(mListScreen->mScreenObj->search(MC8("Plistim1")));
+	mActiveCourseThumbs[2] = static_cast<J2DPicture*>(mListScreen->mScreenObj->search(MC8("Plistim2")));
+	mActiveCourseThumbs[3] = static_cast<J2DPicture*>(mListScreen->mScreenObj->search(MC8("Plistim3")));
+	mActiveCourseThumbs[4] = static_cast<J2DPicture*>(mListScreen->mScreenObj->search(MC8("Plistim4")));
+
+	mPaneLevelWindows[0] = mListScreen->mScreenObj->search(MC8("Pliswin0"));
+	mPaneLevelWindows[1] = mListScreen->mScreenObj->search(MC8("Pliswin1"));
+	mPaneLevelWindows[2] = mListScreen->mScreenObj->search(MC8("Pliswin2"));
+	mPaneLevelWindows[3] = mListScreen->mScreenObj->search(MC8("Pliswin3"));
+	mPaneLevelWindows[4] = mListScreen->mScreenObj->search(MC8("Pliswin4"));
+
+	for (int i = 0; i < mNumActiveRows; i++) {
+#if defined(VERSION_JP)
+		JUT_ASSERTLINE(2136, mActiveCourseThumbs[i], "coursename[%d] not find\n", i);
+#else
+		JUT_ASSERTLINE(2139, mActiveCourseThumbs[i], "coursename[%d] not find\n", i);
+#endif
+#if defined(VERSION_JP)
+		JUT_ASSERTLINE(2137, mPaneLevelWindows[i], "pictureframe[%d] not find\n", i);
+#else
+		JUT_ASSERTLINE(2140, mPaneLevelWindows[i], "pictureframe[%d] not find\n", i);
+#endif
+	}
+
+	mPaneSpot = mMainScreen->mScreenObj->search(MC8("Pspot0"));
+#if defined(VERSION_JP)
+	P2ASSERTLINE(2142, mPaneSpot);
+#else
+	P2ASSERTLINE(2145, mPaneSpot);
+#endif
+
+	f32 test                = 20.0f;
+	mSelectionYOffset       = mIndexPaneList[mCurrActiveRowSel]->getPaneYOffset() - 10.0f;
+	mCursorSelectionYOffset = mSelectionYOffset + test;
+
+	mPaneStars = mMainScreen->mScreenObj->search(MC8("Nstarpik"));
+#if defined(VERSION_JP)
+	P2ASSERTLINE(2151, mPaneStars);
+#else
+	P2ASSERTLINE(2154, mPaneStars);
+#endif
+
+	changeCourseTexture();
+}
+
+/**
+ * @note Address: 0x8039F7B8
+ * @note Size: 0x240
+ */
+void TVsSelect::changePaneInfo()
+{
+	int id        = mIndexPaneList[mCurrActiveRowSel]->getIndex();
+	J2DPane* pane = mPaneLevelName;
+	u64 tag       = getNameID(id);
+	pane->setMsgID(tag);
+
+	mLevelNameYPos *= -1.0f;
+	if (!mLoopDrum) {
+		mStickAnimState = 0;
+		mStickAnim->stickUpDown();
+		int id = mIndexPaneList[mCurrActiveRowSel]->getIndex();
+		f32 y  = mIndexPaneList[mCurrActiveRowSel]->getPaneYOffset();
+		if (id == 0) {
+			mStickAnimState = 1;
+			mStickAnim->stickDown();
+		}
+		if (id == mStageCount - 1) {
+			mStickAnimState = 2;
+			mStickAnim->stickUp();
+		}
+		if (mStickAnimState == 0) {
+			mIsSelectIndexChange = 0;
+		} else {
+			f32 calc                   = 0.0f;
+			mIsSelectIndexChange       = 1;
+			mIndexGroup->mScrollOffset = 0.0f;
+			for (int i = 0; i < mNumActiveRows; i++) {
+				mIndexPaneList[i]->setOffset(calc);
+			}
+		}
+
+		for (int i = 0; i < mNumActiveRows; i++) {
+			mIndexPaneList[i]->mPane->show();
+			int paneIndex = mIndexPaneList[i]->getIndex();
+			if (paneIndex != id) {
+				TIndexPane* ind = mIndexPaneList[i];
+				f32 y2          = ind->getPaneYOffset();
+				ind->getIndex();
+				if ((mIndexPaneList[i]->getIndex() > id && y > y2) || (mIndexPaneList[i]->getIndex() < id && y < y2)) {
+					mIndexPaneList[i]->mPane->hide();
+				}
+			}
+		}
+	}
+}
+
+/**
+ * @note Address: 0x8039F9F8
+ * @note Size: 0x84
+ */
+u64 TVsSelect::getNameID(int id)
+{
+#if defined(VERSION_JP)
+	P2ASSERTLINE(2223, id <= getIdMax());
+#else
+	P2ASSERTLINE(2226, id <= getIdMax());
+#endif
+	int course = getCourseID(id);
+	return mMesgData->getMsgID(course - 1);
+}
+
+/**
+ * @note Address: 0x8039FA7C
+ * @note Size: 0x8
+ */
+int TVsSelect::getIdMax()
+{
+	return mStageCount;
+}
+
+/**
+ * @note Address: 0x8039FA84
+ * @note Size: 0x3C
+ */
+int TVsSelect::getCourseID(int id)
+{
+	if (!mIsSection) {
+		id = (*mDispMember->mTitleInfo)(id)->mIndex;
+	}
+	return id;
+}
+
+/**
+ * @note Address: N/A
+ * @note Size: 0x194
+ */
+void TVsSelect::reset()
+{
+	mDemoScale  = 1.0f;
+	mScreenXPos = 0.0f;
+	mZoomState  = 0;
+	mZoomLevel  = 0.0f;
+	for (int i = 0; i < 2; i++) {
+		mOnyonObj[i]->reset();
+	}
+	mIsZoomActive   = 0;
+	mIsOnyonHitGoal = 0;
+}
+
+/**
+ * @note Address: 0x8039FAC0
+ * @note Size: 0x1F4
+ */
+void TVsSelect::doZoom()
+{
+	if (mZoomState == 1) {
+		if (mZoomLevel > mZoomFrameMax) {
+			mZoomLevel = mZoomFrameMax;
+		} else {
+			mZoomLevel += 1.0f;
+		}
+	} else if (mZoomState == 2) {
+		mZoomLevel -= 1.0f;
+		if (mZoomLevel <= 0.0f) {
+			mZoomLevel  = 0.0f;
+			bool finish = true;
+			Vector2f offset(320.0f, 240.0f);
+			for (int i = 0; i < 2; i++) {
+				Vector2f diff = mOnyonObj[i]->mCurrentPosition;
+				diff -= offset;
+				if (diff.sqrLength() < 160000.0f) {
+					finish = false;
+				}
+			}
+			if (finish)
+				mZoomState = 0;
+		}
+	}
+
+	f32 calc  = sinf(mZoomLevel * HALF_PI / mZoomFrameMax);
+	f32 scale = 0.0f;
+	f32 temp;
+	if (!(calc < 0.25f)) {
+		temp  = 1.0f;
+		scale = (calc - 0.25f) * 4.0f / 3.0f;
+		if (calc == 1.0f) {
+			scale = temp;
+			if (mIsZoomActive) {
+				mZoomState = 3;
+				changeIndirectTexture();
+				mCanCancel = false;
+			}
+		}
+	}
+	mScreenXPos = mDemoOffsetMax * scale;
+	mDemoScale  = (mDemoScaleMax - 1.0f) * scale + 1.0f;
+}
+
+/**
+ * @note Address: 0x8039FCB4
+ * @note Size: 0x6C
+ */
+void TVsSelect::doMoveOnyon()
+{
+	for (int i = 0; i < 2; i++) {
+		f32 calc = 1.0f;
+		if (mZoomState == 2) {
+			calc = 2.0f;
+		}
+		mOnyonObj[i]->posUpdate(calc);
+	}
+}
+
+/**
+ * @note Address: 0x8039FD20
+ * @note Size: 0x214
+ */
+void TVsSelect::doScreenEffect()
+{
+	mZoomLevel += mIndShuki;
+	if (mZoomLevel > TAU) {
+		mZoomLevel -= TAU;
+	}
+	f32 mod = mIndVal;
+	mIndPane->setXY(sinf(mZoomLevel) * mod, cosf(mZoomLevel) * mod);
+
+	if (mIsZoomActive) {
+		bool isAnyAtGoal = true;
+		for (int i = 0; i < 2; i++) {
+			if (mOnyonObj[i]->_30 != 2.0f) {
+				isAnyAtGoal = false;
+			}
+		}
+		if (isAnyAtGoal) {
+			mEndDelayTimer += 1.0f;
+			if (mEndDelayTimer > 15.0f && !mIsSection) {
+				mZoomState          = 0;
+				mDispMember->mState = Screen::Game2DMgr::CHECK2D_VsSelect_InDemo;
+#if defined(VERSION_JP)
+				P2ASSERTLINE(2371, getOwner());
+#else
+				P2ASSERTLINE(2374, getOwner());
+#endif
+				getOwner()->endScene(nullptr);
+#if !defined(VERSION_JP)
+				for (int i = 0; i < mNumActiveRows; i++) {
+					if (i != mCurrActiveRowSel) {
+						mIndexPaneList[i]->mPane->hide();
+					}
+				}
+#endif
+			}
+		} else {
+			mEndDelayTimer = 0.0f;
+		}
+	}
+}
+
+/**
+ * @note Address: 0x8039FF34
+ * @note Size: 0x4FC
+ */
+void TVsSelect::onyonDemoInit()
+{
+	f32 goalX, goalY, x, y;
+	f32 test;
+	if (randFloat() > 0.5f) {
+		test = 1.0f;
+	} else {
+		test = -1.0f;
+	}
+
+	for (int i = 0; i < 2; i++) {
+		goalX = 0.5f * (_290 + _298);
+		goalY = 0.5f * (_294 + _29C);
+
+		mOnyonObj[i]->reset();
+		PSSystem::spSysIF->playSystemSe(PSSE_SY_CHALLENGE_ONY_MOVE, 0);
+		goalX += test * (25.0f * sinf(TAU * randFloat()) + 20.0f);
+		goalY += test * (10.0f * sinf(TAU * randFloat()) + 10.0f);
+		mOnyonObj[i]->mGoalPosition = Vector2f(goalX, goalY);
+
+		if (randFloat() < 0.5f) {
+			if (test > 0.0f) {
+				x = randFloat() * 50.0f + 640.0f;
+			} else {
+				x = randFloat() * -50.0f;
+			}
+			y = randFloat() * 480.0f;
+		} else {
+			if (test > 0.0f) {
+				y = randFloat() * 50.0f + 480.0f;
+			} else {
+				y = randFloat() * -50.0f;
+			}
+			x = randFloat() * 640.0f;
+		}
+		mOnyonObj[i]->mCurrentPosition = Vector2f(x, y);
+		mOnyonObj[i]->_00              = test;
+		test *= -1.0f;
+	}
+	mZoomLevel = 0.0f;
+}
+
+/**
+ * @note Address: 0x803A0430
+ * @note Size: 0x1C0
+ */
+void TVsSelect::demoStart()
+{
+	reset();
+	mZoomState = 1;
+	mCanCancel = true;
+	mEfxCountKira->fade();
+	mIsZoomActive = 1;
+	onyonDemoInit();
+	/*
+	stwu     r1, -0xa0(r1)
+	mflr     r0
+	stw      r0, 0xa4(r1)
+	stfd     f31, 0x90(r1)
+	psq_st   f31, 152(r1), 0, qr0
+	stfd     f30, 0x80(r1)
+	psq_st   f30, 136(r1), 0, qr0
+	stfd     f29, 0x70(r1)
+	psq_st   f29, 120(r1), 0, qr0
+	stfd     f28, 0x60(r1)
+	psq_st   f28, 104(r1), 0, qr0
+	stfd     f27, 0x50(r1)
+	psq_st   f27, 88(r1), 0, qr0
+	stfd     f26, 0x40(r1)
+	psq_st   f26, 72(r1), 0, qr0
+	stmw     r27, 0x2c(r1)
+	lfs      f0, lbl_8051F180@sda21(r2)
+	mr       r31, r3
+	lfs      f26, lbl_8051F170@sda21(r2)
+	li       r29, 0
+	stfs     f0, mDemoScale__Q28Morimura9TVsSelect@sda21(r13)
+	mr       r27, r31
+	lfs      f27, lbl_8051F1C0@sda21(r2)
+	lis      r30, 0x4330
+	stfs     f26, 0x26c(r3)
+	lfd      f28, lbl_8051F198@sda21(r2)
+	stw      r29, 0x240(r3)
+	lfs      f29, lbl_8051F1C4@sda21(r2)
+	stfs     f26, 0x250(r3)
+	lfs      f30, lbl_8051F190@sda21(r2)
+	lfs      f31, lbl_8051F188@sda21(r2)
+
+lbl_803A04AC:
+	lwz      r28, 0x1e8(r27)
+	stfs     f27, 0xc(r28)
+	stfs     f26, 0x10(r28)
+	bl       rand
+	xoris    r0, r3, 0x8000
+	lfs      f0, mTestVal__Q28Morimura9TVsSelect@sda21(r13)
+	stw      r0, 0xc(r1)
+	li       r3, 1
+	fctiwz   f0, f0
+	li       r0, 0
+	stw      r30, 8(r1)
+	lfd      f1, 8(r1)
+	stfd     f0, 0x10(r1)
+	fsubs    f0, f1, f28
+	lwz      r5, 0x14(r1)
+	fdivs    f0, f0, f29
+	fmuls    f0, f30, f0
+	fctiwz   f0, f0
+	stfd     f0, 0x18(r1)
+	lwz      r4, 0x1c(r1)
+	add      r4, r5, r4
+	neg      r4, r4
+	stw      r4, 0x38(r28)
+	stfs     f26, 0x30(r28)
+	stb      r3, 0x3c(r28)
+	lwz      r3, 8(r28)
+	stb      r0, 0xb0(r3)
+	stfs     f26, 0x2c(r28)
+	bl       rand
+	xoris    r0, r3, 0x8000
+	stw      r30, 0x20(r1)
+	stw      r0, 0x24(r1)
+	lfd      f0, 0x20(r1)
+	fsubs    f0, f0, f28
+	fdivs    f0, f0, f29
+	fcmpo    cr0, f0, f31
+	ble      lbl_803A0548
+	lfs      f0, lbl_8051F1A8@sda21(r2)
+	stfs     f0, 0x2c(r28)
+
+lbl_803A0548:
+	stfs     f26, 0x1c(r28)
+	addi     r29, r29, 1
+	cmpwi    r29, 2
+	addi     r27, r27, 4
+	stfs     f26, 0x20(r28)
+	stfs     f26, 0x24(r28)
+	stfs     f26, 0x28(r28)
+	lfs      f0, mAngRate__Q28Morimura9TVsSelect@sda21(r13)
+	stfs     f0, 0x34(r28)
+	blt      lbl_803A04AC
+	li       r3, 0
+	li       r0, 1
+	stb      r3, 0x229(r31)
+	stb      r3, 0x22a(r31)
+	stw      r0, 0x240(r31)
+	stb      r0, mCanCancel__Q28Morimura9TVsSelect@sda21(r13)
+	lwz      r3, 0x200(r31)
+	lwz      r12, 0(r3)
+	lwz      r12, 0x10(r12)
+	mtctr    r12
+	bctrl
+	li       r0, 1
+	mr       r3, r31
+	stb      r0, 0x229(r31)
+	bl       onyonDemoInit__Q28Morimura9TVsSelectFv
+	psq_l    f31, 152(r1), 0, qr0
+	lfd      f31, 0x90(r1)
+	psq_l    f30, 136(r1), 0, qr0
+	lfd      f30, 0x80(r1)
+	psq_l    f29, 120(r1), 0, qr0
+	lfd      f29, 0x70(r1)
+	psq_l    f28, 104(r1), 0, qr0
+	lfd      f28, 0x60(r1)
+	psq_l    f27, 88(r1), 0, qr0
+	lfd      f27, 0x50(r1)
+	psq_l    f26, 72(r1), 0, qr0
+	lfd      f26, 0x40(r1)
+	lmw      r27, 0x2c(r1)
+	lwz      r0, 0xa4(r1)
+	mtlr     r0
+	addi     r1, r1, 0xa0
+	blr
+	*/
+}
+
+/**
+ * @note Address: 0x803A05F0
+ * @note Size: 0x9C
+ */
+void TVsSelect::changeCourseTexture()
+{
+	for (int i = 0; i < mNumActiveRows; i++) {
+		int id = getCourseID(i);
+		mActiveCourseThumbs[i]->changeTexture(mLevelTextures[id], 0);
+	}
+}
+
+/**
+ * @note Address: 0x803A068C
+ * @note Size: 0xD0
+ */
+void TVsSelect::changeIndirectTexture()
+{
+	int id = mIndexPaneList[mCurrActiveRowSel]->getIndex();
+	id     = getCourseID(id);
+	mIndPane->mTexture1->storeTIMG(mLevelTextures[id], (u8)0);
+	mIndPic->changeTexture(mLevelTextures[id], 0);
+	mActiveCourseThumbs[mCurrActiveRowSel]->changeTexture(mIndPane->mTexture3->mTexInfo, 0);
+}
+
+/**
+ * @note Address: 0x803A075C
+ * @note Size: 0xB8
+ */
+void TVsSelect::setShortenIndex(int id, int id2, bool)
+{
+#if defined(VERSION_JP)
+	P2ASSERTLINE(2495, id < mNumActiveRows);
+#else
+	P2ASSERTLINE(2503, id < mNumActiveRows);
+#endif
+	id2 = getCourseID(id2);
+	mActiveCourseThumbs[id]->changeTexture(mLevelTextures[id2], 0);
+}
+
+/**
+ * @note Address: 0x803A0814
+ * @note Size: 0x140
+ */
+void TVsSelect::updateFacePicture()
+{
+	int state  = mChangeFaceState;
+	int state2 = 4 - state;
+	for (int i = 0; i < 6; i++) {
+		if (state >= 0) {
+			mOlimarFacePanes[i]->updateScale(mOlimarFaceScales[state].x, mOlimarFaceScales[state].y);
+		}
+		mOlimarFacePanes[i]->setAngleY(mChangeFaceTimer);
+
+		if (state >= 0) {
+			mLouieFacePanes[i]->updateScale(mLouieFaceScales[state2].x, mLouieFaceScales[state2].y);
+		}
+		mLouieFacePanes[i]->setAngleY(mChangeFaceTimer);
+	}
+
+	if (mChangeFaceTimer >= 1.0f) {
+		mChangeFaceTimer += mFaceChangeSpeed;
+		if (mChangeFaceTimer >= 180.0f) {
+			changeFaceTexture();
+		}
+		if (mChangeFaceTimer >= 360.0f) {
+			mChangeFaceTimer = 0.0f;
+		}
+	}
+}
+
+/**
+ * @note Address: 0x803A0954
+ * @note Size: 0x1F4
+ */
+void TVsSelect::changeFaceTexture()
+{
+	int diff = mPlayerWinCounts[0] - mPlayerWinCounts[1];
+	if (diff <= -3) {
+		if (mChangeFaceState == -1 || mChangeFaceTimer > 180.0f) {
+			mChangeFaceState = 0;
+			changeOrimaTexture(0);
+			changeLouieTexture(4);
+		} else if (mChangeFaceState != 0) {
+			mChangeFaceTimer = 1.0f;
+		}
+	} else if (diff <= -1) {
+		if (mChangeFaceState == -1 || mChangeFaceTimer > 180.0f) {
+			mChangeFaceState = 1;
+			changeOrimaTexture(1);
+			changeLouieTexture(3);
+		} else if (mChangeFaceState != 1) {
+			mChangeFaceTimer = 1.0f;
+		}
+	} else if (diff < 1) {
+		if (mChangeFaceState == -1 || mChangeFaceTimer > 180.0f) {
+			mChangeFaceState = 2;
+			changeOrimaTexture(2);
+			changeLouieTexture(2);
+		} else if (mChangeFaceState != 2) {
+			mChangeFaceTimer = 1.0f;
+		}
+	} else if (diff < 3) {
+		if (mChangeFaceState == -1 || mChangeFaceTimer > 180.0f) {
+			mChangeFaceState = 3;
+			changeOrimaTexture(3);
+			changeLouieTexture(1);
+		} else if (mChangeFaceState != 3) {
+			mChangeFaceTimer = 1.0f;
+		}
+	} else {
+		if (mChangeFaceState == -1 || mChangeFaceTimer > 180.0f) {
+			mChangeFaceState = 4;
+			changeOrimaTexture(4);
+			changeLouieTexture(0);
+		} else if (mChangeFaceState != 4) {
+			mChangeFaceTimer = 1.0f;
+		}
+	}
+}
+
+/**
+ * @note Address: 0x803A0B48
+ * @note Size: 0x9C
+ */
+void TVsSelect::changeOrimaTexture(int id)
+{
+	ResTIMG* timg = mOrimaTexture[id];
+#if defined(VERSION_JP)
+	P2ASSERTLINE(2589, timg);
+#else
+	P2ASSERTLINE(2597, timg);
+#endif
+
+	for (int i = 0; i < 6; i++) {
+		mOlimarFacePanes[i]->changeTexture(timg, 0);
+	}
+}
+
+/**
+ * @note Address: 0x803A0BE4
+ * @note Size: 0x9C
+ */
+void TVsSelect::changeLouieTexture(int id)
+{
+	ResTIMG* timg = mLouieTexture[id];
+#if defined(VERSION_JP)
+	P2ASSERTLINE(2603, timg);
+#else
+	P2ASSERTLINE(2611, timg);
+#endif
+
+	for (int i = 0; i < 6; i++) {
+		mLouieFacePanes[i]->changeTexture(timg, 0);
+	}
+}
+
+/**
+ * @note Address: 0x803A0C80
+ * @note Size: 0x118
+ */
+void TVsSelect::changeSlotPage()
+{
+	if (mCurrentRulesPage) {
+		for (int i = 0; i < 6; i++) {
+			TVsSelectSlotIndex* info = TVsSelectSlotIndex::getIndexInfo(i);
+			u64 tag                  = info->mMesg;
+			mPaneRulesDesc1[i]->setMsgID(tag);
+			mPaneRulesDesc2[i]->setMsgID(tag);
+		}
+	} else {
+		for (int i = 0; i < 6; i++) {
+			TVsSelectSlotIndex* info = TVsSelectSlotIndex::getIndexInfo(i + 6);
+			u64 tag                  = info->mMesg;
+			mPaneRulesDesc1[i]->setMsgID(tag);
+			mPaneRulesDesc2[i]->setMsgID(tag);
+		}
+	}
+}
+
+/**
+ * @note Address: 0x803A0D98
+ * @note Size: 0x9C
+ */
+void TVsSelectScene::doCreateObj(JKRArchive* arc)
+{
+	TVsSelect* obj = new TVsSelect;
+	registObj(obj, arc);
+	mObject           = obj;
+	mConfirmEndWindow = new TConfirmEndWindow("endWindow");
+	registObj(mConfirmEndWindow, arc);
+}
+
+/**
+ * @note Address: 0x803A0E34
+ * @note Size: 0x34
+ */
+bool TVsSelectScene::doStart(Screen::StartSceneArg* arg)
+{
+	mObject->start(arg);
+	return true;
+}
+
+} // namespace Morimura

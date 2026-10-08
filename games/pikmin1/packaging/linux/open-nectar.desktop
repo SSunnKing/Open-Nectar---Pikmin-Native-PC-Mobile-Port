@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Open Nectar
+Comment=Pikmin native port
+# Sustituye /ruta/a/nectar-linux por la carpeta donde hayas extraído el paquete.
+Exec=/ruta/a/nectar-linux/nectar-launcher
+Icon=/ruta/a/nectar-linux/open_nectar.png
+Terminal=false
+Categories=Game;

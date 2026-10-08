@@ -1,0 +1,295 @@
+#ifdef PIKI_PC_PORT
+extern "C" void pc_p2_rules_begin_new_run(void);
+#include "settings/pc_settings.h"
+#endif
+#include "Game/MoviePlayer.h"
+#include "ebi/FileSelect.h"
+#include "ebi/FS.h"
+#ifdef PIKI_PC_PORT
+extern "C" void pc_gfx_set_post_allowed(int allowed);
+extern "C" float pc_gfx_get_current_aspect_ratio(void);
+extern "C" int pc_gfx_p2_tile_edges(float gxY0, float gxY1, float period, float maxLuma);
+extern "C" void pc_gfx_p2_sides_static(int capture);
+extern "C" void pc_gfx_p2_sides_static_reset(void);
+static int sPcSidesFrames = 0;
+#endif
+#include "Game/GameConfig.h"
+#include "Game/AIConstants.h"
+#include "Screen/Game2DMgr.h"
+#include "System.h"
+#include "types.h"
+#include "Game/SingleGame.h"
+#include "nans.h"
+#include "PSGame/PikScene.h"
+#include "PSSystem/PSGame.h"
+#include "PSM/Scene.h"
+#include "TParticle2dMgr.h"
+#include "Game/GameSystem.h"
+
+static const u32 unused[3] = { 0, 0, 0 };
+static const char name[]   = "SingleGS_Game";
+
+namespace Game {
+namespace SingleGame {
+
+/**
+ * @note Address: 0x8021C718
+ * @note Size: 0xA8
+ */
+FileState::FileState()
+    : State(SGS_File)
+{
+	mMainController  = new Controller(JUTGamePad::PORT_0);
+	mDebugController = new Controller(JUTGamePad::PORT_2);
+	mBackupHeap      = nullptr;
+	mMainHeap        = nullptr;
+}
+
+/**
+ * @note Address: 0x8021C7C0
+ * @note Size: 0x9C
+ */
+void FileState::init(SingleGameSection* section, StateArg* arg)
+{
+	moviePlayer->reset();
+	mIsNotInitialized      = true;
+	section->mDisplayWiper = section->mWipeInFader;
+	section->mWipeInFader->start(1.0f);
+	section->refreshHIO();
+	Screen::gGame2DMgr->mScreenMgr->reset();
+	sys->setFrameRate(1);
+#ifdef PIKI_PC_PORT
+	pc_gfx_set_post_allowed(0); // bloom/SSAO dejaban en negro esta pantalla 2D
+	// Venimos de perder una partida Permadeath: el aviso va primero y el
+	// selector espera debajo hasta que se cierra.
+	pc_erased_notice_open_if_queued();
+	sPcSidesFrames = 0; // laterales estaticos: se vuelven a capturar al entrar
+	pc_gfx_p2_sides_static_reset();
+#endif
+	playData->mDeadNaviID.typeView = 0;
+}
+
+/**
+ * @note Address: 0x8021C85C
+ * @note Size: 0x19C
+ */
+void FileState::dvdload()
+{
+	PSGame::SceneInfo info;
+	info.mSceneType = PSGame::SceneInfo::FILE_SELECT;
+	info.mCameras   = 0;
+
+	static_cast<PSGame::PikSceneMgr*>(PSSystem::getSceneMgr())->newAndSetCurrentScene(info);
+	PSSystem::getSceneMgr()->doFirstLoad();
+	PSSystem::getSceneMgr()->doStartMainSeq();
+
+	mFSMgr = ebi::FileSelect::TMgr::createInstance();
+	mFSMgr->doLoadMenuResource();
+	mFSMgr->setControllers(mMainController);
+
+	playData->reset();
+}
+
+/**
+ * @note Address: 0x8021C9F8
+ * @note Size: 0x194
+ */
+void FileState::exec(SingleGameSection* game)
+{
+	if (mIsNotInitialized) {
+		mBackupHeap = JKRGetCurrentHeap();
+		mMainHeap   = JKRExpHeap::create(mBackupHeap->getFreeSize(), mBackupHeap, true);
+		mMainHeap->becomeCurrentHeap();
+
+		mLoadDelegate = new Delegate<FileState>(this, &FileState::dvdload);
+		game->loadSync(mLoadDelegate, false);
+		mFSMgr->start();
+		mIsNotInitialized = false;
+
+	} else if (mMainHeap) {
+#if defined(VERSION_JP)
+		if (gGameConfig.mParms.mE3version.mData) {
+			playData->reset();
+			playData->setDevelopSetting(true, false);
+			playData->setDopeCount(SPRAY_TYPE_SPICY, 10);
+			playData->setDopeCount(SPRAY_TYPE_BITTER, 10);
+			game->mCurrentCourseInfo = stageList->getCourseInfo(1);
+			LoadArg arg(MapEnter_NewDay, false, true, false);
+			transit(game, SGS_Load, &arg);
+			return;
+		}
+#endif
+		if (particle2dMgr) {
+			particle2dMgr->update();
+		}
+
+		game->BaseHIOSection::doUpdate();
+#ifdef PIKI_PC_PORT
+		if (pc_erased_notice_active()) {
+			return;
+		}
+#endif
+		mFSMgr->update();
+
+		if (mFSMgr->isFinish()) {
+			switch (mFSMgr->mEndState) {
+			case ebi::FileSelect::TMgr::End_StartGame:
+				startGame(game);
+				break;
+
+			case ebi::FileSelect::TMgr::End_StartNewGame:
+				gameSystem->mTimeMgr->mDayCount = 0;
+#ifdef PIKI_PC_PORT
+				pc_p2_rules_begin_new_run();
+#endif
+				startGame(game);
+				break;
+
+			case ebi::FileSelect::TMgr::End_ReturnToTitle:
+				game->flow_goto_title();
+			}
+		}
+	}
+}
+
+/**
+ * @note Address: 0x8021CB8C
+ * @note Size: 0x27C
+ */
+void FileState::startGame(SingleGameSection* game)
+{
+	int saveFlag = playData->mLoadType;
+	if (particle2dMgr) {
+		particle2dMgr->killAll();
+	}
+
+	switch (saveFlag) {
+	case STORYSAVE_NewFile: {
+		MovieArg arg(THPPlayer::OPENING_GameStart);
+		transit(game, SGS_Movie, &arg);
+		break;
+	}
+
+	case STORYSAVE_WorldMap: {
+		transit(game, SGS_Select, nullptr);
+		break;
+	}
+
+	case STORYSAVE_Overworld: {
+		game->mDisplayWiper = game->mWipeInFader;
+		game->mWipeInFader->start(4.0f);
+		game->mCurrentCourseInfo = playData->getCurrentCourse();
+#if defined(VERSION_JP)
+		P2ASSERTLINE(464, game->mCurrentCourseInfo);
+#else
+		P2ASSERTLINE(469, game->mCurrentCourseInfo);
+#endif
+
+		u16 loadtype = MapEnter_CaveGeyser;
+		if (playData->mDeadNaviID.typeView & 1 && playData->mDeadNaviID.typeView & 2) {
+			loadtype = MapEnter_CaveNavisDown;
+		}
+		LoadArg arg(loadtype, false, true, false);
+		transit(game, SGS_Load, &arg);
+		break;
+	}
+
+	case STORYSAVE_Cave: {
+		ID32 id;
+		int floor;
+		CourseInfo* info = playData->getCurrentCourse();
+		playData->getCurrentCave(id, floor);
+		game->mCurrentCourseInfo = info;
+		game->mCurrentFloor      = floor;
+		game->mCaveIndex         = id.getID();
+		game->mInCave            = true;
+		game->mCaveID            = id;
+		strcpy(game->mCaveFilename, info->getCaveinfoFilename_FromID(id));
+		game->loadMainMapSituation();
+		// MapEnter type isnt used when loading into caves
+		LoadArg arg(MapEnter_NewDay, true, true, false);
+		transit(game, SGS_Load, &arg);
+		break;
+	}
+
+	case STORYSAVE_DebtPaid: {
+		EndingArg arg(EndingState::Ending_SkipMovie);
+		transit(game, SGS_Ending, &arg);
+		break;
+	}
+
+	default:
+#if defined(VERSION_JP)
+		JUT_PANICLINE(524, "unknown saveFlag (%d)\n", saveFlag);
+#else
+		JUT_PANICLINE(529, "unknown saveFlag (%d)\n", saveFlag);
+#endif
+	}
+}
+
+/**
+ * @note Address: 0x8021CE08
+ * @note Size: 0xC0
+ */
+void FileState::draw(SingleGameSection* game, Graphics& gfx)
+{
+	if (mMainHeap) {
+		gfx.mPerspGraph.setPort();
+		particle2dMgr->draw(1, 0);
+		gfx.mOrthoGraph.setPort();
+		gfx.mPerspGraph.setPort();
+		mFSMgr->draw();
+		gfx.mPerspGraph.setPort();
+#ifdef PIKI_PC_PORT
+		// La rejilla de arriba (hasta la banda azul, y=75) se queda en el 4:3:
+		// se continua en los laterales repitiendo una celda (20 en 612 = 30.6).
+		// Mientras pasa el destello de los slots (franja clara) no se copia.
+		// Una vez guardados los laterales estaticos ya no hace falta.
+		bool pcTiled = false;
+		if (sPcSidesFrames <= 30) {
+			pcTiled = pc_gfx_p2_tile_edges(0.0f, 75.0f, 30.6f, 0.25f) != 0;
+		}
+#endif
+		particle2dMgr->draw(0, 0);
+#ifdef PIKI_PC_PORT
+		// Laterales estaticos: con la pantalla quieta (medio segundo seguido
+		// eligiendo partida, ya sin la entrada ni su destello) se guardan y
+		// desde entonces se reponen; los destellos y la cortina de las
+		// transiciones solo existen en el 4:3 y los descuadraban.
+		gfx.mPerspGraph.setPort();
+		if (sPcSidesFrames <= 30) {
+			// Quieta = eligiendo partida y sin destello en la franja de arriba.
+			const bool idle = mFSMgr->mMgrFS.getStateID() == ebi::FS::FSSTATE_SelectData && pcTiled;
+			sPcSidesFrames  = idle ? sPcSidesFrames + 1 : 0;
+			if (sPcSidesFrames > 30) pc_gfx_p2_sides_static(1);
+		} else {
+			pc_gfx_p2_sides_static(0);
+		}
+#endif
+		mFSMgr->showInfo();
+	}
+}
+
+/**
+ * @note Address: 0x8021CEC8
+ * @note Size: 0xD4
+ */
+void FileState::cleanup(SingleGameSection* game)
+{
+	PSSystem::SceneMgr* sceneMgr = PSSystem::getSceneMgr();
+	PSSystem::validateSceneMgr(sceneMgr);
+	sceneMgr->deleteCurrentScene();
+	mFSMgr->forceQuit();
+	mMainHeap->freeAll();
+	mMainHeap->destroy();
+	mMainHeap = nullptr;
+	mBackupHeap->becomeCurrentHeap();
+	sys->setFrameRate(2);
+#ifdef PIKI_PC_PORT
+	pc_gfx_set_post_allowed(1); // de vuelta a la partida
+#endif
+	Screen::gGame2DMgr->mScreenMgr->reset();
+}
+
+} // namespace SingleGame
+} // namespace Game

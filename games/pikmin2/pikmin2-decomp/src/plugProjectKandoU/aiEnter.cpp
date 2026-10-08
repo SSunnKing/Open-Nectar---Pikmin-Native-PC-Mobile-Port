@@ -1,0 +1,320 @@
+#include "PikiAI.h"
+#include "Game/Piki.h"
+#include "Game/Entities/ItemOnyon.h"
+#include "Dolphin/rand.h"
+
+#define PIKI_ENTERSHIP_RADIUS  (30.0f)
+#define PIKI_ENTERONYON_RADIUS (10.0f)
+#define PIKI_ENTERONYON_SPEED  (50.0f)
+#define PIKI_EXITONYON_SPEED   (100.0f)
+
+namespace PikiAI {
+/**
+ * @note Address: 0x801A2720
+ * @note Size: 0xD0
+ */
+ActEnter::ActEnter(Game::Piki* p)
+    : Action(p)
+{
+	mGotoPos = new ActGotoPos(p);
+	mClimb   = new ActClimb(p);
+
+	mName = "Enter";
+}
+
+/**
+ * @note Address: 0x801A27F0
+ * @note Size: 0x338
+ */
+void ActEnter::init(ActionArg* arg)
+{
+	mOnyonLeg           = nullptr;
+	mOnyonFoot          = nullptr;
+	ActCropArg* cropArg = static_cast<ActCropArg*>(arg);
+	bool isOnyonCheck   = cropArg->isOnyonOrShip();
+	P2ASSERTLINE(119, isOnyonCheck);
+
+	mParent->startMotion(Game::IPikiAnims::WALK, Game::IPikiAnims::WALK, nullptr, nullptr);
+	mParent->mTargetVelocity = Vector3f(0.0f);
+	mOnyon                   = static_cast<Game::Onyon*>(cropArg->mCreature);
+
+	// pikis entering the ship
+	if (mOnyon->mOnyonType == ONYON_TYPE_SHIP) {
+		Vector3f startPos = mOnyon->getInStart_UFO();
+		f32 randDist      = (PIKI_ENTERSHIP_RADIUS + 4.0f) * randFloat();
+		f32 randAngle     = TAU * randFloat();
+		Vector3f offset   = Vector3f(sinf(randAngle) * randDist, 0.0f, cosf(randAngle) * randDist);
+		Vector3f gotoPos  = startPos + offset;
+		GotoPosActionArg gotoArg;
+		gotoArg.mPosition = gotoPos;
+		gotoArg.mRadius   = 20.0f;
+		mGotoPos->init(&gotoArg);
+		mState = ENTER_ShipGoto;
+		return;
+	}
+
+	// pikis entering an onyon
+	int randFoot  = 3.0f * randFloat();
+	mOnyonLeg     = static_cast<Game::Onyon*>(cropArg->mCreature)->getFootPart(randFoot);
+	mOnyonFoot    = mOnyonLeg;
+	CollPart* leg = mOnyonLeg;
+	GotoPosActionArg gotoArg;
+	gotoArg.mPosition = leg->mPosition;
+	gotoArg.mRadius   = PIKI_ENTERONYON_RADIUS;
+	mOnyonLeg         = static_cast<Game::Onyon*>(cropArg->mCreature)->getLegPart(randFoot);
+	mGotoPos->init(&gotoArg);
+	mState = ENTER_OnyonBegin;
+}
+
+/**
+ * @note Address: 0x801A2B28
+ * @note Size: 0x240
+ */
+int ActEnter::exec()
+{
+	switch (mState) {
+	case ENTER_OnyonBegin:
+		if (mOnyonFoot) {
+			mGotoPos->mPosition = mOnyonFoot->mPosition;
+		}
+		if (mGotoPos->exec() == ACTEXEC_Success) {
+			ClimbActionArg climbArg(mOnyonLeg, PIKI_ENTERONYON_SPEED, true);
+			mParent->getPosition();
+			mParent->startStick(mOnyon, mOnyonLeg);
+			mParent->getPosition();
+			mClimb->init(&climbArg);
+			mState = ENTER_OnyonClimb;
+			mParent->startSound(mOnyon, PSSE_PK_VC_ONY_CLIMB, true);
+		}
+		break;
+
+	case ENTER_OnyonClimb: {
+		int climbResult    = mClimb->exec();
+		f32 climbingHeight = mParent->mClimbingPosition.y;
+		if (climbingHeight < 0.25f) {
+			climbingHeight /= 0.25f;
+			mBaseScale      = mParent->getBaseScale() * climbingHeight;
+			mParent->mScale = mBaseScale;
+		}
+		if (climbResult == ACTEXEC_Success) {
+			mParent->endStick();
+			mParent->startSound(mOnyon, PSSE_PK_SE_ONY_ENTER, true);
+			mOnyon->enterPiki(mParent);
+			return ACTEXEC_Success;
+		}
+	} break;
+
+	case ENTER_ShipGoto:
+		if (mGotoPos->exec() == ACTEXEC_Success) {
+			mState = ENTER_ShipStay;
+			initStay();
+		}
+		break;
+
+	case ENTER_ShipSuck:
+		if (execSuck() == ACTEXEC_Success) {
+			mOnyon->enterPiki(mParent);
+			return ACTEXEC_Success;
+		}
+		break;
+
+	case ENTER_ShipStay:
+		execStay();
+		break;
+	}
+
+	return ACTEXEC_Continue;
+}
+
+/**
+ * @note Address: 0x801A2D68
+ * @note Size: 0x68
+ */
+void ActEnter::cleanup()
+{
+	mParent->endStick();
+	mParent->setAtari(true);
+	mBaseScale      = mParent->getBaseScale();
+	mParent->mScale = mBaseScale;
+}
+
+/**
+ * @note Address: 0x801A2DD0
+ * @note Size: 0x4
+ */
+void ActEnter::onKeyEvent(SysShape::KeyEvent const&)
+{
+}
+
+/**
+ * @note Address: 0x801A2DD4
+ * @note Size: 0x78
+ */
+void ActEnter::initStay()
+{
+	mTimer           = 1.3f;
+	Vector3f suckPos = mOnyon->getInEnd_UFO();
+	mParent->turnTo(suckPos);
+	mParent->setMoveRotation(false);
+}
+
+/**
+ * @note Address: 0x801A2E4C
+ * @note Size: 0x64
+ */
+int ActEnter::execStay()
+{
+	mTimer -= sys->getDeltaTime();
+	mParent->mTargetVelocity = 0.0f;
+	if (mTimer <= 0.0f) {
+		mState = ENTER_ShipSuck;
+		initSuck();
+	}
+	return ACTEXEC_Continue;
+}
+
+/**
+ * @note Address: 0x801A2EB0
+ * @note Size: 0x1A0
+ */
+void ActEnter::initSuck()
+{
+	mSuckGoalPos = mOnyon->getInEnd_UFO();
+	mSuckGoalPos.y -= 3.0f;
+
+	const Vector3f pikiPos = mParent->getPosition();
+	mSuckDir               = mSuckGoalPos - pikiPos;
+	mSuckDir.y             = 0.0f;
+
+	mHorizSuckDist = mSuckDir.normalize();
+	mVertSuckDist  = absF(mSuckGoalPos.y - pikiPos.y);
+
+	mSuckGoalPos.y = pikiPos.y;
+
+	mTimer       = -mHorizSuckDist;
+	mInsideOnyon = 0;
+	mBaseScale   = 1.0f;
+
+	mParent->startSound(PSSE_PK_VC_JUMP_INTO_UFO, true);
+	mParent->startMotion(Game::IPikiAnims::ROLLJUMP, Game::IPikiAnims::ROLLJUMP, nullptr, nullptr);
+}
+
+/**
+ * @note Address: 0x801A3050
+ * @note Size: 0x18C
+ */
+int ActEnter::execSuck()
+{
+	if (mInsideOnyon) {
+		mParent->setPosition(mSuckPos, false);
+		return ACTEXEC_Success;
+	}
+
+	f32 heightOffset = (-mVertSuckDist / SQUARE(mHorizSuckDist)) * SQUARE(mTimer) + mVertSuckDist;
+	Vector3f newPos  = mSuckGoalPos + mSuckDir * mTimer;
+	newPos.y += heightOffset;
+	mParent->setPosition(newPos, false);
+
+	mParent->mScale = Vector3f(mBaseScale);
+	mTimer += sys->mDeltaTime * 110.0f;
+	if (mTimer >= 0.0f) {
+		mInsideOnyon = 1;
+		mSuckPos     = newPos;
+		mParent->startSound(PSSE_PK_SE_ONY_ENTER, true);
+		return ACTEXEC_Success;
+	}
+
+	f32 val = -mTimer / mHorizSuckDist;
+	if (val < 0.0f) {
+		val = 0.0f;
+	}
+	mBaseScale = sqrtfClamped(val);
+	if (mBaseScale < 0.05f) {
+		mBaseScale = 0.05f;
+	}
+	return ACTEXEC_Continue;
+}
+
+/**
+ * @note Address: 0x801A31DC
+ * @note Size: 0x70
+ */
+ActExit::ActExit(Game::Piki* parent)
+    : Action(parent)
+    , mClimb(new ActClimb(parent))
+{
+	mName = "Exit";
+}
+
+/**
+ * @note Address: 0x801A324C
+ * @note Size: 0x204
+ */
+void ActExit::init(ActionArg* arg)
+{
+	ActCropArg* cropArg = static_cast<ActCropArg*>(arg);
+	P2ASSERTLINE(517, cropArg->mCreature->mObjectTypeID == OBJTYPE_Onyon);
+
+	mParent->startMotion(Game::IPikiAnims::WALK, Game::IPikiAnims::WALK, nullptr, nullptr);
+	mParent->mTargetVelocity = Vector3f(0.0f);
+	int randFoot             = 3.0f * randFloat();
+	mCreature                = cropArg->mCreature;
+	mOnyonLeg                = static_cast<Game::Onyon*>(cropArg->mCreature)->getLegPart(randFoot);
+
+	ClimbActionArg climbArg(mOnyonLeg, PIKI_EXITONYON_SPEED, false);
+	mParent->setPosition(mOnyonLeg->mPosition, false);
+	mParent->startStick(mCreature, mOnyonLeg);
+	mClimb->init(&climbArg);
+
+	mParent->startSound(cropArg->mCreature, PSSE_PK_VC_ONY_EXIT, true);
+	mParent->mScale                              = Vector3f::zero;
+	mParent->mBaseTrMatrix.mMatrix.structView.xx = 0.0f;
+	mParent->mBaseTrMatrix.mMatrix.structView.yx = 0.0f;
+	mParent->mBaseTrMatrix.mMatrix.structView.zx = 0.0f;
+	mParent->mBaseTrMatrix.mMatrix.structView.xy = 0.0f;
+	mParent->mBaseTrMatrix.mMatrix.structView.yy = 0.0f;
+	mParent->mBaseTrMatrix.mMatrix.structView.zy = 0.0f;
+	mParent->mBaseTrMatrix.mMatrix.structView.xz = 0.0f;
+	mParent->mBaseTrMatrix.mMatrix.structView.yz = 0.0f;
+	mParent->mBaseTrMatrix.mMatrix.structView.zz = 0.0f;
+
+	PSMTXCopy(mParent->mBaseTrMatrix.mMatrix.mtxView, mParent->mModel->mJ3dModel->mPosMtx);
+	mParent->mModel->mJ3dModel->calc();
+}
+
+/**
+ * @note Address: 0x801A3450
+ * @note Size: 0xA8
+ */
+int ActExit::exec()
+{
+	int climbResult    = mClimb->exec();
+	f32 climbingHeight = mParent->mClimbingPosition.y;
+	if (climbingHeight < 0.25f) {
+		climbingHeight /= 0.25f;
+		mBaseScale      = mParent->getBaseScale() * climbingHeight;
+		mParent->mScale = mBaseScale;
+	}
+	if (climbResult == ACTEXEC_Success) {
+		return ACTEXEC_Success;
+	}
+	return ACTEXEC_Continue;
+}
+
+/**
+ * @note Address: 0x801A34F8
+ * @note Size: 0xC8
+ */
+void ActExit::cleanup()
+{
+	f32 climbY      = mParent->mClimbingPosition.y;
+	mBaseScale      = mParent->getBaseScale();
+	mParent->mScale = Vector3f(mBaseScale);
+	mParent->endStick();
+	mParent->setMoveRotation(true);
+	f32 y = 240.0f + 60.0f * randFloat();
+	y *= climbY;
+	mParent->mVelocity = Vector3f(0.0f, y, 0.0f);
+}
+
+} // namespace PikiAI

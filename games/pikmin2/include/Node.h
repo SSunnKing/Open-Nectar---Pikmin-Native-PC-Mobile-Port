@@ -1,0 +1,153 @@
+#ifndef _NODE_H
+#define _NODE_H
+
+#include "CoreNode.h"
+#include "Matrix4f.h"
+#include "SRT.h"
+#include "types.h"
+
+class Graphics;
+class Vector3f;
+class VQS;
+
+/**
+ * @brief TODO
+ */
+class SYSCORE_API Node : public CoreNode {
+public:
+	Node(immut char* name = "<Node>")
+	    : CoreNode(name)
+	{
+		init(name);
+	}
+
+	virtual void update();                                 // _10
+	virtual void draw(Graphics&);                          // _14
+	virtual void render(Graphics&);                        // _18
+	virtual void concat() { }                              // _1C (weak)
+	virtual void concat(VQS&) { concat(); }                // _20 (weak)
+	virtual void concat(SRT&) { concat(); }                // _24 (weak)
+	virtual void concat(Matrix4f&) { concat(); }           // _28 (weak)
+	virtual Matrix4f* getModelMatrix() { return nullptr; } // _2C (weak)
+
+	void init(immut char*);
+
+	// Inlined functions
+	bool getFlag(int);
+	int getFlags();
+	int getType();
+	void clearFlag(int);
+	void setFlag(int);
+	void setFlag(int, bool);
+	void setFlags(int);
+	void setType(int);
+	void togFlag(int);
+
+	static int currID; // unused
+
+	// _00     = VTBL
+	// _00-_14 = CoreNode
+	s32 mType;  // _14
+	s32 mFlags; // _18
+	s32 _1C;    // _1C
+};
+
+/**
+ * @brief TODO
+ */
+class FaceNode : public CoreNode {
+public:
+	FaceNode()
+	    : CoreNode("face")
+	{
+	}
+
+	FaceNode(int faceCount)
+	    : CoreNode("face")
+	{
+		mFaceCount    = faceCount;
+		mMtxIdx       = nullptr;
+		mVtxIdx       = nullptr;
+		mColIdx       = nullptr;
+		mNrmIdx       = nullptr;
+		mTexCoords[0] = nullptr;
+#ifdef WIN32
+		mMtxGroupIndex    = 0;
+		mMtxGroupCount    = 0;
+		mNumMatrices      = 0;
+		_38               = 0;
+		mDisplayListFlags = 0;
+		mCurrentFaceIndex = 0;
+		mHasMatrixData    = 0;
+#endif
+	}
+
+	// _00     = VTBL
+	// _00-_14 = CoreNode
+	int mFaceCount; // _14
+	int* mMtxIdx;   // _18
+	int* mVtxIdx;   // _1C
+	int* mColIdx;   // _20
+	int* mNrmIdx;   // _24
+#ifdef WIN32
+	int* mTexCoords[1];    // _28, OGLGraphics only supports GX_TEXCOORD0
+	int mMtxGroupIndex;    // _2C
+	int mMtxGroupCount;    // _30
+	int mNumMatrices;      // _34
+	int _38;               // _38
+	int mDisplayListFlags; // _3C
+	int mCurrentFaceIndex; // _40
+	int mHasMatrixData;    // _44
+#else
+	int* mTexCoords[8]; // _28, DGXGraphics supports up to 8 texture coordinates
+#endif
+};
+
+/**
+ * @brief TODO
+ */
+class SRTNode : public Node {
+public:
+	SRTNode(immut char* name = "<SRTNode>"); // unused/inlined
+
+	virtual void update();                                    // _10
+	virtual void concat(Matrix4f&) { }                        // _28 (weak)
+	virtual void concat() { }                                 // _1C (weak)
+	virtual Matrix4f* getModelMatrix() { return &mWorldMtx; } // _2C (weak)
+
+	Vector3f& getPosition() { return mSRT.t; }
+	Vector3f& getRotation() { return mSRT.r; }
+	Vector3f& getScale() { return mSRT.s; }
+	Vector3f& getWorldPosition() { return reinterpret_cast<Vector3f&>(mWorldMtx.mMtx[3]); }
+	void setPosition(immut Vector3f& pos) { mSRT.t = pos; }
+	void setRotation(immut Vector3f& rot) { mSRT.r = rot; }
+	void setScale(immut Vector3f& scale) { mSRT.s = scale; }
+
+	// _00 - VTBL
+	// _00 - _14 - CoreNode
+	// _14 - _20 - Node
+	Matrix4f mWorldMtx; // _20
+	SRT mSRT;           // _60
+};
+
+/**
+ * @brief TODO
+ */
+class NodeMgr {
+public:
+	NodeMgr();
+	~NodeMgr();
+
+	inline CoreNode* firstNode() { return &mRootNode; }
+
+	CoreNode* findNode(immut char*, CoreNode*);
+	void recFindNode(CoreNode*, immut char*);
+	void Del(Node*);
+
+	bool mDelete;       // _00
+	CoreNode mRootNode; // _04
+};
+
+extern NodeMgr* nodeMgr;
+
+#endif

@@ -1,0 +1,811 @@
+#include "Collision.h"
+#include "Condition.h"
+#include "Creature.h"
+#include "DebugLog.h"
+#include "Interactions.h"
+#include "KMath.h"
+#include "Pellet.h"
+#include "RopeCreature.h"
+#include "Stickers.h"
+#include "Traversable.h"
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+DEFINE_ERROR(16)
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0000F4
+ */
+DEFINE_PRINT("CreatureStick");
+
+/**
+ * @todo: Documentation
+ */
+void Creature::interactStickers(Creature* stuckTo, immut Interaction& interaction, immut Condition* condition)
+{
+	Stickers stuckList(stuckTo);
+	Iterator iter(&stuckList);
+	CI_LOOP(iter)
+	{
+		Creature* stuck = *iter;
+		if (!condition || condition->satisfy(stuck)) {
+			if (stuck->stimulate(interaction)) {
+				iter.dec();
+			}
+		}
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::killStickers(Creature* stuckTo, immut Condition* cond, int p3)
+{
+	InteractKill kill(stuckTo, p3);
+	interactStickers(stuckTo, kill, cond);
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::startClimb()
+{
+	if (mStickTarget && mStickPart && mStickPart->isClimbable()) {
+		setCreatureFlag(CF_IsClimbing);
+	} else {
+		PRINT("CANNOT CLIMB !\n");
+		resetCreatureFlag(CF_IsClimbing);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::endClimb()
+{
+	resetCreatureFlag(CF_IsClimbing);
+}
+
+/**
+ * @todo: Documentation
+ */
+bool Creature::isStickToPlatform()
+{
+	if (mStickTarget) {
+		CollPart* part = mStickPart;
+		if ((part && part->isPlatformType()) || (!part && !isCreatureFlag(CF_StuckToObject))) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000054
+ */
+bool Creature::isStickToSphere()
+{
+	return !isStickToPlatform();
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 0003E8 (Nonmatching by size)
+ */
+void Creature::adjustStickObject(immut Vector3f& adjust)
+{
+	if (!mStickTarget) {
+		return;
+	}
+	if (isStickToSphere()) {
+		return;
+	}
+
+	// I assume this exists solely to promote the pointer to a reference now that it has been proven to be non-null.
+	Creature& stickTargetRef = *mStickTarget;
+	Matrix4f mtx, invMtx;
+
+	if (mStickPart) {
+		mtx.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, 0.0f, 0.0f), mStickPart->mCentre);
+	} else {
+		mtx.makeSRT(stickTargetRef.mSRT.s, stickTargetRef.mSRT.r, stickTargetRef.mSRT.t);
+	}
+	mtx.inverse(&invMtx);
+
+	// And you made a copy of the vector because...?
+	Vector3f attachPositionCopy(mAttachPosition);
+	attachPositionCopy.multMatrix(mtx);
+	attachPositionCopy = attachPositionCopy + adjust;
+	mAttachPosition    = attachPositionCopy;
+
+	if (mStickPart) {
+		mAttachPosition = mAttachPosition - mStickPart->mCentre;
+		mAttachPosition.normalise();
+		mAttachPosition = mAttachPosition * mStickPart->mRadius + mStickPart->mCentre;
+	} else {
+		mAttachPosition = mAttachPosition - stickTargetRef.mSRT.t;
+		mAttachPosition.normalise();
+		mAttachPosition = mAttachPosition * stickTargetRef.getCentreSize() + stickTargetRef.mSRT.t;
+	}
+	mAttachPosition.multMatrix(invMtx);
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::startStickMouth(Creature* mouthOwner, CollPart* mouthPart)
+{
+	resetCreatureFlag(CF_StuckToMouth);
+	if (mStickTarget) {
+		PRINT("startStickMouth::already stuck to %s : endStick\n", mStickPart->mCollInfo->mId.mStringID);
+		endStick();
+	}
+
+	if (startStick(mouthOwner, mouthPart)) {
+		if (mObjType == OBJTYPE_Rope) {
+			ERROR("stick to mouth!!\n");
+		}
+		setCreatureFlag(CF_StuckToMouth);
+	} else {
+		PRINT("stick mouth failed !!\n");
+		ERROR("karl gotti!\n");
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::endStickMouth()
+{
+	endStickObject();
+	endStick();
+	resetCreatureFlag(CF_StuckToMouth);
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::startStickObjectSphere(Creature* obj, CollPart* stickPart, f32 stickDist)
+{
+	Matrix4f worldMatrix;
+	Matrix4f invWorldMatrix;
+	Vector3f unused;
+
+	// Get world transform from either attach point or full object
+	if (stickPart) {
+		worldMatrix = mStickPart->getMatrix(); // Likely bug: should use stickPart instead of mStickPart
+	} else {
+		worldMatrix.makeSRT(obj->mSRT.s, obj->mSRT.r, obj->mSRT.t);
+	}
+
+	worldMatrix.inverse(&invWorldMatrix);
+
+	// Start from current position
+	mAttachPosition = mSRT.t;
+
+	if (stickPart) {
+		// Position relative to attach point's center
+		mAttachPosition = mAttachPosition - stickPart->mCentre;
+		mAttachPosition.normalise();
+
+		// Move out to the surface of the sphere plus the offset
+		mAttachPosition = mAttachPosition * (stickPart->mRadius + stickDist) + stickPart->mCentre;
+	} else {
+		// Same process but using full object's center and size
+		mAttachPosition = mAttachPosition - obj->mSRT.t;
+		mAttachPosition.normalise();
+
+		mAttachPosition = mAttachPosition * (obj->getCentreSize() + stickDist) + obj->mSRT.t;
+	}
+
+	// Convert final position to object's local space
+	mAttachPosition.multMatrix(invWorldMatrix);
+	PRINT_KANDO("StartStick SPHERE * (%.1f %.1f %.1f) \n", mAttachPosition.x, mAttachPosition.y, mAttachPosition.z);
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::startStickObjectTube(Creature* obj, CollPart* stickPart)
+{
+	Tube tube;
+	stickPart->makeTube(tube);
+	f32 ratio = tube.getPosRatio(mSRT.t);
+	if (ratio < 0.0f) {
+		ratio = 0.0f;
+	} else if (ratio > 1.0f) {
+		ratio = 1.0f;
+	}
+
+	mAttachPosition.x = ratio;
+	Vector3f vec1;
+	Vector3f vec2;
+	tube.getPosGradient(mSRT.t, ratio, vec1, vec2);
+	mSRT.t = vec1;
+	vec2.normalise();
+
+	Vector3f vec3 = tube.setPos(mAttachPosition.x);
+	vec3          = vec3 - mSRT.t;
+	vec3.normalise();
+	Vector3f yVec(vec2);
+	Vector3f xVec(vec3);
+	xVec.CP(yVec);
+	xVec.normalise();
+	xVec = xVec * -1.0f;
+	Vector3f zVec(xVec);
+	zVec.CP(yVec);
+	zVec.normalise();
+	makePostureMatrix(xVec, yVec, zVec, mConstrainedMoveMtx);
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 00009C
+ */
+void Creature::startStickObjectPellet(Pellet* pellet, int slotIdx, f32 offset)
+{
+	if (pellet->stickSlot(slotIdx)) {
+		mPelletStickSlot = slotIdx;
+		mAttachPosition  = pellet->getSlotLocalPos(slotIdx, offset);
+		return;
+	}
+
+	mPelletStickSlot = -1;
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::startStickObject(Creature* obj, CollPart* stickPart, int slot, f32 p4)
+{
+	mCollNormal = nullptr;
+	if (obj->mObjType == OBJTYPE_Pellet && slot != -1) {
+		startStickObjectPellet(static_cast<Pellet*>(obj), slot, p4);
+		if (mPelletStickSlot != -1 && startStick(obj, nullptr)) {
+			resetCreatureFlag(CF_StuckToMouth);
+			setCreatureFlag(CF_StuckToObject);
+		}
+		return;
+	}
+
+	mPelletStickSlot = -1;
+
+	if (startStick(obj, stickPart)) {
+		if (!stickPart || stickPart->isBouncySphereType()) {
+			if (isTeki()) {
+				PRINT("STICK TO SPHERE !\n");
+			}
+
+			startStickObjectSphere(obj, stickPart, p4);
+
+		} else if (stickPart->isTubeType()) {
+			startStickObjectTube(obj, stickPart);
+
+		} else {
+			PRINT("try to stick : ? part->flag\n");
+			ERROR("mail to uja\n");
+		}
+
+		mStickPart = stickPart;
+		resetCreatureFlag(CF_StuckToMouth);
+		setCreatureFlag(CF_StuckToObject);
+		return;
+	}
+
+	mStickPart = nullptr;
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::endStickObject()
+{
+	if (mPelletStickSlot != -1 && mStickTarget) {
+		if (mStickTarget->mObjType != OBJTYPE_Pellet) {
+			ERROR("stick to non-pellet!\n");
+		}
+		Pellet* pellet = static_cast<Pellet*>(mStickTarget);
+		pellet->stickOffSlot(mPelletStickSlot);
+	}
+
+	mPelletStickSlot = -1;
+	endStick();
+	mStickPart = nullptr;
+	resetCreatureFlag(CF_StuckToObject);
+}
+
+const char* _standType[] = { "GROUND", "TEKIPLAT", "PLAT", "AIR" };
+
+/**
+ * @todo: Documentation
+ */
+bool Creature::startStick(Creature* stickTarget, CollPart* stickPart)
+{
+	mStickPart = nullptr;
+	resetCreatureFlag(CF_StuckToObject);
+	if (mStickTarget) {
+		PRINT("already stick to something !\n");
+		return false;
+	}
+
+	PRINT_KANDO("piki%x :::: stick ! : standType = %s\n", this, _standType[getStandType()]);
+
+	mStickTarget = stickTarget;
+	if (!stickTarget->mStickListHead) {
+		stickTarget->mStickListHead = this;
+		mPrevSticker                = nullptr;
+		mNextSticker                = nullptr;
+	} else {
+		Creature* prevSticker;
+		for (prevSticker = stickTarget->mStickListHead; prevSticker->mNextSticker; prevSticker = prevSticker->mNextSticker) {
+			;
+		}
+		prevSticker->mNextSticker = this;
+		mPrevSticker              = prevSticker;
+		mNextSticker              = nullptr;
+	}
+
+	if (!mStickTarget) {
+		PRINT("error !\n");
+	}
+	if (!mStickTarget) {
+		PRINT("error2 !\n");
+	}
+
+	mStickPart = stickPart;
+
+	stickToCallback(stickTarget);
+	stickTarget->stickCallback(this);
+	return true;
+}
+
+/**
+ * @todo: Documentation
+ * @note UNUSED Size: 000028
+ */
+bool Creature::isStickLeader()
+{
+	if (mStickTarget && !mPrevSticker) {
+		return true;
+	}
+
+	return false;
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::endStick()
+{
+	mCollNormal = nullptr;
+	if (!mStickTarget) {
+		return;
+	}
+
+	mStickTarget->offstickCallback(this);
+	if (!mPrevSticker && !mNextSticker) {
+		mStickTarget->mStickListHead = nullptr;
+		mStickTarget                 = nullptr;
+		PRINT("course 1 : only\n");
+
+	} else if (!mPrevSticker) {
+		mStickTarget->mStickListHead = mNextSticker;
+		mStickTarget                 = nullptr;
+		mNextSticker->mPrevSticker   = nullptr;
+		mPrevSticker                 = nullptr;
+		mNextSticker                 = nullptr;
+		PRINT("course 2 : top\n");
+
+	} else {
+		mStickTarget               = nullptr;
+		mPrevSticker->mNextSticker = mNextSticker;
+		if (mNextSticker) {
+			mNextSticker->mPrevSticker = mPrevSticker;
+		}
+		mPrevSticker = nullptr;
+		mNextSticker = nullptr;
+		PRINT("course 3 : prev and next\n");
+	}
+
+	mCollPlatform = nullptr;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool Creature::startRope(RopeCreature* rope, f32 ropeRatio)
+{
+	mConstrainedMoveMtx.makeIdentity();
+	if (mRope) {
+		PRINT("already hold on to something !\n");
+		return false;
+	}
+
+	mRope = rope;
+
+	Cylinder cylinder(rope->mSRT.t, rope->mParentRope->mSRT.t, 2.0f);
+	mRopePosRatio = cylinder.getPosRatio(mSRT.t);
+	mSRT.t        = rope->getRopePos(mRopePosRatio);
+
+	if (!rope->mRopeListHead) {
+		rope->mRopeListHead = this;
+		mPrevRopeHolder     = nullptr;
+		mNextRopeHolder     = nullptr;
+
+	} else {
+		Creature* prevHolder = rope->mRopeListHead;
+		for (prevHolder; prevHolder->mNextRopeHolder; prevHolder = prevHolder->mNextRopeHolder) {
+			;
+		}
+		prevHolder->mNextRopeHolder = this;
+		mPrevRopeHolder             = prevHolder;
+		mNextRopeHolder             = nullptr;
+	}
+
+	mRopePosRatio = ropeRatio;
+
+	return true;
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::endRope()
+{
+	if (!mRope) {
+		return;
+	}
+
+	PRINT_KANDO("endRope called ! : %x\n", this);
+
+	if (!mPrevRopeHolder && !mNextRopeHolder) {
+		mRope->mRopeListHead = nullptr;
+		mRope                = nullptr;
+		return;
+	}
+
+	if (!mPrevRopeHolder) {
+		mRope->mRopeListHead             = mNextRopeHolder;
+		mRope                            = nullptr;
+		mNextRopeHolder->mPrevRopeHolder = nullptr;
+		mPrevRopeHolder                  = nullptr;
+		mNextRopeHolder                  = nullptr;
+		return;
+	}
+
+	mRope                            = nullptr;
+	mPrevRopeHolder->mNextRopeHolder = mNextRopeHolder;
+	if (mNextRopeHolder) {
+		mNextRopeHolder->mPrevRopeHolder = mPrevRopeHolder;
+	}
+	mPrevRopeHolder = nullptr;
+	mNextRopeHolder = nullptr;
+}
+
+/**
+ * @todo: Documentation
+ */
+Stickers::Stickers(Creature* owner)
+{
+	mOwner = owner;
+	calcNum();
+}
+
+/**
+ * @todo: Documentation
+ */
+void Stickers::calcNum()
+{
+	mCount          = 0;
+	Creature* stuck = mOwner->mStickListHead;
+	while (stuck) {
+		stuck = stuck->mNextSticker;
+		mCount++;
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+Creature* Stickers::getCreature(int idx)
+{
+	int startCount = mCount;
+	calcNum();
+	if (startCount > mCount && idx >= mCount) {
+		idx = mCount - 1;
+	}
+
+	Creature* stuck = mOwner->mStickListHead;
+	for (int i = 0; i < idx; i++) {
+		stuck = stuck->mNextSticker;
+	}
+	if (stuck) {
+		return stuck;
+	}
+	return nullptr;
+}
+
+/**
+ * @todo: Documentation
+ */
+int Stickers::getFirst()
+{
+	return 0;
+}
+
+/**
+ * @todo: Documentation
+ */
+int Stickers::getNext(int idx)
+{
+	return idx + 1;
+}
+
+/**
+ * @todo: Documentation
+ */
+bool Stickers::isDone(int idx)
+{
+	if (idx >= mCount) {
+		return true;
+	}
+	return false;
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::updateStickPlatform()
+{
+	if (mCollNormal && mPikiPlatformTriangle) {
+		if (mStickPart->isClimbable() && isCreatureFlag(CF_IsClimbing)) {
+			Vector3f pos(mSRT.t);
+			moveNew(gsys->getFrameTime());
+			moveAttach();
+		}
+
+		Vector3f normal(*mCollNormal);
+		Vector3f zVec(normal);
+		zVec = -1.0f * zVec;
+		Vector3f dir(sinf(mFaceDirection), 0.0f, cosf(mFaceDirection));
+		Vector3f xVec(normal);
+		xVec.CP(dir);
+		xVec.normalise();
+		Vector3f yVec(zVec);
+		yVec.CP(xVec);
+		yVec.normalise();
+		makePostureMatrix(xVec, yVec, zVec, mConstrainedMoveMtx);
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::updateStickNonPlatform()
+{
+	if (mPelletStickSlot != -1) {
+		updateStickPellet();
+		return;
+	}
+
+	if (!mStickPart || mStickPart->isBouncySphereType()) {
+		updateStickSphere();
+		return;
+	}
+
+	if (mStickPart->isTubeType()) {
+		updateStickTube();
+		return;
+	}
+
+	PRINT("flag is %x\n", mStickPart->mPartType);
+	PRINT("%s : %s\n", mStickPart->getID().mStringID, mStickPart->getCode().mStringID);
+	ERROR(" mail to partol : flag is %x\n", mStickPart->mPartType);
+	ERROR("mail to m\n");
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::updateStickSphere()
+{
+	Matrix4f partMtx;
+	Creature* stickObj = getStickObject();
+	if (mStickPart) {
+		partMtx = mStickPart->getMatrix();
+	} else {
+		partMtx.makeSRT(stickObj->mSRT.s, stickObj->mSRT.r, stickObj->mSRT.t);
+	}
+
+	Vector3f attachPos(mAttachPosition);
+	attachPos.multMatrix(partMtx);
+	Vector3f dir;
+	if (mStickPart) {
+		dir = mStickPart->mCentre - attachPos;
+	} else {
+		dir = stickObj->mSRT.t - attachPos;
+	}
+
+	mSRT.r.set(0.0f, atan2f(dir.x, dir.z), 0.0f);
+
+	mVelocity       = attachPos - mSRT.t;
+	f32 fTime       = gsys->getFrameTime();
+	mVelocity       = mVelocity * (1.0f / fTime);
+	mTargetVelocity = mVelocity;
+	moveNew(fTime);
+	mVelocity.set(0.0f, 0.0f, 0.0f);
+	mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+	mLastPosition = mSRT.t;
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::updateStickPellet()
+{
+	if (getStickObject()->mObjType != OBJTYPE_Pellet) {
+		ERROR("stick to non-pellet : update\n");
+	}
+
+	Pellet* stickObj = static_cast<Pellet*>(getStickObject());
+	Matrix4f pelMtx;
+	if (stickObj->isRealDynamics()) {
+		pelMtx.makeVQS(stickObj->mSRT.t, stickObj->mRotationQuat, stickObj->mSRT.s);
+	} else {
+		pelMtx.makeSRT(stickObj->mSRT);
+	}
+
+	Vector3f attachPos(mAttachPosition);
+	attachPos.y = 0.0f;
+	f32 yOffs   = (stickObj->getY() - 1.0f) * 0.5f;
+	f32 v       = (stickObj->getPickOffset() + yOffs * stickObj->getCylinderHeight());
+	attachPos.y = stickObj->getY() * v;
+
+	attachPos.multMatrix(pelMtx);
+
+	Vector3f dir;
+	dir         = stickObj->mSRT.t - attachPos;
+	f32 faceDir = atan2f(dir.x, dir.z);
+	mSRT.r.set(0.0f, faceDir, 0.0f);
+	mFaceDirection = faceDir;
+	mVelocity      = attachPos - mSRT.t;
+
+	f32 fTime = gsys->getFrameTime();
+	f32 speed = mVelocity.length();
+	if (isPiki() && speed > 100.0f) {
+		PRINT("** PIKI STICK OFF!!!\n");
+		endStickObject();
+		return;
+	}
+
+	mVelocity       = mVelocity * (1.0f / fTime);
+	mTargetVelocity = mVelocity;
+	moveNew(fTime);
+	mVelocity.set(0.0f, 0.0f, 0.0f);
+	mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+	mLastPosition = mSRT.t;
+
+	STACK_PAD_VAR(1);
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::updateStickTube()
+{
+	Tube tube;
+	mStickPart->makeTube(tube);
+	Vector3f vec1;
+	Vector3f vec2;
+	tube.getPosGradient(mSRT.t, mAttachPosition.x, vec1, vec2);
+	Vector3f vec3 = tube.setPos(mAttachPosition.x);
+	vec3          = vec3 - mSRT.t;
+	vec3.normalise();
+	Vector3f unused;
+	Vector3f vec4;
+	vec4      = mVelocity.DP(vec2) * vec2;
+	unused    = mVelocity - vec4;
+	mVelocity = vec4;
+	moveNew(gsys->getFrameTime());
+	Vector3f yVec(vec2);
+	Vector3f xVec(vec3);
+	xVec.CP(yVec);
+	xVec.normalise();
+
+	xVec = xVec * -1.0f;
+	Vector3f zVec(xVec);
+	zVec.CP(yVec);
+	zVec.normalise();
+
+	makePostureMatrix(xVec, yVec, zVec, mConstrainedMoveMtx);
+	f32 ratio         = tube.getPosRatio(mSRT.t);
+	mAttachPosition.x = ratio;
+	if (ratio > 1.0f) {
+		endStickObject();
+	} else {
+		tube.getPosGradient(mSRT.t, mAttachPosition.x, vec1, vec2);
+		mSRT.t = vec1;
+	}
+}
+
+/**
+ * @todo: Documentation
+ */
+void Creature::updateStickRope()
+{
+	if (!mRope) {
+		ERROR("no _ropeObject!\n");
+	}
+
+	Vector3f ropeDir(mRope->mRopeDirection);
+	Vector3f vec1;
+	Vector3f vec2;
+	vec2      = mVelocity.DP(ropeDir) * ropeDir;
+	vec1      = mVelocity - vec2;
+	mVelocity = vec2;
+
+	mRope->mVelocity = mRope->mVelocity + vec1;
+
+	moveNew(gsys->getFrameTime());
+	Vector3f yVec(ropeDir);
+	Vector3f xVec(sinf(mFaceDirection), 0.0f, cosf(mFaceDirection));
+	xVec.CP(yVec);
+	xVec.normalise();
+	xVec = xVec * -1.0f;
+
+	Vector3f zVec(xVec);
+	zVec.CP(yVec);
+	zVec.normalise();
+	makePostureMatrix(xVec, yVec, zVec, mConstrainedMoveMtx);
+	RopeCreature* rope = mRope;
+	f32 scale          = 2.0f;
+	if (!rope->mParentRope) {
+		PRINT("no fulcrum\n");
+		char buf[256];
+		sprintf(buf, "no fulc obj%d", rope->mObjType);
+		ERROR(buf);
+	}
+
+	Cylinder cyl(rope->mSRT.t, rope->mParentRope->mSRT.t, scale);
+	mRopePosRatio = cyl.getPosRatio(mSRT.t);
+	if (cyl.mStartPoint.x == cyl.mEndPoint.x && cyl.mStartPoint.y == cyl.mEndPoint.y && cyl.mStartPoint.z == cyl.mEndPoint.z) {
+		ERROR("rope kowareta!\n");
+	}
+
+	if (mRopePosRatio > 1.0f) {
+		endRope();
+		if (rope->mParentRope->mObjType == OBJTYPE_Rope) {
+			PRINT_KANDO("upper rope\n");
+			PRINT("%x upper rope!\n", this);
+			startRope(static_cast<RopeCreature*>(rope->mParentRope), 0.0f);
+			PRINT("==> ratio = %f\n", mRopePosRatio);
+			rope          = static_cast<RopeCreature*>(rope->mParentRope);
+			mRopePosRatio = 0.0f;
+		} else {
+			return;
+		}
+
+	} else if (mRopePosRatio < 0.0f && rope->mAttachedObj) {
+		endRope();
+		PRINT_KANDO("lower rope\n");
+		PRINT("%x lower rope!\n", this);
+		startRope(rope->mAttachedObj, 1.0f);
+		PRINT("==> ratio = %f\n", mRopePosRatio);
+		rope          = rope->mAttachedObj;
+		mRopePosRatio = 1.0f;
+	}
+
+	Vector3f vec3(zVec);
+	vec3.normalise();
+	vec3 = vec3 * scale;
+	if (rope) {
+		mSRT.t = rope->getRopePos(mRopePosRatio);
+	}
+
+	mSRT.t = mSRT.t - vec3;
+}

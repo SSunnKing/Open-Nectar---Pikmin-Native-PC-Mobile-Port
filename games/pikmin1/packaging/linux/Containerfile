@@ -1,0 +1,26 @@
+# Entorno de compilación de los paquetes de Linux.
+#
+# Ubuntu 20.04 trae glibc 2.31: lo que se compila aquí arranca en esa versión
+# y en todas las posteriores (Ubuntu 20.04+, Debian 11+, Fedora 32+, Arch...).
+# SDL2 se compila estática dentro de cada ejecutable y carga X11, Wayland,
+# PulseAudio y ALSA del sistema en tiempo de ejecución, así que las cabeceras
+# de desarrollo solo hacen falta aquí.
+#
+# La usa packaging/linux/build-release.sh (podman build -t open-nectar-build).
+FROM docker.io/library/ubuntu:20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl file git pkg-config python3 python3-pip \
+        build-essential g++-10 gcc-10 \
+        libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxfixes-dev \
+        libxkbcommon-dev libwayland-dev libwayland-bin wayland-protocols \
+        libgl1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev \
+        libpulse-dev libasound2-dev libdbus-1-dev libudev-dev libsamplerate0-dev \
+    ; rm -rf /var/lib/apt/lists/*
+
+# CMake de Ubuntu 20.04 es 3.16; pip trae uno reciente.
+RUN pip3 install --no-cache-dir "cmake>=3.24" ninja
+
+ENV CC=gcc-10 CXX=g++-10
+WORKDIR /src
