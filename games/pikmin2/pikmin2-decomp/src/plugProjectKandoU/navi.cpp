@@ -1,3 +1,5 @@
+#include <chrono>
+#include <cmath>
 #include "Game/Navi.h"
 #ifdef PIKI_PC_PORT
 extern "C" float pc_window_get_mouse_cursor_delta_x(void);
@@ -109,6 +111,21 @@ static Vector3f sPcPinnedOffset(0.0f);
 static Navi* sPcLockNavi = nullptr;
 /// Mod "Charge": segundos que el grupo sigue corriendo hacia el objetivo.
 static f32 sPcChargeTime = 0.0f;
+
+/// Swarm de cada capitan (indice mNaviIndex): destino y reloj (ms) del ultimo
+/// frame en que makeCStick lo renovo. Por capitan y por reloj: en pantalla
+/// partida (2P, VS) el mundo se pinta una vez por vista y cada capitan lleva
+/// sus propias flechas.
+static Vector3f sPcSwarmGoal[2];
+static u32 sPcSwarmMs[2] = { 0, 0 };
+
+static u32 pcSwarmNowMs()
+{
+	const u32 ms = u32(std::chrono::duration_cast<std::chrono::milliseconds>(
+	                       std::chrono::steady_clock::now().time_since_epoch())
+	                       .count());
+	return ms ? ms : 1;
+}
 // Mod "First Person": capitan cuyo modelo esta oculto (el ojo va en su cabeza).
 static Navi* sPcFpHiddenNavi = nullptr;
 
@@ -530,6 +547,112 @@ void pcDrawLockOnRing(Graphics& gfx, Viewport* port)
 	}
 	GXSetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
 	GXSetBlendMode(GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, GX_LO_CLEAR);
+}
+
+/**
+ * @brief Flechas del swarm, al estilo de la version de Wii (como en Pikmin 1).
+ *
+ * Mientras el swarm lleva el grupo al cursor, una hilera de chevrones blancos
+ * (">" con la punta hacia el destino) va del capitan al destino sobre el
+ * suelo y avanza hacia el. Se desvanecen en los extremos. Pasada 3D directa,
+ * como el aro del Lock-On.
+ */
+static void pcDrawSwarmArrowsFor(Game::Navi* navi, const Vector3f& goal);
+
+void pcDrawSwarmArrows(Graphics& gfx, Viewport* port)
+{
+	if (!mapMgr || !naviMgr) {
+		return;
+	}
+	bool any = false;
+	for (int i = 0; i < 2; i++) {
+		any = any || (pcSwarmNowMs() - sPcSwarmMs[i] < 100);
+	}
+	if (!any) {
+		return;
+	}
+
+	gfx.initPrimDraw(port->getMatrix(true));
+	GXSetNumTexGens(0);
+	GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
+	GXSetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
+	GXSetNumIndStages(0);
+	GXSetTevDirect(GX_TEVSTAGE0);
+	GXSetChanCtrl(GX_COLOR0A0, GX_FALSE, GX_SRC_VTX, GX_SRC_VTX, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
+	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+	GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
+	GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
+	GXSetZMode(GX_TRUE, GX_LEQUAL, GX_FALSE);
+	GXSetCullMode(GX_CULL_NONE);
+
+	for (int i = 0; i < 2; i++) {
+		Game::Navi* navi = naviMgr->getAt(i);
+		if (navi && pcSwarmNowMs() - sPcSwarmMs[navi->mNaviIndex & 1] < 100) {
+			pcDrawSwarmArrowsFor(navi, sPcSwarmGoal[navi->mNaviIndex & 1]);
+		}
+	}
+
+	GXSetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
+	GXSetBlendMode(GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, GX_LO_CLEAR);
+}
+
+/// Hilera de chevrones de un capitan hacia su destino (estado GX ya puesto).
+static void pcDrawSwarmArrowsFor(Game::Navi* navi, const Vector3f& goal)
+{
+	static const f32 kSpacing    = 32.0f; // distancia entre chevrones
+	static const f32 kSpeed      = 70.0f; // unidades por segundo hacia el destino
+	static const f32 kArmLength  = 20.0f; // largo de cada brazo
+	static const f32 kArmAngle   = 0.85f; // apertura de cada brazo respecto al eje (radianes)
+	static const f32 kHalfStroke = 2.4f;
+	static const int kArmSegs    = 3;     // tramos por brazo, para seguir el terreno
+	static const f32 kFade       = 30.0f;
+
+	const Vector3f from = navi->getPosition();
+	Vector3f dir(goal.x - from.x, 0.0f, goal.z - from.z);
+	const f32 total = dir.length();
+	if (total < 40.0f) {
+		return;
+	}
+	dir = dir * (1.0f / total);
+	const Vector3f side(dir.z, 0.0f, -dir.x);
+	const f32 begin = 18.0f;
+	const f32 end   = total - 12.0f;
+
+	// Avance por reloj: con dos vistas un acumulador iria al doble.
+	const f32 phase = fmodf(f32(pcSwarmNowMs() % 100000u) * 0.001f * kSpeed, kSpacing);
+
+	const f32 ca = cosf(kArmAngle), sa = sinf(kArmAngle);
+	for (f32 s = begin + phase; s < end; s += kSpacing) {
+		f32 fade = (s - begin) / kFade;
+		if ((end - s) / kFade < fade) fade = (end - s) / kFade;
+		if (fade > 1.0f) fade = 1.0f;
+		if (fade <= 0.0f) continue;
+		const u8 alpha = u8(215.0f * fade);
+
+		const Vector3f tip(from.x + dir.x * s, 0.0f, from.z + dir.z * s);
+		for (int arm = -1; arm <= 1; arm += 2) {
+			// Direccion del brazo (de la punta hacia atras) y su normal.
+			const Vector3f back(-(dir.x * ca) + side.x * sa * f32(arm), 0.0f, -(dir.z * ca) + side.z * sa * f32(arm));
+			const Vector3f norm(back.z, 0.0f, -back.x);
+			for (int k = 0; k < kArmSegs; k++) {
+				// El primer tramo empieza antes de la punta: los brazos se
+				// solapan y la punta queda cerrada.
+				const f32 t0         = k == 0 ? -kHalfStroke : kArmLength * k / kArmSegs;
+				const f32 t1         = kArmLength * (k + 1) / kArmSegs;
+				const f32 along[4]   = { t0, t0, t1, t1 };
+				const f32 across[4]  = { -kHalfStroke, kHalfStroke, kHalfStroke, -kHalfStroke };
+				GXBegin(GX_QUADS, GX_VTXFMT0, 4);
+				for (int v = 0; v < 4; v++) {
+					Vector3f p(tip.x + back.x * along[v] + norm.x * across[v], 0.0f,
+					           tip.z + back.z * along[v] + norm.z * across[v]);
+					p.y = mapMgr->getMinY(p) + 1.5f;
+					GXPosition3f32(p.x, p.y, p.z);
+					GXColor4u8(245, 245, 255, alpha);
+				}
+				GXEnd();
+			}
+		}
+	}
 }
 
 static bool pcNaviExists(Navi* navi)
@@ -2756,12 +2879,20 @@ void Navi::makeCStick(bool disable)
 	// enjambre): el grupo carga hacia el cursor a plena fuerza.
 	// Durante el Charge el empuje va al objetivo fijado en vez de al cursor.
 	const bool pcCharging = sPcChargeTime > 0.0f && sPcLockTarget && sPcLockNavi == this;
-	if (pcCharging || (mController1 && pc_window_swarm_held())) {
+	// El swarm lleva el grupo entero al cursor (issue #76): el C-stick a fondo
+	// solo estrecha la formacion y la alarga desde el capitan.
+	bool pcSwarmToGoal = false;
+	Vector3f pcSwarmGoal;
+	if (!disable && (pcCharging || (mController1 && pc_window_swarm_held()))) {
 		Vector3f toCursor = pcCharging ? sPcLockTarget->getPosition() - getPosition() : mWhistle->mNaviOffsetVec;
 		toCursor.y        = 0.0f;
 		const f32 len     = toCursor.length();
 		if (len > 1.0f) {
 			transformedMotion = toCursor * (1.0f / len);
+			pcSwarmToGoal     = true;
+			pcSwarmGoal       = getPosition() + toCursor;
+			sPcSwarmGoal[mNaviIndex & 1] = pcSwarmGoal;
+			sPcSwarmMs[mNaviIndex & 1]   = pcSwarmNowMs();
 		}
 	}
 #endif
@@ -2825,6 +2956,22 @@ void Navi::makeCStick(bool disable)
 		}
 
 		mCPlateMgr->setPos(position, stickAngle, mVelocity, scale);
+#ifdef PIKI_PC_PORT
+		if (pcSwarmToGoal) {
+			// Formacion compacta (la del C-stick suelto) centrada en el destino.
+			// La distancia al capitan se limita para que el hueco mas lejano no
+			// quede tan lejos que los Pikmin abandonen el grupo.
+			mCPlateMgr->refresh(mCPlateMgr->mSlotCount, 0.0f);
+			Vector3f toGoal = pcSwarmGoal - position;
+			toGoal.y        = 0.0f;
+			const f32 maxDist = 450.0f - mCPlateMgr->mBaseRadius;
+			const f32 dist    = toGoal.length();
+			if (dist > maxDist && dist > 0.0f) {
+				toGoal = toGoal * (maxDist > 0.0f ? maxDist / dist : 0.0f);
+			}
+			mCPlateMgr->mBasePositionOffset = position + toGoal;
+		}
+#endif
 		_2FC        = 0;
 		mCommandOn1 = false;
 

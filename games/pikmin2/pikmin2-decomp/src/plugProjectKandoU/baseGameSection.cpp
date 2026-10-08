@@ -1459,6 +1459,7 @@ void BaseGameSection::draw3D(Graphics& gfx)
 #ifdef PIKI_PC_PORT
 extern "C" int pc_settings_get_fireflies(void);
 void pcDrawLockOnRing(Graphics& gfx, Viewport* port); // navi.cpp
+void pcDrawSwarmArrows(Graphics& gfx, Viewport* port); // navi.cpp
 
 namespace {
 /**
@@ -1716,6 +1717,7 @@ void BaseGameSection::drawParticle(Graphics& gfx, int viewport)
 #ifdef PIKI_PC_PORT
 		pcDrawNightFireflies(gfx, port);
 		pcDrawLockOnRing(gfx, port);
+		pcDrawSwarmArrows(gfx, port);
 #endif
 	}
 }

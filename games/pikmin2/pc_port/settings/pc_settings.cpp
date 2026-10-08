@@ -6376,11 +6376,11 @@ const GroupRow kControlsRows[] = {
 
 const GroupRow kCameraRows[] = {
 #if PIKI_P2_HOST
-    { SRC_MODS, 14, "Free Camera", "Turn the camera freely, as in Pikmin 3. Mouse: push the cursor against the edge of its circle. Controller: right stick. L puts the camera back behind the captain. Swarming moves to D-pad Down, or to its own Swarm button." },
+    { SRC_MODS, 14, "Free Camera", "Turn the camera freely, as in Pikmin 3. Mouse: push the cursor against the edge of its circle. Controller: right stick. L puts the camera back behind the captain. Swarming moves to its own Swarm button: bind it in Controls (on the pad every D-pad direction is a Pikmin 2 action)." },
     { SRC_MODS, 38, "Free Camera Speed", "How fast the right stick turns the free camera. 100% is the default." },
     { SRC_MODS, 18, "First Person", "Look at the world from inside the captain's helmet. Switch in game with the First Person button (V on keyboard, L3 on a controller)." },
 #else
-    { SRC_MODS, 14, "Free Camera", "Turn the camera freely, as in Pikmin 3. Mouse: push the cursor against the edge of its circle. Controller: right stick. L puts the camera back behind the captain. Swarming moves to D-pad Down, or to its own Swarm button." },
+    { SRC_MODS, 14, "Free Camera", "Turn the camera freely, as in Pikmin 3. Mouse: push the cursor against the edge of its circle. Controller: right stick. L puts the camera back behind the captain. Swarming moves to its own Swarm button: bind it in Controls (on the pad every D-pad direction is a Pikmin 2 action)." },
     { SRC_MODS, 38, "Free Camera Speed", "How fast the right stick turns the free camera. 100% is the default." },
     { SRC_MODS, 18, "First Person", "Look at the world from inside the captain's helmet. Switch in game with the First Person button (V on keyboard, L3 on a controller)." },
     { SRC_MODS, 6, "Co-op Split Screen", "How the screen divides in two-player co-op." },

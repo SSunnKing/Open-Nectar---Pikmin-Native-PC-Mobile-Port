@@ -950,14 +950,15 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     if (sCStickInvert & 2) ry = -ry;
     // Mod "Free Camera": the right stick orbits instead of pushing the squad,
     // the way Pikmin 3 rearranged it. The squad moves to the Swarm button,
-    // which defaults to D-pad Down here because the mod frees it up.
+    // which has no default on the pad: every D-pad direction is already a
+    // Pikmin 2 action (sprays, maturity and colour of the held Pikmin), so it
+    // is left for the player to bind.
     sFreeCamSubY = 0.0f;
     if (pc_settings_get_free_camera()) {
         if (abs(ry) > axisDeadZone) sFreeCamSubY = pc_pad_axis_from_sdl(-ry) / 72.0f;
         if (abs(rx) > axisDeadZone) {
             pc_window_add_camera_drag(-(float)rx / 32767.0f * 0.02f * pc_settings_get_free_camera_pad_scale());
         }
-        if (SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) swarmHeld = true;
     } else {
         if (abs(rx) > axisDeadZone) substickX = pc_pad_axis_from_sdl(rx);
         if (abs(ry) > axisDeadZone) substickY = pc_pad_axis_from_sdl(-ry);
