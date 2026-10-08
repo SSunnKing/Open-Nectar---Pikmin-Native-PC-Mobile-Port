@@ -229,7 +229,7 @@ public:
 	Creature* mPcLockTarget = nullptr; ///< Mod "Lock-On": enemigo u objeto fijado.
 	Creature* mPcLockIgnore = nullptr; ///< Automático: soltado a mano, no se recoge hasta salir de él.
 	f32 mPcChargeTime       = 0.0f;    ///< Mod "Charge": segundos que el grupo sigue corriendo hacia el objetivo.
-	int mPcSwarmFrames      = 0;       ///< >0 mientras el swarm lleva el grupo a mPcSwarmGoal (lo renueva makeCStick).
+	u32 mPcSwarmMs          = 0;       ///< Reloj (ms) del último frame en que el swarm llevó el grupo a mPcSwarmGoal.
 	Vector3f mPcSwarmGoal;             ///< Destino del swarm: el cursor o el objetivo de la carga.
 	Vector3f mPcAimOffset;             ///< Cursor libre (lo que apunta el jugador) mientras el visible está clavado.
 	Vector3f mPcPinnedOffset;          ///< Último desplazamiento con el que se clavó el cursor.

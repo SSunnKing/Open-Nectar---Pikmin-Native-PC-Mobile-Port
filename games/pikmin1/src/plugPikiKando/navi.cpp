@@ -1,3 +1,5 @@
+#include <chrono>
+#include <cmath>
 #include "Navi.h"
 #include <cstdlib>
 #if defined(PIKI_PC_PORT)
@@ -1533,6 +1535,15 @@ void Navi::pcDrawLockRing(Graphics& gfx)
 	gfx.setLighting(prevLighting, nullptr);
 }
 
+/// Reloj monotónico en ms para el swarm (vale con varias vistas por frame).
+static u32 pcSwarmNowMs()
+{
+	const u32 ms = u32(std::chrono::duration_cast<std::chrono::milliseconds>(
+	                       std::chrono::steady_clock::now().time_since_epoch())
+	                       .count());
+	return ms ? ms : 1;
+}
+
 /**
  * @brief Flechas del swarm, al estilo de la versión de Wii.
  *
@@ -1552,8 +1563,6 @@ void Navi::pcDrawSwarmArrows(Graphics& gfx)
 	static const int kArmSegs    = 3;     // tramos por brazo, para seguir el terreno
 	static const f32 kFade       = 30.0f; // tramo de aparición y desaparición
 
-	mPcSwarmFrames--;
-
 	Vector3f dir(mPcSwarmGoal.x - mSRT.t.x, 0.0f, mPcSwarmGoal.z - mSRT.t.z);
 	const f32 total = dir.length();
 	if (total < 40.0f) {
@@ -1566,11 +1575,9 @@ void Navi::pcDrawSwarmArrows(Graphics& gfx)
 	const f32 begin = 18.0f;
 	const f32 end   = total - 12.0f;
 
-	static f32 phase = 0.0f;
-	phase += gsys->getFrameTime() * kSpeed;
-	if (phase >= kSpacing) {
-		phase -= kSpacing * f32(int(phase / kSpacing));
-	}
+	// Avance por reloj: con dos vistas se dibuja dos veces por frame y un
+	// acumulador iría al doble de velocidad.
+	const f32 phase = fmodf(f32(pcSwarmNowMs() % 100000u) * 0.001f * kSpeed, kSpacing);
 
 	const bool prevLighting = gfx.setLighting(false, nullptr);
 	gfx.useMatrix(gfx.mCamera->mLookAtMtx, 0);
@@ -3424,7 +3431,7 @@ void Navi::makeCStick(bool isSunset)
 		if (toCursor.length() > 1.0f) {
 			pcSwarmToGoal  = true;
 			pcSwarmGoal    = goal;
-			mPcSwarmFrames = 2; // el dibujo lo consume; si makeCStick no corre, se apagan solas
+			mPcSwarmMs     = pcSwarmNowMs(); // si makeCStick deja de renovarlo, las flechas se apagan solas
 			mPcSwarmGoal   = goal;
 			toCursor.normalise();
 			NTransform3D NRef back = NTransform3D();
@@ -3759,7 +3766,9 @@ void Navi::refresh(Graphics& gfx)
 			pc_gfx_shadow_exclude(0);
 #endif
 #if defined(PIKI_PC_PORT)
-			if (mPcSwarmFrames > 0) {
+			// Por reloj, no por dibujos: en pantalla partida el mundo se pinta
+			// una vez por vista y cada capitán dibuja sus propias flechas.
+			if (pcSwarmNowMs() - mPcSwarmMs < 100) {
 				pcDrawSwarmArrows(gfx);
 			}
 #endif
