@@ -87,6 +87,9 @@ re-read at startup:
 | `supersample` | 1.0 | Multiplies the runtime's recommended eye resolution |
 | `left_handed` | 0 | Swaps the pointing and off hands |
 | `right_stick_turns` | 1 | Pointing hand's stick turns the view; 0 puts swarming there instead |
+| `hud` | `head` | `head` wears the interface like a visor, in view however you turn; `room` hangs it where you last faced |
+| `hud_fill` | 1.0 | With `hud=head`, how much of the view both eyes share it spans; lower pulls its edges in |
+| `hud_distance` | 1.1 | With `hud=head`, how far away it appears to be, in metres |
 
 The lean is a pitch about your own left-right axis as of the last re-anchor (VR
 button + X), so re-anchor after turning your chair.
@@ -150,7 +153,10 @@ adb shell rm -r /data/local/tmp/nectar-assets
   draw and cannot be run twice.
 - **The interface.** Anything drawn outside that span lands in the ordinary
   render target over transparency and is shown as a quad layer, which is also
-  how whole flat screens (title, file select, results) are presented.
+  how whole flat screens (title, file select, results) are presented. Over the
+  world the quad is in view space, as wide as the field both eyes share, so it
+  rides the head (`hud=room` hangs it in the room instead); a whole flat screen
+  always hangs in the room.
 
 `pc_vr_rig.*` holds the mapping between tracking space and the world, and is
 plain maths with no OpenXR or GL in it, so `pc_vr_rig_test` can check the

@@ -115,6 +115,12 @@ struct Config {
 	// The pointing hand's stick swarms the Pikmin, as the C-stick does on the
 	// GameCube, and turning lives on the VR button. Set to 1 to swap them.
 	bool rightStickTurns = false;
+	// Where the interface over the world goes. On the head it is worn like a
+	// visor, so no turn of the head takes it out of sight; in the room it hangs
+	// where the player last faced and follows only a clear turn away.
+	bool hudOnHead    = true;
+	float hudFill     = 1.0f; // on the head: how much of the view both eyes share it spans
+	float hudDistance = 1.1f; // on the head: how far away it appears to be, in metres
 };
 
 #ifdef __ANDROID__
@@ -382,6 +388,9 @@ void loadConfig()
 		else if (key == "supersample" && number > 0.2f) s.config.supersample = std::min(number, 2.0f);
 		else if (key == "left_handed") s.config.leftHanded = number != 0.0f;
 		else if (key == "right_stick_turns") s.config.rightStickTurns = number != 0.0f;
+		else if (key == "hud") s.config.hudOnHead = std::strncmp(value.c_str(), "room", 4) != 0;
+		else if (key == "hud_fill" && number > 0.0f) s.config.hudFill = std::clamp(number, 0.3f, 1.5f);
+		else if (key == "hud_distance" && number > 0.0f) s.config.hudDistance = std::clamp(number, 0.3f, 10.0f);
 	}
 	if (const char* mode = std::getenv("PIKMIN_VR_MODE")) rig.mode = parseMode(mode);
 }
@@ -409,6 +418,9 @@ void saveConfig()
 	file << "supersample=" << s.config.supersample << "\n";
 	file << "left_handed=" << (s.config.leftHanded ? 1 : 0) << "\n";
 	file << "right_stick_turns=" << (s.config.rightStickTurns ? 1 : 0) << "\n";
+	file << "hud=" << (s.config.hudOnHead ? "head" : "room") << "\n";
+	file << "hud_fill=" << s.config.hudFill << "\n";
+	file << "hud_distance=" << s.config.hudDistance << "\n";
 }
 
 // ── GL targets ───────────────────────────────────────────────────────────────
@@ -786,10 +798,41 @@ void pollEvents()
 
 // ── Panel placement ──────────────────────────────────────────────────────────
 
-// The panel hangs in front of where the player faced at recentre and follows
-// lazily: it stays put for small head turns, and swings round only once the
-// player has clearly turned away, so reading the HUD never chases the head.
-XrPosef placePanel(bool hud, XrExtent2Df& size)
+// The interface over the world, worn rather than hung: a quad in view space,
+// which the compositor holds still against the head, so no turn takes it out of
+// sight. It spans the part of the view both eyes share. Any wider and its edges
+// would sit where only one eye sees them.
+bool placeHudOnHead(XrPosef& pose, XrExtent2Df& size)
+{
+	if (!s.config.hudOnHead || s.viewSpace == XR_NULL_HANDLE || !s.viewsValid) return false;
+	const XrFovf& left  = s.views[0].fov;
+	const XrFovf& right = s.views[1].fov;
+	const float across  = std::min({ -left.angleLeft, -right.angleLeft, left.angleRight, right.angleRight });
+	const float up      = std::min({ left.angleUp, right.angleUp, -left.angleDown, -right.angleDown });
+	if (!(across > 0.0f && across < 1.5f) || !(up > 0.0f && up < 1.5f)) return false;
+
+	const float distance = s.config.hudDistance;
+	const float width    = 2.0f * distance * s.config.hudFill * std::min(std::tan(across), std::tan(up) * 16.0f / 9.0f);
+	size                 = { width, width * 9.0f / 16.0f };
+	pose                 = toXr(Pose { Quat {}, Vec3 { 0.0f, 0.0f, -distance } });
+
+	static float reported = 0.0f;
+	if (width != reported) {
+		reported = width;
+		printf("[PC VR] Interface on the head: %.0f degrees across (both eyes share %.0f), %.2f m away\n",
+		       2.0f * std::atan(width * 0.5f / distance) * 57.29578f, 2.0f * across * 57.29578f, distance);
+		fflush(stdout);
+	}
+	return true;
+}
+
+// In the room, the panel hangs in front of where the player faced at recentre
+// and follows lazily: it stays put for small head turns, and swings round only
+// once the player has clearly turned away, so reading it never chases the
+// head. That is where a whole flat screen always goes, and the interface over
+// the world too with hud=room. The placement is kept up either way, so the
+// panel is already in front of the player when a flat screen comes up.
+XrPosef placePanel(bool hud, XrExtent2Df& size, XrSpace& space)
 {
 	const float headYaw = s.headValid ? yawOf(s.head.q) : 0.0f;
 	if (!s.panelPlaced && s.headValid) {
@@ -803,6 +846,13 @@ XrPosef placePanel(bool hud, XrExtent2Df& size)
 		if (std::fabs(diff) < 0.08f) s.panelTurning = false;
 		if (s.panelTurning) s.panelYaw = wrapAngle(s.panelYaw + diff * (1.0f - std::exp(-s.frameDt / 0.25f)));
 		s.panelAnchor = s.panelAnchor + (s.head.p - s.panelAnchor) * (1.0f - std::exp(-s.frameDt / 0.6f));
+	}
+
+	space = s.appSpace;
+	XrPosef onHead;
+	if (hud && placeHudOnHead(onHead, size)) {
+		space = s.viewSpace;
+		return onHead;
 	}
 
 	const float distance = hud ? 1.1f : 2.0f;
@@ -1152,12 +1202,11 @@ void pc_vr_submit(int worldDrawn, unsigned interfaceTexture, int width, int heig
 			glBindFramebuffer_(GL_READ_FRAMEBUFFER, s.readFbo);
 			glFramebufferTexture2D_(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
 			if (ok) {
-				panel.space                      = s.appSpace;
 				panel.eyeVisibility              = XR_EYE_VISIBILITY_BOTH;
 				panel.subImage.swapchain         = s.panelSwap.handle;
 				panel.subImage.imageRect.offset  = { 0, 0 };
 				panel.subImage.imageRect.extent  = { s.panelSwap.width, s.panelSwap.height };
-				panel.pose                       = placePanel(world, panel.size);
+				panel.pose                       = placePanel(world, panel.size, panel.space);
 				// Over the world the interface is drawn onto transparency, with
 				// alpha kept premultiplied by the GL layer. A whole flat screen is
 				// opaque.

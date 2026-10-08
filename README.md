@@ -92,6 +92,9 @@ startup:
 | `supersample` | 1.0 desktop, 0.75 standalone | Multiplies the runtime's recommended eye resolution; takes effect on restart |
 | `left_handed` | 0 | Swaps the pointing and off hands |
 | `right_stick_turns` | 0 | 1 puts turning on the right stick and swarming on the VR button |
+| `hud` | `head` | `head` wears the interface like a visor, in view however you turn; `room` hangs it where you last faced |
+| `hud_fill` | 1.0 | With `hud=head`, how much of the view both eyes share it spans; lower pulls its edges in |
+| `hud_distance` | 1.1 | With `hud=head`, how far away it appears to be, in metres |
 
 The lean is about your own left-right axis as of the last re-anchor (VR button
 + X), so re-anchor after turning your chair.
