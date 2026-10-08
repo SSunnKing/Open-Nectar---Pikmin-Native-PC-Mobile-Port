@@ -24,7 +24,10 @@ fi
 launcher_version="$(python3 -c "import json;print(json.load(open('${root}/versions.json'))['launcher'])")"
 jobs="$(nproc)"
 
-common=(-DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_JAUDIO=ON -DPIKMIN_STATIC_RUNTIME=ON)
+# PIKMIN_NATIVE_OPTIMIZE=OFF: -march=native compilaría para la CPU de esta
+# máquina y el .exe moriría sin ventana ni log en CPUs sin esas instrucciones
+# (issues #41 y #77). Igual que el release de Linux.
+common=(-DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_JAUDIO=ON -DPIKMIN_STATIC_RUNTIME=ON -DPIKMIN_NATIVE_OPTIMIZE=OFF)
 
 printf '[1/4] Pikmin 1 USA y el launcher...\n'
 cmake -S "${p1}" -B "${build_dir}/p1-usa" "${common[@]}" \

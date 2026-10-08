@@ -67,6 +67,8 @@ cmake_common=(
     -DCMAKE_BUILD_TYPE=Release
     -DPIKMIN_NATIVE_JAUDIO=ON
     -DPIKMIN_STATIC_RUNTIME=ON
+    # Portable: sin -march=native (issues #41 y #77).
+    -DPIKMIN_NATIVE_OPTIMIZE=OFF
     -DOPEN_NECTAR_VERSION="${OPEN_NECTAR_VERSION:-$(sed -n 's/.*set(OPEN_NECTAR_VERSION "\([^"]*\)".*/\1/p' "${repo_root}/CMakeLists.txt")}"
 )
 

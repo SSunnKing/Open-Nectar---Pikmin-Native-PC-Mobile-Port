@@ -533,7 +533,10 @@ foreach(target IN LISTS PIKMIN_OPTIMIZED_TARGETS)
         $<$<AND:$<CONFIG:RelWithDebInfo>,$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>>:-O3>)
 endforeach()
 
-option(PIKMIN_NATIVE_OPTIMIZE "Use this build machine's CPU instruction set" ON)
+# OFF by default: a binary built with -march=native dies on the first
+# unsupported instruction, before any window or log, on every CPU older than
+# the build machine's (issues #41 and #77). Turn it on for local builds only.
+option(PIKMIN_NATIVE_OPTIMIZE "Use this build machine's CPU instruction set" OFF)
 if(PIKMIN_NATIVE_OPTIMIZE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     foreach(target IN LISTS PIKMIN_OPTIMIZED_TARGETS)
         target_compile_options(${target} PRIVATE -march=native)
