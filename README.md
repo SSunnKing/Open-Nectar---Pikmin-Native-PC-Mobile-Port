@@ -7,21 +7,30 @@ the native PC/Android port of the
 
 Not an emulator: the game's own code is compiled for your machine, with the
 console's hardware replaced by ordinary equivalents. VR then replaces the
-camera, draws the world once per eye, and puts the interface on a panel that
-floats in front of you.
+camera, draws the world once per eye, and keeps the interface in front of you.
+
+<p align="center">
+  <img src="screenshots/third-person.jpg" width="49%" alt="Third-person: the captain and his ship seen from above and behind, with the day meter and the Pikmin counts in view">
+  <img src="screenshots/tabletop.jpg" width="49%" alt="Tabletop: the Forest of Hope as a miniature seen from above, with the interface hidden">
+</p>
+
+Third-person with the interface, and tabletop with it hidden. Each is the left
+eye's picture as the game drew it, put together from the layers it hands the
+headset (`PIKMIN_VR_DUMP`). The black above the trees is the missing sky: see
+the notes.
 
 **No game data is included.** You supply your own copy of the disc.
 
 The tree follows upstream's layout: the Pikmin port, and the VR mode with it,
 lives in `games/pikmin1/`. Upstream's Pikmin 2 port in `games/pikmin2/` comes
-along unchanged and has no VR mode.
+along unchanged and has no VR mode. The fork is merged up to Open Nectar 0.9.3.
 
 ## What runs today
 
 | | |
 |---|---|
 | Windows + PC headset | Quest over Link/Air Link/Virtual Desktop, or any OpenXR runtime with OpenGL |
-| Quest 2 / Quest 3 standalone | sideloaded APK, 52-72 FPS measured on a Quest 2 |
+| Quest 2 / Quest 3 standalone | sideloaded APK; on a Quest 2, 72 FPS in menus and around 48 in a level |
 | Flat | unchanged; with no headset the game runs exactly as Open Nectar does |
 
 Three ways to play, cycled at any time with **left grip + Y**:
@@ -34,6 +43,26 @@ Three ways to play, cycled at any time with **left grip + Y**:
 - **First-person** — you are the captain, at his size, with the world towering
   around you. The view moves when he does, so it is the least comfortable of
   the three.
+
+## The interface
+
+<p align="center">
+  <img src="screenshots/settings-vr-tab.jpg" width="70%" alt="The settings menu's VR tab in the headset: the interface's placement, size and distance, then what each control does">
+</p>
+
+Over a level the interface is worn like a visor: the HUD, the game's messages
+and its menus stay in view however you turn. A head cannot turn towards
+something worn on it, so it is kept where the eyes reach on their own, and how
+far out that is depends on the headset and on you. Set it by looking at it:
+**VR button + Menu** opens the port's settings on the **VR** tab above, where
+**Interface Size** changes as you adjust it. The same tab moves it nearer or
+further, or hangs it in the room instead, and below that lists what every
+control does.
+
+**VR button + B** puts the interface away and brings it back, for the level
+with nothing in front of it. Whole flat screens (the title, file select, the
+map, results) are not worn: they hang in the room where you last faced, and
+swing round only when you turn well away.
 
 ## Controls (Quest Touch)
 
@@ -69,10 +98,7 @@ Throwing works either way: let go of the trigger, or flick your hand forward
 while holding it. A flick while the trigger stays down picks up the next
 Pikmin, so you can throw a line of them without releasing.
 
-All of this is listed in the game too. VR button + Menu opens the port's
-settings menu on its **VR** tab, which says what each control does. The same
-tab sets where the interface goes, its size and its distance; they change as
-you adjust them, so the size can be set by looking at it.
+All of this is listed in the game too, on the settings menu's **VR** tab.
 
 ## Settings
 
@@ -184,11 +210,16 @@ Windows and Android only so far, because the session binds to WGL or EGL.
 - **Cutscenes put you where the director's camera is.** Comfortable in
   tabletop, where the table stays put; in third-person the camera moves you.
 - Post-processing (bloom, depth of field, ambient occlusion) is off in VR: it
-  assumes one symmetric view, and the eyes are neither.
+  assumes one symmetric view, and the eyes are neither. Open Nectar's real-time
+  shadows are built by the same pass, so they are off too.
+- **Local co-op has one view in the headset**, following the first captain.
+  Open Nectar's split screen is for a flat screen; in VR the second player
+  shares the first one's view. Not tried beyond that.
 - If the standalone build flickers, close Link/Air Link on the headset: the
   streaming client and the app compete for the immersive slot.
-- The settings menu is still the desktop one. A VR panel for the values above
-  belongs there and is not written yet.
+- The settings menu's VR tab holds the interface's settings and the list of
+  controls. The rig's own values (scales, distances, the lean, tracking) are
+  still only in `pikmin_vr.ini`.
 
 ## How it works
 
@@ -204,8 +235,9 @@ Three hooks, described in
   twice. Both eyes share one framebuffer because swapping targets per draw
   makes a tile-based GPU resolve its tiles every time, which cost a Quest 2 more
   than half its frame rate.
-- **The interface** lands on a floating panel, which is also how whole flat
-  screens (title, file select, results) are shown.
+- **The interface** is drawn to the ordinary render target and shown as a
+  layer of its own: worn on the head over a level, hung in the room for whole
+  flat screens (title, file select, results).
 
 `games/pikmin1/pc_port/vr/pc_vr_rig.*` is plain maths with no OpenXR or GL in
 it, so `ctest -R pc_vr_rig_test` checks the conventions -- eye offsets, the
