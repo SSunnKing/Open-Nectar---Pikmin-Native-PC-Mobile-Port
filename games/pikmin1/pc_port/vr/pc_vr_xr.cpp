@@ -118,17 +118,33 @@ struct Config {
 	// Where the interface over the world goes. On the head it is worn like a
 	// visor, so no turn of the head takes it out of sight; in the room it hangs
 	// where the player last faced and follows only a clear turn away.
-	bool hudOnHead    = true;
-	float hudFill     = 1.0f; // on the head: how much of the view both eyes share it spans
+	bool hudOnHead = true;
+	// On the head: how far out its corners reach, 1 being the edge of what both
+	// eyes see. Short of that by default, because a head cannot turn towards
+	// something that turns with it: the eyes have to reach the corners alone.
+	float hudFill     = 0.8f;
 	float hudDistance = 1.1f; // on the head: how far away it appears to be, in metres
 };
+constexpr float kHudFillMin = 0.4f, kHudFillMax = 1.3f;
+constexpr float kHudDistanceMin = 0.5f, kHudDistanceMax = 3.0f;
 
+// The interface target, and the panel it is shown on. 4:3, the GameCube's own
+// screen: it is the squarest shape the game lays its interface out for, so the
+// one that wastes least of a headset's near-square view.
 #ifdef __ANDROID__
-constexpr int kPanelWidth  = 1280;
+constexpr int kPanelWidth  = 960;
 constexpr int kPanelHeight = 720;
 #else
-constexpr int kPanelWidth  = 1920;
+constexpr int kPanelWidth  = 1440;
 constexpr int kPanelHeight = 1080;
+#endif
+constexpr float kPanelAspect = float(kPanelWidth) / float(kPanelHeight);
+// The largest swapchain asked for. A standalone headset has the memory of a
+// phone, and the surround of a small interface is mostly border.
+#ifdef __ANDROID__
+constexpr int kSwapchainLimit = 2048;
+#else
+constexpr int kSwapchainLimit = 4096;
 #endif
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -205,6 +221,11 @@ struct State {
 	Swapchain stereoSwap;
 	StereoTarget stereo;
 	Swapchain panelSwap;
+	// The interface on the head, with a surround: see ensureHudSwapchain.
+	Swapchain hudSwap;
+	int hudBorderX     = 0;
+	int hudBorderY     = 0;
+	bool hudSwapFailed = false;
 	GLuint readFbo = 0, drawFbo = 0;
 
 	Actions actions;
@@ -242,6 +263,10 @@ struct State {
 	bool rumbleApplied = false;
 	int debugMode      = 0;
 	bool debugLatch    = false;
+	// The interface over the world, put away by the player. Not kept between
+	// runs: a game that starts with its messages hidden looks frozen.
+	bool hudHidden = false;
+	bool hudLatch  = false;
 
 	// What the last stretch of frames was made of. A frame that carries a world
 	// and one that carries only the flat panel look completely different in the
@@ -389,8 +414,8 @@ void loadConfig()
 		else if (key == "left_handed") s.config.leftHanded = number != 0.0f;
 		else if (key == "right_stick_turns") s.config.rightStickTurns = number != 0.0f;
 		else if (key == "hud") s.config.hudOnHead = std::strncmp(value.c_str(), "room", 4) != 0;
-		else if (key == "hud_fill" && number > 0.0f) s.config.hudFill = std::clamp(number, 0.3f, 1.5f);
-		else if (key == "hud_distance" && number > 0.0f) s.config.hudDistance = std::clamp(number, 0.3f, 10.0f);
+		else if (key == "hud_fill" && number > 0.0f) s.config.hudFill = std::clamp(number, kHudFillMin, kHudFillMax);
+		else if (key == "hud_distance" && number > 0.0f) s.config.hudDistance = std::clamp(number, kHudDistanceMin, kHudDistanceMax);
 	}
 	if (const char* mode = std::getenv("PIKMIN_VR_MODE")) rig.mode = parseMode(mode);
 }
@@ -488,11 +513,9 @@ void destroySwapchain(Swapchain& sc)
 	sc = Swapchain {};
 }
 
-// Copies a framebuffer's colour into the next image of a swapchain. The game's
-// targets hold display-referred values, and the swapchain is sRGB: with
-// GL_FRAMEBUFFER_SRGB left off (the port never enables it) the bytes are copied
-// unchanged and the compositor decodes them as the display would have.
-bool blitToSwapchain(Swapchain& sc, GLuint sourceFramebuffer, int sourceWidth, int sourceHeight)
+// Takes the next image of a swapchain and makes it the draw framebuffer's
+// colour, for the blits that fill it.
+bool beginSwapchainImage(Swapchain& sc)
 {
 	uint32_t index = 0;
 	XrSwapchainImageAcquireInfo acquire { XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
@@ -503,19 +526,72 @@ bool blitToSwapchain(Swapchain& sc, GLuint sourceFramebuffer, int sourceWidth, i
 
 	glBindFramebuffer_(GL_DRAW_FRAMEBUFFER, s.drawFbo);
 	glFramebufferTexture2D_(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sc.images[index].image, 0);
-	glBindFramebuffer_(GL_READ_FRAMEBUFFER, sourceFramebuffer);
-	const bool sameSize = sourceWidth == sc.width && sourceHeight == sc.height;
-	glBlitFramebuffer_(0, 0, sourceWidth, sourceHeight, 0, 0, sc.width, sc.height, GL_COLOR_BUFFER_BIT, sameSize ? GL_NEAREST : GL_LINEAR);
-	glFramebufferTexture2D_(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+	return true;
+}
 
+bool endSwapchainImage(Swapchain& sc)
+{
+	glFramebufferTexture2D_(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
 	XrSwapchainImageReleaseInfo release { XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
 	return xrOk(xrReleaseSwapchainImage(sc.handle, &release), "xrReleaseSwapchainImage");
 }
 
+// Copies a framebuffer's colour into the next image of a swapchain. The game's
+// targets hold display-referred values, and the swapchain is sRGB: with
+// GL_FRAMEBUFFER_SRGB left off (the port never enables it) the bytes are copied
+// unchanged and the compositor decodes them as the display would have.
+bool blitToSwapchain(Swapchain& sc, GLuint sourceFramebuffer, int sourceWidth, int sourceHeight)
+{
+	if (!beginSwapchainImage(sc)) return false;
+	glBindFramebuffer_(GL_READ_FRAMEBUFFER, sourceFramebuffer);
+	const bool sameSize = sourceWidth == sc.width && sourceHeight == sc.height;
+	glBlitFramebuffer_(0, 0, sourceWidth, sourceHeight, 0, 0, sc.width, sc.height, GL_COLOR_BUFFER_BIT, sameSize ? GL_NEAREST : GL_LINEAR);
+	return endSwapchainImage(sc);
+}
+
+void dumpFramebuffer(GLuint framebuffer, int x, int y, int width, int height, const char* path, bool alpha = false);
+
+// The same, into the middle of a swapchain that is `borderX` and `borderY`
+// larger on every side, with the source's outermost pixels drawn out to fill
+// the border. Whatever the source holds at its edge -- nothing, usually, or the
+// veil the game lays over the whole screen -- carries on to the swapchain's.
+// `dumpStem` names a PIKMIN_VR_DUMP frame to write the result into.
+bool blitWithSurround(Swapchain& sc, int borderX, int borderY, GLuint sourceFramebuffer, int sourceWidth, int sourceHeight,
+                      const char* dumpStem)
+{
+	if (!beginSwapchainImage(sc)) return false;
+	glBindFramebuffer_(GL_READ_FRAMEBUFFER, sourceFramebuffer);
+	// Columns and rows of the swapchain: border, source, border. Each takes the
+	// source's first pixel, all of it, or its last.
+	const int x[4]        = { 0, borderX, sc.width - borderX, sc.width };
+	const int y[4]        = { 0, borderY, sc.height - borderY, sc.height };
+	const int fromX[3][2] = { { 0, 1 }, { 0, sourceWidth }, { sourceWidth - 1, sourceWidth } };
+	const int fromY[3][2] = { { 0, 1 }, { 0, sourceHeight }, { sourceHeight - 1, sourceHeight } };
+	const bool sameSize   = sourceWidth == x[2] - x[1] && sourceHeight == y[2] - y[1];
+	for (int row = 0; row < 3; ++row) {
+		for (int column = 0; column < 3; ++column) {
+			if (x[column] == x[column + 1] || y[row] == y[row + 1]) continue;
+			const bool middle = row == 1 && column == 1;
+			glBlitFramebuffer_(fromX[column][0], fromY[row][0], fromX[column][1], fromY[row][1], x[column], y[row], x[column + 1],
+			                   y[row + 1], GL_COLOR_BUFFER_BIT, middle && !sameSize ? GL_LINEAR : GL_NEAREST);
+		}
+	}
+	if (dumpStem) {
+		char path[512];
+		std::snprintf(path, sizeof path, "%s_shown.ppm", dumpStem);
+		dumpFramebuffer(s.drawFbo, 0, 0, sc.width, sc.height, path);
+		std::snprintf(path, sizeof path, "%s_shown_alpha.ppm", dumpStem);
+		dumpFramebuffer(s.drawFbo, 0, 0, sc.width, sc.height, path, true);
+	}
+	return endSwapchainImage(sc);
+}
+
 // PIKMIN_VR_DUMP=<dir>: both eyes and the panel as PPM (at half resolution)
 // every couple of seconds, for looking at what the headset was sent without
-// wearing it.
-void dumpFramebuffer(GLuint framebuffer, int x, int y, int width, int height, const char* path)
+// wearing it. Over a world the panel's alpha is written too, as grey: it is
+// what the headset composites with, and the colours alone do not show it. So
+// is the interface as the headset is handed it, when it is worn: `_shown`.
+void dumpFramebuffer(GLuint framebuffer, int x, int y, int width, int height, const char* path, bool alpha)
 {
 	constexpr int kStep = 2;
 	std::vector<unsigned char> rgba(size_t(width) * size_t(height) * 4);
@@ -525,29 +601,42 @@ void dumpFramebuffer(GLuint framebuffer, int x, int y, int width, int height, co
 	if (!file) return;
 	std::fprintf(file, "P6\n%d %d\n255\n", width / kStep, height / kStep);
 	for (int y = (height / kStep) * kStep - kStep; y >= 0; y -= kStep) {
-		for (int x = 0; x + kStep <= width; x += kStep) std::fwrite(&rgba[(size_t(y) * width + x) * 4], 1, 3, file);
+		for (int x = 0; x + kStep <= width; x += kStep) {
+			const unsigned char* pixel  = &rgba[(size_t(y) * width + x) * 4];
+			const unsigned char grey[3] = { pixel[3], pixel[3], pixel[3] };
+			std::fwrite(alpha ? grey : pixel, 1, 3, file);
+		}
 	}
 	std::fclose(file);
 }
 
-void maybeDumpFrame(bool world, unsigned interfaceTexture, int width, int height)
+// Writes this frame out if it is one of those PIKMIN_VR_DUMP takes, and returns
+// the start of its file names so that more can be added to it.
+const char* maybeDumpFrame(bool world, unsigned interfaceTexture, int width, int height)
 {
 	static const char* dir = std::getenv("PIKMIN_VR_DUMP");
 	static unsigned frame  = 0;
-	if (!dir || ++frame % 144 != 0) return;
+	static char stem[480];
+	if (!dir || ++frame % 144 != 0) return nullptr;
+	std::snprintf(stem, sizeof stem, "%s/vr_%05u", dir, frame);
 	char path[512];
 	if (world) {
 		for (int eye = 0; eye < 2; ++eye) {
-			std::snprintf(path, sizeof path, "%s/vr_%05u_eye%d.ppm", dir, frame, eye);
+			std::snprintf(path, sizeof path, "%s_eye%d.ppm", stem, eye);
 			dumpFramebuffer(s.stereo.framebuffer, eye * s.stereo.eyeWidth, 0, s.stereo.eyeWidth, s.stereo.eyeHeight, path);
 		}
 	}
 	glBindFramebuffer_(GL_READ_FRAMEBUFFER, s.readFbo);
 	glFramebufferTexture2D_(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, interfaceTexture, 0);
-	std::snprintf(path, sizeof path, "%s/vr_%05u_panel%s.ppm", dir, frame, world ? "_hud" : "");
+	std::snprintf(path, sizeof path, "%s_panel%s.ppm", stem, world ? "_hud" : "");
 	dumpFramebuffer(s.readFbo, 0, 0, width, height, path);
+	if (world) {
+		std::snprintf(path, sizeof path, "%s_panel_hud_alpha.ppm", stem);
+		dumpFramebuffer(s.readFbo, 0, 0, width, height, path, true);
+	}
 	glBindFramebuffer_(GL_READ_FRAMEBUFFER, s.readFbo);
 	glFramebufferTexture2D_(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+	return stem;
 }
 
 // ── Input ────────────────────────────────────────────────────────────────────
@@ -729,6 +818,7 @@ void destroyAll()
 	destroySwapchain(s.stereoSwap);
 	destroyStereoTarget(s.stereo);
 	destroySwapchain(s.panelSwap);
+	destroySwapchain(s.hudSwap);
 	if (s.readFbo) glDeleteFramebuffers_(1, &s.readFbo);
 	if (s.drawFbo) glDeleteFramebuffers_(1, &s.drawFbo);
 	s.readFbo = s.drawFbo = 0;
@@ -800,28 +890,72 @@ void pollEvents()
 
 // The interface over the world, worn rather than hung: a quad in view space,
 // which the compositor holds still against the head, so no turn takes it out of
-// sight. It spans the part of the view both eyes share. Any wider and its edges
-// would sit where only one eye sees them.
-bool placeHudOnHead(XrPosef& pose, XrExtent2Df& size)
+// sight. Sizes are at one metre; the distance it is shown at scales them.
+struct HudOnHead {
+	float width, height;         // the interface itself
+	float viewWidth, viewHeight; // everything either eye can see around it
+};
+
+// Its corners reach the edge of the field both eyes share: the corners, not the
+// sides, because a lens shows roughly a circle and it is the corners of a
+// rectangle that the circle cuts off.
+bool placeHudOnHead(HudOnHead& out)
 {
 	if (!s.config.hudOnHead || s.viewSpace == XR_NULL_HANDLE || !s.viewsValid) return false;
 	const XrFovf& left  = s.views[0].fov;
 	const XrFovf& right = s.views[1].fov;
-	const float across  = std::min({ -left.angleLeft, -right.angleLeft, left.angleRight, right.angleRight });
-	const float up      = std::min({ left.angleUp, right.angleUp, -left.angleDown, -right.angleDown });
-	if (!(across > 0.0f && across < 1.5f) || !(up > 0.0f && up < 1.5f)) return false;
+	const float shared  = std::min({ -left.angleLeft, -right.angleLeft, left.angleRight, right.angleRight, left.angleUp, right.angleUp,
+		                             -left.angleDown, -right.angleDown });
+	const float across  = std::max({ -left.angleLeft, -right.angleLeft, left.angleRight, right.angleRight });
+	const float up      = std::max({ left.angleUp, right.angleUp, -left.angleDown, -right.angleDown });
+	if (!(shared > 0.0f) || !(across < 1.4f) || !(up < 1.4f)) return false;
 
-	const float distance = s.config.hudDistance;
-	const float width    = 2.0f * distance * s.config.hudFill * std::min(std::tan(across), std::tan(up) * 16.0f / 9.0f);
-	size                 = { width, width * 9.0f / 16.0f };
-	pose                 = toXr(Pose { Quat {}, Vec3 { 0.0f, 0.0f, -distance } });
+	const float diagonal = 2.0f * s.config.hudFill * std::tan(shared);
+	out.height           = diagonal / std::sqrt(kPanelAspect * kPanelAspect + 1.0f);
+	out.width            = out.height * kPanelAspect;
+	// A little past the last thing either eye sees, so no edge of it shows.
+	out.viewWidth        = std::max(out.width, 2.1f * std::tan(across));
+	out.viewHeight       = std::max(out.height, 2.1f * std::tan(up));
 
 	static float reported = 0.0f;
-	if (width != reported) {
-		reported = width;
-		printf("[PC VR] Interface on the head: %.0f degrees across (both eyes share %.0f), %.2f m away\n",
-		       2.0f * std::atan(width * 0.5f / distance) * 57.29578f, 2.0f * across * 57.29578f, distance);
+	if (out.width != reported) {
+		reported = out.width;
+		printf("[PC VR] Interface on the head: %.0f by %.0f degrees, in a view of %.0f by %.0f\n",
+		       2.0f * std::atan(out.width * 0.5f) * 57.29578f, 2.0f * std::atan(out.height * 0.5f) * 57.29578f,
+		       2.0f * across * 57.29578f, 2.0f * up * 57.29578f);
 		fflush(stdout);
+	}
+	return true;
+}
+
+// The swapchain the interface on the head is shown from: the interface's own
+// pixels in the middle and, around them, a surround reaching the edge of the
+// view (see blitWithSurround). Without it a veil the game lays over the whole
+// screen -- behind a message, in a fade -- would end where the interface does,
+// and hang in front of the world as a rectangle. Made on first use, since the
+// field of view is not known before the first frame, and again when the size
+// of the interface is changed: a smaller interface needs more surround to
+// reach the same edge.
+bool ensureHudSwapchain(const HudOnHead& hud)
+{
+	const auto border = [](int pixels, float view, float own) {
+		return std::clamp(int(std::ceil(float(pixels) * (view / own - 1.0f) * 0.5f)), 0, (kSwapchainLimit - pixels) / 2);
+	};
+	const int borderX = border(kPanelWidth, hud.viewWidth, hud.width);
+	const int borderY = border(kPanelHeight, hud.viewHeight, hud.height);
+	// A few pixels either way is the runtime's field of view settling, not a
+	// change of setting.
+	if (s.hudSwap.handle != XR_NULL_HANDLE && std::abs(borderX - s.hudBorderX) <= 16 && std::abs(borderY - s.hudBorderY) <= 16) {
+		return true;
+	}
+	if (s.hudSwapFailed) return false;
+	destroySwapchain(s.hudSwap);
+	s.hudBorderX = borderX;
+	s.hudBorderY = borderY;
+	if (!createSwapchain(s.hudSwap, kPanelWidth + 2 * s.hudBorderX, kPanelHeight + 2 * s.hudBorderY)) {
+		destroySwapchain(s.hudSwap);
+		s.hudSwapFailed = true;
+		return false;
 	}
 	return true;
 }
@@ -832,7 +966,7 @@ bool placeHudOnHead(XrPosef& pose, XrExtent2Df& size)
 // head. That is where a whole flat screen always goes, and the interface over
 // the world too with hud=room. The placement is kept up either way, so the
 // panel is already in front of the player when a flat screen comes up.
-XrPosef placePanel(bool hud, XrExtent2Df& size, XrSpace& space)
+XrPosef placePanel(bool hud, XrExtent2Df& size)
 {
 	const float headYaw = s.headValid ? yawOf(s.head.q) : 0.0f;
 	if (!s.panelPlaced && s.headValid) {
@@ -848,17 +982,10 @@ XrPosef placePanel(bool hud, XrExtent2Df& size, XrSpace& space)
 		s.panelAnchor = s.panelAnchor + (s.head.p - s.panelAnchor) * (1.0f - std::exp(-s.frameDt / 0.6f));
 	}
 
-	space = s.appSpace;
-	XrPosef onHead;
-	if (hud && placeHudOnHead(onHead, size)) {
-		space = s.viewSpace;
-		return onHead;
-	}
-
 	const float distance = hud ? 1.1f : 2.0f;
-	const float width    = hud ? 1.4f : 2.6f;
+	const float width    = hud ? 1.3f : 2.4f;
 	const float drop     = hud ? 0.08f : 0.0f;
-	size                 = { width, width * 9.0f / 16.0f };
+	size                 = { width, width / kPanelAspect };
 	Pose pose { yawQuat(s.panelYaw), s.panelAnchor + forwardOnGround(s.panelYaw) * distance + Vec3 { 0.0f, -drop, 0.0f } };
 	return toXr(pose);
 }
@@ -1066,6 +1193,12 @@ int pc_vr_session_running(void) { return s.sessionRunning ? 1 : 0; }
 
 int pc_vr_frame_active(void) { return s.frameBegun && s.shouldRender && s.viewsValid ? 1 : 0; }
 
+void pc_vr_interface_size(int* width, int* height)
+{
+	if (width) *width = kPanelWidth;
+	if (height) *height = kPanelHeight;
+}
+
 void pc_vr_frame_begin(void)
 {
 	pollEvents();
@@ -1177,7 +1310,7 @@ void pc_vr_submit(int worldDrawn, unsigned interfaceTexture, int width, int heig
 		} else {
 			++s.statPanelOnly;
 		}
-		maybeDumpFrame(world, interfaceTexture, width, height);
+		const char* dumpStem = maybeDumpFrame(world, interfaceTexture, width, height);
 		if (world) {
 			const bool ok = blitToSwapchain(s.stereoSwap, s.stereo.framebuffer, s.stereo.width(), s.stereo.eyeHeight);
 			for (int eye = 0; eye < 2; ++eye) {
@@ -1195,18 +1328,33 @@ void pc_vr_submit(int worldDrawn, unsigned interfaceTexture, int width, int heig
 			}
 		}
 
-		if (interfaceTexture != 0 && width > 0 && height > 0) {
+		if (interfaceTexture != 0 && width > 0 && height > 0 && !(world && s.hudHidden)) {
+			HudOnHead onHead;
+			const bool worn     = world && placeHudOnHead(onHead);
+			const bool surround = worn && ensureHudSwapchain(onHead);
+			Swapchain& shown    = surround ? s.hudSwap : s.panelSwap;
 			glBindFramebuffer_(GL_READ_FRAMEBUFFER, s.readFbo);
 			glFramebufferTexture2D_(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, interfaceTexture, 0);
-			const bool ok = blitToSwapchain(s.panelSwap, s.readFbo, width, height);
+			const bool ok = surround ? blitWithSurround(shown, s.hudBorderX, s.hudBorderY, s.readFbo, width, height, dumpStem)
+			                         : blitToSwapchain(shown, s.readFbo, width, height);
 			glBindFramebuffer_(GL_READ_FRAMEBUFFER, s.readFbo);
 			glFramebufferTexture2D_(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
 			if (ok) {
 				panel.eyeVisibility              = XR_EYE_VISIBILITY_BOTH;
-				panel.subImage.swapchain         = s.panelSwap.handle;
+				panel.subImage.swapchain         = shown.handle;
 				panel.subImage.imageRect.offset  = { 0, 0 };
-				panel.subImage.imageRect.extent  = { s.panelSwap.width, s.panelSwap.height };
-				panel.pose                       = placePanel(world, panel.size, panel.space);
+				panel.subImage.imageRect.extent  = { shown.width, shown.height };
+				panel.space                      = s.appSpace;
+				panel.pose                       = placePanel(world, panel.size);
+				if (worn) {
+					// The interface is the middle of what is shown; the quad is
+					// larger by as much as the swapchain is.
+					const float distance = s.config.hudDistance;
+					panel.space          = s.viewSpace;
+					panel.pose           = toXr(Pose { Quat {}, Vec3 { 0.0f, 0.0f, -distance } });
+					panel.size           = { distance * onHead.width * float(shown.width) / float(kPanelWidth),
+						                     distance * onHead.height * float(shown.height) / float(kPanelHeight) };
+				}
 				// Over the world the interface is drawn onto transparency, with
 				// alpha kept premultiplied by the GL layer. A whole flat screen is
 				// opaque.
@@ -1321,6 +1469,33 @@ void pc_vr_set_rumble(int on) { s.rumble = on != 0 && s.sessionRunning; }
 
 int pc_vr_debug_mode(void) { return s.debugMode; }
 
+int pc_vr_hud_on_head(void) { return s.config.hudOnHead ? 1 : 0; }
+float pc_vr_hud_fill(void) { return s.config.hudFill; }
+float pc_vr_hud_distance(void) { return s.config.hudDistance; }
+
+// Without an instance the settings file was never read, and writing it back
+// would replace the player's with defaults.
+void pc_vr_set_hud_on_head(int onHead)
+{
+	if (s.instance == XR_NULL_HANDLE) return;
+	s.config.hudOnHead = onHead != 0;
+	saveConfig();
+}
+
+void pc_vr_set_hud_fill(float fill)
+{
+	if (s.instance == XR_NULL_HANDLE) return;
+	s.config.hudFill = std::clamp(fill, kHudFillMin, kHudFillMax);
+	saveConfig();
+}
+
+void pc_vr_set_hud_distance(float metres)
+{
+	if (s.instance == XR_NULL_HANDLE) return;
+	s.config.hudDistance = std::clamp(metres, kHudDistanceMin, kHudDistanceMax);
+	saveConfig();
+}
+
 void pc_vr_read_pad(PcVrPad* out)
 {
 	if (!out) return;
@@ -1407,6 +1582,16 @@ void pc_vr_read_pad(PcVrPad* out)
 		}
 		if (other.menu && !s.menuLatch) out->settingsToggle = 1;
 
+		// The pointing hand's upper button puts the interface over the world
+		// away, or brings it back: the level with nothing in front of it.
+		if (point.upper && !s.hudLatch) {
+			s.hudHidden = !s.hudHidden;
+			printf("[PC VR] Interface: %s\n", s.hudHidden ? "hidden" : "shown");
+			fflush(stdout);
+			pulse(pointingHand(), 0.4f, 0.03f);
+		}
+		if (point.upper) s.hudLatch = true;
+
 		// Cycle the rendering experiments: normal, no water surface, no shadow
 		// repaint, neither.
 		if (point.stickClick && !s.debugLatch) {
@@ -1446,6 +1631,9 @@ void pc_vr_read_pad(PcVrPad* out)
 		out->x          = other.lower;
 		out->y          = other.upper;
 	}
+	// A press that hid or showed the interface stays the VR button's until it
+	// is let go, whichever of the two is released first.
+	if (!point.upper) s.hudLatch = false;
 
 	// A held-button trace, for working out why a control did nothing.
 	if (std::getenv("PIKMIN_VR_INPUT_DEBUG")) {
@@ -1492,7 +1680,7 @@ void pc_vr_read_pad(PcVrPad* out)
 	}
 
 	out->a        = point.lower || triggerA;
-	out->b        = point.upper || point.squeeze > 0.6f; // grip: whistle
+	out->b        = (point.upper && !s.hudLatch) || point.squeeze > 0.6f; // grip: whistle
 	out->start    = other.menu && !s.modifierHeld;
 	out->triggerL = other.trigger;
 	out->l        = other.trigger > 0.6f;

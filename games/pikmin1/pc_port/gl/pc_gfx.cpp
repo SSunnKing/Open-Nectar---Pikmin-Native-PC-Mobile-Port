@@ -3393,14 +3393,11 @@ void pc_gfx_begin_frame(void) {
             // shape and size the window on the monitor happens to be. It matches
             // the panel swapchain (pc_vr_xr.cpp), so presenting it is a copy
             // rather than a rescale -- on a standalone headset that matters.
-            sCurrentAspectRatio = 16.0f / 9.0f;
-#ifdef __ANDROID__
-            baseWidth = 1280.0f;
-            baseHeight = 720.0f;
-#else
-            baseWidth = 1920.0f;
-            baseHeight = 1080.0f;
-#endif
+            int panelWidth = 0, panelHeight = 0;
+            pc_vr_interface_size(&panelWidth, &panelHeight);
+            baseWidth = float(panelWidth);
+            baseHeight = float(panelHeight);
+            sCurrentAspectRatio = baseWidth / baseHeight;
             renderScale = 1.0f;
         }
 #endif

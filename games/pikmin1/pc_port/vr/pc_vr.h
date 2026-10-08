@@ -52,6 +52,11 @@ int pc_vr_session_running(void);
 /// The frame being built will be shown in the headset.
 int pc_vr_frame_active(void);
 
+/// The size the interface is drawn at while a session runs, whatever the
+/// window on the monitor is: 4:3, the shape the game lays its interface out
+/// for that wastes least of a headset's view.
+void pc_vr_interface_size(int* width, int* height);
+
 /* ── Per frame (GL layer) ────────────────────────────────────────────────── */
 
 /// Waits for the headset's next frame and locates the eyes. Once per frame,
@@ -139,6 +144,20 @@ void pc_vr_set_rumble(int on);
 /// cleared background magenta, bit 8 turns culling off, bit 16 logs every draw
 /// in each pass (with PIKMIN_DRAW_DEBUG set) and bit 32 disables batching.
 int pc_vr_debug_mode(void);
+
+/* ── Settings (the port's menu) ──────────────────────────────────────────── */
+
+/// Where the interface over the world goes: worn on the head, in view however
+/// it turns, or hung in the room. Worn, `fill` is how far out its corners
+/// reach (1 is the edge of what both eyes see) and `distance` how far away it
+/// appears to be, in metres. Setters take effect on the next frame and are
+/// written to pikmin_vr.ini; they do nothing when VR never started.
+int pc_vr_hud_on_head(void);
+void pc_vr_set_hud_on_head(int onHead);
+float pc_vr_hud_fill(void);
+void pc_vr_set_hud_fill(float fill);
+float pc_vr_hud_distance(void);
+void pc_vr_set_hud_distance(float metres);
 
 /* ── Input (pc_window) ───────────────────────────────────────────────────── */
 
