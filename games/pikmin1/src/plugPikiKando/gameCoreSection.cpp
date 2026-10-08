@@ -22,6 +22,9 @@
 #include <vector>
 #include "pc_window.h"
 #include "gl/pc_gfx.h"
+#if defined(PIKI_PC_VR)
+#include "vr/pc_vr.h"
+#endif
 #endif
 #endif
 
@@ -3105,7 +3108,9 @@ void GameCoreSection::draw(Graphics& gfx)
 	gfx.useMatrix(Matrix4f::ident, 0);
 	gfx.calcLighting(1.0f);
 	if (mDrawHideType != 8) {
+		pc_gfx_debug_span("map-opaque");
 		mMapMgr->refresh(gfx);
+		pc_gfx_debug_span(nullptr);
 	}
 	mMapMgr->mDayMgr->setFog(gfx, nullptr);
 
@@ -3160,7 +3165,21 @@ void GameCoreSection::draw(Graphics& gfx)
 #endif
 
 	naviMgr->renderCircle(gfx);
-	mMapMgr->drawXLU(gfx);
+	// PIKMIN_VR_SKIP_XLU=1 leaves the translucent half of the map undrawn: whatever remains visible is what lies
+	// behind the water, which says whether a wrong-looking pond is the surface or what is under it.
+	{
+		static const bool skipXluAlways = getenv("PIKMIN_VR_SKIP_XLU") != nullptr;
+#if defined(PIKI_PC_VR)
+		const bool skipXlu = skipXluAlways || (pc_vr_debug_mode() & 1) != 0;
+#else
+		const bool skipXlu = skipXluAlways;
+#endif
+		pc_gfx_debug_span("map-xlu");
+		if (!skipXlu) {
+			mMapMgr->drawXLU(gfx);
+		}
+		pc_gfx_debug_span(nullptr);
+	}
 	MATCHING_START_TIMER("shadow draw", true);
 	mMapMgr->mDayMgr->setFog(gfx, stack_new(Colour)(0, 0, 0, 0));
 	Matrix4f mtx;
@@ -3190,7 +3209,11 @@ void GameCoreSection::draw(Graphics& gfx)
 	gfx.setCBlending(blend);
 	gfx.setDepth(true);
 	MATCHING_STOP_TIMER("shadow draw");
+	// Translucent shapes are queued rather than drawn where they are submitted: this is where the queue is flushed,
+	// so this is where the water actually reaches the hardware.
+	pc_gfx_debug_span("map-post");
 	mMapMgr->postrefresh(gfx);
+	pc_gfx_debug_span(nullptr);
 	if (AIPerf::soundDebug) {
 		seSystem->draw3d(gfx);
 	}

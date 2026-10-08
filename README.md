@@ -24,13 +24,16 @@ along unchanged and has no VR mode.
 | Quest 2 / Quest 3 standalone | sideloaded APK, 52-72 FPS measured on a Quest 2 |
 | Flat | unchanged; with no headset the game runs exactly as Open Nectar does |
 
-Two ways to play, swapped at any time with **left grip + Y**:
+Three ways to play, cycled at any time with **left grip + Y**:
 
 - **Third-person** — you float behind and above the captain, looking where you
   look rather than where the game's camera pointed.
 - **Tabletop** — the level is a miniature in front of you with the captain at
   its centre. Nothing moves you, so it is the comfortable one, and it suits a
   game about directing a crowd from above.
+- **First-person** — you are the captain, at his size, with the world towering
+  around you. The view moves when he does, so it is the least comfortable of
+  the three.
 
 ## Controls (Quest Touch)
 
@@ -56,7 +59,7 @@ The left grip is the **VR button**. While it is held:
 | Right stick up/down | Move the view closer or further, or resize the table |
 | Move the left hand | Drag the table (tabletop) |
 | X | Re-anchor your play space where you are sitting or standing now |
-| Y | Swap third-person and tabletop |
+| Y | Next rig: third-person, tabletop, first-person |
 | Menu | Open the port's settings menu |
 | Left stick | D-pad |
 | Left stick click | Z |
@@ -72,18 +75,29 @@ startup:
 
 | Key | Default | What it does |
 |---|---|---|
-| `mode` | `third_person` | `third_person` or `tabletop` |
+| `mode` | `third_person` | `third_person`, `tabletop` or `first_person` |
 | `third_person_scale` | 100 | World units per metre: lower makes the world bigger around you |
 | `third_person_distance` | 300 | How far behind the captain the view sits |
 | `third_person_height` | 220 | How far above him |
 | `tabletop_scale` | 1000 | World units per metre on the table: higher shrinks the level |
+| `first_person_scale` | 15 | World units per metre as the captain: lower makes you smaller still |
+| `first_person_height` | 20 | How far above his feet your eyes are, in world units |
+| `first_person_follow_seconds` | 0.08 | How closely the view rides him; higher smooths out bumpy ground |
 | `snap_turn_degrees` | 30 | Turn step |
 | `follow_seconds` | 0.25 | How lazily the view follows the captain |
+| `lean_back_degrees` | 0 | Tips the world up towards you, -90 to 90. Around 30 puts the captain (or the table) straight ahead instead of below, and suits playing reclined |
+| `camera_forward` | 0 | Metres to sit forward (negative: back) of where the rig puts you, cutscenes included |
+| `camera_height` | 0 | Metres to sit higher (negative: lower) |
+| `tracking` | `6dof` | `6dof` follows the headset; `3dof` only its rotation, so leaning cannot push you through things; `none` locks the view to your face |
 | `supersample` | 1.0 desktop, 0.75 standalone | Multiplies the runtime's recommended eye resolution; takes effect on restart |
 | `left_handed` | 0 | Swaps the pointing and off hands |
 | `right_stick_turns` | 0 | 1 puts turning on the right stick and swarming on the VR button |
 
-`PIKMIN_VR=0` turns VR off. Diagnostics: `PIKMIN_VR_MODE=tabletop`,
+The lean is about your own left-right axis as of the last re-anchor (VR button
++ X), so re-anchor after turning your chair.
+
+`PIKMIN_VR=0` turns VR off. Diagnostics: `PIKMIN_VR_MODE=tabletop` (or
+`first_person`),
 `PIKMIN_VR_INPUT_DEBUG=1`, `PIKMIN_VR_DUMP=<dir>`, `PIKMIN_VR_CLEAR_DEBUG=1`,
 `PIKMIN_VR_NO_CULL=1`. On Android these go in `env.txt` in the game's folder,
 one per line.
@@ -133,8 +147,26 @@ Windows and Android only so far, because the session binds to WGL or EGL.
 
 - **Water renders as a dark, opaque sheet** instead of translucent, and
   anything below the surface (including the captain's submerged half) goes dark
-  with it. Under investigation; it is not the eye projection, the clear colour
-  or the blend override, all of which have been ruled out by testing.
+  with it. This is an Open Nectar rendering bug, not a VR one: nothing in the
+  VR path touches the state involved, and the flat build draws it the same way.
+
+  The pond is built from a near-black base (`TEVreg0 x raster` =
+  `(0.21,0.60,0.71) x (0.09,0.09,0.10)`, alpha saturating to opaque) plus two
+  additive highlight layers that are meant to give it its surface. Those layers
+  compute a bright colour but contribute almost nothing, because their alpha
+  comes out around `0.54 x 0.54 x 0.54 / 2` = 0.08.
+
+  Instrumented on a Quest 2 (`PIKMIN_DRAW_DEBUG=1`, debug bit 16), the
+  following were each measured and match the hardware: the packed material
+  words (`alphaCompare=0x64610233`, `blend=0x00003141`, `depth=0x00000301`) and
+  their unpacking, the alpha test comparison functions and combining op, the
+  channel colour/alpha sources, the TEV combiners, registers and konst values,
+  the ripple texture's decode (`571: 512x256 I4, alpha 0..255, repeat, no
+  mipmaps`), both texgens and their scroll animation, the per-vertex alpha
+  (full `0..1` range), and the lighting clamp, which matches Dolphin's
+  `clamp(lacc, 0, 255)` before the material multiply. Whatever differs from
+  Dolphin is not in this material's state, so the next step is a side-by-side
+  FIFO comparison rather than more inspection of the port.
 - **There is no sky.** The flat camera never looks above the treeline, so the
   game draws nothing there and you see black. A tinted dome would fix it.
 - **Screen-space interface pieces sit on the panel, not in the world**: enemy

@@ -14,6 +14,12 @@ void pc_gfx_init(void);
 void pc_gfx_begin_frame(void);
 void pc_gfx_present(void);
 
+// Diagnostics: names the pass the following draws belong to. With
+// PIKMIN_DRAW_DEBUG set, the state each named draw is made with is printed a
+// few times a second -- which material, which textures, which blend. nullptr
+// ends the span.
+void pc_gfx_debug_span(const char* name);
+
 // VR (PIKMIN_VR): brackets the 3D world of a gameplay frame. Draws in between
 // go to both eyes; everything outside is the interface panel. No-ops when the
 // frame is not going to the headset. See pc_port/vr/pc_vr.h.

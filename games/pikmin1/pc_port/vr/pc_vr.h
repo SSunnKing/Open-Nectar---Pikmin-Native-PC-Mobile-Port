@@ -9,10 +9,11 @@
  *
  *  - The camera. Before the world is drawn, the camera the game picked (Pcam
  *    or a cutscene) is replaced by the headset's head pose, placed in the world
- *    by the active rig: third-person (a view floating behind the captain) or
- *    tabletop (the level as a miniature in front of the player). Culling, the
- *    stick's movement direction and billboards all read that camera, so they
- *    follow the headset without further changes.
+ *    by the active rig: third-person (a view floating behind the captain),
+ *    tabletop (the level as a miniature in front of the player) or
+ *    first-person (the captain's own eyes). Culling, the stick's movement
+ *    direction and billboards all read that camera, so they follow the headset
+ *    without further changes.
  *
  *  - The world draw. Between pc_gfx_vr_world_begin/end every GL draw is issued
  *    once per eye into that eye's target, with the eye's offset from the head
@@ -34,6 +35,7 @@ extern "C" {
 typedef enum PcVrRigMode {
 	PC_VR_RIG_THIRD_PERSON = 0,
 	PC_VR_RIG_TABLETOP     = 1,
+	PC_VR_RIG_FIRST_PERSON = 2,
 } PcVrRigMode;
 
 /* ── Lifecycle (pc_main) ─────────────────────────────────────────────────── */
@@ -119,12 +121,24 @@ int pc_vr_aim_ray(float origin[3], float direction[3]);
 void pc_vr_set_aim_hit(const float hit[3], int valid);
 int pc_vr_laser(float from[3], float to[3]);
 
+/// The view is inside the captain's head (first-person, outside a cutscene),
+/// so his model must not be drawn around it. Valid after pc_vr_scene_view.
+int pc_vr_hide_focus(void);
+
 /// World distance to add to fog start/end: in tabletop the eye is far from
 /// the miniature in world units, and unshifted fog would swallow it.
 float pc_vr_fog_offset(void);
 
 /// GameCube rumble motor on/off, routed to the controllers' haptics.
 void pc_vr_set_rumble(int on);
+
+/// Live rendering experiments, cycled in the headset with the VR button and the
+/// pointing hand's stick click, so a scene can be compared with itself instead
+/// of rebuilt for each guess. Bit 1 skips the translucent half of the map (the
+/// water surface), bit 2 the subtractive shadow repaint, bit 4 paints the
+/// cleared background magenta, bit 8 turns culling off, bit 16 logs every draw
+/// in each pass (with PIKMIN_DRAW_DEBUG set) and bit 32 disables batching.
+int pc_vr_debug_mode(void);
 
 /* ── Input (pc_window) ───────────────────────────────────────────────────── */
 

@@ -234,6 +234,8 @@ struct State {
 
 	bool rumble        = false;
 	bool rumbleApplied = false;
+	int debugMode      = 0;
+	bool debugLatch    = false;
 
 	// What the last stretch of frames was made of. A frame that carries a world
 	// and one that carries only the flat panel look completely different in the
@@ -323,6 +325,35 @@ EGLConfig currentEglConfig(EGLDisplay display, EGLContext context)
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
+PcVrRigMode parseMode(const char* text)
+{
+	if (std::strncmp(text, "table", 5) == 0) return PC_VR_RIG_TABLETOP;
+	if (std::strncmp(text, "first", 5) == 0) return PC_VR_RIG_FIRST_PERSON;
+	return PC_VR_RIG_THIRD_PERSON;
+}
+
+const char* modeKey(PcVrRigMode mode)
+{
+	return mode == PC_VR_RIG_TABLETOP ? "tabletop" : mode == PC_VR_RIG_FIRST_PERSON ? "first_person" : "third_person";
+}
+
+const char* modeName(PcVrRigMode mode)
+{
+	return mode == PC_VR_RIG_TABLETOP ? "tabletop" : mode == PC_VR_RIG_FIRST_PERSON ? "first-person" : "third-person";
+}
+
+Tracking parseTracking(const char* text)
+{
+	if (text[0] == '3') return Tracking::ThreeDof;
+	if (text[0] == 'n' || text[0] == '0') return Tracking::Fixed;
+	return Tracking::SixDof;
+}
+
+const char* trackingKey(Tracking tracking)
+{
+	return tracking == Tracking::ThreeDof ? "3dof" : tracking == Tracking::Fixed ? "none" : "6dof";
+}
+
 void loadConfig()
 {
 	RigSettings& rig = s.rig.settings;
@@ -334,20 +365,25 @@ void loadConfig()
 		const std::string key   = line.substr(0, eq);
 		const std::string value = line.substr(eq + 1);
 		const float number      = std::strtof(value.c_str(), nullptr);
-		if (key == "mode") rig.mode = value.rfind("table", 0) == 0 ? PC_VR_RIG_TABLETOP : PC_VR_RIG_THIRD_PERSON;
+		if (key == "mode") rig.mode = parseMode(value.c_str());
 		else if (key == "third_person_scale" && number > 1.0f) rig.thirdPersonScale = number;
 		else if (key == "third_person_distance" && number >= 0.0f) rig.thirdPersonDistance = number;
 		else if (key == "third_person_height") rig.thirdPersonHeight = number;
 		else if (key == "tabletop_scale" && number >= 150.0f) rig.tabletopScale = std::min(number, 8000.0f);
+		else if (key == "first_person_scale" && number > 1.0f) rig.firstPersonScale = number;
+		else if (key == "first_person_height") rig.firstPersonEyeHeight = number;
+		else if (key == "first_person_follow_seconds" && number >= 0.0f) rig.firstPersonFollowSeconds = number;
 		else if (key == "snap_turn_degrees" && number > 0.0f) rig.snapTurnDegrees = number;
 		else if (key == "follow_seconds" && number >= 0.0f) rig.followSeconds = number;
+		else if (key == "lean_back_degrees") rig.leanBackDegrees = std::clamp(number, -90.0f, 90.0f);
+		else if (key == "camera_forward") rig.cameraForward = std::clamp(number, -20.0f, 20.0f);
+		else if (key == "camera_height") rig.cameraHeight = std::clamp(number, -20.0f, 20.0f);
+		else if (key == "tracking") rig.tracking = parseTracking(value.c_str());
 		else if (key == "supersample" && number > 0.2f) s.config.supersample = std::min(number, 2.0f);
 		else if (key == "left_handed") s.config.leftHanded = number != 0.0f;
 		else if (key == "right_stick_turns") s.config.rightStickTurns = number != 0.0f;
 	}
-	if (const char* mode = std::getenv("PIKMIN_VR_MODE")) {
-		rig.mode = std::strncmp(mode, "table", 5) == 0 ? PC_VR_RIG_TABLETOP : PC_VR_RIG_THIRD_PERSON;
-	}
+	if (const char* mode = std::getenv("PIKMIN_VR_MODE")) rig.mode = parseMode(mode);
 }
 
 void saveConfig()
@@ -356,13 +392,20 @@ void saveConfig()
 	std::ofstream file(kConfigPath);
 	if (!file) return;
 	file << "# Pikmin VR settings. Delete a line to go back to its default.\n";
-	file << "mode=" << (rig.mode == PC_VR_RIG_TABLETOP ? "tabletop" : "third_person") << "\n";
+	file << "mode=" << modeKey(rig.mode) << "\n";
 	file << "third_person_scale=" << rig.thirdPersonScale << "\n";
 	file << "third_person_distance=" << rig.thirdPersonDistance << "\n";
 	file << "third_person_height=" << rig.thirdPersonHeight << "\n";
 	file << "tabletop_scale=" << rig.tabletopScale << "\n";
+	file << "first_person_scale=" << rig.firstPersonScale << "\n";
+	file << "first_person_height=" << rig.firstPersonEyeHeight << "\n";
+	file << "first_person_follow_seconds=" << rig.firstPersonFollowSeconds << "\n";
 	file << "snap_turn_degrees=" << rig.snapTurnDegrees << "\n";
 	file << "follow_seconds=" << rig.followSeconds << "\n";
+	file << "lean_back_degrees=" << rig.leanBackDegrees << "\n";
+	file << "camera_forward=" << rig.cameraForward << "\n";
+	file << "camera_height=" << rig.cameraHeight << "\n";
+	file << "tracking=" << trackingKey(rig.tracking) << "\n";
 	file << "supersample=" << s.config.supersample << "\n";
 	file << "left_handed=" << (s.config.leftHanded ? 1 : 0) << "\n";
 	file << "right_stick_turns=" << (s.config.rightStickTurns ? 1 : 0) << "\n";
@@ -956,8 +999,8 @@ void pc_vr_init(void)
 		return;
 	}
 
-	printf("[PC VR] Ready (%s space, %s rig). Put the headset on to start.\n", appType == XR_REFERENCE_SPACE_TYPE_STAGE ? "stage" : "local",
-	       s.rig.settings.mode == PC_VR_RIG_TABLETOP ? "tabletop" : "third-person");
+	printf("[PC VR] Ready (%s space, %s rig, %s tracking). Put the headset on to start.\n",
+	       appType == XR_REFERENCE_SPACE_TYPE_STAGE ? "stage" : "local", modeName(s.rig.settings.mode), trackingKey(s.rig.settings.tracking));
 	fflush(stdout);
 }
 
@@ -1150,7 +1193,7 @@ int pc_vr_scene_view(const PcVrSceneInput* in, PcVrSceneView* out)
 		s.sceneReady = s.rig.ready();
 		if (!s.sceneReady) return 0;
 	}
-	const Pose head = s.rig.headInWorld(s.head);
+	const Pose head = s.rig.headInWorld(s.rig.viewHead(s.head));
 	gxViewFromPose(head, out->view);
 	out->position[0] = head.p.x;
 	out->position[1] = head.p.y;
@@ -1187,9 +1230,12 @@ float pc_vr_cull_distance(void)
 int pc_vr_aim_ray(float origin[3], float direction[3])
 {
 	const HandState& hand = s.hands[pointingHand()];
-	if (!s.sceneReady || !hand.aimValid) return 0;
-	const Vec3 o = s.rig.trackingToWorld(hand.aim.p);
-	const Vec3 d = normalize(s.rig.trackingDirectionToWorld(rotate(hand.aim.q, { 0.0f, 0.0f, -1.0f })));
+	if (!s.sceneReady || !hand.aimValid || !s.headValid) return 0;
+	// The hand keeps its place relative to the head the world is drawn from,
+	// which is not the headset's own when the tracking mode holds it still.
+	const Pose aim = compose(compose(s.rig.viewHead(s.head), inverse(s.head)), hand.aim);
+	const Vec3 o   = s.rig.trackingToWorld(aim.p);
+	const Vec3 d   = normalize(s.rig.trackingDirectionToWorld(rotate(aim.q, { 0.0f, 0.0f, -1.0f })));
 	origin[0]    = o.x;
 	origin[1]    = o.y;
 	origin[2]    = o.z;
@@ -1215,9 +1261,16 @@ int pc_vr_laser(float from[3], float to[3])
 	return 1;
 }
 
-float pc_vr_fog_offset(void) { return s.sceneReady ? s.rig.fogOffset(s.head) : 0.0f; }
+int pc_vr_hide_focus(void)
+{
+	return s.sceneReady && pc_vr_frame_active() && s.rig.settings.mode == PC_VR_RIG_FIRST_PERSON && !s.rig.inCutscene() ? 1 : 0;
+}
+
+float pc_vr_fog_offset(void) { return s.sceneReady ? s.rig.fogOffset(s.rig.viewHead(s.head)) : 0.0f; }
 
 void pc_vr_set_rumble(int on) { s.rumble = on != 0 && s.sessionRunning; }
+
+int pc_vr_debug_mode(void) { return s.debugMode; }
 
 void pc_vr_read_pad(PcVrPad* out)
 {
@@ -1301,9 +1354,29 @@ void pc_vr_read_pad(PcVrPad* out)
 			s.rig.requestRecentre();
 			s.panelPlaced = false;
 			saveConfig();
-			printf("[PC VR] Rig: %s\n", s.rig.settings.mode == PC_VR_RIG_TABLETOP ? "tabletop" : "third-person");
+			printf("[PC VR] Rig: %s\n", modeName(s.rig.settings.mode));
 		}
 		if (other.menu && !s.menuLatch) out->settingsToggle = 1;
+
+		// Cycle the rendering experiments: normal, no water surface, no shadow
+		// repaint, neither.
+		if (point.stickClick && !s.debugLatch) {
+			// Bits: 1 skips the water surface, 2 the shadow repaint, 4 paints the
+			// background magenta, 8 turns culling off. Cycled through the
+			// combinations worth comparing rather than all sixteen.
+			static const int modes[3]   = { 0, 8, 16 };
+			static const char* names[3] = { "normal", "no culling", "verbose draw log" };
+			static int modeIndex        = 0;
+			modeIndex                   = (modeIndex + 1) % 3;
+			s.debugMode                 = modes[modeIndex];
+			printf("[PC VR] render debug: %s\n", names[modeIndex]);
+			fflush(stdout);
+			// Long and at full amplitude: repeated calls do not stack into separate
+			// buzzes (each one restarts the same vibration), and the 40ms used
+			// elsewhere is short enough to go unnoticed through a controller grip.
+			pulse(pointingHand(), 1.0f, 0.15f);
+		}
+		s.debugLatch = point.stickClick;
 		s.recentreLatch = other.lower;
 		s.modeLatch     = other.upper;
 		s.menuLatch     = other.menu;
@@ -1318,6 +1391,7 @@ void pc_vr_read_pad(PcVrPad* out)
 		s.recentreLatch = false;
 		s.modeLatch     = false;
 		s.menuLatch     = false;
+		s.debugLatch    = false;
 		out->stickX     = other.stickX;
 		out->stickY     = other.stickY;
 		out->x          = other.lower;

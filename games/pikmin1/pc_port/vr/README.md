@@ -8,7 +8,7 @@ Supported: Windows with a PC-connected headset (Quest over Link, Air Link or
 Virtual Desktop; anything with an OpenXR runtime that speaks OpenGL), and
 Quest 2/3 standalone through the Android build.
 
-## The two rigs
+## The three rigs
 
 **Third-person** — you float behind and above the captain, looking where you
 look rather than where the game's camera pointed. The view follows him with a
@@ -18,7 +18,18 @@ little lag, and turning is snap turns rather than a slow sweep.
 centre. Comfortable (nothing moves you), and it suits a game about directing a
 crowd from above. Grab, spin and resize the table to taste.
 
-Switch between them at any time: hold the VR button and press Y.
+**First-person** — your head is the captain's, at a scale that makes you his
+size. His model is not drawn, the view rides him closely, and turning is snap
+turns. Cutscenes still play from the director's camera, where he is visible
+again.
+
+Cycle through them at any time: hold the VR button and press Y.
+
+Three adjustments apply to every rig. **Lean back** tips the world up towards
+you, so the captain or the table is ahead rather than below, or so the horizon
+is level when you are reclined. **Camera forward / height** move you off the
+spot the rig chose, in metres. **Tracking** can drop the headset's position
+(3DoF) or all of its motion from the view.
 
 ## Controls (Quest Touch)
 
@@ -47,7 +58,7 @@ The left grip is the **VR button**. While it is held:
 | Right stick | Swarm (the C-stick) |
 | Move the left hand | Drag the table (tabletop) |
 | X | Face where you are looking |
-| Y | Swap third-person and tabletop |
+| Y | Next rig: third-person, tabletop, first-person |
 | Menu | Open the port's own settings menu |
 | Left stick | D-pad |
 | Left stick click | Z |
@@ -59,19 +70,29 @@ re-read at startup:
 
 | Key | Default | What it does |
 |---|---|---|
-| `mode` | `third_person` | `third_person` or `tabletop` |
+| `mode` | `third_person` | `third_person`, `tabletop` or `first_person` |
 | `third_person_scale` | 100 | World units per metre: lower makes the world bigger around you |
 | `third_person_distance` | 300 | How far behind the captain the view sits |
 | `third_person_height` | 220 | How far above him |
 | `tabletop_scale` | 1000 | World units per metre on the table: higher shrinks the level |
+| `first_person_scale` | 15 | World units per metre as the captain: lower makes you smaller still |
+| `first_person_height` | 20 | How far above his feet your eyes are, in world units |
+| `first_person_follow_seconds` | 0.08 | How closely the view rides him; higher smooths out bumpy ground |
 | `snap_turn_degrees` | 30 | Turn step |
 | `follow_seconds` | 0.25 | How lazily the view follows the captain |
+| `lean_back_degrees` | 0 | Tips the world up towards you, -90 to 90: a level gaze looks down by this much |
+| `camera_forward` | 0 | Metres to sit forward (negative: back) of where the rig puts you, cutscenes included |
+| `camera_height` | 0 | Metres to sit higher (negative: lower) |
+| `tracking` | `6dof` | `6dof`, `3dof` (rotation only) or `none` (the view is locked to the headset) |
 | `supersample` | 1.0 | Multiplies the runtime's recommended eye resolution |
 | `left_handed` | 0 | Swaps the pointing and off hands |
 | `right_stick_turns` | 1 | Pointing hand's stick turns the view; 0 puts swarming there instead |
 
-`PIKMIN_VR=0` turns VR off entirely. `PIKMIN_VR_MODE=tabletop` overrides the
-rig for one run. `PIKMIN_VR_INPUT_DEBUG=1` traces the controller buttons, and
+The lean is a pitch about your own left-right axis as of the last re-anchor (VR
+button + X), so re-anchor after turning your chair.
+
+`PIKMIN_VR=0` turns VR off entirely. `PIKMIN_VR_MODE=tabletop` (or
+`first_person`) overrides the rig for one run. `PIKMIN_VR_INPUT_DEBUG=1` traces the controller buttons, and
 `PIKMIN_VR_DUMP=<dir>` writes both eyes and the panel as PPM every few seconds.
 
 ## Building
@@ -133,8 +154,8 @@ adb shell rm -r /data/local/tmp/nectar-assets
 
 `pc_vr_rig.*` holds the mapping between tracking space and the world, and is
 plain maths with no OpenXR or GL in it, so `pc_vr_rig_test` can check the
-conventions -- eye offsets, the GameCube-style frustum, snap turns, the table --
-without a headset. Run it with `ctest -R pc_vr_rig_test`.
+conventions -- eye offsets, the GameCube-style frustum, snap turns, the table,
+the lean, the tracking modes -- without a headset. Run it with `ctest -R pc_vr_rig_test`.
 
 `pc_vr_xr.cpp` is everything platform: session, swapchains, frame submission,
 Touch bindings, haptics. It has a Windows/WGL branch and an Android/EGL one.

@@ -179,6 +179,163 @@ int main()
 		check(near(rig.trackingToWorld(table + Vec3 { 0.2f, 0, 0 }), scene.focus), "dragging moves the table");
 	}
 
+	// ── First-person ─────────────────────────────────────────────────────────
+	{
+		Rig rig;
+		rig.settings.mode = PC_VR_RIG_FIRST_PERSON;
+		SceneState scene;
+		scene.focus         = { 400, 30, -900 };
+		scene.cameraForward = { -1, -0.4f, 0 };
+		const TrackedFrame t = headAt({ 0.3f, 1.2f, -0.1f }, 0.6f);
+		rig.update(t, scene, 1.0f / 72.0f);
+
+		const RigSettings& s = rig.settings;
+		const Vec3 eyes      = scene.focus + Vec3 { 0, s.firstPersonEyeHeight, 0 };
+		check(near(rig.headInWorld(t.head).p, eyes), "first-person puts the head at the captain's eyes");
+		check(near(rotate(rig.headInWorld(t.head).q, { 0, 0, -1 }), Vec3 { -1, 0, 0 }), "looking the way the game camera did, level");
+		check(near(rig.scale(), s.firstPersonScale), "at its own scale");
+		check(!rig.inCutscene(), "and is not a cutscene");
+
+		// Leaning 10 cm to the side moves the view by the scale's worth, not the captain.
+		const Vec3 right = rotate(t.head.q, { 1, 0, 0 });
+		check(near(rig.trackingToWorld(t.head.p + right * 0.1f), eyes + Vec3 { 0, 0, -0.1f * s.firstPersonScale }),
+		      "physical movement is in the captain's scale");
+
+		rig.zoom(2.0f);
+		rig.update(t, scene, 1.0f / 72.0f);
+		check(near(rig.headInWorld(t.head).p, eyes), "there is no distance to zoom in first-person");
+
+		SceneState cut    = scene;
+		cut.cutscene      = true;
+		cut.cameraPos     = { 0, 500, 0 };
+		cut.cameraForward = { 0, 0, 1 };
+		rig.update(t, cut, 1.0f / 72.0f);
+		check(rig.inCutscene() && near(rig.headInWorld(t.head).p, cut.cameraPos), "a cutscene takes the view out of his head");
+		rig.update(t, scene, 1.0f / 72.0f);
+		check(!rig.inCutscene() && near(rig.headInWorld(t.head).p, eyes), "and it snaps back afterwards");
+	}
+
+	// ── Mode cycle ───────────────────────────────────────────────────────────
+	{
+		Rig rig;
+		rig.toggleMode();
+		check(rig.settings.mode == PC_VR_RIG_TABLETOP, "third-person cycles to tabletop");
+		rig.toggleMode();
+		check(rig.settings.mode == PC_VR_RIG_FIRST_PERSON, "tabletop cycles to first-person");
+		rig.toggleMode();
+		check(rig.settings.mode == PC_VR_RIG_THIRD_PERSON, "first-person cycles back to third-person");
+	}
+
+	// ── Lean back ────────────────────────────────────────────────────────────
+	{
+		Rig rig;
+		rig.settings.leanBackDegrees = 30.0f;
+		SceneState scene;
+		scene.focus         = { 0, 0, 0 };
+		scene.cameraForward = { 0, 0, -1 };
+		// Facing left in the room: the lean has to be about the player's own
+		// left-right axis, not the tracking space's X.
+		const TrackedFrame t = headAt({ 2, 1.6f, -1 }, kPi * 0.5f);
+		rig.update(t, scene, 1.0f / 72.0f);
+
+		const RigSettings& s = rig.settings;
+		const float lean     = 30.0f * kPi / 180.0f;
+		check(near(rig.headInWorld(t.head).p, Vec3 { 0, s.thirdPersonHeight, s.thirdPersonDistance }), "leaning pivots on the head: it stays put");
+		check(near(rotate(rig.headInWorld(t.head).q, { 0, 0, -1 }), Vec3 { 0, -std::sin(lean), -std::cos(lean) }),
+		      "a level gaze looks down by the lean");
+		check(near(rotate(rig.headInWorld(t.head).q, { 1, 0, 0 }), Vec3 { 1, 0, 0 }), "and stays level side to side");
+		// Reclining by the same angle finds the horizon again.
+		const Pose reclined { normalize(t.head.q * pitchQuat(lean)), t.head.p };
+		check(near(rotate(rig.headInWorld(reclined).q, { 0, 0, -1 }), Vec3 { 0, 0, -1 }), "looking up by the lean finds the horizon");
+		// The mapping stays rigid: a metre is the scale's worth in any direction.
+		const Vec3 a = rig.trackingToWorld({ 0.3f, 1.0f, 0.2f });
+		const Vec3 b = rig.trackingToWorld({ 1.3f, 1.0f, 0.2f });
+		const Vec3 c = rig.trackingToWorld({ 0.3f, 2.0f, 0.2f });
+		check(near(length(b - a), s.thirdPersonScale, 0.05f) && near(length(c - a), s.thirdPersonScale, 0.05f) && near(dot(b - a, c - a), 0.0f, 0.5f),
+		      "leaning neither stretches nor shears the world");
+	}
+	{
+		// Tabletop: the far edge of the table comes up towards the player.
+		Rig rig;
+		rig.settings.mode            = PC_VR_RIG_TABLETOP;
+		rig.settings.leanBackDegrees = 30.0f;
+		SceneState scene;
+		scene.focus         = { 50, 0, 50 };
+		scene.cameraForward = { 0, 0, -1 };
+		const TrackedFrame t = headAt({ 0, 1.6f, 0 }, 0.0f);
+		rig.update(t, scene, 1.0f / 72.0f);
+
+		const RigSettings& s = rig.settings;
+		const Vec3 table     = rig.anchorTracking();
+		const float lean     = 30.0f * kPi / 180.0f;
+		check(near(rig.trackingToWorld(table), scene.focus), "the tilted table still turns about the captain");
+		// The ground 100 units beyond the captain, back in the player's space.
+		const Vec3 beyond = table + Vec3 { 0, std::sin(lean), -std::cos(lean) } * (100.0f / s.tabletopScale);
+		check(near(rig.trackingToWorld(beyond), scene.focus + Vec3 { 0, 0, -100 }, 0.05f), "its far side is raised by the lean");
+	}
+
+	// ── Camera forward and height ────────────────────────────────────────────
+	{
+		Rig rig;
+		rig.settings.cameraForward = 0.5f;
+		rig.settings.cameraHeight  = -0.25f;
+		SceneState scene;
+		scene.focus         = { 0, 0, 0 };
+		scene.cameraForward = { 0, 0, -1 };
+		const TrackedFrame t = headAt({ 0, 1.6f, 0 }, 0.0f);
+		rig.update(t, scene, 1.0f / 72.0f);
+
+		const RigSettings& s = rig.settings;
+		const Vec3 plain { 0, s.thirdPersonHeight, s.thirdPersonDistance };
+		check(near(rig.headInWorld(t.head).p, plain + Vec3 { 0, -0.25f * s.thirdPersonScale, -0.5f * s.thirdPersonScale }),
+		      "camera forward and height move the player, in metres");
+
+		SceneState cut    = scene;
+		cut.cutscene      = true;
+		cut.cameraPos     = { 100, 100, 100 };
+		cut.cameraForward = { 1, 0, 0 };
+		rig.update(t, cut, 1.0f / 72.0f);
+		check(near(rig.headInWorld(t.head).p, cut.cameraPos + Vec3 { 0.5f * s.thirdPersonScale, -0.25f * s.thirdPersonScale, 0 }),
+		      "along the cutscene camera's own heading too");
+	}
+	{
+		Rig rig;
+		rig.settings.mode          = PC_VR_RIG_TABLETOP;
+		rig.settings.cameraForward = 0.2f;
+		SceneState scene;
+		const TrackedFrame t = headAt({ 0, 1.6f, 0 }, 0.0f);
+		rig.update(t, scene, 1.0f / 72.0f);
+		const RigSettings& s = rig.settings;
+		check(near(rig.anchorTracking(), Vec3 { 0, 1.6f - s.tabletopDrop, -s.tabletopDistance + 0.2f }), "on the table it brings the table closer");
+		check(near(rig.fogOffset(t.head), length(t.head.p - rig.anchorTracking()) * s.tabletopScale, 0.5f), "and the fog follows");
+	}
+
+	// ── Tracking modes ───────────────────────────────────────────────────────
+	{
+		Rig rig;
+		SceneState scene;
+		const TrackedFrame start = headAt({ 0.5f, 1.5f, 0.25f }, 0.3f);
+		rig.update(start, scene, 1.0f / 72.0f);
+		// Later: the player has leaned away and looked somewhere else.
+		const Pose moved { normalize(yawQuat(-0.9f) * pitchQuat(0.4f)), { 0.9f, 1.3f, -0.2f } };
+
+		check(near(rig.viewHead(moved).p, moved.p) && near(rotate(rig.viewHead(moved).q, { 0, 0, -1 }), rotate(moved.q, { 0, 0, -1 })),
+		      "6DoF draws from the headset itself");
+
+		rig.settings.tracking = Tracking::ThreeDof;
+		check(near(rig.viewHead(moved).p, start.head.p), "3DoF keeps the head where it was at recentre");
+		check(near(rotate(rig.viewHead(moved).q, { 0, 0, -1 }), rotate(moved.q, { 0, 0, -1 })), "but still turns with it");
+
+		rig.settings.tracking = Tracking::Fixed;
+		check(near(rig.viewHead(moved).p, start.head.p), "no tracking keeps the position");
+		check(near(rotate(rig.viewHead(moved).q, { 0, 0, -1 }), forwardOnGround(0.3f)), "and the level heading of the recentre");
+
+		// A hand carried through the same change keeps its place relative to the head.
+		const Pose hand { moved.q, transform(moved, { 0.2f, -0.3f, -0.4f }) };
+		const Pose seen = compose(compose(rig.viewHead(moved), inverse(moved)), hand);
+		check(near(transform(inverse(rig.viewHead(moved)), seen.p), Vec3 { 0.2f, -0.3f, -0.4f }), "hands stay where the player sees them");
+	}
+
 	if (failures == 0) std::printf("pc_vr_rig_test: all checks passed\n");
 	return failures == 0 ? 0 : 1;
 }

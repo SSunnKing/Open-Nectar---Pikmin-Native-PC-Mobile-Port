@@ -21,6 +21,21 @@ void Rig::setMode(PcVrRigMode mode)
 	mFollowValid  = false;
 }
 
+void Rig::toggleMode()
+{
+	switch (settings.mode) {
+	case PC_VR_RIG_THIRD_PERSON:
+		setMode(PC_VR_RIG_TABLETOP);
+		break;
+	case PC_VR_RIG_TABLETOP:
+		setMode(PC_VR_RIG_FIRST_PERSON);
+		break;
+	default:
+		setMode(PC_VR_RIG_THIRD_PERSON);
+		break;
+	}
+}
+
 void Rig::faceFocus()
 {
 	// Look the way the captain looks: in third-person that puts the view behind
@@ -43,6 +58,8 @@ void Rig::snapTurn(int direction)
 
 void Rig::zoom(float factor)
 {
+	// There is no distance to change with the view in the captain's head.
+	if (settings.mode != PC_VR_RIG_THIRD_PERSON) return;
 	mZoom        = std::clamp(mZoom * factor, 0.25f, 4.0f);
 	mFollowValid = false;
 }
@@ -56,6 +73,7 @@ void Rig::scaleTable(float factor) { settings.tabletopScale = std::clamp(setting
 Vec3 Rig::followTarget(const SceneState& scene) const
 {
 	if (settings.mode == PC_VR_RIG_TABLETOP) return scene.focus;
+	if (settings.mode == PC_VR_RIG_FIRST_PERSON) return scene.focus + Vec3 { 0.0f, settings.firstPersonEyeHeight, 0.0f };
 	// The head at recentre sits behind the captain along the direction the
 	// player faces in the world: local +Z is behind, as forward is -Z.
 	const Vec3 behind { 0.0f, settings.thirdPersonHeight * mZoom, settings.thirdPersonDistance * mZoom };
@@ -84,10 +102,10 @@ void Rig::update(const TrackedFrame& tracked, const SceneState& scene, float dt)
 		mFollowValid = false;
 	}
 
-	if (settings.mode == PC_VR_RIG_THIRD_PERSON && scene.cutscene) {
+	if (settings.mode != PC_VR_RIG_TABLETOP && scene.cutscene) {
 		// Put the head where the director put the camera, facing the same way.
 		mFocus       = scene.cameraPos;
-		mMapYaw      = yawOfDirection(scene.cameraForward) - mTrackingYaw;
+		mMapRotation = mapRotation(yawOfDirection(scene.cameraForward));
 		mWasCutscene = true;
 		mReady       = true;
 		return;
@@ -102,26 +120,64 @@ void Rig::update(const TrackedFrame& tracked, const SceneState& scene, float dt)
 		mFocus       = target;
 		mFollowValid = true;
 	} else {
-		const float blend = 1.0f - std::exp(-std::max(dt, 0.0f) / std::max(settings.followSeconds, 0.01f));
-		mFocus            = mFocus + (target - mFocus) * blend;
+		const float seconds = settings.mode == PC_VR_RIG_FIRST_PERSON ? settings.firstPersonFollowSeconds : settings.followSeconds;
+		const float blend   = 1.0f - std::exp(-std::max(dt, 0.0f) / std::max(seconds, 0.01f));
+		mFocus              = mFocus + (target - mFocus) * blend;
 	}
 
-	mMapYaw = settings.mode == PC_VR_RIG_TABLETOP ? mWorldYaw - mTableYaw : mWorldYaw - mTrackingYaw;
-	mReady  = true;
+	mMapRotation = mapRotation(mWorldYaw);
+	mReady       = true;
 }
 
-float Rig::scale() const { return settings.mode == PC_VR_RIG_TABLETOP ? settings.tabletopScale : settings.thirdPersonScale; }
-
-Vec3 Rig::trackingToWorld(Vec3 tracking) const
+Quat Rig::mapRotation(float worldYaw) const
 {
-	return mFocus + rotate(yawQuat(mMapYaw), tracking - anchorTracking()) * scale();
+	// The lean is a pitch about the player's left-right axis, which is only an
+	// axis of tracking space once the yaw the player faced at recentre is taken
+	// out; the world's yaw goes on afterwards. A positive lean sends a level
+	// gaze downwards in the world, so it is looking up that finds the horizon.
+	const float lean = std::clamp(settings.leanBackDegrees, -90.0f, 90.0f) * kPi / 180.0f;
+	return normalize(yawQuat(worldYaw) * pitchQuat(-lean) * yawQuat(-anchorYaw()));
 }
 
-Vec3 Rig::trackingDirectionToWorld(Vec3 direction) const { return rotate(yawQuat(mMapYaw), direction); }
+float Rig::scale() const
+{
+	switch (settings.mode) {
+	case PC_VR_RIG_TABLETOP:
+		return settings.tabletopScale;
+	case PC_VR_RIG_FIRST_PERSON:
+		return settings.firstPersonScale;
+	default:
+		return settings.thirdPersonScale;
+	}
+}
+
+Vec3 Rig::anchorTracking() const
+{
+	// Moving the player forward and up is moving what they are anchored to back
+	// and down, along the way they faced at recentre.
+	const Vec3 camera = forwardOnGround(anchorYaw()) * settings.cameraForward + Vec3 { 0.0f, settings.cameraHeight, 0.0f };
+	return (settings.mode == PC_VR_RIG_TABLETOP ? mTablePos : mOrigin) - camera;
+}
+
+Vec3 Rig::trackingToWorld(Vec3 tracking) const { return mFocus + rotate(mMapRotation, tracking - anchorTracking()) * scale(); }
+
+Vec3 Rig::trackingDirectionToWorld(Vec3 direction) const { return rotate(mMapRotation, direction); }
 
 Pose Rig::headInWorld(const Pose& headTracking) const
 {
-	return { normalize(yawQuat(mMapYaw) * headTracking.q), trackingToWorld(headTracking.p) };
+	return { normalize(mMapRotation * headTracking.q), trackingToWorld(headTracking.p) };
+}
+
+Pose Rig::viewHead(const Pose& headTracking) const
+{
+	switch (settings.tracking) {
+	case Tracking::ThreeDof:
+		return { headTracking.q, mOrigin };
+	case Tracking::Fixed:
+		return { yawQuat(mTrackingYaw), mOrigin };
+	default:
+		return headTracking;
+	}
 }
 
 // 10 cm and 60 m, whatever the scale. The ratio is what the depth buffer
@@ -133,7 +189,7 @@ float Rig::farPlane() const { return std::max(10000.0f, 60.0f * scale()); }
 float Rig::fogOffset(const Pose& headTracking) const
 {
 	if (settings.mode != PC_VR_RIG_TABLETOP) return 0.0f;
-	return length(headTracking.p - mTablePos) * scale();
+	return length(headTracking.p - anchorTracking()) * scale();
 }
 
 Mat4 eyeFromHead(const Pose& headTracking, const Pose& eyeTracking, float scale)

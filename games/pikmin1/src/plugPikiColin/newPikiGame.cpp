@@ -275,8 +275,8 @@ static void vrApplyCamera(Graphics& gfx, bool cutscene)
 
 	// PIKMIN_VR_NO_CULL=1 turns culling off again, to tell a culling fault from a material one: anything that appears
 	// only with this set was being culled when it should not have been.
-	static const bool noCull = getenv("PIKMIN_VR_NO_CULL") != nullptr;
-	if (noCull) {
+	static const bool noCullAlways = getenv("PIKMIN_VR_NO_CULL") != nullptr;
+	if (noCullAlways || (pc_vr_debug_mode() & 8) != 0) {
 		cam->mActivePlaneCount = 0;
 	}
 }

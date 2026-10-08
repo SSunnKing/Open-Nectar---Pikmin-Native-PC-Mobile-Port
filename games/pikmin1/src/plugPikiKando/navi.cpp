@@ -3859,6 +3859,14 @@ void Navi::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 	// solo el dibujado: la animación y updateInfo siguen corriendo, y de ahí
 	// salen las esferas de colisión (sin ellas no se abre la cebolla).
 	bool drawn = pc_first_person_active_for(mNaviID);
+#if defined(PIKI_PC_VR)
+	// First-person VR looks out of the captain's own eyes: drawn, his model would be the inside of a helmet wrapped
+	// round the view. Only the model goes: the collision and antenna light updates below carry on. The rig follows
+	// the first captain, so a second one is still drawn.
+	if (this == naviMgr->getNavi() && pc_vr_hide_focus()) {
+		drawn = true;
+	}
+#endif
 	if (drawn) {
 	} else if (pcDrawAsPikmin(gfx)) {
 		drawn = true;

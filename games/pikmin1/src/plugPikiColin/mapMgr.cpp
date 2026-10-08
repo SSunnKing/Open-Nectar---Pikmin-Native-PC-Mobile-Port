@@ -2,6 +2,9 @@
 #if defined(PIKI_PC_PORT)
 #include "gl/pc_gfx.h"
 #endif
+#if defined(PIKI_PC_VR)
+#include "vr/pc_vr.h"
+#endif
 
 #include "AIPerf.h"
 #include "Creature.h"
@@ -1370,6 +1373,14 @@ void MapMgr::preRender(Graphics& gfx)
  */
 void MapMgr::drawShadowCasters(Graphics& gfx)
 {
+#if defined(PIKI_PC_VR)
+	// This pass repaints the whole map subtractively through a projected texture the port never fills (GXCopyTex is a
+	// stub), and its coordinates come from the view -- which in VR is the player's head. Skipping it says whether it is
+	// what darkens the water.
+	if ((pc_vr_debug_mode() & 2) != 0) {
+		return;
+	}
+#endif
 	// set up overall graphics settings
 	gfx.setFog(false);
 	int blend = gfx.setCBlending(BLEND_Subtractive);
@@ -1644,7 +1655,9 @@ void MapMgr::postrefresh(Graphics& gfx)
 	mDayMgr->setFog(gfx, nullptr);
 
 	// draw shadows
+	pc_gfx_debug_span("shadowcast");
 	drawShadowCasters(gfx);
+	pc_gfx_debug_span(nullptr);
 
 	// queue up carry info text
 	if (lgMgr) {
@@ -1654,7 +1667,9 @@ void MapMgr::postrefresh(Graphics& gfx)
 
 	// draw carry info text (and any other light flares)
 	gfx.useMatrix(Matrix4f::ident, 0);
+	pc_gfx_debug_span("cached-shapes");
 	gfx.flushCachedShapes();
+	pc_gfx_debug_span(nullptr);
 	gsys->flushLFlares(gfx);
 
 	// draw effects

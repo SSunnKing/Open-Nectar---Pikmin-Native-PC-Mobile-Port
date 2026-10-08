@@ -59,6 +59,9 @@ inline Vec3 rotate(Quat q, Vec3 v)
 /// to the left, as OpenXR's and the game's right-handed axes both have it.
 inline Quat yawQuat(float radians) { return { 0.0f, std::sin(radians * 0.5f), 0.0f, std::cos(radians * 0.5f) }; }
 
+/// Rotation of `radians` about +X. Positive tips -Z (forward) up towards +Y.
+inline Quat pitchQuat(float radians) { return { std::sin(radians * 0.5f), 0.0f, 0.0f, std::cos(radians * 0.5f) }; }
+
 /// Heading of a direction on the ground plane, in yawQuat's convention: the
 /// yaw that turns -Z onto the direction's horizontal part.
 inline float yawOfDirection(Vec3 d) { return std::atan2(-d.x, -d.z); }
