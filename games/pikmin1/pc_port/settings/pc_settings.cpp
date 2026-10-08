@@ -47,6 +47,7 @@
 #include "pc_vs.h"
 #include "pc_achievements.h"
 #include "pc_speedrun.h"
+#include "randomizer/pc_randomizer.h"
 #include "gameflow.h"
 #include "SoundMgr.h"
 #include "pc_art.h"
@@ -1584,6 +1585,7 @@ void latchKeys() {
 void pcNewGamePromptInput();
 void pcErasedNoticeInput();
 void pcSpeedrunIntroInput();
+void pcRandomizerIntroInput();
 void pcPlayerCountPromptInput();
 void pcDevAssignPromptInput();
 
@@ -1798,6 +1800,13 @@ void pollMenuInput() {
         pc_touch_claim_game_menu();
 #endif
         pcSpeedrunIntroInput();
+        return;
+    }
+    if (pc_randomizer_intro_active()) {
+#if PIKI_PC_TOUCH
+        pc_touch_claim_game_menu();
+#endif
+        pcRandomizerIntroInput();
         return;
     }
     if (pc_newgame_prompt_active()) {
@@ -3617,7 +3626,7 @@ void pc_settings_init(void) {
 int pc_settings_menu_is_open(void) { return sMenuOpen ? 1 : 0; }
 
 bool pc_settings_consume_game_input(void) {
-    const bool promptWasOpen = pc_erased_notice_active() || pc_speedrun_intro_active() || pc_newgame_prompt_active() || pc_playercount_prompt_active() || pc_devassign_prompt_active()
+    const bool promptWasOpen = pc_erased_notice_active() || pc_speedrun_intro_active() || pc_randomizer_intro_active() || pc_newgame_prompt_active() || pc_playercount_prompt_active() || pc_devassign_prompt_active()
                             || pc_captain_prompt_active() || pc_glass_menu_active();
     pollMenuInput();   // edge-detect using the previous frame's snapshot
     latchKeys();       // snapshot AFTER polling so next frame sees this one
@@ -3941,6 +3950,494 @@ void pc_speedrun_intro_draw(void) {
     drawHelpLine(panelX + panelW / 2, panelY + 160, "A / Enter: select    B / Esc: back", Colour(150, 165, 195, 255));
 }
 
+// ─── Randomizer: explicación y ajustes ───
+// Se abre al elegir Randomizer en el título, antes del capitán y los slots.
+// Dos páginas: la explicación (A sigue, B vuelve al título) y "Randomizer
+// Settings" (flechas para cambiar, Start sigue, B vuelve a la explicación).
+
+namespace {
+bool sRandomizerIntroOpen   = false;
+int  sRandomizerIntroResult = PC_RANDOMIZER_INTRO_PENDING;
+int  sRndPage = 0; // 0 = explicación, 1 = ajustes
+int  sRndRow  = 0;
+
+// Filas de ajustes. Cada una tiene sus valores y una línea de ayuda por valor.
+enum RndRow {
+    RND_Parts, RND_Enemies, RND_Bosses, RND_Mix, RND_Wisps, RND_Final, RND_Daily, RND_Share, RND_NewSeed,
+    RND_Start, RND_RowCount
+};
+const char* const kRndRowTitles[RND_RowCount] = {
+    "Ship parts", "Enemies", "Bosses", "Bosses <-> enemies", "Honeywisps & Flint Beetles",
+    "Final boss", "Daily layout", "Seed code", "", "",
+};
+
+bool sRndTextWasOn = false;
+
+// Código compartido (semilla + ajustes): campo de texto libre aparte, porque
+// lleva letras que el editor de la semilla no acepta.
+bool sShareEditing = false;
+Uint32 sShareErrorUntil = 0; ///< aviso de código no válido, tras salir de la edición
+char sShareEdit[32];
+int  sShareLen     = 0;
+
+/// Si el texto es un código compartido válido, aplica semilla y ajustes.
+bool rndApplyShareCode(const char* text) {
+    uint64_t seed  = 0;
+    uint32_t flags = 0;
+    if (!pc_randomizer_parse_share_code(text, &seed, &flags)) return false;
+    pc_randomizer_set_pending_seed(seed);
+    pc_randomizer_set_pending_flags(flags);
+    return true;
+}
+
+void rndCopyShareCode() {
+    char code[PC_RANDOMIZER_SHARE_CODE_LEN];
+    pc_randomizer_format_share_code(pc_randomizer_pending_seed(), pc_randomizer_pending_flags(), code, sizeof(code));
+    SDL_SetClipboardText(code);
+}
+
+void rndTextInputOn() {
+    // En Android abre el teclado virtual; en escritorio solo activa los
+    // eventos de texto. Se deja como estaba al salir.
+    sRndTextWasOn = SDL_IsTextInputActive() == SDL_TRUE;
+    if (!sRndTextWasOn) SDL_StartTextInput();
+}
+
+void rndShareBegin() {
+    sShareLen     = 0;
+    sShareEdit[0] = '\0';
+    sShareEditing = true;
+    rndTextInputOn();
+}
+
+void rndShareEnd() {
+    sShareEditing = false;
+    if (!sRndTextWasOn) SDL_StopTextInput();
+}
+
+void rndShareType(char c) {
+    if (c >= 'a' && c <= 'z') c = char(c - 32);
+    const bool ok = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || c == '-';
+    if (!ok || sShareLen >= int(sizeof(sShareEdit)) - 1) return;
+    sShareEdit[sShareLen++] = c;
+    sShareEdit[sShareLen]   = '\0';
+}
+
+/// Confirma. Un código no válido no bloquea: se sale de la edición, vuelve
+/// el código que había y se avisa unos segundos.
+void rndShareCommit() {
+    if (sShareLen > 0 && !rndApplyShareCode(sShareEdit)) sShareErrorUntil = SDL_GetTicks() + 3000;
+    rndShareEnd();
+}
+
+bool rndShareErrorShown() { return SDL_GetTicks() < sShareErrorUntil; }
+
+int rndValueCount(int row) {
+    return (row == RND_Enemies || row == RND_Bosses) ? 3 : 2;
+}
+
+int rndValue(int row) {
+    const uint32_t f = pc_randomizer_pending_flags();
+    switch (row) {
+    case RND_Parts:   return (f & PC_RND_ShuffleParts) ? 1 : 0;
+    case RND_Enemies: return int(pc_rnd_enemy_mode(f));
+    case RND_Bosses:  return int(pc_rnd_boss_mode(f));
+    case RND_Mix:     return (f & PC_RND_BossEnemyMix) ? 1 : 0;
+    case RND_Wisps:   return (f & PC_RND_IncludeWispsFlint) ? 1 : 0;
+    case RND_Final:   return (f & PC_RND_RandomFinalBoss) ? 1 : 0;
+    case RND_Daily:   return (f & PC_RND_DailyLayout) ? 1 : 0;
+    default:          return 0;
+    }
+}
+
+void rndSetValue(int row, int v) {
+    uint32_t f = pc_randomizer_pending_flags();
+    auto bit = [&](uint32_t b) { f = v ? (f | b) : (f & ~b); };
+    switch (row) {
+    case RND_Parts:   bit(PC_RND_ShuffleParts); break;
+    case RND_Enemies: f = pc_rnd_with_enemy_mode(f, uint32_t(v)); break;
+    case RND_Bosses:  f = pc_rnd_with_boss_mode(f, uint32_t(v)); break;
+    case RND_Mix:     bit(PC_RND_BossEnemyMix); break;
+    case RND_Wisps:   bit(PC_RND_IncludeWispsFlint); break;
+    case RND_Final:   bit(PC_RND_RandomFinalBoss); break;
+    case RND_Daily:   bit(PC_RND_DailyLayout); break;
+    default: break;
+    }
+    pc_randomizer_set_pending_flags(f);
+}
+
+const char* rndValueLabel(int row, int v) {
+    switch (row) {
+    case RND_Parts:   return v ? "Shuffled" : "Vanilla";
+    case RND_Enemies:
+    case RND_Bosses:  return v == 2 ? "Chaos" : v == 1 ? "Shuffled" : "Vanilla";
+    case RND_Mix:     return v ? "Yes" : "No";
+    case RND_Wisps:   return v ? "Randomized" : "Vanilla";
+    case RND_Final:   return v ? "Randomized" : "Fixed";
+    case RND_Daily:   return v ? "Changes each day" : "Same every day";
+    default:          return "";
+    }
+}
+
+const char* rndHelp(int row, int v) {
+    switch (row) {
+    case RND_Parts:
+        return v ? "The 29 remaining ship parts swap places. Each zone keeps its count."
+                 : "Every ship part is where it always was.";
+    case RND_Enemies:
+        return v == 2 ? "Any enemy can appear anywhere. Expect the unexpected."
+             : v == 1 ? "Enemies are replaced by others of the same kind."
+                      : "Regular enemies are left as they are.";
+    case RND_Bosses:
+        return v == 2 ? "Any boss can appear in any boss arena."
+             : v == 1 ? "Bosses trade arenas with each other."
+                      : "Bosses are left as they are.";
+    case RND_Mix:
+        return v ? "Bosses may replace regular enemies, and enemies may replace bosses."
+                 : "Bosses and regular enemies are shuffled separately.";
+    case RND_Wisps:
+        return v ? "Include the many Honeywisps and Flint Beetles. Much harder."
+                 : "Honeywisps and Flint Beetles stay as they are.";
+    case RND_Final:
+        return v ? "The Final Trial boss is randomized too. Experimental."
+                 : "The Emperor Bulblax keeps the Final Trial.";
+    case RND_Daily:
+        return v ? "Respawning enemies are re-rolled each day. Parts never move."
+                 : "Each spot keeps the same replacement for the whole run.";
+    case RND_Share:
+        return "This world and its settings in one code. A: enter a friend's. Ctrl+C: copy.";
+    case RND_NewSeed:
+        return "Roll a new random seed.";
+    default:
+        return "Next: difficulty and game mode. The tutorial is always skipped.";
+    }
+}
+
+// Geometría compartida por el dibujo y los toques.
+const int kRndPanelW = 640;
+const int kRndPanelH = 466;
+const int kRndRowH   = 32;
+const int kRndValueW = 250;
+int rndRowY(int panelY, int row) { return panelY + 30 + row * kRndRowH + (row == RND_Start ? 6 : 0); }
+int rndValueX(int panelX) { return panelX + kRndPanelW - 40 - kRndValueW; }
+}
+
+void pc_settings_text_input(const char* text) {
+    if (!sRandomizerIntroOpen || !text) return;
+    if (sShareEditing) {
+        for (const char* p = text; *p; ++p) rndShareType(*p);
+    }
+}
+
+// Ajustes de una partida nueva: se abren al elegir una ranura vacía desde el
+// menú Randomizer. Las partidas ya creadas usan los suyos, guardados en el
+// archivo. Cada partida nueva empieza con una semilla nueva.
+void pc_randomizer_settings_open(void) {
+    sRandomizerIntroOpen   = true;
+    sRandomizerIntroResult = PC_RANDOMIZER_INTRO_PENDING;
+    sRndPage               = 1;
+    sRndRow                = RND_Start;
+    if (sShareEditing) rndShareEnd();
+    pc_randomizer_reroll_pending_seed();
+    pc_menu_edge_reset();
+}
+
+void pc_randomizer_intro_open(void) {
+    sRandomizerIntroOpen   = true;
+    sRandomizerIntroResult = PC_RANDOMIZER_INTRO_PENDING;
+    sRndPage               = 0;
+    sRndRow                = 0;
+    pc_menu_edge_reset();
+}
+
+bool pc_randomizer_intro_active(void) { return sRandomizerIntroOpen; }
+
+int pc_randomizer_intro_result(void) { return sRandomizerIntroResult; }
+
+namespace {
+void pcRandomizerIntroInput() {
+    if (!sRandomizerIntroOpen) return;
+    if (sRndPage == 1 && sShareEditing) {
+        // Igual que la semilla: Enter/Esc en el teclado, A/B en el mando.
+        bool ok     = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_KP_ENTER);
+        bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE);
+        SDL_GameController* ctl = pc_window_get_controller();
+        if (sTouchTapPending) {
+            sTouchTapPending = false;
+            ok = true;
+        }
+        if (ctl) {
+            if (promptPadA(ctl)) ok = true;
+            if (promptPadB(ctl)) cancel = true;
+        }
+        if ((sTouchFrameButtons & PAD_BUTTON_A) != 0) ok = true;
+        if ((sTouchFrameButtons & PAD_BUTTON_B) != 0) cancel = true;
+        if ((SDL_GetModState() & KMOD_CTRL) && keyWentDown(SDL_SCANCODE_V)) {
+            char* clip = SDL_GetClipboardText();
+            sShareLen  = 0;
+            sShareEdit[0] = '\0';
+            for (const char* q = clip ? clip : ""; *q; ++q) rndShareType(*q);
+            SDL_free(clip);
+            rndShareCommit(); // pegar un código completo lo aplica al momento
+        } else if (keyWentDown(SDL_SCANCODE_BACKSPACE)) {
+            if (sShareLen > 0) sShareEdit[--sShareLen] = '\0';
+        }
+        if (ok) rndShareCommit();
+        else if (cancel) rndShareEnd();
+        return;
+    }
+    bool accept = menuOkKey() || (sTouchFrameButtons & PAD_BUTTON_A) != 0;
+    bool back   = menuCancelKey() || (sTouchFrameButtons & PAD_BUTTON_B) != 0;
+    bool up     = keyWentDown(SDL_SCANCODE_UP) || keyWentDown(SDL_SCANCODE_W) || (sTouchFrameButtons & PAD_BUTTON_UP) != 0;
+    bool down   = keyWentDown(SDL_SCANCODE_DOWN) || keyWentDown(SDL_SCANCODE_S) || (sTouchFrameButtons & PAD_BUTTON_DOWN) != 0;
+    bool left   = keyWentDown(SDL_SCANCODE_LEFT) || keyWentDown(SDL_SCANCODE_A) || (sTouchFrameButtons & PAD_BUTTON_LEFT) != 0;
+    bool right  = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D) || (sTouchFrameButtons & PAD_BUTTON_RIGHT) != 0;
+    if (sTouchTapPending) {
+        sTouchTapPending = false;
+        if (sRndPage == 0) {
+            accept = true; // un toque en la explicación sigue adelante
+        } else {
+            int dw = 0, dh = 0;
+            pc_gfx_get_drawable_size(&dw, &dh);
+            const float aspect  = dh > 0 ? float(dw) / float(dh) : 4.0f / 3.0f;
+            const float screenW = aspect * 480.0f;
+            const float x = sTouchTapX * screenW, y = sTouchTapY * 480.0f;
+            const int panelX = int(screenW * 0.5f) - kRndPanelW / 2, panelY = 240 - kRndPanelH / 2;
+            for (int row = 0; row < RND_RowCount; row++) {
+                const float ry = float(rndRowY(panelY, row));
+                if (y < ry || y > ry + kRndRowH - 4) continue;
+                sRndRow = row;
+                if (row == RND_Start || row == RND_Share || row == RND_NewSeed) {
+                    accept = true;
+                } else {
+                    // Mitad izquierda del valor: anterior; derecha: siguiente.
+                    const float vx = float(rndValueX(panelX));
+                    if (x >= vx && x < vx + kRndValueW / 2) left = true;
+                    else if (x >= vx + kRndValueW / 2) right = true;
+                }
+            }
+        }
+    }
+    SDL_GameController* ctl = pc_window_get_controller();
+    if (ctl) {
+        if (promptPadA(ctl)) accept = true;
+        if (promptPadB(ctl)) back = true;
+        if (padNavUp(ctl)) up = true;
+        if (padNavDown(ctl)) down = true;
+        if (padNavLeft(ctl)) left = true;
+        if (padNavRight(ctl)) right = true;
+    }
+
+    if (sRndPage == 0) {
+        if (accept) {
+            sRandomizerIntroOpen   = false;
+            sRandomizerIntroResult = PC_RANDOMIZER_INTRO_CONTINUE;
+        } else if (back) {
+            sRandomizerIntroOpen   = false;
+            sRandomizerIntroResult = PC_RANDOMIZER_INTRO_BACK;
+        }
+        return;
+    }
+
+    if (up)   sRndRow = (sRndRow + RND_RowCount - 1) % RND_RowCount;
+    if (down) sRndRow = (sRndRow + 1) % RND_RowCount;
+    if ((left || right) && sRndRow < RND_Share) {
+        const int n = rndValueCount(sRndRow);
+        rndSetValue(sRndRow, (rndValue(sRndRow) + (right ? 1 : n - 1)) % n);
+    }
+    // Ctrl+C copia el código compartido (semilla + ajustes); Ctrl+V pega un
+    // código compartido (aplica ambos) o, si no lo es, una semilla.
+    const bool seedRows = sRndRow == RND_Share;
+    if (seedRows && (SDL_GetModState() & KMOD_CTRL) && keyWentDown(SDL_SCANCODE_C)) {
+        rndCopyShareCode();
+    }
+    if (seedRows && (SDL_GetModState() & KMOD_CTRL) && keyWentDown(SDL_SCANCODE_V)) {
+        char* clip = SDL_GetClipboardText();
+        if (clip && *clip && !rndApplyShareCode(clip)) sShareErrorUntil = SDL_GetTicks() + 3000;
+        SDL_free(clip);
+        return;
+    }
+    if (accept) {
+        if (sRndRow == RND_Share) {
+            rndShareBegin();
+        } else if (sRndRow == RND_NewSeed) {
+            pc_randomizer_reroll_pending_seed();
+        } else if (sRndRow == RND_Start) {
+            sRandomizerIntroOpen   = false;
+            sRandomizerIntroResult = PC_RANDOMIZER_INTRO_CONTINUE;
+        } else {
+            const int n = rndValueCount(sRndRow);
+            rndSetValue(sRndRow, (rndValue(sRndRow) + 1) % n);
+        }
+    } else if (back) {
+        // Vuelve a la selección de ranura sin crear nada.
+        sRandomizerIntroOpen   = false;
+        sRandomizerIntroResult = PC_RANDOMIZER_INTRO_BACK;
+    }
+}
+
+// Texto P2D que se encoge hasta caber en maxW (las descripciones largas no
+// deben salirse del panel). center: x es el centro.
+void rndText(int x, int y, const char* t, Colour c, int fw, int maxW, bool center) {
+    while (fw > 9 && pc_settings_p2d_text_width(t, fw) > maxW) fw--;
+    const int fh = fw * 3 / 2;
+    if (center) x -= pc_settings_p2d_text_width(t, fw) / 2;
+    srText(x, y, t, c, fw, fh);
+}
+
+void drawRndIntro(DGXGraphics* gfx, int screenW, int screenH) {
+    const int panelW = 620, panelH = 360;
+    const int panelX = screenW / 2 - panelW / 2, panelY = screenH / 2 - panelH / 2 + 10;
+    drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
+    drawPikminHeader(gfx, panelX, panelY, panelW, "Randomizer");
+
+    const Colour kGold(255, 214, 90, 255), kBody(232, 238, 252, 255), kDim(176, 192, 222, 255);
+    rndText(panelX + panelW / 2, panelY + 34, "Every run is a brand new expedition.", kGold, 16, panelW - 60, true);
+
+    // Una idea por línea, con viñeta: qué se baraja, cómo se elige, la
+    // semilla, cómo empieza y dónde se guarda.
+    struct Bullet { const char* text; const char* sub; };
+    const Bullet bullets[] = {
+        { "Enemies, bosses and ship parts get shuffled.", "Choose how wild it gets when you start a new file." },
+        { "Same seed and settings, same world.", "Share your seed to race a friend." },
+        { "No tutorial: start on Day 2.", "With the Main Engine and 20 red Pikmin." },
+        { "Separate saves.", "Randomizer files never touch your normal ones." },
+    };
+    const int textX = panelX + 64, textW = panelW - 64 - 36;
+    for (int i = 0; i < 4; i++) {
+        const int y = panelY + 82 + i * 58;
+        fillRoundRectGrad(gfx, panelX + 40, y + 5, 10, 10, 5, Colour(255, 236, 140, 255), Colour(220, 160, 40, 255));
+        rndText(textX, y, bullets[i].text, kBody, 13, textW, false);
+        rndText(textX, y + 23, bullets[i].sub, kDim, 11, textW, false);
+    }
+    drawHelpLine(panelX + panelW / 2, panelY + panelH - 34, "A / Enter: continue    B / Esc: back",
+                 Colour(150, 165, 195, 255));
+}
+
+void drawRndSettings(DGXGraphics* gfx, int screenW, int screenH) {
+    const int panelX = screenW / 2 - kRndPanelW / 2, panelY = screenH / 2 - kRndPanelH / 2;
+    drawPikminPanel(gfx, panelX, panelY, kRndPanelW, kRndPanelH, 22);
+    drawPikminHeader(gfx, panelX, panelY, kRndPanelW, "Randomizer Settings");
+
+    const Colour kFocus(255, 229, 120, 255), kLabel(190, 200, 220, 255), kEdge(8, 12, 28, 255);
+    const int vx = rndValueX(panelX);
+    for (int row = 0; row < RND_RowCount; row++) {
+        const bool focus = row == sRndRow;
+        const int y      = rndRowY(panelY, row);
+        if (row == RND_Start) {
+            const int bw = 230, bx = panelX + kRndPanelW / 2 - bw / 2;
+            if (focus) drawTextOutline(bx - 18, y + 8, ">", kFocus, kEdge);
+            drawGlassOption(bx, y, bw, kRndRowH - 4, "Continue", focus, 18, 26);
+            continue;
+        }
+        if (row == RND_Share) {
+            char share[40];
+            if (sShareEditing) {
+                std::snprintf(share, sizeof(share), "%s|", sShareEdit);
+            } else {
+                pc_randomizer_format_share_code(pc_randomizer_pending_seed(), pc_randomizer_pending_flags(), share,
+                                                sizeof(share));
+            }
+            if (focus) drawTextOutline(panelX + 22, y + 8, ">", kFocus, kEdge);
+            rndText(panelX + 40, y + 7, kRndRowTitles[row], focus ? kFocus : kLabel, 13, vx - panelX - 50, false);
+            drawGlassOption(vx, y, kRndValueW, kRndRowH - 4, share, focus, 11, 17);
+            continue;
+        }
+        if (row == RND_NewSeed) {
+            if (focus) drawTextOutline(vx - 18, y + 8, ">", kFocus, kEdge);
+            drawGlassOption(vx, y, kRndValueW, kRndRowH - 4, "New random seed", focus, 13, 20);
+            continue;
+        }
+        if (focus) drawTextOutline(panelX + 22, y + 8, ">", kFocus, kEdge);
+        rndText(panelX + 40, y + 7, kRndRowTitles[row], focus ? kFocus : kLabel, 13, vx - panelX - 50, false);
+        char value[48];
+        // "< valor >" muestra que se cambia con las flechas.
+        std::snprintf(value, sizeof(value), "<  %s  >", rndValueLabel(row, rndValue(row)));
+        drawGlassOption(vx, y, kRndValueW, kRndRowH - 4, value, focus, 15, 22);
+    }
+
+    const char* help = sShareEditing         ? "Type or paste (Ctrl+V) a friend's code: RND-XXXXXX-XXXXXX-XXXXXX"
+                     : rndShareErrorShown() ? "That code is not valid, so your code was kept."
+                                            : rndHelp(sRndRow, sRndRow < RND_Share ? rndValue(sRndRow) : 0);
+    rndText(panelX + kRndPanelW / 2, panelY + kRndPanelH - 64, help, Colour(232, 238, 252, 255), 12, kRndPanelW - 60, true);
+    drawHelpLine(panelX + kRndPanelW / 2, panelY + kRndPanelH - 34,
+                 sShareEditing ? "Enter / A: confirm    Esc / B: cancel"
+                             : "Arrows: change    A / Enter: select    B / Esc: back",
+                 Colour(150, 165, 195, 255));
+}
+}
+
+void pc_randomizer_intro_draw(void) {
+    if (!sRandomizerIntroOpen || !gsys || !gsys->mDGXGfx) return;
+    DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+    ensureFont();
+    if (!sFont) return;
+
+    const int screenW = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
+    const int screenH = gfx->mScreenHeight;
+    PcSettingsP2DFrame nativeFrame(screenW, screenH);
+    GlassTextScope glassText;
+    Matrix4f ortho;
+    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
+
+    if (sRndPage == 0) drawRndIntro(gfx, screenW, screenH);
+    else drawRndSettings(gfx, screenW, screenH);
+}
+
+// ─── Semilla en el menú de pausa ───
+// En una partida Randomizer, bajo el recuadro de la pausa: la semilla y un
+// resumen de los ajustes, que es lo que hace falta para compartir el mundo.
+
+void pc_randomizer_pause_update(void) {
+    if (!pc_randomizer_active()) return;
+    // Ctrl+C copia el código. Flanco propio: la pausa no pasa por el
+    // latch de teclas de los prompts.
+    static bool sWasDown = false;
+    const Uint8* keys    = SDL_GetKeyboardState(nullptr);
+    const bool down      = keys && keys[SDL_SCANCODE_C] && (SDL_GetModState() & KMOD_CTRL);
+    if (down && !sWasDown) {
+        char code[PC_RANDOMIZER_SHARE_CODE_LEN];
+        pc_randomizer_format_share_code(pc_randomizer_rules().seed, pc_randomizer_rules().flags, code, sizeof(code));
+        SDL_SetClipboardText(code);
+    }
+    sWasDown = down;
+}
+
+void pc_randomizer_pause_draw(void) {
+    if (!pc_randomizer_active() || !gsys || !gsys->mDGXGfx) return;
+    DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+    ensureFont();
+    if (!sFont) return;
+
+    const int screenW = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
+    const int screenH = gfx->mScreenHeight;
+    PcSettingsP2DFrame nativeFrame(screenW, screenH);
+    GlassTextScope glassText;
+    Matrix4f ortho;
+    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
+
+    const PcRandomizerRules& rules = pc_randomizer_rules();
+    char line[96], summary[128];
+    char share[PC_RANDOMIZER_SHARE_CODE_LEN];
+    pc_randomizer_format_share_code(rules.seed, rules.flags, share, sizeof(share));
+    std::snprintf(line, sizeof(line), "%s", share);
+
+    static const char* const kModes[] = { "Vanilla", "Shuffled", "Chaos", "?" };
+    std::snprintf(summary, sizeof(summary), "Parts %s  -  Enemies %s  -  Bosses %s%s%s%s%s",
+                  (rules.flags & PC_RND_ShuffleParts) ? "Shuffled" : "Vanilla", kModes[pc_rnd_enemy_mode(rules.flags)],
+                  kModes[pc_rnd_boss_mode(rules.flags)], (rules.flags & PC_RND_BossEnemyMix) ? "  +Mix" : "",
+                  (rules.flags & PC_RND_IncludeWispsFlint) ? "  +Wisps" : "",
+                  (rules.flags & PC_RND_RandomFinalBoss) ? "  +Final" : "",
+                  (rules.flags & PC_RND_DailyLayout) ? "  +Daily" : "");
+
+    const int panelW = 460, panelH = 74;
+    const int panelX = screenW / 2 - panelW / 2, panelY = screenH - panelH - 18;
+    drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 16);
+    rndText(panelX + panelW / 2, panelY + 10, line, Colour(255, 214, 90, 255), 15, panelW - 30, true);
+    rndText(panelX + panelW / 2, panelY + 36, summary, Colour(214, 224, 245, 255), 10, panelW - 30, true);
+    rndText(panelX + panelW / 2, panelY + 54, "Ctrl+C: copy code", Colour(150, 165, 195, 255), 9, panelW - 30, true);
+}
+
 void pc_erased_notice_queue(void) { sErasedNoticeQueued = true; }
 
 bool pc_erased_notice_open_if_queued(void) {
@@ -4004,7 +4501,8 @@ void pc_newgame_prompt_open(void) {
     sNewGamePromptRules  = 0;
     sNewGamePromptResult = PC_NEWGAME_PENDING;
     sNewGamePromptHard   = false;
-    sNewGamePromptSkipTutorial = false;
+    // Randomizer: el tutorial se salta siempre (la fila queda bloqueada).
+    sNewGamePromptSkipTutorial = pc_randomizer_menu_pending();
     pc_menu_edge_reset();
 }
 
@@ -4034,15 +4532,21 @@ int ngRowY(int panelY, int row) { return panelY + 72 + row * 70; }
 int ngStartX(int panelX) { return panelX + kNgPanelW / 2 - kNgBoxW / 2; }
 int ngBoxX(int panelX, int i) { return panelX + 40 + i * (kNgBoxW + 40); }
 
+// En una partida Randomizer la fila 2 (Skip tutorial) queda fija en Yes: el
+// tutorial depende de generadores y una pieza que el barajado cambia.
+bool ngSeedRow(int row) { return row == 2 && pc_randomizer_menu_pending(); }
+
 int ngRowValue(int row) {
     if (row == 0) return sNewGamePromptHard ? 1 : 0;
     if (row == 1) return sNewGamePromptRules;
+    if (ngSeedRow(row)) return 1;
     return sNewGamePromptSkipTutorial ? 1 : 0;
 }
 
 void ngSetRowValue(int row, int v) {
     if (row == 0) sNewGamePromptHard = v != 0;
     else if (row == 1) sNewGamePromptRules = v;
+    else if (ngSeedRow(row)) { (void)v; }
     else               sNewGamePromptSkipTutorial = v != 0;
 }
 
@@ -4148,7 +4652,8 @@ void pc_newgame_prompt_draw(void) {
     const int panelY = screenH / 2 - panelH / 2;
 
     drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
-    drawPikminHeader(gfx, panelX, panelY, panelW, "New Game");
+    const bool randomizer = pc_randomizer_menu_pending();
+    drawPikminHeader(gfx, panelX, panelY, panelW, randomizer ? "New Randomizer Game" : "New Game");
 
     const char* titles[kNgRowCount] = { "Difficulty", "Game mode", "Skip tutorial" };
     const char* options[kNgRowCount][2] = {
@@ -4156,6 +4661,10 @@ void pc_newgame_prompt_draw(void) {
         { "Standard", "Permadeath" },
         { "No", "Yes" },
     };
+    if (randomizer) {
+        options[2][0] = "-";
+        options[2][1] = "Yes (required)";
+    }
     for (int row = 0; row < kNgRowCount; row++) {
         const bool rowFocus = (row == sNewGamePromptRow);
         const int optY = ngRowY(panelY, row);
@@ -4203,10 +4712,13 @@ void pc_newgame_prompt_draw(void) {
 
     // Describe la opción bajo el cursor: es el único sitio donde se explican
     // Hard y Permadeath.
-    const int value = sNewGamePromptRow < kNgRowCount ? sNewGamePromptCol : 0;
+    const int value = sNewGamePromptRow < kNgRowCount && !ngSeedRow(sNewGamePromptRow) ? sNewGamePromptCol : 0;
     const char* detail;
     if (sNewGamePromptRow == kNgStartRow) {
-        detail = "Begin the expedition with these settings.";
+        detail = randomizer ? "Begin the randomized expedition."
+                            : "Begin the expedition with these settings.";
+    } else if (ngSeedRow(sNewGamePromptRow)) {
+        detail = "Required in Randomizer: Day 2, Main Engine and 20 red Pikmin.";
     } else if (sNewGamePromptRow == 0) {
         detail = value ? "Tougher enemies, Olimar takes more damage. 8-minute days, 80 Pikmin."
                        : "Original enemy health, day length and field limit.";

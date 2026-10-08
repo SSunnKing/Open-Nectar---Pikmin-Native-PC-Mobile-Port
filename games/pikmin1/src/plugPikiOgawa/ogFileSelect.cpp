@@ -12,6 +12,8 @@
 #include "zen/ogNitaku.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_permadeath.h"
+#include "randomizer/pc_randomizer.h"
+#include <cstdio>
 #include "P2D/Picture.h"
 #include "P2D/Font.h"
 #include "P2D/Print.h"
@@ -61,7 +63,7 @@ public:
 protected:
 	virtual void drawSelf(int x, int y, immut Matrix4f* view)
 	{
-		if (!pc_permadeath_slot(mSlot) && !pc_hardmode_slot(mSlot)) {
+		if (!pc_permadeath_slot(mSlot) && !pc_hardmode_slot(mSlot) && !pc_randomizer_slot(mSlot)) {
 			return;
 		}
 		P2DPicture::drawSelf(x, y, view);
@@ -79,6 +81,21 @@ protected:
 			label = "HARD + PERMA";
 		else if (pc_permadeath_slot(mSlot))
 			label = "PERMADEATH";
+		// Randomizer: "RND" y los cuatro primeros dígitos de la semilla, más
+		// las otras reglas abreviadas.
+		char rndLabel[32];
+		if (pc_randomizer_slot(mSlot)) {
+			const unsigned shortSeed = unsigned(pc_randomizer_slot_seed(mSlot) >> 48) & 0xFFFF;
+			const char* extra = "";
+			if (pc_permadeath_slot(mSlot) && pc_hardmode_slot(mSlot))
+				extra = " H+P";
+			else if (pc_permadeath_slot(mSlot))
+				extra = " PERMA";
+			else if (pc_hardmode_slot(mSlot))
+				extra = " HARD";
+			sprintf(rndLabel, "RND %04X%s", shortSeed, extra);
+			label = rndLabel;
+		}
 		print.printReturn(label, getWidth(), getHeight(), TBOXHBIND_Center, TBOXVBIND_Center, 0, 0);
 	}
 

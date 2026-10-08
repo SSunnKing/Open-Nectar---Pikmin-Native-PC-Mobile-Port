@@ -7,6 +7,7 @@
 #include "gameflow.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_permadeath.h"
+#include "randomizer/pc_randomizer.h"
 #endif
 #include "system.h"
 #include <string.h>
@@ -932,7 +933,7 @@ void MemoryCard::saveCurrentGame()
 #if defined(PIKI_PC_PORT)
 	// After the padding and before the checksum: the block lands in bytes the
 	// game zero-fills, and is covered by the sum computed just below.
-	pc_permadeath_write_block(*stream, pc_permadeath_active(), pc_hardmode_active());
+	pc_permadeath_write_block(*stream, pc_permadeath_active(), pc_hardmode_active(), pc_randomizer_rules());
 #endif
 
 	u32 sum = calcChecksum(getGameFilePtr(gameflow.mGamePrefs.mSpareMemCardSaveIndex - 1), 0x7FF8);
@@ -997,6 +998,7 @@ void MemoryCard::readCurrentGame(RandomAccessStream* data)
 	// position, and doing it first means a corrupt tail cannot be mistaken for
 	// game data that has already been consumed.
 	pc_permadeath_read_block(*data);
+	pc_randomizer_adopt_loaded(pc_randomizer_peek_block(*data));
 #endif
 	gameflow.mPlayState.read(*data);
 	if (gameflow.mPlayState.mSaveStatus == PlayState::ReadyToSave && playerState) {
@@ -1433,6 +1435,7 @@ void MemoryCard::getQuickInfos(CardQuickInfo* infos)
 	// Re-derived below from whichever card file wins each slot, so start clean:
 	// a slot that has since been deleted must not keep yesterday's mark.
 	pc_permadeath_clear_slots();
+	pc_randomizer_clear_slots();
 #endif
 	for (i = 0; i < 4; i++) {
 		RamStream* stream = getGameFileStream(i);
@@ -1471,6 +1474,7 @@ void MemoryCard::getQuickInfos(CardQuickInfo* infos)
 					// whichever one happens to be read last.
 					pc_permadeath_note_slot(slot, pc_permadeath_peek_block(*stream));
 					pc_hardmode_note_slot(slot, pc_hardmode_peek_block(*stream));
+					pc_randomizer_note_slot(slot, pc_randomizer_peek_block(*stream));
 #endif
 				}
 			} else {

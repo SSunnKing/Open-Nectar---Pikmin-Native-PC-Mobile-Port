@@ -1,6 +1,7 @@
 #include "pc_permadeath.h"
 
 #include "Stream.h"
+#include "randomizer/pc_randomizer.h"
 #include <cstdio>
 
 namespace {
@@ -8,7 +9,7 @@ namespace {
 // in an original save are zeros that happen to be there, not a field anybody
 // wrote. Only an exact match means the block is ours.
 const int kMagic   = 0x4E435431;
-const int kVersion = 2;
+const int kVersion = 3;
 
 const f32 kTekiLifeScale  = 1.33f;
 const f32 kNaviDamageScale = 1.5f;
@@ -23,6 +24,7 @@ bool sHardSlots[3] = { false, false, false };
 struct SaveRules {
 	bool permadeath;
 	bool hard;
+	PcRandomizerRules randomizer;
 };
 
 SaveRules peekRules(RandomAccessStream& in)
@@ -35,9 +37,15 @@ SaveRules peekRules(RandomAccessStream& in)
 	int hardFlag      = 0;
 	if (version >= 2)
 		hardFlag = in.readInt();
+	// Version 3: randomizer. Read only for a version we know the layout of.
+	int rnd[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+	if (magic == kMagic && version == 3) {
+		for (int i = 0; i < 7; i++)
+			rnd[i] = in.readInt();
+	}
 	in.setPosition(resume);
 
-	SaveRules rules = { false, false };
+	SaveRules rules = {};
 	if (magic != kMagic)
 		return rules;
 	// Version 1 is an older port that only stored permadeath. Anything newer
@@ -46,10 +54,19 @@ SaveRules peekRules(RandomAccessStream& in)
 		rules.permadeath = flag != 0;
 		return rules;
 	}
-	if (version != kVersion)
+	if (version != 2 && version != kVersion)
 		return rules;
 	rules.permadeath = flag != 0;
 	rules.hard       = hardFlag != 0;
+	if (version >= 3 && rnd[0] != 0) {
+		PcRandomizerRules& r = rules.randomizer;
+		r.enabled            = true;
+		r.flags              = u32(rnd[1]);
+		r.algorithmVersion   = u16(u32(rnd[2]) >> 16);
+		r.catalogVersion     = u16(u32(rnd[2]) & 0xFFFF);
+		r.seed               = (uint64_t(u32(rnd[3])) << 32) | u32(rnd[4]);
+		r.manifestHash       = (uint64_t(u32(rnd[5])) << 32) | u32(rnd[6]);
+	}
 	return rules;
 }
 }
@@ -104,6 +121,12 @@ void pc_hardmode_begin_new_run(void)
 
 void pc_permadeath_write_block(RandomAccessStream& out, bool permadeath, bool hard)
 {
+	const PcRandomizerRules off = {};
+	pc_permadeath_write_block(out, permadeath, hard, off);
+}
+
+void pc_permadeath_write_block(RandomAccessStream& out, bool permadeath, bool hard, const PcRandomizerRules& rnd)
+{
 	// The caller has already padded to the checksum trailer, so seek back into
 	// the padding, write, and leave the position where it was found.
 	const int resume = out.getPosition();
@@ -112,6 +135,13 @@ void pc_permadeath_write_block(RandomAccessStream& out, bool permadeath, bool ha
 	out.writeInt(kVersion);
 	out.writeInt(permadeath ? 1 : 0);
 	out.writeInt(hard ? 1 : 0);
+	out.writeInt(rnd.enabled ? 1 : 0);
+	out.writeInt(rnd.enabled ? int(rnd.flags) : 0);
+	out.writeInt(rnd.enabled ? int((u32(rnd.algorithmVersion) << 16) | rnd.catalogVersion) : 0);
+	out.writeInt(rnd.enabled ? int(u32(rnd.seed >> 32)) : 0);
+	out.writeInt(rnd.enabled ? int(u32(rnd.seed)) : 0);
+	out.writeInt(rnd.enabled ? int(u32(rnd.manifestHash >> 32)) : 0);
+	out.writeInt(rnd.enabled ? int(u32(rnd.manifestHash)) : 0);
 	out.setPosition(resume);
 }
 
@@ -123,6 +153,11 @@ bool pc_permadeath_peek_block(RandomAccessStream& in)
 bool pc_hardmode_peek_block(RandomAccessStream& in)
 {
 	return peekRules(in).hard;
+}
+
+PcRandomizerRules pc_randomizer_peek_block(RandomAccessStream& in)
+{
+	return peekRules(in).randomizer;
 }
 
 void pc_permadeath_read_block(RandomAccessStream& in)

@@ -55,6 +55,8 @@
 #include "timing/pc_render_phase.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_permadeath.h"
+#include "randomizer/pc_randomizer.h"
+#include "randomizer/pc_randomizer_catalog.h"
 #include "pc_discord.h"
 
 // Discord Rich Presence: zona, día y piezas de la partida en curso.
@@ -1517,6 +1519,19 @@ ModeState* DayOverModeState::update(u32& result)
 
 #if defined(PIKI_PC_PORT)
 	if (mState == STATE_PcTutorialSkip) {
+		if (pc_randomizer_active()) {
+			// The bootstrap and the seed exist only in memory until the file is
+			// written: leaving from the map before another day ends would lose
+			// both. Save to the slot the file was created in, through the same
+			// path as an ordinary day-end save.
+			CardQuickInfo infos[4];
+			gameflow.mMemoryCard.getQuickInfos(infos); // picks the spare card file
+			gameflow.mPlayState.mSaveSlot = gameflow.mGamePrefs.mMostRecentFileSlot;
+			gameflow.mMemoryCard.saveCurrentGame();
+			fprintf(stderr, "[PC] randomizer: initial save to slot %d %s\n", int(gameflow.mPlayState.mSaveSlot),
+			        gameflow.mMemoryCard.mDidSaveFail ? "FAILED" : "ok");
+			pc_randomizer_write_spoiler_log();
+		}
 		mParentSection->mPendingOnePlayerSectionID = ONEPLAYER_MapSelect;
 		gsys->setFade(0.0f);
 		return new QuittingGameModeState(mParentSection);

@@ -21,6 +21,7 @@
 #include "pc_permadeath.h"
 #include "pc_coop.h"
 #include "pc_speedrun.h"
+#include "randomizer/pc_randomizer.h"
 #include "mods/pc_vs_arena.h"
 #include "pc_window.h"
 #include "settings/pc_settings.h"
@@ -112,6 +113,12 @@ struct CardSelectSetupSection : public Node {
 				} else {
 					pcStartSpeedrunRun();
 				}
+			} else if (pc_randomizer_menu_pending()) {
+				// Randomizer: primero la explicación del modo; luego capitán y
+				// slots, como Start.
+				pc_window_input_reset_assignment();
+				mAwaitingRandomizerIntro = true;
+				pc_randomizer_intro_open();
 			} else {
 				// 1 jugador: elige capitán (Olimar/Louie) antes del slot.
 				pc_window_input_reset_assignment();
@@ -146,7 +153,7 @@ struct CardSelectSetupSection : public Node {
 		// Los prompts que van antes del slot llevan de fondo el degradado y
 		// las estrellas de la selección de slot, como el de New Game.
 		if (mAwaitingCaptain || mAwaitingDevAssign || mAwaitingVsRules || mAwaitingSpeedrunIntro
-		    || pc_erased_notice_active()) {
+		    || mAwaitingRandomizerIntro || pc_erased_notice_active()) {
 			mPcBackdrop = new zen::ogScrFileChkSelMgr();
 			mPcBackdrop->pcStartBackdrop();
 		}
@@ -227,7 +234,7 @@ struct CardSelectSetupSection : public Node {
 		}
 		// Bajo New Game el fondo es la pantalla de slots, que no se actualiza
 		// mientras el prompt está abierto: sin esto las estrellas se paran.
-		if (mAwaitingNewGameChoice && mPromptBackdrop) {
+		if ((mAwaitingNewGameChoice || mAwaitingRandomizerSettings) && mPromptBackdrop) {
 			mPromptBackdrop->pcUpdateBackdrop();
 		}
 		if (pc_erased_notice_active()) {
@@ -248,6 +255,24 @@ struct CardSelectSetupSection : public Node {
 				return;
 			}
 			pcStartSpeedrunRun();
+			return;
+		}
+		if (mAwaitingRandomizerIntro) {
+			const int choice = pc_randomizer_intro_result();
+			if (choice == PC_RANDOMIZER_INTRO_PENDING) {
+				return;
+			}
+			mAwaitingRandomizerIntro = false;
+			if (choice == PC_RANDOMIZER_INTRO_BACK) {
+				// Atrás: vuelta al título, ya sin Randomizer.
+				pc_randomizer_set_menu_pending(false);
+				mNextSectionsFlag = PACK_NEXT_ONEPLAYER(ONEPLAYER_GameExit);
+				mState            = Exit;
+				gsys->setFade(0.0f);
+				return;
+			}
+			mAwaitingCaptain = true;
+			pc_captain_prompt_open();
 			return;
 		}
 		if (mAwaitingCaptain) {
@@ -341,6 +366,22 @@ struct CardSelectSetupSection : public Node {
 			memcardWindow->start(gameflow.mIsChallengeMode);
 			return;
 		}
+		if (mAwaitingRandomizerSettings) {
+			const int choice = pc_randomizer_intro_result();
+			if (choice == PC_RANDOMIZER_INTRO_PENDING) {
+				return;
+			}
+			mAwaitingRandomizerSettings = false;
+			if (choice == PC_RANDOMIZER_INTRO_BACK) {
+				mPromptBackdrop = nullptr;
+				memcardWindow   = new zen::ogScrFileChkSelMgr();
+				memcardWindow->start(gameflow.mIsChallengeMode);
+				return;
+			}
+			mAwaitingNewGameChoice = true;
+			pc_newgame_prompt_open();
+			return;
+		}
 		if (mAwaitingNewGameChoice) {
 			const int choice = pc_newgame_prompt_result();
 			if (choice == PC_NEWGAME_PENDING) {
@@ -358,7 +399,9 @@ struct CardSelectSetupSection : public Node {
 			}
 			pc_permadeath_set_pending(choice == PC_NEWGAME_PERMADEATH);
 			pc_hardmode_set_pending(pc_newgame_prompt_chose_hard());
-			pc_tutorial_skip_set_pending(pc_newgame_prompt_chose_skip_tutorial());
+			// El Randomizer siempre salta el tutorial: el original depende de
+			// generadores y una pieza fijos que el barajado cambia.
+			pc_tutorial_skip_set_pending(pc_randomizer_menu_pending() || pc_newgame_prompt_chose_skip_tutorial());
 			commitSelectedFile(mPendingCard, mPendingSlot);
 			mState = Exit;
 			gsys->setFade(0.0f);
@@ -403,6 +446,7 @@ struct CardSelectSetupSection : public Node {
 							// its rule from the file instead, in readCurrentGame.
 							pc_permadeath_begin_new_run();
 							pc_hardmode_begin_new_run();
+							pc_randomizer_begin_new_run();
 #endif
 						}
 
@@ -418,6 +462,7 @@ struct CardSelectSetupSection : public Node {
 						// so that backing out of the prompt leaves nothing set.
 						pc_permadeath_begin_new_run();
 						pc_hardmode_begin_new_run();
+						pc_randomizer_begin_new_run();
 #endif
 
 						// next subsection will be the new game intro cutscene
@@ -530,6 +575,13 @@ struct CardSelectSetupSection : public Node {
 			pc_speedrun_intro_draw();
 			return;
 		}
+		if (mAwaitingRandomizerIntro) {
+			if (mPcBackdrop) {
+				mPcBackdrop->drawBackdrop(gfx);
+			}
+			pc_randomizer_intro_draw();
+			return;
+		}
 		if (mAwaitingPlayerCount) {
 			pc_playercount_prompt_draw();
 			return;
@@ -553,6 +605,13 @@ struct CardSelectSetupSection : public Node {
 				mPcBackdrop->drawBackdrop(gfx);
 			}
 			pc_captain_prompt_draw();
+			return;
+		}
+		if (mAwaitingRandomizerSettings) {
+			if (mPromptBackdrop) {
+				mPromptBackdrop->drawBackdrop(gfx);
+			}
+			pc_randomizer_intro_draw();
 			return;
 		}
 		if (mAwaitingNewGameChoice) {
@@ -625,6 +684,27 @@ struct CardSelectSetupSection : public Node {
 					gsys->setFade(0.0f);
 					return;
 				}
+				if (card.mSaveStatus == PlayState::ReadyToSave
+				    && pc_randomizer_slot(returnCode - zen::ogScrFileChkSelMgr::FILECHKSEL_SlotOffset)
+				           != pc_randomizer_menu_pending()) {
+					// Las partidas Randomizer se empiezan y continúan desde su
+					// botón del título, y solo esas: la otra clase de partida
+					// no se carga desde aquí.
+					if (seSystem) seSystem->playSysSe(SYSSE_CANCEL);
+					memcardWindow = new zen::ogScrFileChkSelMgr();
+					memcardWindow->start(gameflow.mIsChallengeMode);
+					return;
+				}
+				if (card.mSaveStatus != PlayState::ReadyToSave && pc_randomizer_menu_pending()) {
+					// Randomizer: primero los ajustes de esta partida nueva,
+					// luego New Game. Las partidas existentes usan los suyos.
+					mPendingCard                 = card;
+					mPendingSlot                 = returnCode - zen::ogScrFileChkSelMgr::FILECHKSEL_SlotOffset;
+					mAwaitingRandomizerSettings  = true;
+					mPromptBackdrop              = mPromptBackdropNext;
+					pc_randomizer_settings_open();
+					return;
+				}
 				if (card.mSaveStatus != PlayState::ReadyToSave) {
 					mPendingCard           = card;
 					mPendingSlot           = returnCode - zen::ogScrFileChkSelMgr::FILECHKSEL_SlotOffset;
@@ -668,6 +748,8 @@ struct CardSelectSetupSection : public Node {
 	bool mAwaitingPlayerCount   = false; ///< The 1P/2P prompt is up (before the slot screen).
 	bool mAwaitingCaptain       = false; ///< 1P: selector Olimar/Louie antes del slot.
 	bool mAwaitingSpeedrunIntro = false; ///< Speedrun: explicación del modo antes del slot.
+	bool mAwaitingRandomizerIntro = false; ///< Randomizer: explicación del modo antes del capitán.
+	bool mAwaitingRandomizerSettings = false; ///< Randomizer: ajustes de la partida nueva (ranura vacía).
 	bool mAwaitingDevAssign     = false; ///< The controller assignment prompt is up.
 	bool mAwaitingVsRules       = false; ///< VS: explicación y reglas, antes de los mandos.
 	bool mAwaitingNewGameChoice = false; ///< The new-game prompt is up.

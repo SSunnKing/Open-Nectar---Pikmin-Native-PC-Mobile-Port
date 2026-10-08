@@ -147,6 +147,10 @@ zen::ogScrPauseMgr::PauseStatus zen::ogScrPauseMgr::update(Controller* controlle
 		return mState;
 	}
 
+#if defined(PIKI_PC_PORT)
+	pc_randomizer_pause_update();
+#endif
+
 	if (playerState->getCurrDay() == 0 || playerState->getCurrDay() == playerState->getTotalDays() - 1
 #if defined(PIKI_PC_PORT)
 	    || pc_vs_active() // VS: sin atardecer; la revancha está en la pantalla final
@@ -302,4 +306,8 @@ void zen::ogScrPauseMgr::draw(Graphics& gfx)
 #endif
 	mMainMenu->draw(gfx);
 	mSubMenu->draw(gfx);
+#if defined(PIKI_PC_PORT)
+	// Randomizer: la semilla de esta partida, para poder compartirla.
+	pc_randomizer_pause_draw();
+#endif
 }

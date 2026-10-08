@@ -1120,6 +1120,9 @@ void pc_window_poll_events(PADStatus* pad) {
                     SDL_SetRelativeMouseMode(sMouseRelativeMode ? SDL_TRUE : SDL_FALSE);
                 }
                 break;
+            case SDL_TEXTINPUT:
+                pc_settings_text_input(event.text.text);
+                break;
             case SDL_CONTROLLERDEVICEADDED:
                 pc_controller_open_slot(event.cdevice.which);
                 break;

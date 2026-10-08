@@ -10,6 +10,7 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_photo_mode.h"
 #include "pc_coop.h"
+#include "randomizer/pc_randomizer_catalog.h"
 #include "mods/pc_vs_arena.h"
 #include "pc_vs.h"
 #include "BuildingItem.h"
@@ -1419,6 +1420,10 @@ void GameCoreSection::initStage()
 	gameflow.addGenNode("pikiMgr", pikiMgr);
 	PRINT("done2\n");
 
+#if defined(PIKI_PC_PORT)
+	// Randomizer, fase 2: inventario de todos los .gen (solo con PIKI_RND_AUDIT).
+	pc_randomizer_audit_run_if_requested();
+#endif
 	char path[PATH_MAX];
 	strcpy(path, flowCont.mCurrStageFilePath);
 	u8* tmp;
@@ -1445,6 +1450,11 @@ void GameCoreSection::initStage()
 		PRINT("DEFAULT GEN LOADED **********************************\n");
 		generatorMgr->read(*data, false);
 		data->close();
+#if defined(PIKI_PC_PORT)
+		// Randomizer: tras leer y antes de updateUseList, para que se precargue
+		// lo que ha tocado en cada sitio.
+		pc_randomizer_apply_generators(flowCont.mCurrentStage->mStageID, "default.gen", generatorMgr);
+#endif
 		generatorMgr->updateUseList();
 		useDefault = true;
 	} else {
@@ -1474,6 +1484,13 @@ void GameCoreSection::initStage()
 		PRINT("** FILE %s READING\n", path2);
 		dailyGeneratorMgr->read(*data, true);
 		data->close();
+#if defined(PIKI_PC_PORT)
+		{
+			char dailyName[16];
+			sprintf(dailyName, "%d.gen", (gameflow.mWorldClock.mCurrentDay - 1) % MAX_DAYS);
+			pc_randomizer_apply_generators(flowCont.mCurrentStage->mStageID, dailyName, dailyGeneratorMgr);
+		}
+#endif
 		dailyGeneratorMgr->updateUseList();
 		useDay = true;
 	} else {
@@ -1496,6 +1513,9 @@ void GameCoreSection::initStage()
 			PRINT("** FILE %s READING\n", path2);
 			onceGeneratorMgr->read(*data, true);
 			data->close();
+#if defined(PIKI_PC_PORT)
+			pc_randomizer_apply_generators(flowCont.mCurrentStage->mStageID, "init.gen", onceGeneratorMgr);
+#endif
 			onceGeneratorMgr->updateUseList();
 			useInit = true;
 		}
@@ -1507,6 +1527,9 @@ void GameCoreSection::initStage()
 		PRINT("** FILE %s READING\n", path2);
 		plantGeneratorMgr->read(*data, true);
 		data->close();
+#if defined(PIKI_PC_PORT)
+		pc_randomizer_apply_generators(flowCont.mCurrentStage->mStageID, "plants.gen", plantGeneratorMgr);
+#endif
 		plantGeneratorMgr->updateUseList();
 		usePlant = true;
 	}
@@ -1527,6 +1550,9 @@ void GameCoreSection::initStage()
 				data->close();
 				playerState->setLimitGenFlag(i);
 				gen->setDayLimit(gfInfo->mDayLimit + 1);
+#if defined(PIKI_PC_PORT)
+				pc_randomizer_apply_generators(flowCont.mCurrentStage->mStageID, gfInfo->mName, gen);
+#endif
 				gen->updateUseList();
 				j++;
 			}

@@ -184,6 +184,22 @@ bool pc_speedrun_intro_open_if_needed(void);
 bool pc_speedrun_intro_active(void);
 int  pc_speedrun_intro_result(void);
 void pc_speedrun_intro_draw(void);
+// Explicación del modo Randomizer al elegirlo en el título. CONTINUE = seguir
+// a capitán y slots, BACK = volver al título.
+enum { PC_RANDOMIZER_INTRO_PENDING = 0, PC_RANDOMIZER_INTRO_CONTINUE = 1, PC_RANDOMIZER_INTRO_BACK = 2 };
+void pc_randomizer_intro_open(void);
+/// "Randomizer Settings" de una partida nueva (ranura vacía). Mismos
+/// resultados: CONTINUE = seguir a New Game, BACK = volver a las ranuras.
+void pc_randomizer_settings_open(void);
+/// Semilla y ajustes de la partida Randomizer en curso, bajo el menú de
+/// pausa. Update: Ctrl+C copia el código.
+void pc_randomizer_pause_draw(void);
+void pc_randomizer_pause_update(void);
+bool pc_randomizer_intro_active(void);
+int  pc_randomizer_intro_result(void);
+void pc_randomizer_intro_draw(void);
+/// Texto tecleado (SDL_TEXTINPUT): edición de la semilla del Randomizer.
+void pc_settings_text_input(const char* text);
 void pc_erased_notice_queue(void);
 bool pc_erased_notice_open_if_queued(void);
 bool pc_erased_notice_active(void);

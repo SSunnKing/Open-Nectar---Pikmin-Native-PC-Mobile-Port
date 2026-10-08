@@ -2,6 +2,7 @@
 #include "Dolphin/card.h"
 #include "Dolphin/dvd.h"
 #include "pc_speedrun.h"
+#include "randomizer/pc_randomizer.h"
 
 #include <algorithm>
 #include <atomic>
@@ -162,10 +163,14 @@ fs::path saveRoot()
 }
 
 // El modo Speedrun tiene su propia tarjeta (save/speedrun/card0): sus
-// partidas vanilla no se mezclan con las normales ni al revés.
+// partidas vanilla no se mezclan con las normales ni al revés. El Randomizer
+// igual (save/randomizer/card0): sus tres ranuras son independientes de las
+// del juego normal.
 fs::path root(s32 channel)
 {
-	const fs::path base = pc_speedrun_active() ? saveRoot() / "speedrun" : saveRoot();
+	const fs::path base = pc_speedrun_active()            ? saveRoot() / "speedrun"
+	                      : pc_randomizer_menu_pending() ? saveRoot() / "randomizer"
+	                                                     : saveRoot();
 	return base / (channel == 0 ? "card0" : "card1");
 }
 fs::path dataPath(s32 channel, const std::string& name) { return root(channel) / name; }

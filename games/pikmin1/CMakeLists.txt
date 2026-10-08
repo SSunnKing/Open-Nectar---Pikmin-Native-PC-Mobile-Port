@@ -264,6 +264,11 @@ set(PC_PORT_SOURCES
     pc_port/pc_menu_repeat.cpp
     pc_port/pc_photo_mode.cpp
     pc_port/pc_permadeath.cpp
+    pc_port/randomizer/pc_randomizer.cpp
+    pc_port/randomizer/pc_randomizer_catalog.cpp
+    pc_port/randomizer/pc_randomizer_audit.cpp
+    pc_port/randomizer/pc_randomizer_logic.cpp
+    pc_port/randomizer/pc_randomizer_apply.cpp
     pc_port/pc_coop.cpp
     pc_port/pc_whistle_pluck.cpp
     pc_port/pc_discord.cpp

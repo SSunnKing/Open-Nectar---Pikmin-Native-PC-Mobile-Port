@@ -4,6 +4,7 @@
 #include "types.h"
 
 class RandomAccessStream;
+struct PcRandomizerRules;
 
 /*
  * Permadeath and Hard mode are properties of a save file, not of the port's
@@ -18,8 +19,10 @@ class RandomAccessStream;
  * as a normal, non-Hard run; a build without this port reads our files as it
  * always did.
  *
- * Version 1 wrote only permadeath. Version 2 appends Hard. An older file
- * still reads as whatever permadeath it had, with Hard off.
+ * Version 1 wrote only permadeath. Version 2 appends Hard. Version 3 appends
+ * the randomizer (enabled, flags, algorithm/catalogue versions, 64-bit seed,
+ * 64-bit manifest hash). An older file still reads as whatever it had, with
+ * the newer rules off.
  */
 
 /// Byte offset of the port block inside a save file's 0x8000 block. The game
@@ -56,7 +59,9 @@ void pc_permadeath_begin_new_run(void);
 void pc_hardmode_begin_new_run(void);
 
 /// Writes the port block. Call with the stream positioned anywhere: it seeks.
+/// The 3-argument form writes the randomizer as off.
 void pc_permadeath_write_block(RandomAccessStream& out, bool permadeath, bool hard);
+void pc_permadeath_write_block(RandomAccessStream& out, bool permadeath, bool hard, const PcRandomizerRules& rnd);
 
 /// Reads the port block and adopts both rules. A file with no block is a
 /// normal, non-Hard run.
@@ -65,6 +70,8 @@ void pc_permadeath_read_block(RandomAccessStream& in);
 /// Reads one flag without adopting either, for listing files.
 bool pc_permadeath_peek_block(RandomAccessStream& in);
 bool pc_hardmode_peek_block(RandomAccessStream& in);
+/// Randomizer rules of a file (disabled for v1/v2 files or no block).
+PcRandomizerRules pc_randomizer_peek_block(RandomAccessStream& in);
 
 /// Hard-mode combat scales. Identity when Hard is off.
 f32 pc_hardmode_teki_life(f32 base);

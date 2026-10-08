@@ -1031,6 +1031,11 @@ public:
 	// DLL inlines:
 	void setLimitGenerator(bool val) { mIsLimitGenerator = val; }
 
+#if defined(PIKI_PC_PORT)
+	/// Randomizer: recorre los generadores en el orden del archivo.
+	Generator* pcFirstGenerator() { return mGenListHead; }
+#endif
+
 	void genWrite(AgeServer&);
 	void addGenerator(AgeServer&);
 	void removeGenerator(AgeServer&, Generator*);
