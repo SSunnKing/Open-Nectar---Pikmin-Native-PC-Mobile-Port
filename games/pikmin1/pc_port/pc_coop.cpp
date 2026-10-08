@@ -1,5 +1,9 @@
 #include "pc_coop.h"
 #include "GlobalGameOptions.h"
+#include "mods/pc_hd_model_convert.h"
+#include "mods/pc_hd_models.h"
+
+#include <filesystem>
 
 static bool sPending = false;
 static bool sActive  = false;
@@ -30,6 +34,35 @@ int pc_captain_piki_color(int captain)
 	case PC_CAPTAIN_PIKMIN_BLUE: return Blue;
 	default: return -1;
 	}
+}
+bool pc_captain_is_pikmin(int captain)
+{
+	return pc_captain_piki_color(captain) >= 0 || captain == PC_CAPTAIN_PIKMIN_WHITE
+	    || captain == PC_CAPTAIN_PIKMIN_PURPLE || captain == PC_CAPTAIN_BULBMIN;
+}
+int pc_captain_skeleton_color(int captain)
+{
+	const int color = pc_captain_piki_color(captain);
+	if (color >= 0) return color;
+	return pc_captain_is_pikmin(captain) ? Red : -1;
+}
+int pc_captain_pikmin2_model(int captain)
+{
+	switch (captain) {
+	case PC_CAPTAIN_PRESIDENT: return PC_HD_MODEL_PRESIDENT;
+	case PC_CAPTAIN_PIKMIN_WHITE: return PC_HD_MODEL_PIKI_WHITE;
+	case PC_CAPTAIN_PIKMIN_PURPLE: return PC_HD_MODEL_PIKI_PURPLE;
+	case PC_CAPTAIN_BULBMIN: return PC_HD_MODEL_BULBMIN;
+	default: return -1;
+	}
+}
+bool pc_captain_available(int captain)
+{
+	if (captain < 0 || captain >= PC_CAPTAIN_COUNT) return false;
+	if (captain < PC_CAPTAIN_FIRST_PIKMIN2) return true;
+	std::error_code ec;
+	return pc_pikmin2_detected()
+	    && std::filesystem::is_regular_file(pc_hd_model_path((PcHdModelId)pc_captain_pikmin2_model(captain)), ec);
 }
 int pc_coop_captain(int player)
 {

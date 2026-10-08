@@ -23,6 +23,11 @@ enum PcHdModelId {
 	PC_HD_MODEL_HAPPA_FLOWER,
 	PC_HD_MODEL_BULBORB_DWARF, // tekis/chappy (Dwarf Bulborb)
 	PC_HD_MODEL_BULBORB,       // tekis/swallow (Spotty Bulborb)
+	// Capitanes sacados de un Pikmin 2 instalado (pc_hd_models_import_pikmin2).
+	PC_HD_MODEL_PRESIDENT,    // sobre el esqueleto de Olimar
+	PC_HD_MODEL_PIKI_WHITE,   // sobre el esqueleto de un Pikmin
+	PC_HD_MODEL_PIKI_PURPLE,
+	PC_HD_MODEL_BULBMIN,
 	PC_HD_MODEL_COUNT,
 };
 

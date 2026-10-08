@@ -54,6 +54,7 @@ __declspec(dllexport) int           AmdPowerXpressRequestHighPerformance = 1;
 #include "android/pc_android.h"
 #endif
 #include "settings/pc_settings.h"
+#include "mods/pc_hd_model_convert.h"
 #include "settings/pc_settings_p2d.h"
 
 int main(int argc, char* argv[])
@@ -128,6 +129,8 @@ int main(int argc, char* argv[])
     printf("[PC Port] Loading persisted settings...\n");
     fflush(stdout);
     pc_settings_init();
+    // Con Pikmin 2 instalado, su Louie sirve de capitán sin bajar ningún pack.
+    pc_hd_models_import_pikmin2();
 
     printf("[PC Port] Initializing game system...\n");
     fflush(stdout);

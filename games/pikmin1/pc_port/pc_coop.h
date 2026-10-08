@@ -23,10 +23,27 @@ enum PcCaptain {
 	PC_CAPTAIN_PIKMIN_RED    = 2,
 	PC_CAPTAIN_PIKMIN_YELLOW = 3,
 	PC_CAPTAIN_PIKMIN_BLUE   = 4,
+	// Segunda fila, solo con Pikmin 2 instalado: modelos sacados de su disco
+	// (pc_hd_models_import_pikmin2). También solo estéticos.
+	PC_CAPTAIN_PRESIDENT     = 5,
+	PC_CAPTAIN_PIKMIN_WHITE  = 6,
+	PC_CAPTAIN_PIKMIN_PURPLE = 7,
+	PC_CAPTAIN_BULBMIN       = 8,
 	PC_CAPTAIN_COUNT
 };
+/// Primer capitán de la segunda fila (los de Pikmin 2).
+#define PC_CAPTAIN_FIRST_PIKMIN2 PC_CAPTAIN_PRESIDENT
 /// Color de Pikmin (Red/Yellow/Blue del juego) de un capitán Pikmin, o -1.
 int pc_captain_piki_color(int captain);
+/// True para cualquier capitán con forma de Pikmin (también los de Pikmin 2).
+bool pc_captain_is_pikmin(int captain);
+/// Color del Pikmin de Pikmin 1 cuyo esqueleto y animaciones usa un capitán
+/// Pikmin (los de Pikmin 2 van sobre el del rojo), o -1.
+int pc_captain_skeleton_color(int captain);
+/// Modelo NHM (PcHdModelId) que dibuja a un capitán de Pikmin 2, o -1.
+int pc_captain_pikmin2_model(int captain);
+/// True si el capitán se puede elegir: los de Pikmin 2 piden tenerlo instalado.
+bool pc_captain_available(int captain);
 void pc_coop_set_captain(int player, int captain);
 int pc_coop_captain(int player);
 /// Tinte de distinción de P2 cuando ambos llevan el mismo capitán:

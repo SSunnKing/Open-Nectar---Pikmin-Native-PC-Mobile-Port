@@ -690,6 +690,51 @@ constexpr const char* kPikmin2DiscId = "GPVP01";
 // aparte de los de Pikmin 1, que ocupan la raíz.
 fs::path pikmin2GameDirectory(const fs::path& installDirectory) { return installDirectory / "pikmin2"; }
 
+// Pikmin 2 puede instalarse en cualquier carpeta: su ruta se guarda en un
+// fichero de usuario para que el launcher lo encuentre al abrirse desde otro
+// sitio y para que Pikmin 1 use su Louie (pc_pikmin2_dir_file, misma ruta).
+fs::path pikmin2DirFile()
+{
+#ifdef _WIN32
+    const char* base = std::getenv("LOCALAPPDATA");
+    if (!base || !*base) return {};
+    return fs::path(base) / "Open Nectar" / "pikmin2_dir";
+#else
+    fs::path base;
+    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg) base = xdg;
+    else if (const char* home = std::getenv("HOME"); home && *home) base = fs::path(home) / ".config";
+    else return {};
+    return base / "open-nectar" / "pikmin2_dir";
+#endif
+}
+
+fs::path rememberedPikmin2Directory()
+{
+    std::ifstream in(pikmin2DirFile());
+    std::string line;
+    if (!in || !std::getline(in, line)) return {};
+    while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ')) line.pop_back();
+    return line.empty() ? fs::path() : fs::u8path(line);
+}
+
+// Guarda la carpeta y la exporta a los juegos que lance este proceso.
+void rememberPikmin2Directory(const fs::path& directory)
+{
+    std::error_code ec;
+    const fs::path absolute = fs::absolute(directory, ec);
+    const std::string text = (ec ? directory : absolute).u8string();
+#ifdef _WIN32
+    _putenv_s("NECTAR_PIKMIN2_DIR", text.c_str());
+#else
+    setenv("NECTAR_PIKMIN2_DIR", text.c_str(), 1);
+#endif
+    const fs::path file = pikmin2DirFile();
+    if (file.empty() || rememberedPikmin2Directory() == fs::u8path(text)) return;
+    fs::create_directories(file.parent_path(), ec);
+    std::ofstream out(file, std::ios::trunc);
+    if (out) out << text << '\n';
+}
+
 bool installPikmin2Assets(const fs::path& image, const fs::path& gameDirectory, std::string& failure,
                           const std::function<void(std::uint32_t, const std::string&)>& progressCallback)
 {
@@ -856,6 +901,7 @@ UpdateOutcome runPikmin2Install(pikmin::launcher::HubWindow& hub, const fs::path
         }
         hub.markInstalled(pikmin::launcher::HubGame::Pikmin2, gameDirectory.string(),
                           (gameDirectory / kPikmin2Executable).string(), "GPVE01");
+        rememberPikmin2Directory(gameDirectory);
         const std::string text = "Pikmin 2 is installed in:\n" + gameDirectory.string()
                                + "\n\nOpen " + std::string(kLauncherExecutable) + " from\n" + installDirectory.string()
                                + "\nto play again.";
@@ -910,9 +956,15 @@ int main(int argc, char** argv)
         "NECTAR_PIKMIN1_EXECUTABLE", gameBinaryFor(pikmin1Directory));
     // Pikmin 2 instalado por el launcher está en pikmin2/; el de una build de
     // desarrollo, junto al launcher.
-    const fs::path pikmin2Directory = environmentPath("NECTAR_PIKMIN2_DIR",
-        fs::is_regular_file(sourceDirectory / "assets/.pikmin2-assets") ? sourceDirectory
-                                                                         : pikmin2GameDirectory(sourceDirectory));
+    // Si no está ni junto al launcher ni en pikmin2/, la carpeta recordada
+    // de una instalación en otro sitio.
+    fs::path pikmin2Default = fs::is_regular_file(sourceDirectory / "assets/.pikmin2-assets")
+        ? sourceDirectory : pikmin2GameDirectory(sourceDirectory);
+    if (!fs::is_regular_file(pikmin2Default / "assets/.pikmin2-assets")) {
+        const fs::path remembered = rememberedPikmin2Directory();
+        if (!remembered.empty() && fs::is_regular_file(remembered / "assets/.pikmin2-assets")) pikmin2Default = remembered;
+    }
+    const fs::path pikmin2Directory = environmentPath("NECTAR_PIKMIN2_DIR", pikmin2Default);
     const fs::path pikmin2Executable = environmentPath("NECTAR_PIKMIN2_EXECUTABLE",
         fs::is_regular_file(pikmin2Directory / kPikmin2Executable) ? pikmin2Directory / kPikmin2Executable
                                                                     : sourceDirectory / kPikmin2Executable);
@@ -920,6 +972,7 @@ int main(int argc, char** argv)
                                && fs::is_regular_file(pikmin1Executable);
     const bool pikmin2Available = fs::is_regular_file(pikmin2Executable)
                                && fs::is_regular_file(pikmin2Directory / "assets/.pikmin2-assets");
+    if (fs::is_regular_file(pikmin2Directory / "assets/.pikmin2-assets")) rememberPikmin2Directory(pikmin2Directory);
     const bool hasStandaloneFiles
         = fs::is_regular_file(sourceDirectory / (std::string(kGameExecutable) + ".real"))
        && fs::is_regular_file(sourceDirectory / (std::string(kLauncherExecutable) + ".real"))

@@ -24,4 +24,20 @@ int pc_texpack_install_zip(const char* zipPath, char* message, unsigned long mes
 // the menu. The packs are always rebuilt, even if up to date.
 int pc_hd_models_convert_file(const char* path, int expected, char* message, unsigned long messageSize);
 
+#include <string>
+
+/// Fichero de usuario donde el launcher guarda la carpeta de Pikmin 2
+/// (~/.config/open-nectar/pikmin2_dir o %LOCALAPPDATA%\Open Nectar\pikmin2_dir).
+std::string pc_pikmin2_dir_file(void);
+
+/// True si se encuentra Pikmin 2 instalado (NECTAR_PIKMIN2_DIR, el fichero
+/// anterior, ../pikmin2 o ./pikmin2). Se comprueba una vez.
+bool pc_pikmin2_detected(void);
+
+/// Con Pikmin 2 instalado, escribe desde su pikis.szs Louie
+/// (Load/Models/Louie/louie.nhm) y los capitanes extra en Load/Models/Pikmin2
+/// (presidente, Pikmin blanco y morado, Bulbmin), y sus retratos del HUD en
+/// Load/Art. Devuelve cuántos ficheros escribió.
+int pc_hd_models_import_pikmin2(void);
+
 #endif

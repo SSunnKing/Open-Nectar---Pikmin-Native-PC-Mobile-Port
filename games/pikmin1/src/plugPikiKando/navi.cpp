@@ -3804,7 +3804,10 @@ void Navi::applyPlayerLightTint()
 	} else if (pcCaptain() == PC_CAPTAIN_LOUIE) {
 		light.set(80, 140, 255, 255);
 		tinted = true;
-	} else if (pc_captain_piki_color(pcCaptain()) >= 0) {
+	} else if (pcCaptain() == PC_CAPTAIN_PRESIDENT) {
+		light.set(255, 190, 60, 255); // el presidente, dorada
+		tinted = true;
+	} else if (pc_captain_is_pikmin(pcCaptain())) {
 		light.set(90, 255, 110, 255); // capitán Pikmin: la hoja brilla verde
 		tinted = true;
 	}
@@ -3837,8 +3840,10 @@ static void pcSyncPikiAnimator(PaniPikiAnimator& dst, PaniPikiAnimator& src, Ani
 
 bool Navi::pcDrawAsPikmin(Graphics& gfx)
 {
-	const int color = pc_captain_piki_color(pcCaptain());
+	// Los de Pikmin 2 (blanco, morado, Bulbmin) van sobre el esqueleto del rojo.
+	const int color = pc_captain_skeleton_color(pcCaptain());
 	if (color < 0) return false;
+	const int p2Model = pc_captain_pikmin2_model(pcCaptain());
 
 	PikiShapeObject* obj = PikiShapeObject::create(color);
 	if (mPcPikiAnimColor != color) {
@@ -3863,11 +3868,12 @@ bool Navi::pcDrawAsPikmin(Graphics& gfx)
 	// La textura original es gris y la pinta el color del Pikmin.
 	obj->mShape->mMaterialList->setColour(Piki::pikiColors[color]);
 	static const PcHdModelId kHdPiki[PikiColorCount] = { PC_HD_MODEL_PIKI_BLUE, PC_HD_MODEL_PIKI_RED, PC_HD_MODEL_PIKI_YELLOW };
-	if (!pc_hd_model_draw_skinned(gfx, obj->mShape, kHdPiki[color], pcTint())) {
+	const bool p2Drawn = p2Model >= 0 && pc_hd_model_draw_skinned(gfx, obj->mShape, (PcHdModelId)p2Model, pcTint());
+	if (!p2Drawn && !pc_hd_model_draw_skinned(gfx, obj->mShape, kHdPiki[color], pcTint())) {
 		obj->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
 	}
 
-	// Hoja, siempre hoja (no capullo ni flor).
+	// Hoja, siempre hoja (no capullo ni flor); también a los de Pikmin 2.
 	gfx.useMatrix(obj->mShape->getAnimMatrix(6), 0);
 	const GXColor white = { 255, 255, 255, 255 };
 	if (!pc_hd_model_draw_rigid(gfx, obj->mShape->getAnimMatrix(6), PC_HD_MODEL_HAPPA_LEAF, white) && pikiMgr->mLeafModel[Leaf]) {
@@ -3904,6 +3910,8 @@ void Navi::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 	} else if (pcCaptain() == PC_CAPTAIN_LOUIE) {
 		drawn = pc_hd_model_draw_skinned(gfx, mNaviShapeObject->mShape, PC_HD_MODEL_LOUIE_HD, hdTint)
 		     || pc_hd_model_draw_skinned(gfx, mNaviShapeObject->mShape, PC_HD_MODEL_LOUIE, hdTint);
+	} else if (pcCaptain() == PC_CAPTAIN_PRESIDENT) {
+		drawn = pc_hd_model_draw_skinned(gfx, mNaviShapeObject->mShape, PC_HD_MODEL_PRESIDENT, hdTint);
 	} else {
 		drawn = pc_hd_model_draw_skinned(gfx, mNaviShapeObject->mShape, PC_HD_MODEL_OLIMAR, hdTint);
 	}
@@ -3925,7 +3933,7 @@ void Navi::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 	}
 #if defined(PIKI_PC_PORT)
 	// Capitán Pikmin: la luz sale de la punta de la hoja, no de la antena.
-	if (pc_captain_piki_color(pcCaptain()) >= 0 && !(pc_first_person_active_for(mNaviID))) {
+	if (pc_captain_is_pikmin(pcCaptain()) && !(pc_first_person_active_for(mNaviID))) {
 		mNaviLightPosition = mPcPikiLeafTip;
 	}
 #endif

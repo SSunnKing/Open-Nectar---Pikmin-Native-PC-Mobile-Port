@@ -141,6 +141,11 @@ const Entry kEntries[PC_HD_MODEL_COUNT] = {
 	// (their rigs differ), so the engine's inverse binds skin them.
 	{ "BulborbHD", "bulborb_dwarf.nhm", BIND_ENGINE, GX_CULL_FRONT, kDwarfBulborbRig, 17 },
 	{ "BulborbHD", "bulborb.nhm", BIND_ENGINE, GX_CULL_FRONT, kBulborbRig, 29 },
+	// De Pikmin 2: mismo esqueleto que Pikmin 1, con sus propias poses de reposo.
+	{ "Pikmin2", "president.nhm", BIND_PACK, GX_CULL_FRONT, kNaviRig, 12 },
+	{ "Pikmin2", "piki_white.nhm", BIND_PACK, GX_CULL_FRONT, kNaviRig, 12 },
+	{ "Pikmin2", "piki_purple.nhm", BIND_PACK, GX_CULL_FRONT, kNaviRig, 12 },
+	{ "Pikmin2", "bulbmin.nhm", BIND_PACK, GX_CULL_FRONT, kNaviRig, 12 },
 };
 
 struct Model {
@@ -282,6 +287,11 @@ int settingsRow(PcHdModelId id)
 	case PC_HD_MODEL_LOUIE_HD: return 2;
 	case PC_HD_MODEL_BULBORB: return 4;
 	case PC_HD_MODEL_BULBORB_DWARF: return 5;
+	// Capitanes de Pikmin 2: no son un pack HD opcional, siempre activos.
+	case PC_HD_MODEL_PRESIDENT:
+	case PC_HD_MODEL_PIKI_WHITE:
+	case PC_HD_MODEL_PIKI_PURPLE:
+	case PC_HD_MODEL_BULBMIN: return -1;
 	default: return 3;
 	}
 }
@@ -290,7 +300,7 @@ Model* prepare(PcHdModelId id)
 {
 	if (id < 0 || id >= PC_HD_MODEL_COUNT) return nullptr;
 	// Apagado desde el launcher o el .conf: se dibuja el original.
-	if (!pc_settings_get_hd_model_enabled(settingsRow(id))) return nullptr;
+	if (settingsRow(id) >= 0 && !pc_settings_get_hd_model_enabled(settingsRow(id))) return nullptr;
 	// First use: build packs from any Pikmin 3 rip (zip or folder) dropped
 	// into Load/Models, so the user never needs an external tool.
 	static bool sConverted = false;

@@ -47,6 +47,8 @@
 #include "pc_vs.h"
 #include "pc_achievements.h"
 #include "pc_speedrun.h"
+#include "pc_captain_preview.h"
+#include "mods/pc_hd_model_convert.h"
 #include "randomizer/pc_randomizer.h"
 #include "gameflow.h"
 #include "SoundMgr.h"
@@ -4921,16 +4923,36 @@ void devAssignRestart() {
 }
 
 // Tarjetas del selector de capitán, en orden (índice = PcCaptain).
-const char* const kCaptainNames[PC_CAPTAIN_COUNT] = { "Olimar", "Louie", "Red", "Yellow", "Blue" };
+const char* const kCaptainNames[PC_CAPTAIN_COUNT] = { "Olimar", "Louie", "Red", "Yellow", "Blue",
+                                                      "President", "White", "Purple", "Bulbmin" };
 // Sprites al doble (Olimar/Louie de Pikmin 2-e; los Pikmin, de Pikmin Puzzle
 // Cards de GBA, de pie con la hoja).
 const char* const kCaptainArt[PC_CAPTAIN_COUNT] = { "coop_olimar", "coop_louie", "coop_piki_red", "coop_piki_yellow",
-                                                    "coop_piki_blue" };
+                                                    "coop_piki_blue", "coop_president", "coop_piki_white",
+                                                    "coop_piki_purple", "coop_bulbmin" };
 // Si falta el PNG de un Pikmin, sale de la textura del juego piki3 (116x64):
 // rojo, amarillo y azul tumbados con su hoja. Columnas de cada uno.
 const int kCaptainPikiCol[PC_CAPTAIN_COUNT][2] = { { 0, 0 }, { 0, 0 }, { 0, 38 }, { 34, 78 }, { 76, 116 } };
 constexpr int kCaptainBoxW = 104, kCaptainBoxH = 120, kCaptainBoxGap = 9;
-constexpr int kCaptainBoxLeft = (620 - (PC_CAPTAIN_COUNT * kCaptainBoxW + (PC_CAPTAIN_COUNT - 1) * kCaptainBoxGap)) / 2;
+// Primera fila: los de Pikmin 1; segunda (con Pikmin 2 instalado): los suyos.
+constexpr int kCaptainRow0 = PC_CAPTAIN_FIRST_PIKMIN2;
+constexpr int kCaptainRow1 = PC_CAPTAIN_COUNT - PC_CAPTAIN_FIRST_PIKMIN2;
+constexpr int captainRowLeft(int count) { return (620 - (count * kCaptainBoxW + (count - 1) * kCaptainBoxGap)) / 2; }
+bool captainSecondRow() { return pc_pikmin2_detected(); }
+int captainRowOf(int captain) { return captain >= PC_CAPTAIN_FIRST_PIKMIN2 ? 1 : 0; }
+// Alto extra del panel con la segunda fila.
+int captainExtraH() { return captainSecondRow() ? kCaptainBoxH + kCaptainBoxGap : 0; }
+// Esquina de la tarjeta de un capitán dentro del panel; false si no se muestra.
+bool captainCardPos(int captain, int panelX, int panelY, int* x, int* y) {
+    if (captain < 0 || captain >= PC_CAPTAIN_COUNT) return false;
+    const int row = captainRowOf(captain);
+    if (row == 1 && !captainSecondRow()) return false;
+    const int first = row == 0 ? 0 : PC_CAPTAIN_FIRST_PIKMIN2;
+    const int count = row == 0 ? kCaptainRow0 : kCaptainRow1;
+    *x = panelX + captainRowLeft(count) + (captain - first) * (kCaptainBoxW + kCaptainBoxGap);
+    *y = panelY + 84 + row * (kCaptainBoxH + kCaptainBoxGap);
+    return true;
+}
 const char* devAssignCaptainName(int captain) {
     return (captain >= 0 && captain < PC_CAPTAIN_COUNT) ? kCaptainNames[captain] : kCaptainNames[0];
 }
@@ -4951,16 +4973,20 @@ const char* devAssignName(int player) {
 // Selector de capitán (Olimar, Louie o un Pikmin) compartido por el prompt de mandos del
 // coop y el de 1 jugador. Devuelve 0 nada, 1 aceptado, 2 atrás.
 int captainPickInput(int player, bool keyboardOk, SDL_GameController* ctl, int* captain, bool ignoreWindow) {
-    bool left = false, right = false, accept = false, back = false;
+    bool left = false, right = false, up = false, down = false, accept = false, back = false;
     if (keyboardOk) {
         left   = keyWentDown(SDL_SCANCODE_LEFT)  || keyWentDown(SDL_SCANCODE_A);
         right  = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
+        up     = keyWentDown(SDL_SCANCODE_UP)    || keyWentDown(SDL_SCANCODE_W);
+        down   = keyWentDown(SDL_SCANCODE_DOWN)  || keyWentDown(SDL_SCANCODE_S);
         accept = menuOkKey();
         back   = menuCancelKey();
     }
     if (player == 0) {
         left |= (sTouchFrameButtons & PAD_BUTTON_LEFT) != 0;
         right |= (sTouchFrameButtons & PAD_BUTTON_RIGHT) != 0;
+        up |= (sTouchFrameButtons & PAD_BUTTON_UP) != 0;
+        down |= (sTouchFrameButtons & PAD_BUTTON_DOWN) != 0;
         accept |= (sTouchFrameButtons & PAD_BUTTON_A) != 0;
         back |= (sTouchFrameButtons & PAD_BUTTON_B) != 0;
         if (sTouchTapPending) {
@@ -4971,9 +4997,10 @@ int captainPickInput(int player, bool keyboardOk, SDL_GameController* ctl, int* 
             const float aspect = dh > 0 ? float(dw) / float(dh) : 4.0f / 3.0f;
             const float screenW = aspect * 480.0f;
             const float x = sTouchTapX * screenW, y = sTouchTapY * 480.0f;
-            const float panelX = screenW * 0.5f - 310.0f, boxY = 110.0f + 84.0f;
+            const int panelX = int(screenW * 0.5f) - 310, panelY = 240 - (260 + captainExtraH()) / 2;
             for (int i = 0; i < PC_CAPTAIN_COUNT; ++i) {
-                const float boxX = panelX + kCaptainBoxLeft + i * (kCaptainBoxW + kCaptainBoxGap);
+                int boxX = 0, boxY = 0;
+                if (!captainCardPos(i, panelX, panelY, &boxX, &boxY) || !pc_captain_available(i)) continue;
                 if (x >= boxX && x <= boxX + kCaptainBoxW && y >= boxY && y <= boxY + kCaptainBoxH) {
                     *captain = i;
                     accept = true;
@@ -4988,12 +5015,33 @@ int captainPickInput(int player, bool keyboardOk, SDL_GameController* ctl, int* 
         const bool hB     = pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_B));
         if (padEdge(hLeft, 2))  left   = true;
         if (padEdge(hRight, 3)) right  = true;
+        const bool hUp   = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_UP) || menuStickVertical(ctl, -1);
+        const bool hDown = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_DOWN) || menuStickVertical(ctl, 1);
+        if (padEdge(hUp, 0))   up   = true;
+        if (padEdge(hDown, 1)) down = true;
         if (padEdge(hA, 4))     accept = true;
         if (padEdge(hB, 5))     back   = true;
     }
     if (ignoreWindow) return 0;
-    if (left)  *captain = (*captain + PC_CAPTAIN_COUNT - 1) % PC_CAPTAIN_COUNT;
-    if (right) *captain = (*captain + 1) % PC_CAPTAIN_COUNT;
+    // Izquierda/derecha dan la vuelta dentro de la fila; arriba/abajo cambian
+    // de fila (la segunda solo con Pikmin 2), a la misma columna o la última.
+    if (!captainSecondRow() && captainRowOf(*captain) == 1) *captain = PC_CAPTAIN_OLIMAR;
+    {
+        const int row   = captainRowOf(*captain);
+        const int first = row == 0 ? 0 : PC_CAPTAIN_FIRST_PIKMIN2;
+        const int count = row == 0 ? kCaptainRow0 : kCaptainRow1;
+        for (int step = 0; step < count && (left || right); step++) {
+            *captain = first + (*captain - first + (left ? count - 1 : 1)) % count;
+            if (pc_captain_available(*captain)) break;
+        }
+        if ((up || down) && captainSecondRow() && (row == 0 ? down : up)) {
+            const int col    = *captain - first;
+            const int other  = row == 0 ? PC_CAPTAIN_FIRST_PIKMIN2 : 0;
+            const int oCount = row == 0 ? kCaptainRow1 : kCaptainRow0;
+            const int target = other + (col < oCount ? col : oCount - 1);
+            if (pc_captain_available(target)) *captain = target;
+        }
+    }
     if (accept && *captain == PC_CAPTAIN_LOUIE && !devAssignLouieInstalled()) {
         // Sin el modelo no se puede jugar con Louie: aviso y se queda.
         sDevAssignLouieNoticeUntil = SDL_GetTicks() + 3000;
@@ -5004,6 +5052,10 @@ int captainPickInput(int player, bool keyboardOk, SDL_GameController* ctl, int* 
     return 0;
 }
 
+// Prueba de tarjetas con el modelo 3D del juego (pc_captain_preview): lo
+// activa el selector de 1 jugador; las tarjetas con modelo no pintan su PNG.
+bool sCaptainCards3D = false;
+
 // Dibujo del selector dentro de un panel (panelX/Y/W del prompt).
 void captainPickDraw(DGXGraphics* gfx, int panelX, int panelY, int panelW, int player, int captain, const char* helpDefault) {
     char line1[64];
@@ -5011,10 +5063,10 @@ void captainPickDraw(DGXGraphics* gfx, int panelX, int panelY, int panelW, int p
     drawTextOutline(panelX + panelW / 2 - menuTextWidth(line1) / 2, panelY + 56,
                     "%s", Colour(255, 229, 120, 255), Colour(8, 12, 28, 255), line1);
     const int boxW = kCaptainBoxW, boxH = kCaptainBoxH;
-    const int boxY = panelY + 84;
     for (int i = 0; i < PC_CAPTAIN_COUNT; i++) {
         const bool sel = captain == i;
-        const int boxX = panelX + kCaptainBoxLeft + i * (boxW + kCaptainBoxGap);
+        int boxX = 0, boxY = 0;
+        if (!captainCardPos(i, panelX, panelY, &boxX, &boxY)) continue;
         if (pc_settings_p2d_active()) {
             // Cada capitán en su burbuja de cristal.
             pc_settings_p2d_plate(boxX, boxY, boxW, boxH, 1);
@@ -5027,9 +5079,10 @@ void captainPickDraw(DGXGraphics* gfx, int panelX, int panelY, int panelW, int p
         // misma línea que Olimar (32 px de alto). Sin PNG, un Pikmin usa su
         // trozo de piki3 a tamaño real.
         int ax = 0, aw = 0, ah = 0, scale = 2;
-        Texture* art = pc_art_texture(kCaptainArt[i]);
+        Texture* art = (sCaptainCards3D && pc_captain_preview_ready(i)) ? nullptr : pc_art_texture(kCaptainArt[i]);
         if (art && !pc_art_size(kCaptainArt[i], &aw, &ah)) art = nullptr;
-        if (!art && i >= PC_CAPTAIN_PIKMIN_RED) {
+        if (!art && i >= PC_CAPTAIN_PIKMIN_RED && i <= PC_CAPTAIN_PIKMIN_BLUE
+            && !(sCaptainCards3D && pc_captain_preview_ready(i))) {
             static Texture* sPiki3 = nullptr;
             if (!sPiki3) sPiki3 = zen::loadTexExp("screen/tex/piki3.bti", true, true);
             art   = sPiki3;
@@ -5053,7 +5106,9 @@ void captainPickDraw(DGXGraphics* gfx, int panelX, int panelY, int panelW, int p
                 gfx->useTexture(nullptr, GX_TEXMAP0);
             }
         }
-        if (drawGlassOption(boxX, boxY + boxH - 38, boxW, 30, kCaptainNames[i], sel)) continue;
+        // Metido en la tarjeta: a lo ancho entero, los bordes del brillo de
+        // selección asomaban por fuera como paréntesis.
+        if (drawGlassOption(boxX + 8, boxY + boxH - 38, boxW - 16, 30, kCaptainNames[i], sel)) continue;
         const int tw = menuTextWidth(kCaptainNames[i]);
         drawTextOutline(boxX + boxW / 2 - tw / 2, boxY + boxH - 30, "%s",
                         sel ? Colour(255, 229, 120, 255) : Colour(170, 180, 200, 255),
@@ -5063,7 +5118,7 @@ void captainPickDraw(DGXGraphics* gfx, int panelX, int panelY, int panelW, int p
     const bool noticing = louieMissing && SDL_GetTicks() < sDevAssignLouieNoticeUntil;
     const char* help = noticing ? "Louie model not installed: Advanced Options > HD Models (Louie zip)."
                      : (louieMissing ? "Louie: model not installed (Advanced Options > HD Models)." : helpDefault);
-    drawHelpLine(panelX + panelW / 2, panelY + 220, help, noticing ? Colour(255, 160, 120, 255) : Colour(150, 165, 195, 255));
+    drawHelpLine(panelX + panelW / 2, panelY + 220 + captainExtraH(), help, noticing ? Colour(255, 160, 120, 255) : Colour(150, 165, 195, 255));
 }
 }
 
@@ -5082,9 +5137,11 @@ void pcCaptainPromptInput() {
         pc_coop_set_captain(0, sCaptainPromptChoice);
         sCaptainPromptResult = PC_DEVASSIGN_OK;
         sCaptainPromptOpen   = false;
+        pc_captain_preview_release();
     } else if (r == 2) {
         sCaptainPromptResult = PC_DEVASSIGN_CANCELLED;
         sCaptainPromptOpen   = false;
+        pc_captain_preview_release();
     }
 }
 }
@@ -5107,16 +5164,33 @@ void pc_captain_prompt_draw(void) {
     if (!sFont) return;
     const int screenW = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
     const int screenH = gfx->mScreenHeight;
-    PcSettingsP2DFrame nativeFrame(screenW, screenH);
-    GlassTextScope glassText;
-    Matrix4f ortho;
-    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
-    const int panelW = 620, panelH = 260;
+    const int panelW = 620, panelH = 260 + captainExtraH();
     const int panelX = screenW / 2 - panelW / 2, panelY = screenH / 2 - panelH / 2;
-    drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
-    drawPikminHeader(gfx, panelX, panelY, panelW, "Captain");
-    captainPickDraw(gfx, panelX, panelY, panelW, 0, sCaptainPromptChoice,
-                    "Left/Right: choose    A / Enter: confirm    B / Esc: back");
+    // Prueba: modelos 3D en las tarjetas (solo con el menú a pantalla
+    // ancha, cuyo espacio virtual cubre toda la ventana).
+    sCaptainCards3D = pc_gfx_menu_wide() != 0;
+    {
+        PcSettingsP2DFrame nativeFrame(screenW, screenH);
+        GlassTextScope glassText;
+        Matrix4f ortho;
+        gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
+        drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
+        drawPikminHeader(gfx, panelX, panelY, panelW, "Captain");
+        captainPickDraw(gfx, panelX, panelY, panelW, 0, sCaptainPromptChoice,
+                        captainSecondRow() ? "Arrows: choose    A / Enter: confirm    B / Esc: back"
+                                            : "Left/Right: choose    A / Enter: confirm    B / Esc: back");
+    }
+    if (sCaptainCards3D) {
+        // Mismo hueco que el sprite: encima del nombre de la tarjeta.
+        for (int i = 0; i < PC_CAPTAIN_COUNT; i++) {
+            int boxX = 0, boxY = 0;
+            if (!captainCardPos(i, panelX, panelY, &boxX, &boxY)) continue;
+            pc_captain_preview_draw(i, boxX + 4, boxY + 4, kCaptainBoxW - 8, kCaptainBoxH - 44, screenW, screenH,
+                                    i == sCaptainPromptChoice);
+        }
+        Matrix4f ortho;
+        gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
+    }
 }
 
 void pc_devassign_prompt_open(void) {
@@ -5270,7 +5344,9 @@ void pc_devassign_prompt_draw(void) {
 
 
     const int panelW = 620;
-    const int panelH = 260;
+    // Al elegir capitán, con Pikmin 2 cabe la segunda fila de tarjetas.
+    const bool picking = sDevAssignStep == DEVASSIGN_PickP1 || sDevAssignStep == DEVASSIGN_PickP2;
+    const int panelH = 260 + (picking ? captainExtraH() : 0);
     const int panelX = screenW / 2 - panelW / 2;
     const int panelY = screenH / 2 - panelH / 2;
 
@@ -5280,7 +5356,8 @@ void pc_devassign_prompt_draw(void) {
     if (sDevAssignStep == DEVASSIGN_PickP1 || sDevAssignStep == DEVASSIGN_PickP2) {
         const int player = devAssignPlayer();
         captainPickDraw(gfx, panelX, panelY, panelW, player, sDevAssignCaptain[player],
-                        "Left/Right: choose    A / Enter: confirm    B: reassign    Esc: back");
+                        captainSecondRow() ? "Arrows: choose    A / Enter: confirm    B: reassign    Esc: back"
+                                        : "Left/Right: choose    A / Enter: confirm    B: reassign    Esc: back");
         return;
     }
 
@@ -6625,9 +6702,9 @@ void graphicsRowValue(int i, char* value, size_t n) {
     case 11: {
         std::error_code ec;
         int installed = 0;
-        for (int id = 0; id < PC_HD_MODEL_COUNT; id++)
+        for (int id = 0; id < PC_HD_MODEL_PRESIDENT; id++) // los de Pikmin 2 no son packs
             if (std::filesystem::is_regular_file(pc_hd_model_path((PcHdModelId)id), ec)) installed++;
-        snprintf(value, n, "%d / %d files  >", installed, (int)PC_HD_MODEL_COUNT);
+        snprintf(value, n, "%d / %d files  >", installed, (int)PC_HD_MODEL_PRESIDENT);
         break;
     }
     case 12: snprintf(value, n, "%s", sPending.perPixelLighting ? "Smooth" : "Original"); break;

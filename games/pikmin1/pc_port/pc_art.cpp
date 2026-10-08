@@ -30,6 +30,8 @@ bool readFile(const char* name, std::vector<unsigned char>& bytes)
 	// fuentes en escritorio (o PIKMIN_TOUCH_ART).
 	std::vector<std::string> candidates;
 	candidates.push_back(std::string("art/") + name + ".png");
+	// Retratos sacados de un Pikmin 2 instalado (pc_hd_models_import_pikmin2).
+	candidates.push_back(std::string("Load/Art/") + name + ".png");
 	if (const char* dir = std::getenv("PIKMIN_TOUCH_ART")) candidates.insert(candidates.begin(), std::string(dir) + "/" + name + ".png");
 	candidates.push_back(std::string("pc_port/touch/assets/art/") + name + ".png");
 	candidates.push_back(std::string("../pc_port/touch/assets/art/") + name + ".png");

@@ -305,8 +305,9 @@ struct NaviTexCallBack : public P2DPaneCallBack {
 		if (naviMgr) {
 			Navi* navi = naviMgr->getNavi(zen::gHudNaviIndex);
 #if defined(PIKI_PC_PORT)
-			// Retrato del capitán: Louie (Pikmin 2) o, para un capitán Pikmin, el
-			// icono de burbuja del propio juego con hoja (el del contador).
+			// Retrato del capitán: Louie y el presidente (Pikmin 2) o, para un
+			// capitán Pikmin, el icono de burbuja con hoja (el del contador; los
+			// de los Pikmin blanco y morado salen del Pikmin 2 instalado).
 			if (!mOriginalTex) mOriginalTex = pic->getTexture(0);
 			static Texture* sPikiPortrait[PikiColorCount] = {};
 			static const char* kPikiPortrait[PikiColorCount] = { "screen/tex/bp_l64.bti", "screen/tex/rp_l64.bti", "screen/tex/yp_l64.bti" };
@@ -318,6 +319,16 @@ struct NaviTexCallBack : public P2DPaneCallBack {
 				custom = sPikiPortrait[pikColor];
 			} else if (captain == PC_CAPTAIN_LOUIE) {
 				custom = pc_art_texture("coop_portrait_louie");
+			} else if (captain == PC_CAPTAIN_PRESIDENT) {
+				custom = pc_art_texture("coop_portrait_president");
+			} else if (captain == PC_CAPTAIN_PIKMIN_WHITE) {
+				custom = pc_art_texture("coop_portrait_piki_white");
+			} else if (captain == PC_CAPTAIN_PIKMIN_PURPLE) {
+				custom = pc_art_texture("coop_portrait_piki_purple");
+			} else if (captain == PC_CAPTAIN_BULBMIN) {
+				// Pikmin 2 no tiene icono de Bulbmin: el del rojo, su color.
+				if (!sPikiPortrait[Red]) sPikiPortrait[Red] = zen::loadTexExp(kPikiPortrait[Red], true, true);
+				custom = sPikiPortrait[Red];
 			}
 			Texture* want = custom ? custom : mOriginalTex;
 			if (want && pic->getTexture(0) != want) pic->setTexture(want, 0);
