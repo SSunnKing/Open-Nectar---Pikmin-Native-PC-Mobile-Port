@@ -1534,6 +1534,93 @@ void Navi::pcDrawLockRing(Graphics& gfx)
 }
 
 /**
+ * @brief Flechas del swarm, al estilo de la versión de Wii.
+ *
+ * Mientras el swarm lleva el grupo al cursor, una hilera de chevrones
+ * blancos (">" con la punta hacia el destino) sobre el suelo va del capitán
+ * al destino y avanza hacia él. Se desvanecen en los dos extremos para que la
+ * hilera no empiece ni acabe de golpe, y cada vértice se apoya en el terreno,
+ * como el aro del Lock-On.
+ */
+void Navi::pcDrawSwarmArrows(Graphics& gfx)
+{
+	static const f32 kSpacing    = 32.0f; // distancia entre arcos
+	static const f32 kSpeed      = 70.0f; // unidades por segundo hacia el destino
+	static const f32 kArmLength  = 20.0f; // largo de cada brazo del chevrón
+	static const f32 kArmAngle   = 0.85f; // apertura de cada brazo respecto al eje (radianes)
+	static const f32 kHalfStroke = 2.4f;
+	static const int kArmSegs    = 3;     // tramos por brazo, para seguir el terreno
+	static const f32 kFade       = 30.0f; // tramo de aparición y desaparición
+
+	mPcSwarmFrames--;
+
+	Vector3f dir(mPcSwarmGoal.x - mSRT.t.x, 0.0f, mPcSwarmGoal.z - mSRT.t.z);
+	const f32 total = dir.length();
+	if (total < 40.0f) {
+		return;
+	}
+	dir.multiply(1.0f / total);
+	const Vector3f side(dir.z, 0.0f, -dir.x);
+
+	// Del capitán (con un margen para no pisarle los pies) al destino.
+	const f32 begin = 18.0f;
+	const f32 end   = total - 12.0f;
+
+	static f32 phase = 0.0f;
+	phase += gsys->getFrameTime() * kSpeed;
+	if (phase >= kSpacing) {
+		phase -= kSpacing * f32(int(phase / kSpacing));
+	}
+
+	const bool prevLighting = gfx.setLighting(false, nullptr);
+	gfx.useMatrix(gfx.mCamera->mLookAtMtx, 0);
+	gfx.useTexture(nullptr, GX_TEXMAP0);
+	const int prevBlend = gfx.setCBlending(BLEND_Alpha);
+	const int prevCull  = gfx.setCullFront(2);
+
+	Vector2f uv[4];
+	for (int i = 0; i < 4; i++) {
+		uv[i].set(0.0f, 0.0f);
+	}
+	for (f32 s = begin + phase; s < end; s += kSpacing) {
+		f32 fade = (s - begin) / kFade;
+		if ((end - s) / kFade < fade) fade = (end - s) / kFade;
+		if (fade > 1.0f) fade = 1.0f;
+		if (fade <= 0.0f) continue;
+		gfx.setColour(Colour(245, 245, 255, u8(215.0f * fade)), true);
+
+		// Chevrón: dos brazos que salen hacia atrás desde la punta, uno a
+		// cada lado del eje. El grosor se aplica a lo ancho de cada brazo.
+		const Vector3f tip(mSRT.t.x + dir.x * s, 0.0f, mSRT.t.z + dir.z * s);
+		for (int arm = -1; arm <= 1; arm += 2) {
+			const f32 ca = cosf(kArmAngle), sa = sinf(kArmAngle) * f32(arm);
+			// Dirección del brazo (de la punta hacia atrás) y su normal.
+			const Vector3f back(-(dir.x * ca) + side.x * sa, 0.0f, -(dir.z * ca) + side.z * sa);
+			const Vector3f norm(back.z, 0.0f, -back.x);
+			for (int k = 0; k < kArmSegs; k++) {
+				// El primer tramo empieza un poco antes de la punta para que los
+				// dos brazos se solapen y la punta quede cerrada.
+				const f32 t0 = k == 0 ? -kHalfStroke : kArmLength * k / kArmSegs;
+				const f32 t1 = kArmLength * (k + 1) / kArmSegs;
+				const f32 along[4] = { t0, t0, t1, t1 };
+				const f32 across[4] = { -kHalfStroke, kHalfStroke, kHalfStroke, -kHalfStroke };
+				Vector3f quad[4];
+				for (int v = 0; v < 4; v++) {
+					quad[v].x = tip.x + back.x * along[v] + norm.x * across[v];
+					quad[v].z = tip.z + back.z * along[v] + norm.z * across[v];
+					quad[v].y = mapMgr->getMinY(quad[v].x, quad[v].z, true) + 1.5f;
+				}
+				gfx.drawOneTri(quad, nullptr, uv, 4);
+			}
+		}
+	}
+
+	gfx.setCullFront(prevCull);
+	gfx.setCBlending(prevBlend);
+	gfx.setLighting(prevLighting, nullptr);
+}
+
+/**
  * @brief Eternal Night: centro del ambiente (luciérnagas, luces de pellets).
  *
  * La cámara de partida no rellena mFocus (sí la de las cinemáticas), así que
@@ -3322,10 +3409,23 @@ void Navi::makeCStick(bool isSunset)
 	const bool swarmHeld     = mNaviID == 0 ? pc_window_swarm_held() : pc_window_swarm_held_p2();
 	// Durante el Charge el empuje va al objetivo fijado en vez de al cursor.
 	const bool charging = mPcChargeTime > 0.0f && mPcLockTarget;
-	if (!isSunset && (charging || (!swarmIsCharge && swarmHeld)) && cStickInput.length() < 0.05f) {
+	// Con el Charge activo el botón solo carga si hay a quién: sin objetivo
+	// fijado (o fijado en algo que no se ataca) hace el swarm normal al cursor.
+	const bool chargeTarget = swarmIsCharge && mPcLockTarget && (mPcLockTarget->isTeki() || mPcLockTarget->isBoss());
+	// El swarm lleva el grupo entero al cursor (issue #76): no se reutiliza el
+	// C-stick a fondo, que estrecha la formación a un Pikmin de ancho y la
+	// ancla delante del capitán, y con muchos Pikmin queda una fila desde
+	// Olimar hasta el cursor.
+	bool pcSwarmToGoal = false;
+	Vector3f pcSwarmGoal;
+	if (!isSunset && (charging || (swarmHeld && !chargeTarget)) && cStickInput.length() < 0.05f) {
 		const Vector3f goal = charging ? mPcLockTarget->getCentre() : mCursorWorldPos;
 		NVector3f toCursor(goal.x - mSRT.t.x, 0.0f, goal.z - mSRT.t.z);
 		if (toCursor.length() > 1.0f) {
+			pcSwarmToGoal  = true;
+			pcSwarmGoal    = goal;
+			mPcSwarmFrames = 2; // el dibujo lo consume; si makeCStick no corre, se apagan solas
+			mPcSwarmGoal   = goal;
 			toCursor.normalise();
 			NTransform3D NRef back = NTransform3D();
 			back.inputAxisAngle(NAxisAngle4f(NVector3f(0.0f, 1.0f, 0.0f), -cameraYaw));
@@ -3389,6 +3489,20 @@ void Navi::makeCStick(bool isSunset)
 		mPlateMgr->refresh(getPlatePikis(), strength);
 
 		mPlateMgr->setPos(mSRT.t, targetYaw, mVelocity);
+#if defined(PIKI_PC_PORT)
+		if (pcSwarmToGoal) {
+			// Formación compacta (la redonda del C-stick suelto) centrada en el
+			// cursor. La distancia al capitán se limita para que el hueco más
+			// lejano quede dentro de mFormationSlipRange (600) de los Pikmin que
+			// aún van a su lado: más allá romperían el grupo.
+			mPlateMgr->refresh(getPlatePikis(), 0.0f);
+			Vector3f toGoal(pcSwarmGoal.x - mSRT.t.x, 0.0f, pcSwarmGoal.z - mSRT.t.z);
+			const f32 maxDist = 450.0f - mPlateMgr->mPlateLength;
+			const f32 dist    = toGoal.length();
+			if (dist > maxDist && dist > 0.0f) toGoal.multiply(maxDist > 0.0f ? maxDist / dist : 0.0f);
+			mPlateMgr->mPlateCenter = mSRT.t + toGoal;
+		}
+#endif
 		mPlateDirLocked  = false;
 		mIsCStickNeutral = false;
 	} else {
@@ -3643,6 +3757,11 @@ void Navi::refresh(Graphics& gfx)
 #endif
 #if defined(PIKI_PC_PORT)
 			pc_gfx_shadow_exclude(0);
+#endif
+#if defined(PIKI_PC_PORT)
+			if (mPcSwarmFrames > 0) {
+				pcDrawSwarmArrows(gfx);
+			}
 #endif
 		}
 	}

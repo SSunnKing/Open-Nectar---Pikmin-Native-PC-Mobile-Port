@@ -221,6 +221,7 @@ public:
 	void pcUpdateBombCommand();
 	void pcPinCursorToLock();
 	void pcDrawLockRing(Graphics& gfx);
+	void pcDrawSwarmArrows(Graphics& gfx); ///< Flechas del swarm hacia el cursor, como en la versión de Wii.
 	void pcDrawNightAmbience(Graphics& gfx);
 	void pcPinCursorFirstPerson();
 	void pcRotateCursor(f32 angle); ///< Gira el cursor alrededor del capitán (cámara libre).
@@ -228,6 +229,8 @@ public:
 	Creature* mPcLockTarget = nullptr; ///< Mod "Lock-On": enemigo u objeto fijado.
 	Creature* mPcLockIgnore = nullptr; ///< Automático: soltado a mano, no se recoge hasta salir de él.
 	f32 mPcChargeTime       = 0.0f;    ///< Mod "Charge": segundos que el grupo sigue corriendo hacia el objetivo.
+	int mPcSwarmFrames      = 0;       ///< >0 mientras el swarm lleva el grupo a mPcSwarmGoal (lo renueva makeCStick).
+	Vector3f mPcSwarmGoal;             ///< Destino del swarm: el cursor o el objetivo de la carga.
 	Vector3f mPcAimOffset;             ///< Cursor libre (lo que apunta el jugador) mientras el visible está clavado.
 	Vector3f mPcPinnedOffset;          ///< Último desplazamiento con el que se clavó el cursor.
 	Texture* mPcGlowTex = nullptr;     ///< Eternal Night: halo de luciérnagas y pellets (va con el heap del nivel).

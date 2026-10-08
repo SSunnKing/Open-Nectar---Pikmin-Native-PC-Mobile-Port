@@ -204,6 +204,8 @@ static SDL_Scancode sKeyBindings[PC_KEY_ACT_COUNT];
 // el código (izquierdo = A, derecho = B, central = Z) son sus valores por defecto.
 static SDL_Scancode sKeyBindings2[PC_KEY_ACT_COUNT];
 static bool sSwarmHeld = false; // PC_KEY_ACT_SWARM sampled by the last poll
+// D-pad Down of each player's pad, which is also the swarm button.
+static bool sPadDpadDownHeld[2] = { false, false };
 
 // Lock-On y Charge se consumen como flanco: el bucle sondea el mando muchas
 // veces entre ticks lógicos, así que la pulsación se guarda hasta que alguien
@@ -217,6 +219,8 @@ static bool sBombPending[2] = { false, false }; // mod "Bomb Control", por jugad
 static bool sSwarmPending  = false;
 
 bool pc_window_swarm_held(void) { return sSwarmHeld; }
+
+bool pc_window_pad_dpad_down_held(int player) { return sPadDpadDownHeld[player & 1]; }
 static bool sKeyBindingsInitialized = false;
 
 // Gamepad remapping state.
@@ -961,16 +965,22 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     if (sCStickInvert & 1) rx = -rx;
     if (sCStickInvert & 2) ry = -ry;
     // Mod "Free Camera": the right stick orbits instead of pushing the squad,
-    // the way Pikmin 3 rearranged it. The squad moves to the Swarm button,
-    // which defaults to D-pad Down here because the mod frees it up.
+    // the way Pikmin 3 rearranged it. The squad moves to the Swarm button.
+    // D-pad Down is the pad's swarm button with or without the mod (issue
+    // #76): the right stick alone makes the original C-stick column, never a
+    // group at the cursor.
     sFreeCamSubY[player & 1] = 0.0f;
+    sPadDpadDownHeld[player & 1] = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_DOWN) != 0;
+    // Con A pulsado y la selección de Pikmin 2, la cruceta abajo solo cambia
+    // el color del Pikmin agarrado: no hace swarm.
+    const bool kindChange = (button & PAD_BUTTON_A) && pc_settings_get_p2_selection();
+    if (sPadDpadDownHeld[player & 1] && !kindChange) swarmHeld = true;
     if (pc_settings_get_free_camera()) {
         if (abs(ry) > axisDeadZone) sFreeCamSubY[player & 1] = pc_pad_axis_from_sdl(-ry) / 74.0f;
         if (abs(rx) > axisDeadZone) {
             // Cada mando gira la cámara de su jugador (en cooperativo, J2 la suya).
             pc_window_add_camera_drag_player(player, -(float)rx / 32767.0f * 0.02f * pc_settings_get_free_camera_pad_scale());
         }
-        if (SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) swarmHeld = true;
     } else {
         if (abs(rx) > axisDeadZone) substickX = pc_pad_axis_from_sdl(rx);
         if (abs(ry) > axisDeadZone) substickY = pc_pad_axis_from_sdl(-ry);
