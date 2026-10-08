@@ -633,6 +633,54 @@ if(ANDROID AND NOT TARGET nectar_installer)
     target_link_options(nectar_installer PRIVATE "-Wl,-z,max-page-size=16384")
 endif()
 
+# Launcher en Android: la misma ventana del hub (launcher_gui.cpp) en una .so
+# que carga LauncherActivity, con su propio arranque (launcher_android_main)
+# y plataforma (launcher_platform_android). Ver games/pikmin2/docs/ANDROID.md.
+if(ANDROID AND NOT TARGET nectar_launcher)
+    add_library(launcher_imgui_android STATIC
+        third_party/imgui/imgui.cpp
+        third_party/imgui/imgui_draw.cpp
+        third_party/imgui/imgui_tables.cpp
+        third_party/imgui/imgui_widgets.cpp
+        third_party/imgui/backends/imgui_impl_sdl2.cpp
+        third_party/imgui/backends/imgui_impl_opengl3.cpp)
+    set_property(TARGET launcher_imgui_android PROPERTY INCLUDE_DIRECTORIES "")
+    target_include_directories(launcher_imgui_android PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui
+        ${SDL2_INCLUDE_DIRS})
+    target_compile_definitions(launcher_imgui_android PUBLIC IMGUI_IMPL_OPENGL_ES3)
+    target_link_libraries(launcher_imgui_android PUBLIC ${SDL2_LIBRARIES} GLESv3)
+
+    include(cmake/EmbedFile.cmake)
+    set(LAUNCHER_EMBED_DIR "${CMAKE_CURRENT_BINARY_DIR}/launcher_embedded")
+    file(MAKE_DIRECTORY "${LAUNCHER_EMBED_DIR}")
+    embed_file("${CMAKE_CURRENT_SOURCE_DIR}/pc_port/launcher/assets/logo.png" "${LAUNCHER_EMBED_DIR}/logo_open_nectar.h" kLogoOpenNectar)
+    embed_file("${CMAKE_CURRENT_SOURCE_DIR}/pc_port/launcher/assets/Fredoka.ttf" "${LAUNCHER_EMBED_DIR}/font_fredoka.h" kFontFredoka)
+
+    add_library(nectar_launcher SHARED
+        pc_port/launcher/launcher_android_main.cpp
+        pc_port/launcher/launcher_gui.cpp
+        pc_port/launcher/bti_decode.cpp
+        pc_port/launcher/settings_model.cpp
+        pc_port/launcher/release_update.cpp
+        pc_port/launcher/installer_ui.cpp
+        pc_port/launcher/launcher_platform_android.cpp
+        pc_port/pc_icon.cpp
+        "${LAUNCHER_EMBED_DIR}/logo_open_nectar.h"
+        "${LAUNCHER_EMBED_DIR}/font_fredoka.h")
+    set_property(TARGET nectar_launcher PROPERTY INCLUDE_DIRECTORIES "")
+    target_include_directories(nectar_launcher PRIVATE
+        ${PC_PORT_DIR}
+        "${LAUNCHER_EMBED_DIR}"
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb
+        ${SDL2_INCLUDE_DIRS})
+    set(OPEN_NECTAR_VERSION "0.9.2" CACHE STRING "Open Nectar version of this build (GitHub release tag)")
+    target_compile_definitions(nectar_launcher PRIVATE OPEN_NECTAR_VERSION="${OPEN_NECTAR_VERSION}")
+    target_compile_options(nectar_launcher PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    target_link_libraries(nectar_launcher PRIVATE launcher_imgui_android pikmin_disc_image ${SDL2_LIBRARIES} GLESv3 EGL log android)
+    target_link_options(nectar_launcher PRIVATE "-Wl,-z,max-page-size=16384")
+endif()
+
 if(PIKMIN_BUILD_LAUNCHER)
 
     # La capa de plataforma aísla lo único del launcher que depende del sistema:

@@ -19,11 +19,22 @@ import org.opennectar.TexturePack;
  * libnectar.so exporta SDL_main, que es el main() de pc_port/pc_main.cpp.
  */
 public class NectarActivity extends SDLActivity {
+    /** Biblioteca del juego: nectar, nectar-pal (Pikmin), nectar2, nectar2-pal (Pikmin 2). */
+    public static final String EXTRA_LIBRARY = "org.opennectar.LIBRARY";
+    /** Carpeta del juego (la que tiene assets/ y pikmin_settings.conf). */
+    public static final String EXTRA_GAME_DIR = "org.opennectar.GAME_DIR";
+
+    /** La que pide el launcher; sin ella, la de siempre de Pikmin 1. */
+    private java.io.File gameDirectory() {
+        String dir = getIntent() != null ? getIntent().getStringExtra(EXTRA_GAME_DIR) : null;
+        return dir != null ? new java.io.File(dir) : Installer.gameDir(this);
+    }
+
     @Override
     public void loadLibraries() {
         // Antes de cargar el juego: sus inicializadores estáticos leen
         // pikmin_settings.conf del directorio actual (idioma del disco PAL).
-        Installer.nativeChdir(Installer.gameDir(this).getAbsolutePath());
+        Installer.nativeChdir(gameDirectory().getAbsolutePath());
         super.loadLibraries();
     }
 
@@ -35,15 +46,22 @@ public class NectarActivity extends SDLActivity {
     /** "nectar" (USA) o "nectar-pal" (Europa), según el disco instalado: el
      *  instalador lo deja en assets/.pikmin-build. */
     private String gameLibrary() {
-        java.io.File marker = new java.io.File(Installer.gameDir(this), "assets/.pikmin-build");
+        String requested = getIntent() != null ? getIntent().getStringExtra(EXTRA_LIBRARY) : null;
+        if (isGameLibrary(requested)) return requested;
+        java.io.File marker = new java.io.File(gameDirectory(), "assets/.pikmin-build");
         try (java.io.BufferedReader in = new java.io.BufferedReader(new java.io.FileReader(marker))) {
             String line = in.readLine();
             if (line != null) {
                 line = line.trim();
-                if (line.equals("nectar") || line.equals("nectar-pal")) return line;
+                if (isGameLibrary(line)) return line;
             }
         } catch (java.io.IOException ignored) {}
         return "nectar";
+    }
+
+    private static boolean isGameLibrary(String name) {
+        return name != null && (name.equals("nectar") || name.equals("nectar-pal")
+                || name.equals("nectar2") || name.equals("nectar2-pal"));
     }
 
     @Override

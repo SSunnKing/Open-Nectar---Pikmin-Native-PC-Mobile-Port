@@ -776,7 +776,7 @@ void System::initialize()
  */
 void System::loadResourceFirst()
 {
-	Delegate<System>* delegate = new (mSysHeap, 0) Delegate<System>(this, &constructWithDvdAccessFirst);
+	Delegate<System>* delegate = new (mSysHeap, 0) Delegate<System>(this, &System::constructWithDvdAccessFirst);
 
 	dvdLoadUseCallBack(&mThreadCommand, delegate);
 }
@@ -787,7 +787,7 @@ void System::loadResourceFirst()
  */
 void System::loadResourceSecond()
 {
-	Delegate<System>* delegate = new (mSysHeap, 0) Delegate<System>(this, &constructWithDvdAccessSecond);
+	Delegate<System>* delegate = new (mSysHeap, 0) Delegate<System>(this, &System::constructWithDvdAccessSecond);
 
 	dvdLoadUseCallBack(&mThreadCommand, delegate);
 }

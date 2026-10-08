@@ -2450,7 +2450,7 @@ void BaseGameSection::setupFixMemory_dvdload()
 	sys->heapStatusEnd("navi-piki");
 
 	pelletMgr = new PelletMgr;
-	pelletMgr->createManagers(nullptr);
+	pelletMgr->createManagers(0);
 	gameSystem->addObjectMgr(pelletMgr);
 
 	createScreenRootNode();

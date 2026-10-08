@@ -23,11 +23,16 @@ bool sTexturesDone = false;
 bool sFontDone     = false;
 int sCursorX = 0, sCursorY = 0, sRowH = 0; // empaquetado por filas
 
+// Destino de put: el atlas, salvo mientras pc_p2_load_bti_rgba decodifica
+// una textura suelta.
+unsigned char* sDst = sAtlas;
+int sDstW = kAtlasW, sDstH = kAtlasH;
+
 void put(int x, int y, unsigned char r, unsigned char g, unsigned char b, unsigned char a)
 {
-    if (x < 0 || y < 0 || x >= kAtlasW || y >= kAtlasH)
+    if (x < 0 || y < 0 || x >= sDstW || y >= sDstH)
         return;
-    unsigned char* p = sAtlas + (y * kAtlasW + x) * 4;
+    unsigned char* p = sDst + (y * sDstW + x) * 4;
     p[0] = r; p[1] = g; p[2] = b; p[3] = a;
 }
 
@@ -357,6 +362,34 @@ void loadFont()
 }
 
 } // namespace
+
+bool pc_p2_load_bti_rgba(const char* archive, const char* name, std::vector<unsigned char>& rgba, int& w, int& h)
+{
+    if (!JKRHeap::sSystemHeap)
+        return false;
+    void* arc = loadArchive(archive);
+    if (!arc)
+        return false;
+    bool ok = false;
+    if (const unsigned char* bti = rarcFind(static_cast<const unsigned char*>(arc), name, nullptr)) {
+        const int fmt = bti[0];
+        w = be16(bti + 2);
+        h = be16(bti + 4);
+        unsigned off = be32(bti + 0x1C);
+        if (off == 0)
+            off = 0x20;
+        rgba.assign((size_t)w * h * 4, 0);
+        sDst  = rgba.data();
+        sDstW = w;
+        sDstH = h;
+        ok    = decodeGX(bti + off, fmt, w, h, 0, 0);
+        sDst  = sAtlas;
+        sDstW = kAtlasW;
+        sDstH = kAtlasH;
+    }
+    freeArchive(arc);
+    return ok;
+}
 
 const PcGlassAtlas* pc_p2_glass_atlas()
 {

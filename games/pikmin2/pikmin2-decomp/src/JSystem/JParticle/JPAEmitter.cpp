@@ -53,7 +53,7 @@ void JPABaseEmitter::init(JPAEmitterManager* manager, JPAResource* resource)
 	mGlobalPrmClr.r = 0xff;
 	resource->getBsp()->getPrmClr(&mPrmClr);
 	resource->getBsp()->getEnvClr(&mEnvClr);
-	mpUserWork = nullptr;
+	mpUserWork = 0;
 	mScaleOut  = 1.0f;
 	mEmitCount = 0.0f;
 	initFlag(JPAEMIT_FirstEmit | JPAEMIT_RateStepEmit);

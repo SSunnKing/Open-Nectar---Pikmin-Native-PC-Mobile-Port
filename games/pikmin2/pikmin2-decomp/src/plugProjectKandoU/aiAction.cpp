@@ -151,7 +151,7 @@ bool Brain::start(int nextID, ActionArg* actionArg)
 {
 	if (!mPiki->isCreatureFlag(Game::CF_IsAlive)) {
 		mActionId = ACT_NULL;
-		return;
+		return false;
 	}
 
 	Action* action;

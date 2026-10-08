@@ -300,7 +300,7 @@ void ObjectActor::entry()
 bool ObjectActor::setShape()
 {
 	if (moviePlayer->isFlag(MVP_IsFinished)) {
-		return; // doesnt specify true or false
+		return false; // doesnt specify true or false
 	}
 
 	sys->startChangeCurrentHeap(moviePlayer->mMovieHeap);
@@ -351,7 +351,7 @@ bool ObjectActor::setShape()
 bool ObjectActor::setAnim()
 {
 	if (moviePlayer->isFlag(MVP_IsFinished)) {
-		return; // doesnt specify true or false
+		return false; // doesnt specify true or false
 	}
 
 	sys->startChangeCurrentHeap(moviePlayer->mMovieHeap);

@@ -118,8 +118,8 @@ void UpdateMgr::create(int count)
 	mClientCount  = 0;
 	mCurrentIndex = 0;
 	for (int i = 0; i < mMaxClientId; i++) {
-		mClientListA[i] = nullptr;
-		mClientListB[i] = nullptr;
+		mClientListA[i] = 0;
+		mClientListB[i] = 0;
 	}
 	_14 = 0;
 }

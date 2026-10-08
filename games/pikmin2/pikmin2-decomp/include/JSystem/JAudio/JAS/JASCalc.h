@@ -4,6 +4,12 @@
 #include "stl/limits.h"
 #include "types.h"
 
+#ifdef __ANDROID__
+// bionic define bcopy/bzero como macros (strings.h).
+#undef bcopy
+#undef bzero
+#endif
+
 namespace JASCalc {
 void imixcopy(const s16*, const s16*, s16*, u32);
 void bcopy(const void*, void*, u32);

@@ -1,5 +1,14 @@
 #include "pc_touch.h"
+#if PIKI_P2_HOST
+// Pikmin 2 aún no tiene modo foto: su botón no aparece (button_modded_off) y
+// estas llamadas no hacen nada.
+static int pc_photo_mode_active(void) { return 0; }
+static void pc_photo_mode_request_toggle(void) { }
+static void pc_photo_mode_set_touch_move(float, float) { }
+static void pc_photo_mode_add_touch_look(float, float) { }
+#else
 #include "../pc_photo_mode.h"
+#endif
 
 #include <SDL.h>
 #include <cmath>
@@ -12,7 +21,12 @@
 #include "Dolphin/pad.h"
 #include "gl/pc_gfx.h"
 #include "pc_window.h"
+#include "../pc_gyro.h"
 #include "settings/pc_settings.h"
+#if PIKI_P2_HOST
+#include "settings/pc_p2_glass_assets.h"
+#include "JSystem/JKernel/JKRHeap.h"
+#endif
 
 // stb_image se compila una sola vez, en pc_port/gl/pc_texpack.cpp (plan
 // TEXTURAS_HD). Aquí solo se declara la API (PNG, sin stdio).
@@ -39,6 +53,13 @@ enum ButtonId {
 	BTN_SETTINGS,
 	BTN_LAYOUT,
 	BTN_PHOTO,
+	BTN_LOCKON,
+	BTN_CHARGE,
+	BTN_DPAD_UP,      // P2: spray amargo / madurez con Pikmin en la mano; P1: tipo (mod)
+	BTN_DPAD_DOWN,    // P2: spray picante / madurez; P1: tipo (mod)
+	BTN_BOMB,         // P1: mod Bomb Control
+	BTN_FIRST_PERSON, // mod First Person
+	BTN_GYRO,         // recentrar giroscopio
 	BTN_BACK,
 	BTN_MENU_CONFIRM,
 	BTN_COUNT
@@ -63,6 +84,15 @@ const ButtonSpec kButtons[BTN_COUNT] = {
 	{ "settings", 0.25f, 0.09f, false, 0.045f, 0 },
 	{ "layout", 0.37f, 0.09f, false, 0.045f, 0 },
 	{ "photo_mode", 0.49f, 0.09f, false, 0.045f, 0 },
+	// Solo aparecen con su mod activo (ver button_modded_off): quedan bajo la
+	// columna de cámara, en el lado del pulgar derecho.
+	{ "lock_on", 0.08f, 0.71f, true, 0.05f, 0 },
+	{ "charge", 0.20f, 0.36f, true, 0.05f, 0 },
+	{ "kind_up", 0.20f, 0.13f, true, 0.045f, PAD_BUTTON_UP },
+	{ "kind_down", 0.20f, 0.25f, true, 0.045f, PAD_BUTTON_DOWN },
+	{ "bomb", 0.36f, 0.30f, true, 0.05f, 0 },
+	{ "first_person", 0.61f, 0.09f, false, 0.045f, 0 },
+	{ "gyro_recenter", 0.73f, 0.09f, false, 0.045f, 0 },
 	{ "back", 0.10f, 0.84f, false, 0.055f, PAD_BUTTON_B },
 	{ nullptr, 0.10f, 0.84f, true, 0.055f, PAD_BUTTON_A },
 };
@@ -105,6 +135,46 @@ struct ToolState { float cx = 0, cy = 0, r = 0; };
 ToolState sTools[TOOL_COUNT];
 
 bool button_editable(int i) { return i != BTN_BACK && i != BTN_MENU_CONFIRM; }
+
+// Botones de mods: no se dibujan ni responden si su mod está apagado, para no
+// ocupar sitio con algo que no hace nada. El editor de disposición sí los
+// muestra siempre, o no habría forma de colocarlos antes de activarlos.
+unsigned sContext = 0; // pc_touch_set_context: lo que el juego dice de este frame
+
+bool button_modded_off(int i)
+{
+	// La cruceta ↑/↓ sale cuando hace algo: en P2, con Pikmin en la mano
+	// (madurez) o con el spray de ese lado; en P1, con el mod de selección y
+	// un Pikmin en la mano (tipo).
+	if (i == BTN_DPAD_UP || i == BTN_DPAD_DOWN) {
+#if PIKI_P2_HOST
+		if (sContext & PC_TOUCH_CTX_HOLDING) return false;
+#else
+		// P1: solo con el mod de selección (tipo de Pikmin con A sujeto).
+		if (!pc_settings_get_p2_selection()) return true;
+		if (sContext & PC_TOUCH_CTX_HOLDING) return false;
+#endif
+#if PIKI_P2_HOST
+		return !(sContext & (i == BTN_DPAD_UP ? PC_TOUCH_CTX_SPRAY_BITTER : PC_TOUCH_CTX_SPRAY_SPICY));
+#else
+		return true;
+#endif
+	}
+#if PIKI_P2_HOST
+	if (i == BTN_BOMB) return true; // Pikmin 2 no tiene el mod de bombas
+	if (i == BTN_MAP) return !(sContext & PC_TOUCH_CTX_SWAP); // Y = cambiar de capitán
+#else
+	if (i == BTN_BOMB) return pc_settings_get_bomb_control() == 0;
+#endif
+	if (i == BTN_FIRST_PERSON) return pc_settings_get_first_person() == 0;
+	if (i == BTN_GYRO) return pc_settings_get_gyro_enabled() == 0;
+	if (i == BTN_LOCKON) return pc_settings_get_lock_on() == 0;
+	if (i == BTN_CHARGE) return pc_settings_get_charge() == 0;
+#if PIKI_P2_HOST
+	if (i == BTN_PHOTO) return true; // sin modo foto en Pikmin 2
+#endif
+	return false;
+}
 
 struct ButtonState {
 	long long finger = -1; // dedo que lo mantiene, o -1
@@ -223,6 +293,13 @@ u16 sQueuedGameButtons = 0;
 int sLayoutW = 0, sLayoutH = 0;
 int sGameMenuClaimFrames = 0;
 int sPortMenuClaimFrames = 0;
+// Arrastre vertical sobre los menús del port (listas con scroll): se manda
+// como desplazamiento normalizado y, si se movió, el toque no cuenta.
+struct MenuDrag {
+	long long finger = -1;
+	float lastY = 0.0f, startY = 0.0f;
+	bool moved = false;
+} sMenuDrag;
 
 // Con un menú reclamando la capa: B/atrás, A/confirmar del menú F1 y los
 // botones cuyo icono está en pantalla.
@@ -240,10 +317,86 @@ float sGameMenuTapX = 0.0f, sGameMenuTapY = 0.0f;
 struct Art {
 	unsigned bubble = 0, bubblePressed = 0, ring = 0, knob = 0, pinch = 0, swipeL = 0, swipeR = 0;
 	unsigned glyph[BTN_COUNT] = {};
+	// Iconos según contexto (glyph_for).
+	unsigned swapCaptain = 0, sprayBitter = 0, spraySpicy = 0;
+	bool gameSprays = false; // sprays ya sacados de los archivos del juego
+	unsigned faceOlimar = 0, faceLouie = 0, facePresident = 0;
+	bool gameFaces = false;
 	unsigned white = 0; // 1x1 para rectángulos (cuadrícula y glifos del editor)
 	bool loaded = false;
 };
 Art sArt;
+
+// Icono de un botón según el contexto: en P2 la Y cambia de capitán y la
+// cruceta ↑/↓ es spray sin Pikmin en la mano y madurez con él.
+#if PIKI_P2_HOST
+// Los sprays usan las gotas del propio juego (las de la selección del
+// 2 jugadores). Se piden aquí y no en ensure_art porque los archivos del
+// disco aún no están montados al arrancar; hasta entonces (o si faltan)
+// quedan los PNG de assets/art.
+void load_game_sprays()
+{
+	if (sArt.gameSprays || !JKRHeap::sSystemHeap) return;
+	sArt.gameSprays = true;
+	static const char* kArchive = "/new_screen/eng/res_vsSelectTexture.szs";
+	const struct { const char* bti; unsigned* tex; } sprays[] = {
+		{ "gekiniga.bti", &sArt.sprayBitter },
+		{ "gekikara.bti", &sArt.spraySpicy },
+	};
+	for (const auto& s : sprays) {
+		std::vector<unsigned char> rgba;
+		int w = 0, h = 0;
+		if (!pc_p2_load_bti_rgba(kArchive, s.bti, rgba, w, h)) {
+			printf("[Touch] spray %s: not in game files, using PNG\n", s.bti);
+			continue;
+		}
+		if (*s.tex) pc_gfx_overlay_texture_destroy(*s.tex);
+		*s.tex = pc_gfx_overlay_texture_create(w, h, rgba.data());
+	}
+}
+#endif
+
+// Cambiar de capitán: la cara del que vas a controlar, del HUD del juego.
+void load_game_faces()
+{
+	if (sArt.gameFaces || !JKRHeap::sSystemHeap) return;
+	sArt.gameFaces = true;
+	static const char* kArchive = "/new_screen/eng/res_ground.szs";
+	const struct { const char* bti; unsigned* tex; } faces[] = {
+		{ "orima_pk2.bti", &sArt.faceOlimar },
+		{ "loozy_pk2.bti", &sArt.faceLouie },
+		{ "president.bti", &sArt.facePresident },
+	};
+	for (const auto& f : faces) {
+		std::vector<unsigned char> rgba;
+		int w = 0, h = 0;
+		if (pc_p2_load_bti_rgba(kArchive, f.bti, rgba, w, h)) *f.tex = pc_gfx_overlay_texture_create(w, h, rgba.data());
+		else printf("[Touch] face %s: not in game files\n", f.bti);
+	}
+}
+
+unsigned swap_face()
+{
+	load_game_faces();
+	if (!(sContext & PC_TOUCH_CTX_SWAP_TO_2P)) return sArt.faceOlimar;
+	return (sContext & PC_TOUCH_CTX_PRESIDENT) ? sArt.facePresident : sArt.faceLouie;
+}
+
+unsigned glyph_for(int i)
+{
+#if PIKI_P2_HOST
+	if (i == BTN_MAP && (sContext & PC_TOUCH_CTX_SWAP)) {
+		if (const unsigned face = swap_face()) return face;
+	}
+	if (i == BTN_MAP && sArt.swapCaptain) return sArt.swapCaptain;
+	if ((i == BTN_DPAD_UP || i == BTN_DPAD_DOWN) && !(sContext & PC_TOUCH_CTX_HOLDING)) {
+		load_game_sprays();
+		const unsigned spray = i == BTN_DPAD_UP ? sArt.sprayBitter : sArt.spraySpicy;
+		if (spray) return spray;
+	}
+#endif
+	return i >= 0 && i < BTN_COUNT ? sArt.glyph[i] : 0;
+}
 
 unsigned load_texture(const char* name)
 {
@@ -294,6 +447,11 @@ void ensure_art()
 	}
 	for (int i = 0; i < BTN_COUNT; ++i)
 		sArt.glyph[i] = kButtons[i].art ? load_texture(kButtons[i].art) : 0;
+#if PIKI_P2_HOST
+	sArt.swapCaptain = load_texture("swap_captain");
+	sArt.sprayBitter = load_texture("spray_bitter");
+	sArt.spraySpicy  = load_texture("spray_spicy");
+#endif
 }
 
 // ── Disposición en píxeles ───────────────────────────────────────────────────
@@ -535,6 +693,7 @@ int button_at(float x, float y)
 		} else if (i == BTN_BACK || i == BTN_MENU_CONFIRM) {
 			continue;
 		}
+		if (button_modded_off(i)) continue;
 		const float dx = x - sButtons[i].cx, dy = y - sButtons[i].cy;
 		const float reach = sButtons[i].r * 1.15f; // algo más que el dibujo: el pulgar no es preciso
 		if (dx * dx + dy * dy <= reach * reach) return i;
@@ -591,6 +750,11 @@ void pc_touch_on_finger(long long fingerId, PcTouchPhase phase, float x, float y
 			s.y0 = y;
 			break;
 		}
+		if (sPortMenuClaimFrames > 0 && sMenuDrag.finger < 0 && button_at(x, y) < 0) {
+			sMenuDrag.finger = fingerId;
+			sMenuDrag.lastY = sMenuDrag.startY = y;
+			sMenuDrag.moved = false;
+		}
 		const int btn = button_at(x, y);
 		if (btn < 0 && sGameMenuClaimFrames <= 0 && sColorTapFinger < 0 && in_color_icon(x, y)) {
 			// Va antes que el stick: el icono cae dentro de su zona.
@@ -606,6 +770,13 @@ void pc_touch_on_finger(long long fingerId, PcTouchPhase phase, float x, float y
 				if (btn == BTN_LAYOUT && sGameMenuClaimFrames <= 0) sLayoutRequested = true;
 				// Modo foto: el mismo conmutador que F3 en escritorio.
 				if (btn == BTN_PHOTO && sGameMenuClaimFrames <= 0) pc_photo_mode_request_toggle();
+				if (btn == BTN_LOCKON && sGameMenuClaimFrames <= 0) pc_window_request_lockon_press();
+				if (btn == BTN_CHARGE && sGameMenuClaimFrames <= 0) pc_window_request_charge_press();
+#if !PIKI_P2_HOST
+				if (btn == BTN_BOMB && sGameMenuClaimFrames <= 0) pc_window_request_bomb_press(0);
+#endif
+				if (btn == BTN_FIRST_PERSON && sGameMenuClaimFrames <= 0) pc_window_request_firstperson_press();
+				if (btn == BTN_GYRO && sGameMenuClaimFrames <= 0) pc_gyro_request_recenter();
 				if (btn == BTN_DISBAND) {
 					sGroupDrag.ax = x;
 					sGroupDrag.ay = y;
@@ -633,6 +804,11 @@ void pc_touch_on_finger(long long fingerId, PcTouchPhase phase, float x, float y
 		break;
 	}
 	case PC_TOUCH_MOVE:
+		if (fingerId == sMenuDrag.finger && sPortMenuClaimFrames > 0 && sLayoutH > 0) {
+			if (std::fabs(y - sMenuDrag.startY) > 0.01f * float(sLayoutH)) sMenuDrag.moved = true;
+			if (sMenuDrag.moved) pc_settings_touch_drag((y - sMenuDrag.lastY) / float(sLayoutH));
+			sMenuDrag.lastY = y;
+		}
 		if (fingerId == sStick.finger) update_stick(x, y);
 		for (GestureFinger& g : sRightGesture) {
 			if (g.finger != fingerId) continue;
@@ -655,7 +831,7 @@ void pc_touch_on_finger(long long fingerId, PcTouchPhase phase, float x, float y
 					pc_photo_mode_add_touch_look((x - previousX) / float(sLayoutH), (y - previousY) / float(sLayoutH));
 				} else {
 					// Un dedo en una zona libre funciona como un trackpad de cámara.
-					pc_window_add_touch_camera_drag((x - previousX) / float(sLayoutH));
+					pc_window_add_camera_drag((x - previousX) / float(sLayoutH));
 				}
 			}
 		}
@@ -706,6 +882,11 @@ void pc_touch_on_finger(long long fingerId, PcTouchPhase phase, float x, float y
 			g.moved = false;
 			sPinchDistance = -1.0f;
 		}
+		if (fingerId == sMenuDrag.finger) {
+			if (sMenuDrag.moved) gestureMoved = true; // un arrastre no es un toque
+			sMenuDrag.finger = -1;
+			sMenuDrag.moved = false;
+		}
 		if (!gestureMoved)
 		{
 			pc_settings_touch_tap(x / float(sLayoutW), y / float(sLayoutH));
@@ -733,8 +914,26 @@ void pc_touch_on_finger(long long fingerId, PcTouchPhase phase, float x, float y
 	}
 }
 
+static u16 sLastPadButtons = 0;
+static s8 sLastPadStick[4] = { 0, 0, 0, 0 };
+
+void pc_touch_last_pad(u16* buttons, s8* stickX, s8* stickY, s8* substickX, s8* substickY)
+{
+	if (buttons) *buttons = sLastPadButtons;
+	if (stickX) *stickX = sLastPadStick[0];
+	if (stickY) *stickY = sLastPadStick[1];
+	if (substickX) *substickX = sLastPadStick[2];
+	if (substickY) *substickY = sLastPadStick[3];
+}
+
 bool pc_touch_merge_pad(u16* button, s8* stickX, s8* stickY, s8* substickX, s8* substickY)
 {
+#if !PIKI_P2_HOST
+	// P1 no avisa de si hay un Pikmin en la mano: con el táctil, A sujeto es
+	// el dedo en lanzar, que es cuando la cruceta cambia el tipo.
+	if (sButtons[BTN_THROW].finger >= 0) sContext |= PC_TOUCH_CTX_HOLDING;
+	else sContext &= ~PC_TOUCH_CTX_HOLDING;
+#endif
 	if (sLayoutRequested) {
 		sLayoutRequested = false;
 		if (!sEditMode) edit_enter();
@@ -807,6 +1006,13 @@ bool pc_touch_merge_pad(u16* button, s8* stickX, s8* stickY, s8* substickX, s8* 
 		if (ny < -0.55f) touchButtons |= PAD_BUTTON_DOWN;
 		if (ny >  0.55f) touchButtons |= PAD_BUTTON_UP;
 	}
+	// Lo que el juego ve este frame (táctil más mando), para el visor de
+	// controles del modo Speedrun.
+	sLastPadButtons = *button;
+	sLastPadStick[0] = *stickX;
+	sLastPadStick[1] = *stickY;
+	sLastPadStick[2] = *substickX;
+	sLastPadStick[3] = *substickY;
 	const u16 menuEdges = touchButtons & ~sPreviousMenuButtons;
 	if (menuEdges) pc_settings_touch_buttons(menuEdges);
 	sPreviousMenuButtons = touchButtons;
@@ -994,6 +1200,7 @@ void pc_touch_draw(void)
 		} else if (i == BTN_BACK || i == BTN_MENU_CONFIRM) {
 			continue;
 		}
+		if (!sEditMode && button_modded_off(i)) continue;
 		const ButtonState& b = sButtons[i];
 		const bool pressed = sEditMode ? i == sEditDragButton : b.finger >= 0;
 		const float d = b.r * 2.0f;
@@ -1003,7 +1210,7 @@ void pc_touch_draw(void)
 		}
 		sprite(pressed ? sArt.bubblePressed : sArt.bubble, b.cx, b.cy, d, kLayerAlpha);
 		// El glifo un poco más pequeño que la burbuja, y "hundido" al pulsar.
-		sprite(sArt.glyph[i], b.cx, b.cy + (pressed ? d * 0.02f : 0.0f), d * (pressed ? 0.62f : 0.66f), kLayerAlpha);
+		sprite(glyph_for(i), b.cx, b.cy + (pressed ? d * 0.02f : 0.0f), d * (pressed ? 0.62f : 0.66f), kLayerAlpha);
 	}
 	if (sEditMode) {
 		// Barra de herramientas: cuadrícula, −, +, restablecer. Los glifos se
@@ -1052,7 +1259,7 @@ void pc_touch_draw(void)
 		// Algo mayor que la letra (como los glifos de botón originales, que
 		// eran de 32x28 sobre texto de 24) y opaco para que se lea.
 		sprite(sArt.bubble, icon.cx, icon.cy, icon.size * 1.6f, 1.0f);
-		sprite(sArt.glyph[icon.button], icon.cx, icon.cy, icon.size * 1.15f, 1.0f);
+		sprite(glyph_for(icon.button), icon.cx, icon.cy, icon.size * 1.15f, 1.0f);
 	}
 	sInlineIcons.clear();
 	// Página de controles: burbuja con el glifo del botón táctil, o el gesto
@@ -1070,7 +1277,7 @@ void pc_touch_draw(void)
 		sprite(sArt.bubble, icon.cx, icon.cy, d, a);
 		const int btn = icon.tag == 'p' ? BTN_PAUSE : button_for_tag(icon.tag == 'c' ? 'x' : icon.tag);
 		if (btn >= 0) {
-			sprite(sArt.glyph[btn], icon.cx, icon.cy, d * 0.66f, a);
+			sprite(glyph_for(btn), icon.cx, icon.cy, d * 0.66f, a);
 		} else if (icon.tag == 'r') {
 			sprite(sArt.pinch, icon.cx, icon.cy, d * 0.66f, a);
 		} else if (icon.tag == 's') {
@@ -1081,3 +1288,5 @@ void pc_touch_draw(void)
 	sHelpIcons.clear();
 	pc_gfx_overlay_end();
 }
+
+void pc_touch_set_context(unsigned flags) { sContext = flags; }

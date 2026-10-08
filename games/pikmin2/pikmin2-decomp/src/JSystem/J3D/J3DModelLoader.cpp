@@ -416,7 +416,7 @@ void J3DModelLoader::readJoint(const J3DJointBlock* block)
 {
 	J3DJointFactory factory(*block);
 	mModelData->getJointTree().mJointCnt = block->mCount;
-	if (block->mNameTableOffset != nullptr) {
+	if (block->mNameTableOffset != 0) {
 		mModelData->getJointTree().mNametab = new JUTNameTab(JSUConvertOffsetToPtr<ResNTAB>(block, (const void*)block->mNameTableOffset));
 	} else {
 		mModelData->getJointTree().mNametab = nullptr;

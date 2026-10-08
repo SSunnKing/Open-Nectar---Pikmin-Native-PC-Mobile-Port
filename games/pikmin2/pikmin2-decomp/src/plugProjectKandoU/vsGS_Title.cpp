@@ -37,7 +37,7 @@ TitleState::TitleState()
     : State(VGS_Title)
 {
 	mPlayer1Controller = new Controller(JUTGamePad::PORT_0);
-	mDelegate          = new Delegate<Game::VsGame::TitleState>(this, &dvdload);
+	mDelegate          = new Delegate<Game::VsGame::TitleState>(this, &TitleState::dvdload);
 	mPlayer2Controller = new Controller(JUTGamePad::PORT_1);
 }
 

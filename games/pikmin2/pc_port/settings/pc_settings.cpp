@@ -4544,6 +4544,9 @@ namespace {
 bool sNewGamePromptOpen   = false;
 int  sNewGamePromptRow    = 0;   // fila con foco: 0 = Difficulty, 1 = Game mode, 2 = Start
 int  sNewGamePromptCol    = 0;   // opción bajo el cursor en la fila con foco
+// Hasta soltarlo todo, la ventana no atiende: la pulsación (o el toque) que
+// eligió la partida no debe aceptar también aquí.
+bool sNewGamePromptArmed  = false;
 int  sNewGamePromptRules  = 0;   // 0 = standard, 1 = permadeath
 int  sNewGamePromptResult = PC_NEWGAME_PENDING;
 bool sNewGamePromptHard   = false;
@@ -4582,6 +4585,18 @@ void ngScreen(int* w, int* h)
 void pcNewGamePromptInput()
 {
     if (!sNewGamePromptOpen) return;
+    if (!sNewGamePromptArmed) {
+        SDL_GameController* pad = pc_window_get_controller();
+        const bool padHeld = pad && (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A)
+                                     || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_B));
+        const Uint8* keys = SDL_GetKeyboardState(nullptr);
+        const bool keyHeld = keys && (keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_ESCAPE]);
+        sTouchTapPending = false;
+        if (padHeld || keyHeld || sTouchFrameButtons != 0) return;
+        sNewGamePromptArmed = true;
+        pc_menu_edge_reset();
+        return;
+    }
 
     bool left   = keyWentDown(SDL_SCANCODE_LEFT)  || keyWentDown(SDL_SCANCODE_A);
     bool right  = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
@@ -4660,6 +4675,7 @@ void pcNewGamePromptInput()
 void pc_newgame_prompt_open(void)
 {
     sNewGamePromptOpen   = true;
+    sNewGamePromptArmed  = false;
     sNewGamePromptRow    = 0;
     sNewGamePromptCol    = 0;
     sNewGamePromptRules  = 0;
@@ -4792,6 +4808,7 @@ void pc_settings_note_lock_on(int hasTarget) {
 
 #if PIKI_P2_HOST
 void pc_p2_cheats_poll(void);
+void pc_p2_touch_context_poll(void);
 void pc_p2_count_idle_pikis(void);
 void pc_p2_trace_pikis(void);
 #endif
@@ -4806,6 +4823,9 @@ void pc_settings_note_gameplay_frame(void) {
     sLastGameplayFrameMs = SDL_GetTicks();
 #if PIKI_P2_HOST
     pc_p2_cheats_poll();    // zonas y cebollas (pc_p2_cheats.cpp)
+#if PIKI_PC_TOUCH
+    pc_p2_touch_context_poll(); // botones táctiles de contexto (pc_p2_cheats.cpp)
+#endif
     pc_p2_count_idle_pikis();
     pc_p2_trace_pikis();
     pc_achievements_poll(); // Pikmin 2: los logros salen de la partida (mira 1 vez/s)
@@ -5414,6 +5434,23 @@ void pc_settings_draw_achievement_toast(void) {
     }
     (void)screenH;
 }
+
+#if PIKI_P2_HOST
+// Pikmin 2: lo que se dibuja encima del juego (F1, avisos, ventanas) va en un
+// lote que se envía con las medidas del DGXGraphics del shim. En Android el F1
+// usa un lienzo del ancho de la pantalla y 400 de alto (f1Layout): las
+// medidas tienen que ser esas para todo el frame, o el menú sale descolocado.
+void pc_settings_p2_begin_frame(void) {
+#ifdef __ANDROID__
+    f1Layout();
+    if (gsys && gsys->mDGXGfx) {
+        DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+        gfx->mScreenWidth  = kF1CanvasW;
+        gfx->mScreenHeight = kF1CanvasH;
+    }
+#endif
+}
+#endif
 
 void pc_settings_draw(void) {
     PC_SETTINGS_HOST_ALLOC();

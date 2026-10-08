@@ -32,7 +32,7 @@ CaveResultState::CaveResultState()
     : State(SGS_CaveResult)
 {
 	mController   = new Controller(JUTGamePad::PORT_0);
-	mLoadCallback = new Delegate<CaveResultState>(this, &loadResource);
+	mLoadCallback = new Delegate<CaveResultState>(this, &CaveResultState::loadResource);
 	mBackupHeap   = nullptr;
 	mMainHeap     = nullptr;
 }

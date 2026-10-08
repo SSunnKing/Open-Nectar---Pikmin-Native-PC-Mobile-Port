@@ -1177,16 +1177,16 @@ void NaviFollowState::exec(Navi* navi)
 			// make appropriate sound
 			switch (animIdx) {
 			case IPikiAnims::CHATTING:
-				navi->mSoundObj->startSound(se_chats[naviID], nullptr);
+				navi->mSoundObj->startSound(se_chats[naviID], 0);
 				break;
 			case IPikiAnims::AKUBI:
-				navi->mSoundObj->startSound(se_novis[naviID], nullptr);
+				navi->mSoundObj->startSound(se_novis[naviID], 0);
 				break;
 			case IPikiAnims::JUMP:
-				navi->mSoundObj->startSound(se_jumps[naviID], nullptr);
+				navi->mSoundObj->startSound(se_jumps[naviID], 0);
 				break;
 			case IPikiAnims::SAGASU2:
-				navi->mSoundObj->startSound(se_kyoros[naviID], nullptr);
+				navi->mSoundObj->startSound(se_kyoros[naviID], 0);
 				break;
 			}
 		}

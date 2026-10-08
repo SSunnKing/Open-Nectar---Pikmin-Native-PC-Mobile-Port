@@ -112,7 +112,7 @@ bool Game2DMgr::setDispMember(og::Screen::DispMemberBase* disp)
 	if (mScreenMgr) {
 		return mScreenMgr->setDispMember(disp);
 	} else {
-		return nullptr;
+		return 0;
 	}
 }
 

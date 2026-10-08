@@ -30,7 +30,7 @@ ResultState::ResultState()
 	mEndFlags.clear();
 	mPlayer1Controller = new Controller(JUTGamePad::PORT_0);
 	mPlayer2Controller = new Controller(JUTGamePad::PORT_1);
-	mDelegate          = new Delegate<ResultState>(this, &dvdload);
+	mDelegate          = new Delegate<ResultState>(this, &ResultState::dvdload);
 }
 
 /**

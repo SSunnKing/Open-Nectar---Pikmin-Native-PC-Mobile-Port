@@ -511,7 +511,7 @@ static inline void pc_promote_j3d_mat(J3DMaterialBlock* mat, u32 blockSize)
 	J3DOffset* offsets = &mat->mMatEntryDataOffset;
 	size_t offsetCount = (sizeof(J3DMaterialBlock) - offsetof(J3DMaterialBlock, mMatEntryDataOffset)) / sizeof(J3DOffset);
 	for (size_t i = 0; i < offsetCount; i++) {
-		if (offsets[i] != 0) {
+		if ((u32)offsets[i] != 0) {
 			u32 off = pc_bmd_bswap32(offsets[i]);
 			offsets[i] = off;
 		}
@@ -594,7 +594,7 @@ static inline void pc_promote_j3d_mat_v21(J3DMaterialBlock_v21* mat, u32 blockSi
 	J3DOffset* offsets = &mat->mMatEntryDataOffset;
 	size_t offsetCount = (sizeof(J3DMaterialBlock_v21) - offsetof(J3DMaterialBlock_v21, mMatEntryDataOffset)) / sizeof(J3DOffset);
 	for (size_t i = 0; i < offsetCount; i++) {
-		if (offsets[i] != 0) {
+		if ((u32)offsets[i] != 0) {
 			u32 off = pc_bmd_bswap32(offsets[i]);
 			offsets[i] = off;
 		}
@@ -649,7 +649,7 @@ static inline void pc_promote_j3d_mat_dl(J3DMaterialDLBlock* mdl, u32 blockSize)
 	J3DOffset* offsets = &mdl->mPacketOffset;
 	size_t offsetCount = (sizeof(J3DMaterialDLBlock) - offsetof(J3DMaterialDLBlock, mPacketOffset)) / sizeof(J3DOffset);
 	for (size_t i = 0; i < offsetCount; i++) {
-		if (offsets[i] != 0) {
+		if ((u32)offsets[i] != 0) {
 			u32 off = pc_bmd_bswap32(offsets[i]);
 			offsets[i] = off;
 		}

@@ -2231,10 +2231,12 @@ void ObjDayEndResultMail::updateCommon()
 	mScreenMain->animation();
 }
 
+#if !defined(__clang__) // dentro de un namespace: solo GCC lo acepta (la real está en ogScreen.cpp)
 inline u64 J2DPane::getTagName() const
 {
 	return mTag;
 }
+#endif
 
 /**
  * @note Address: 0x80409DB8

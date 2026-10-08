@@ -330,7 +330,7 @@ void StateWait::exec(EnemyBase* enemy)
 		if ((u32)titan->mCurAnim->mType == KEYEVENT_END_BLEND) {
 			titan->endBlendAnimation();
 		} else if ((u32)titan->mCurAnim->mType == 0) {
-			titan->getJAIObject()->startSound(PSSE_EN_BIGTAKARA_WAIT2, nullptr);
+			titan->getJAIObject()->startSound(PSSE_EN_BIGTAKARA_WAIT2, 0);
 		} else if ((u32)titan->mCurAnim->mType == KEYEVENT_END) {
 			transit(titan, titan->mNextState, nullptr);
 		}

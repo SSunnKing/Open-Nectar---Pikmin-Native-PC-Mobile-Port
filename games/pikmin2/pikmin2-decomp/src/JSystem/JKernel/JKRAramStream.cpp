@@ -11,7 +11,7 @@ OSMessageQueue JKRAramStream::sMessageQueue = { 0 };
 
 JKRAramStream* JKRAramStream::sAramStreamObject = nullptr;
 u8* JKRAramStream::transBuffer                  = nullptr;
-u32 JKRAramStream::transSize                    = nullptr;
+u32 JKRAramStream::transSize                    = 0;
 JKRHeap* JKRAramStream::transHeap               = nullptr;
 
 /**

@@ -156,7 +156,7 @@ void Section::doLoadingStart()
 {
 	mMoviePlayer.load((Game::THPPlayer::EMovieIndex)sMovieIndexTable[sMovieIndex]);
 
-	Delegate<Section>* delegate = new Delegate<Section>(this, &loadResource);
+	Delegate<Section>* delegate = new Delegate<Section>(this, &Section::loadResource);
 	sys->dvdLoadUseCallBack(&mThreadCommand, delegate);
 }
 

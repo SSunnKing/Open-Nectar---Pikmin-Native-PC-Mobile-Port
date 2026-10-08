@@ -23,6 +23,10 @@ static f32 sPcZoomMul = 1.0f;
 // derecho o, en primera persona, el raton siempre) y cabeceo en primera persona.
 extern "C" float pc_window_take_camera_drag(void);
 extern "C" float pc_window_take_camera_pitch(void);
+#if PIKI_PC_TOUCH
+extern "C" bool pc_touch_visible(void);
+extern "C" float pc_window_take_touch_zoom(void);
+#endif
 extern "C" int pc_settings_get_free_camera(void);
 extern "C" int pc_first_person_active(void);
 static f32 sPcPitch = -0.15f; // cabeceo neutro, un poco hacia abajo, como en Pikmin 1
@@ -32,10 +36,22 @@ static bool pcFirstPersonFor(Game::Navi* navi)
 }
 static void pcUpdateWheelZoom()
 {
+#if PIKI_PC_TOUCH
+	// Pellizco táctil: acerca o aleja como en Pikmin 1, sobre el mismo
+	// multiplicador que la rueda.
+	const float touchZoom = pc_window_take_touch_zoom();
+	if (touchZoom != 0.0f) {
+		sPcZoomMul += touchZoom;
+		if (sPcZoomMul < 0.45f) sPcZoomMul = 0.45f;
+		if (sPcZoomMul > 2.50f) sPcZoomMul = 2.50f;
+	}
+	if (pc_settings_get_mouse_wheel_action() != 1) return; // el zoom del pellizco se queda
+#else
 	if (pc_settings_get_mouse_wheel_action() != 1) {
 		sPcZoomMul = 1.0f;
 		return;
 	}
+#endif
 	const int steps = pc_window_take_wheel_steps();
 	if (steps != 0) {
 		// Alejar la rueda del jugador aleja la camara.
@@ -643,7 +659,14 @@ void PlayCamera::changeTargetTheta()
 		const f32 drag  = pc_window_take_camera_drag();
 		const f32 pitch = pc_window_take_camera_pitch();
 		const bool fp   = pcFirstPersonFor(mTargetObj);
-		if (drag != 0.0f && (pc_settings_get_free_camera() || fp)) {
+		// El arrastre táctil (mitad derecha de la pantalla) gira la cámara
+		// siempre, como en Pikmin 1; ratón y stick solo con "Free Camera".
+#if PIKI_PC_TOUCH
+		const bool touchCamera = pc_touch_visible();
+#else
+		const bool touchCamera = false;
+#endif
+		if (drag != 0.0f && (pc_settings_get_free_camera() || fp || touchCamera)) {
 			// Aproximadamente media vuelta por una pasada de un ancho de pantalla.
 			f32 angle = mCameraAngleTarget + drag * 3.2f;
 			clampAngle(angle);

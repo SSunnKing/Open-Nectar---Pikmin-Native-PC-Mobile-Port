@@ -235,7 +235,7 @@ u32 JKRFileCache::readResource(void* resourceBuffer, u32 bufferSize, u32 type, c
 	if (findFile(directoryPath, fileName)) {
 		return readResource(resourceBuffer, bufferSize, path);
 	}
-	return nullptr;
+	return 0;
 }
 
 /**

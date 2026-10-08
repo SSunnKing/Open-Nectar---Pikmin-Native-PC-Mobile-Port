@@ -182,9 +182,9 @@ void J3DJoint::appendChild(J3DJoint* newChild)
  */
 J3DJoint::J3DJoint()
 {
-	mCallBackUserData = nullptr;
+	mCallBackUserData = 0;
 	mFunction         = nullptr;
-	_08               = nullptr;
+	_08               = 0;
 	mChild            = nullptr;
 	mYounger          = nullptr;
 	mJointIdx         = 0;

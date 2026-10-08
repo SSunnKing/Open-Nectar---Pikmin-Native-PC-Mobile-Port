@@ -122,7 +122,7 @@ ObjAnaDemo::ObjAnaDemo(const char* name)
 	mScreen            = nullptr;
 	mMenuMgr           = nullptr;
 	mAnimGroup         = nullptr;
-	mUnusedObj         = nullptr;
+	mUnusedObj         = 0;
 	mMenuSelTitle      = nullptr;
 	mMenuSelYes        = nullptr;
 	mMenuSelNo         = nullptr;

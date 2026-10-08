@@ -32,7 +32,7 @@ SelectState::SelectState()
     : State(SGS_Select)
 {
 	mController       = new Controller(JUTGamePad::PORT_0);
-	mDvdLoadCallback  = new Delegate<SelectState>(this, &dvdload);
+	mDvdLoadCallback  = new Delegate<SelectState>(this, &SelectState::dvdload);
 	mPreviousCourseID = -1;
 }
 

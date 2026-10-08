@@ -159,6 +159,19 @@ bool pc_android_init()
 		return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 	};
 	const char* chosen = hasAssets(external) ? external : hasAssets(internal) ? internal : external ? external : internal;
+	// El launcher abre cada juego en su carpeta (NectarActivity hace chdir
+	// antes de cargar la biblioteca): si ahí hay una instalación, es esa.
+	// Pikmin 2 vive en <files>/pikmin2 y no tiene dataDir.
+	char cwd[4096];
+	std::string current;
+	if (getcwd(cwd, sizeof(cwd))) {
+		struct stat st;
+		const std::string base = cwd;
+		if (stat((base + "/assets/.pikmin2-assets").c_str(), &st) == 0 || stat((base + "/assets/.pikmin-assets").c_str(), &st) == 0) {
+			current = base;
+			chosen  = current.c_str();
+		}
+	}
 	if (!chosen) {
 		printf("[Android] no storage path available: %s\n", SDL_GetError());
 		return false;

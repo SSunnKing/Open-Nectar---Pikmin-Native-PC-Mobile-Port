@@ -294,7 +294,11 @@ struct JASTrack : public JSUList<JASChannel> {
 	static void newMemPool(int);
 	static void registerSeqCallback(SeqCallback);
 
+#ifdef PIKI_PC_PORT
+	void* operator new(size_t n)
+#else
 	void* operator new(u32 n)
+#endif
 	{
 		JASTrack* track = sFreeList;
 		if (track == nullptr) {

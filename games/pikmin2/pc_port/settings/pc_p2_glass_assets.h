@@ -1,6 +1,8 @@
 #ifndef PC_P2_GLASS_ASSETS_H
 #define PC_P2_GLASS_ASSETS_H
 
+#include <vector>
+
 // Assets de Pikmin 2 para el menú F1 "de cristal": texturas de sus pantallas
 // (placa de cristal, degradado, burbujas, iconos de botón) y los glifos de su
 // fuente, decodificados a un atlas RGBA para el lote de UI del port
@@ -43,5 +45,9 @@ struct PcGlassAtlas {
 // Carga perezosa (la primera vez que se pide). nullptr si los archivos del
 // juego todavía no están disponibles; se reintenta en la siguiente llamada.
 const PcGlassAtlas* pc_p2_glass_atlas();
+
+// Decodifica una textura BTI suelta de un archivo del juego a RGBA8.
+// false si el archivo o la textura no están (o su formato no se soporta).
+bool pc_p2_load_bti_rgba(const char* archive, const char* name, std::vector<unsigned char>& rgba, int& w, int& h);
 
 #endif

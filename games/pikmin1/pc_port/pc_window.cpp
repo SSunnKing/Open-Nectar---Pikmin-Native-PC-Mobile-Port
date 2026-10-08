@@ -1699,6 +1699,7 @@ bool pc_window_take_bomb_press(int player)
 }
 void pc_window_request_firstperson_press(void) { pc_first_person_toggle(); }
 void pc_window_request_charge_press(void) { sSwarmPending = true; }
+void pc_window_request_bomb_press(int player) { sBombPending[player == 1 ? 1 : 0] = true; }
 
 // Control mode functions
 void pc_window_set_control_mode(int mode) {

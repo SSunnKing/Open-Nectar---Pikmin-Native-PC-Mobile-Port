@@ -38,6 +38,9 @@ bool pc_touch_merge_pad(u16* button, s8* stickX, s8* stickY, s8* substickX, s8* 
 /** La capa se dibuja solo cuando la última entrada fue táctil. */
 void pc_touch_set_visible(bool visible);
 bool pc_touch_visible(void);
+/** Estado de mando que vio el juego en el último frame (táctil incluido),
+ *  en el formato de GameCube: botones PAD_* y sticks -127..127 (Y arriba). */
+void pc_touch_last_pad(u16* buttons, s8* stickX, s8* stickY, s8* substickX, s8* substickY);
 
 /**
  * Los menús nativos reclaman temporalmente la pantalla: la capa de juego se
@@ -91,6 +94,16 @@ void pc_touch_mark_color_icon(float x0, float y0, float x1, float y1);
 int pc_touch_take_color_taps(void);
 
 /** Dibuja la capa sobre la ventana. Llamar tras pc_gfx_present(). */
+/* Lo que el juego cuenta del frame para mostrar u ocultar botones de contexto
+   (cruceta ↑/↓, cambiar de capitán). Lo pone el juego cada frame de partida. */
+#define PC_TOUCH_CTX_HOLDING      (1u << 0) /* Pikmin en la mano */
+#define PC_TOUCH_CTX_SPRAY_BITTER (1u << 1) /* P2: hay spray amargo */
+#define PC_TOUCH_CTX_SPRAY_SPICY  (1u << 2) /* P2: hay spray picante */
+#define PC_TOUCH_CTX_SWAP         (1u << 3) /* P2: se puede cambiar de capitán */
+#define PC_TOUCH_CTX_SWAP_TO_2P   (1u << 4) /* P2: el otro capitán es Louie/Presidente */
+#define PC_TOUCH_CTX_PRESIDENT    (1u << 5) /* P2: deuda pagada, Louie → Presidente */
+void pc_touch_set_context(unsigned flags);
+
 void pc_touch_draw(void);
 
 /** Carga el arte (una vez, con contexto GL activo). */

@@ -148,7 +148,11 @@ void checkReadSeq();
 void checkSeqWave();
 void checkPlayingSeqTrack(u32);
 void stopSeq(JAISequence*);
+#ifdef PIKI_PC_PORT
+void checkDvdLoadArc(u32, uintptr_t); // LoadCallback lleva uintptr_t en el port
+#else
 void checkDvdLoadArc(u32, u32);
+#endif
 void checkCustomDvdLoadArc(u32, uintptr_t);
 void storeSeqBuffer(JAISequence**, JAInter::Actor*, u32, u32, u8, JAInter::SoundInfo*);
 void releaseSeqBuffer(JAISequence* seq, u32 fadeTime);

@@ -1391,6 +1391,17 @@ struct PcTextureSource {
     u64 uploadedGeneration = 0;
     uintptr_t srcAddr = 0; // imagen original: para encontrar copias de GXCopyTex
 };
+// Varias versiones por GXTexObj. Las fuentes del juego reutilizan un único
+// GXTexObj y lo reinicializan con la página de glifos de cada letra: con una
+// textura GL por objeto, cada cambio de página volvía a subirla (155 subidas
+// por frame en el selector de partidas; en un móvil, la mitad de FPS). Aquí se
+// guardan las últimas versiones (por contenido) de las texturas pequeñas y una
+// página ya vista se enlaza sin subir nada.
+struct PcTexVariant { u64 hash = 0; GLuint tex = 0; u64 lastUse = 0; };
+static PcGfxHostMap<uintptr_t, PcGfxHostVector<PcTexVariant>> sTexVariants;
+static u64 sTexVariantClock = 0;
+constexpr size_t kTexVariantsPerObj = 16;
+constexpr u16 kTexVariantMaxSide = 256;
 // GXCopyTex: direccion de destino -> textura GL con la copia del framebuffer.
 struct PcEfbCopy { GLuint tex = 0; int w = 0, h = 0; };
 static PcGfxHostMap<uintptr_t, PcEfbCopy> sEfbCopies;
@@ -2066,6 +2077,9 @@ void pc_gfx_ui_set_atlas(const unsigned char* rgba, int w, int h, unsigned gener
     sUiAtlasGen    = generation;
 }
 
+// Algo escribió en el framebuffer nativo desde la última presentación.
+static bool sNativeWrittenThisFrame = false;
+
 void pc_gfx_ui_draw(const PcUiVertex* verts, int count, int virtW, int virtH,
                     const unsigned char* fontI8, int fontW, int fontH)
 {
@@ -2076,6 +2090,10 @@ void pc_gfx_ui_draw(const PcUiVertex* verts, int count, int virtW, int virtH,
 
     pc_gfx_note_gl_state_change();
     invalidate_gl_pipeline_guards();
+    // Lo que dibuja la capa de menús también cuenta: sin esto, en GLES un
+    // frame sin dibujo del juego (la ventana de partida nueva) se limpiaba a
+    // negro al presentar y el menú no llegaba a verse.
+    sNativeWrittenThisFrame = true;
     if (sNativeFramebufferReady && glBindFramebuffer_ptr) {
         glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
     }
@@ -3200,7 +3218,7 @@ static bool fb_invalidate_enabled() {
     return enabled;
 }
 // Algo escribió en el framebuffer nativo desde la última presentación.
-static bool sNativeWrittenThisFrame = false;
+// (declarada antes de pc_gfx_ui_draw, que también la marca)
 // The port never touches the stencil buffer (no glStencil* anywhere), so on
 // GLES the depth attachment is plain 24-bit depth: less tile memory and
 // bandwidth than packed depth-stencil. PIKMIN_DEPTH_STENCIL=1 restores the
@@ -6414,6 +6432,19 @@ void pc_gfx_release_texture(void* gxTexObj)
     sExternalMipChain.erase(id);
     sTextureCache.erase(it);
     sTextureSignatures.erase(key);
+    auto variants = sTexVariants.find(key);
+    if (variants != sTexVariants.end()) {
+        for (const PcTexVariant& v : variants->second) {
+            if (v.tex == id) continue; // ya borrada arriba
+            GLuint vt = v.tex;
+            for (int unit = 0; unit < 8; ++unit) {
+                if (sBoundTextures[unit] == vt) sBoundTextures[unit] = 0;
+            }
+            glDeleteTextures(1, &vt);
+            sExternalMipChain.erase(vt);
+        }
+        sTexVariants.erase(variants);
+    }
 
     auto bytesIt = sTextureBytes.find(key);
     if (bytesIt != sTextureBytes.end()) {
@@ -7049,6 +7080,42 @@ void pc_gfx_load_tex_obj(GXTexObj* obj, GXTexMapID id) {
             needsUpload = true;
         }
     }
+    // ¿Esta versión ya está en la GPU? (ver sTexVariants)
+    bool trackVariant = false;
+    u64 variantHash = 0;
+    if (needsUpload && !sourceSnapshot.indexed && !sourceSnapshot.image.empty()
+        && sourceSnapshot.width <= kTexVariantMaxSide && sourceSnapshot.height <= kTexVariantMaxSide) {
+        const u64 seed = (u64(sourceSnapshot.format) << 48) ^ (u64(sourceSnapshot.width) << 32) ^ (u64(sourceSnapshot.height) << 16)
+                       ^ (sourceSnapshot.mipmap ? 1u : 0u);
+        variantHash = XXH64(sourceSnapshot.image.data(), sourceSnapshot.image.size(), seed);
+        PcGfxHostVector<PcTexVariant>& variants = sTexVariants[key];
+        for (PcTexVariant& v : variants) {
+            if (v.hash != variantHash) continue;
+            v.lastUse          = ++sTexVariantClock;
+            sTextureCache[key] = v.tex;
+            needsUpload        = false;
+            std::lock_guard<std::mutex> lock(sTextureRegistryMutex);
+            auto source = sTextureSources.find(key);
+            if (source != sTextureSources.end() && source->second.generation == sourceSnapshot.generation) {
+                source->second.uploadedGeneration = sourceSnapshot.generation;
+            }
+            break;
+        }
+        if (needsUpload) {
+            // La textura GL actual es otra versión guardada: que la subida
+            // cree una nueva en vez de sobrescribirla.
+            auto current = sTextureCache.find(key);
+            if (current != sTextureCache.end()) {
+                for (const PcTexVariant& v : variants) {
+                    if (v.tex == current->second) {
+                        sTextureCache.erase(current);
+                        break;
+                    }
+                }
+            }
+            trackVariant = true;
+        }
+    }
     if (needsUpload) {
         const bool uploaded = sourceSnapshot.indexed
             ? upload_ci_texture(obj, sourceSnapshot)
@@ -7059,6 +7126,32 @@ void pc_gfx_load_tex_obj(GXTexObj* obj, GXTexMapID id) {
             if (source != sTextureSources.end() && source->second.generation == sourceSnapshot.generation) {
                 source->second.uploadedGeneration = sourceSnapshot.generation;
             }
+        }
+        auto current = sTextureCache.find(key);
+        if (uploaded && trackVariant && current != sTextureCache.end()) {
+            PcGfxHostVector<PcTexVariant>& variants = sTexVariants[key];
+            if (variants.size() >= kTexVariantsPerObj) {
+                // Fuera la menos usada (nunca la recién subida).
+                size_t oldest = 0;
+                for (size_t i = 1; i < variants.size(); ++i) {
+                    if (variants[i].lastUse < variants[oldest].lastUse) oldest = i;
+                }
+                GLuint vt = variants[oldest].tex;
+                if (vt != current->second) {
+                    pc_gfx_flush_batch();
+                    for (int unit = 0; unit < 8; ++unit) {
+                        if (sBoundTextures[unit] == vt) sBoundTextures[unit] = 0;
+                    }
+                    glDeleteTextures(1, &vt);
+                    sExternalMipChain.erase(vt);
+                }
+                variants.erase(variants.begin() + oldest);
+            }
+            PcTexVariant added;
+            added.hash    = variantHash;
+            added.tex     = current->second;
+            added.lastUse = ++sTexVariantClock;
+            variants.push_back(added);
         }
     }
     auto it = sTextureCache.find(key);

@@ -88,3 +88,30 @@ void pc_p2_trace_pikis(void)
 	}
 	fflush(stderr);
 }
+
+#if PIKI_PC_TOUCH
+#include "Game/Navi.h"
+#include "Game/NaviState.h"
+#include "Game/AIConstants.h"
+#include "touch/pc_touch.h"
+
+// Táctil: qué botones de contexto tienen sentido este frame (cruceta ↑/↓ con
+// sprays o madurez, cambiar de capitán). Mismas condiciones que el juego.
+void pc_p2_touch_context_poll(void)
+{
+	unsigned flags = 0;
+	Game::Navi* navi = Game::naviMgr ? Game::naviMgr->getActiveNavi() : nullptr;
+	if (navi && Game::playData && Game::gameSystem) {
+		if (navi->getStateID() == Game::NSID_ThrowWait) flags |= PC_TOUCH_CTX_HOLDING;
+		if (Game::playData->mSprayCount[SPRAY_TYPE_BITTER] > 0) flags |= PC_TOUCH_CTX_SPRAY_BITTER;
+		if (Game::playData->mSprayCount[SPRAY_TYPE_SPICY] > 0) flags |= PC_TOUCH_CTX_SPRAY_SPICY;
+		if (!Game::gameSystem->isMultiplayerMode() && Game::playData->isDemoFlag(Game::DEMO_Unlock_Captain_Switch)) {
+			Game::Navi* other = Game::naviMgr->getAt(1 - navi->mNaviIndex);
+			if (other && other->isAlive()) flags |= PC_TOUCH_CTX_SWAP;
+			if (navi->mNaviIndex == NAVIID_Olimar) flags |= PC_TOUCH_CTX_SWAP_TO_2P;
+			if (Game::playData->isStoryFlag(Game::STORY_DebtPaid)) flags |= PC_TOUCH_CTX_PRESIDENT;
+		}
+	}
+	pc_touch_set_context(flags);
+}
+#endif

@@ -977,7 +977,7 @@ void VsGame::CardMgr::drawSlot(Graphics& gfx, Vector3f& place, SlotMachine& mach
 	GXSetColorUpdate(1);
 	GXSetZMode(0, GX_LESS, 0);
 	GXSetZMode(1, GX_LESS, 1);
-	GXSetCurrentMtx(nullptr);
+	GXSetCurrentMtx(0);
 	GXSetNumTexGens(1);
 	GXSetTexCoordGen2(GX_TEXCOORD0, GX_TG_MTX3X4, GX_TG_TEXCOORD0, 0x3c, 0, 0x7d);
 	GXSetCullMode(GX_CULL_BACK);

@@ -2303,6 +2303,12 @@ void EnemyBase::gotoHell()
 		return;
 	}
 
+#ifdef PIKI_PC_PORT
+	// Cae por debajo del mapa: desaparece sin rastro. Se anota para poder
+	// distinguirlo de otros fallos (p. ej. colisión con el suelo).
+	printf("[PC Port] Enemy fell out of the map: type=%d pos=(%.1f %.1f %.1f)\n", (int)getEnemyTypeID(), mPosition.x,
+	       mPosition.y, mPosition.z);
+#endif
 	throwupItem();
 	EnemyKillArg killArg(CKILL_DisableDeathEffects | CKILL_LeaveNoCarcass | CKILL_NotKilledByPlayer);
 	kill(&killArg);

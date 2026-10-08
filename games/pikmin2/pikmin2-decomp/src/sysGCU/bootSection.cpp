@@ -1232,12 +1232,12 @@ void BootSection::run()
 {
 	mDisplayHeap->becomeCurrentHeap();
 	sys->dvdLoadUseCallBack(&mThreadCommand, new Delegate<BootSection>(this, &BootSection::loadBootResource));
-	runWait(&waitLoadResource);
+	runWait(&BootSection::waitLoadResource);
 	sys->loadResourceFirst();
 	setMode(SID_LoadResourceFirst);
 	::Section::run();
 	gPikmin2AramMgr->setLoadPermission(false);
-	runWait(&waitLoadResource);
+	runWait(&BootSection::waitLoadResource);
 	sys->heapStatusDump(true);
 	mIsMainActive = false;
 }

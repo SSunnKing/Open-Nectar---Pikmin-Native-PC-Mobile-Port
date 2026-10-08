@@ -175,7 +175,11 @@ void JAInter::BankWave::setSceneSetFinishCallback(JAInter::BankWave::SceneSetFin
  * @note Address: 0x800AC0CC
  * @note Size: 0x18
  */
+#ifdef PIKI_PC_PORT
+void JAInter::BankWave::finishSceneSet(uintptr_t flag)
+#else
 void JAInter::BankWave::finishSceneSet(u32 flag)
+#endif
 {
 	SceneSetFlag               = flag;
 	wsLoadStatus[flag >> 0x10] = 2;

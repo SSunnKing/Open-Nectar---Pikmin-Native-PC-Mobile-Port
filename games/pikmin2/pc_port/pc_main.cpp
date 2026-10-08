@@ -44,10 +44,17 @@ __declspec(dllexport) int           AmdPowerXpressRequestHighPerformance = 1;
 static uintptr_t pc_module_base()
 {
 	Dl_info info;
+#ifdef __ANDROID__
+	// bionic no tiene RTLD_DL_LINKMAP: la base de la .so la da dladdr.
+	if (dladdr((void*)&pc_module_base, &info)) {
+		return (uintptr_t)info.dli_fbase;
+	}
+#else
 	struct link_map* map = nullptr;
 	if (dladdr1((void*)&pc_module_base, &info, (void**)&map, RTLD_DL_LINKMAP) && map) {
 		return (uintptr_t)map->l_addr;
 	}
+#endif
 	return 0;
 }
 
@@ -234,8 +241,10 @@ int main(int argc, char* argv[])
 
 	printf("[PC Port] Constructing System / GameFlow...\n");
 	System* gameSys = new System();
-	gameSys->setFlag(System::SF_TVModeSelected);
+#if defined(VERSION_PAL)
+	gameSys->setFlag(System::SF_TVModeSelected); // solo PAL: elección 50/60 Hz
 	gameSys->setFlag(System::SF_RestoredRenderMode);
+#endif
 
 	printf("[PC Port] GameFlow::run() — section loop (boot → title → ...)\n");
 	const int status = gameSys->run();

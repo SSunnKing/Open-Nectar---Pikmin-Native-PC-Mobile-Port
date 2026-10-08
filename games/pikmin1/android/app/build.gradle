@@ -51,7 +51,8 @@ android {
                           '-DANDROID_PLATFORM=android-29',
                           '-DPIKMIN_NATIVE_JAUDIO=ON',
                           '-DPIKMIN_NATIVE_OPTIMIZE=OFF'
-                targets 'SDL2', 'pikmin_pc', 'pikmin_pc_pal', 'nectar_installer'
+                targets 'SDL2', 'pikmin_pc', 'pikmin_pc_pal', 'nectar_installer', 'nectar_launcher',
+                        'pikmin2_pc', 'pikmin2_pc_pal'
             }
         }
         ndk { abiFilters 'arm64-v8a' }

@@ -31,6 +31,7 @@
 RenderModeInfo gPcRenderInfoStore = {};
 
 #include <cstdarg>
+#include <signal.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -53,6 +54,9 @@ RenderModeInfo gPcRenderInfoStore = {};
 #include "pc_window.h"
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2_shim.h"
+#if PIKI_PC_TOUCH
+#include "touch/pc_touch.h"
+#endif
 
 OSTime __OSStartTime       = 0;
 u32 __OSFpscrEnableBits    = 0;
@@ -721,7 +725,27 @@ void OSCancelThread(OSThread* thread)
 		pthread_cond_broadcast(&arg->cond);
 		pthread_mutex_unlock(&arg->mutex);
 	}
+#ifdef __ANDROID__
+	// bionic no tiene pthread_cancel: una señal cuyo manejador sale del hilo.
+	// Los hilos del juego esperan en condvars (sin el mutex tomado), que es
+	// donde el original los cancelaba.
+	{
+		static bool installed = false;
+		if (!installed) {
+			struct sigaction sa;
+			memset(&sa, 0, sizeof(sa));
+			sa.sa_handler = [](int) { pthread_exit(nullptr); };
+			sigaction(SIGUSR2, &sa, nullptr);
+			installed = true;
+		}
+		if (pthread_equal(native, pthread_self())) {
+			pthread_exit(nullptr);
+		}
+		pthread_kill(native, SIGUSR2);
+	}
+#else
 	pthread_cancel(native);
+#endif
 	if (!pthread_equal(native, pthread_self())) {
 		// The target may need the interrupt lock to unwind (PcIrqRelease).
 		PcIrqRelease irq;
@@ -1035,6 +1059,7 @@ void VIWaitForRetrace()
 		pc_settings_request_toggle();
 	// Aviso de Lock-On (Camera > Lock-On) y, encima, el menu F1, sobre el
 	// frame terminado y antes de presentarlo.
+	pc_settings_p2_begin_frame();
 	pc_settings_draw_lock_on();
 	pc_settings_draw_idle_counter();
 	pc_newgame_prompt_draw();
@@ -1043,6 +1068,9 @@ void VIWaitForRetrace()
 	pc_settings_draw_achievement_toast();
 	pc_settings_p2_flush();
 	pc_gfx_present();
+#if PIKI_PC_TOUCH
+	pc_touch_draw(); // controles táctiles encima de todo, como en Pikmin 1
+#endif
 	if (SDL_Window* window = SDL_GL_GetCurrentWindow()) {
 		// FPS Mode 120 en un monitor mas lento: con VSync el swap bloquearia
 		// hasta el refresco y frenaria la logica. Se presenta un frame por
@@ -1139,6 +1167,8 @@ void VISetNextFrameBuffer(void* fb) { sFrameBuffer = fb; }
 void* VIGetCurrentFrameBuffer() { return sFrameBuffer; }
 void VISetBlack(BOOL) {}
 u32 VIGetRetraceCount() { return sRetraceCount; }
+// Versión USA: ¿cable de vídeo por componentes (progresivo)? En PC, no.
+u32 VIGetDTVStatus(void) { return 0; }
 
 BOOL PADInit()
 {

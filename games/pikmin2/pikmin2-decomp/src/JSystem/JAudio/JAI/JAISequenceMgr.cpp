@@ -77,6 +77,8 @@ void init()
  * @note Address: 0x800B0DEC
  * @note Size: 0x12C
  */
+} // namespace SequenceMgr (el constructor es de JAInter, no de SequenceMgr)
+
 JAInter::SeqUpdateData::SeqUpdateData()
     : mPauseMode(SOUNDPAUSE_Unk0)
     , mPauseVolume(0)
@@ -93,6 +95,8 @@ JAInter::SeqUpdateData::SeqUpdateData()
 	mTrackDolbys  = new (JAIBasic::getCurrentJAIHeap(), 0x20) f32[JAIGlobalParameter::getParamSeqTrackMax()];
 	_44           = new (JAIBasic::getCurrentJAIHeap(), 0x20) u32[JAIGlobalParameter::getParamSeqTrackMax() + 1];
 }
+
+namespace SequenceMgr {
 
 /**
  * @note Address: 0x800B1028
@@ -770,7 +774,11 @@ void stopSeq(JAISequence* seq)
  * @note Address: 0x800B2D18
  * @note Size: 0xE4
  */
+#ifdef PIKI_PC_PORT
+void checkDvdLoadArc(u32 p1, uintptr_t p2)
+#else
 void checkDvdLoadArc(u32 p1, u32 p2)
+#endif
 {
 	u32 playTrackNo = p2 & 0xFF;
 	u32 seqOffset   = (p2 >> 16) & 0x3FF;

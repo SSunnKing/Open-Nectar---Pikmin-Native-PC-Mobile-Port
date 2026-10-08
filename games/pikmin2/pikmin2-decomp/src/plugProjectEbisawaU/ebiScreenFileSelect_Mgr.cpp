@@ -634,8 +634,16 @@ void FSMState00b_CheckData::do_exec(TMgr* mgr)
 	switch (mStatus) {
 	case CheckDataState_DoLoad:
 		if (sys->mCardMgr->isSaveInvalid()) {
+#ifdef PIKI_PC_PORT
+			// loadPlayer falla si el hilo de la tarjeta tiene el mutex en ese
+			// instante (en un móvil pasa): se reintenta en el siguiente frame.
+			if (sys->mCardMgr->loadPlayer(mgr->mCurrSelection)) {
+				mStatus = CheckDataState_GetStatus;
+			}
+#else
 			P2ASSERTLINE(625, sys->mCardMgr->loadPlayer(mgr->mCurrSelection));
 			mStatus = CheckDataState_GetStatus;
+#endif
 		}
 		break;
 	case CheckDataState_GetStatus:

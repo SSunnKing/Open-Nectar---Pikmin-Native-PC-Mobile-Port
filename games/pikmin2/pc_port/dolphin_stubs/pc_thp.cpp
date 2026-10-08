@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <vector>
 
 #include "stb_image.h"
@@ -98,17 +99,58 @@ void close_file()
 	}
 }
 
+// ── Audio mezclado en la salida del juego ──────────────────────────────────
+// Android solo deja abrir un dispositivo de audio, y es del juego: entonces el
+// vídeo deja su audio aquí y jaudio_sink lo suma (pc_thp_mix), como las pistas
+// AST. Anillo fijo de PCM estéreo s16, sin memoria del heap del juego.
+constexpr u32 kMixCapacity = 32000 * 2 * 8; // 8 s a 32 kHz
+s16 sMixRing[kMixCapacity];
+u32 sMixRead = 0, sMixCount = 0;
+u32 sMixRate = 32000;
+double sMixPhase = 0.0;
+bool sMixMode = false, sMixPaused = true;
+std::mutex sMixMutex;
+
+void mix_clear()
+{
+	std::lock_guard<std::mutex> lock(sMixMutex);
+	sMixRead = sMixCount = 0;
+	sMixPhase = 0.0;
+}
+
+void mix_push(const s16* pcm, u32 samples)
+{
+	std::lock_guard<std::mutex> lock(sMixMutex);
+	for (u32 i = 0; i < samples; i++) {
+		if (sMixCount == kMixCapacity) { // lleno: se descarta lo más viejo
+			sMixRead = (sMixRead + 1) % kMixCapacity;
+			sMixCount--;
+		}
+		sMixRing[(sMixRead + sMixCount) % kMixCapacity] = pcm[i];
+		sMixCount++;
+	}
+}
+
+bool mix_empty()
+{
+	std::lock_guard<std::mutex> lock(sMixMutex);
+	return sMixCount < 2;
+}
+
 void audio_close()
 {
 	if (sPlayer.audioDev) {
 		SDL_CloseAudioDevice(sPlayer.audioDev);
 		sPlayer.audioDev = 0;
 	}
+	sMixMode   = false;
+	sMixPaused = true;
+	mix_clear();
 }
 
 bool audio_open()
 {
-	if (sPlayer.audioDev || !sPlayer.hasAudio || sPlayer.audioRate == 0) return sPlayer.audioDev != 0;
+	if (sPlayer.audioDev || sMixMode || !sPlayer.hasAudio || sPlayer.audioRate == 0) return sPlayer.audioDev != 0 || sMixMode;
 	if (!SDL_WasInit(SDL_INIT_AUDIO) && SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
 		printf("[PC THP] SDL audio init failed: %s\n", SDL_GetError());
 		return false;
@@ -121,8 +163,12 @@ bool audio_open()
 	want.samples  = 1024;
 	sPlayer.audioDev = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
 	if (!sPlayer.audioDev) {
-		printf("[PC THP] SDL_OpenAudioDevice failed: %s\n", SDL_GetError());
-		return false;
+		// Android: el dispositivo es del juego; se mezcla en su salida.
+		printf("[PC THP] own audio device unavailable (%s): mixing into the game output\n", SDL_GetError());
+		sMixMode = true;
+		sMixRate = sPlayer.audioRate;
+		mix_clear();
+		return true;
 	}
 	return true;
 }
@@ -295,7 +341,7 @@ bool step_frame(bool wantVideo)
 	}
 	if (wantVideo && decode_video(image, imageSize)) p.shownFrame = s32(p.nextIndex);
 
-	if (p.hasAudio && audioSize && p.audioDev) {
+	if (p.hasAudio && audioSize && (p.audioDev || sMixMode)) {
 		const u8* audio = image + imageSize;
 		// Every game movie carries a single track, so the record starts the block.
 		const u8* rec = audio;
@@ -306,7 +352,8 @@ bool step_frame(bool wantVideo)
 			if (p.volume < 0.999f) {
 				for (s16& s : p.pcmBuf) s = s16(s * p.volume);
 			}
-			SDL_QueueAudio(p.audioDev, p.pcmBuf.data(), Uint32(p.pcmBuf.size() * sizeof(s16)));
+			if (p.audioDev) SDL_QueueAudio(p.audioDev, p.pcmBuf.data(), Uint32(p.pcmBuf.size() * sizeof(s16)));
+			else mix_push(p.pcmBuf.data(), u32(p.pcmBuf.size()));
 			p.queuedFrames++;
 			// PIKMIN_THP_PCM=<file>: raw s16le stereo dump of the decoded audio.
 			static FILE* pcmDump = getenv("PIKMIN_THP_PCM") ? fopen(getenv("PIKMIN_THP_PCM"), "wb") : nullptr;
@@ -470,12 +517,18 @@ BOOL THPPlayerPlay()
 	if (ActivePlayer.mState == THP_PAUSED) {
 		sPlayer.playStartTicks += SDL_GetTicks() - sPlayer.pausedAtTicks;
 		if (sPlayer.audioDev) SDL_PauseAudioDevice(sPlayer.audioDev, 0);
+		sMixPaused = false;
 	} else if (ActivePlayer.mState != THP_PLAYING) {
 		sPlayer.playStartTicks = SDL_GetTicks();
 		sPlayer.baseFrame      = double(std::max(sPlayer.shownFrame, 0));
 		if (audio_open()) {
-			SDL_ClearQueuedAudio(sPlayer.audioDev);
-			SDL_PauseAudioDevice(sPlayer.audioDev, 0);
+			if (sPlayer.audioDev) {
+				SDL_ClearQueuedAudio(sPlayer.audioDev);
+				SDL_PauseAudioDevice(sPlayer.audioDev, 0);
+			} else {
+				mix_clear();
+				sMixPaused = false;
+			}
 		}
 	}
 	ActivePlayer.mState = THP_PLAYING;
@@ -487,6 +540,7 @@ BOOL THPPlayerPause()
 	if (ActivePlayer.mState != THP_PLAYING) return FALSE;
 	sPlayer.pausedAtTicks = SDL_GetTicks();
 	if (sPlayer.audioDev) SDL_PauseAudioDevice(sPlayer.audioDev, 1);
+	sMixPaused          = true;
 	ActivePlayer.mState = THP_PAUSED;
 	return TRUE;
 }
@@ -497,6 +551,8 @@ void THPPlayerStop()
 		SDL_PauseAudioDevice(sPlayer.audioDev, 1);
 		SDL_ClearQueuedAudio(sPlayer.audioDev);
 	}
+	sMixPaused = true;
+	mix_clear();
 	if (ActivePlayer.mIsOpen) ActivePlayer.mState = THP_STOPPED;
 }
 
@@ -529,7 +585,7 @@ int THPPlayerDrawCurrentFrame(GXRenderModeObj* rmode, int x, int y, int polyWidt
 				rewind_stream();
 				p.playStartTicks = SDL_GetTicks();
 				p.baseFrame      = 0.0;
-			} else if (!p.audioDev || SDL_GetQueuedAudioSize(p.audioDev) == 0) {
+			} else if (p.audioDev ? SDL_GetQueuedAudioSize(p.audioDev) == 0 : (!sMixMode || mix_empty())) {
 				ActivePlayer.mState = THP_PLAYED;
 			}
 		}
@@ -587,3 +643,25 @@ void THPPlayerDrawDone() {}
 void THPPlayerPostDrawDone() {}
 
 } // extern "C"
+
+// Suma el audio del vídeo a `out` (estéreo s16, `frames` a `rate` Hz). La
+// llama jaudio_sink al enviar cada bloque, como pc_ast_mix.
+extern "C" void pc_thp_mix(int16_t* out, size_t frames, int rate)
+{
+	if (!sMixMode || sMixPaused || rate <= 0) return;
+	std::lock_guard<std::mutex> lock(sMixMutex);
+	const double step = double(sMixRate) / double(rate);
+	for (size_t i = 0; i < frames && sMixCount >= 2; i++) {
+		const s16 l = sMixRing[sMixRead];
+		const s16 r = sMixRing[(sMixRead + 1) % kMixCapacity];
+		const int ml = out[i * 2] + l, mr = out[i * 2 + 1] + r;
+		out[i * 2]     = s16(ml > 32767 ? 32767 : ml < -32768 ? -32768 : ml);
+		out[i * 2 + 1] = s16(mr > 32767 ? 32767 : mr < -32768 ? -32768 : mr);
+		sMixPhase += step;
+		while (sMixPhase >= 1.0 && sMixCount >= 2) {
+			sMixPhase -= 1.0;
+			sMixRead = (sMixRead + 2) % kMixCapacity;
+			sMixCount -= 2;
+		}
+	}
+}

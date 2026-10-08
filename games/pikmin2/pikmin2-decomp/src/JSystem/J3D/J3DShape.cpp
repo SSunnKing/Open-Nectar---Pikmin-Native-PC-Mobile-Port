@@ -153,7 +153,7 @@ void J3DShape::makeVtxArrayCmd()
 		if (array[i] != 0)
 			GDSetArray((GXAttr)(i + GX_VA_POS), array[i], stride[i]);
 		else
-			GDSetArrayRaw((GXAttr)(i + GX_VA_POS), nullptr, stride[i]);
+			GDSetArrayRaw((GXAttr)(i + GX_VA_POS), 0, stride[i]);
 	}
 }
 

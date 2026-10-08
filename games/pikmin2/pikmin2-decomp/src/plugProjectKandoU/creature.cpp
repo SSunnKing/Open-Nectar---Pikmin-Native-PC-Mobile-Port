@@ -633,7 +633,7 @@ void Creature::checkCollision(CellObject* other)
 	isDebugCollision();
 
 	Delegate3<Creature, CollPart*, CollPart*, Vector3f&> delegate
-	    = Delegate3<Creature, CollPart*, CollPart*, Vector3f&>(this, &resolveOneColl);
+	    = Delegate3<Creature, CollPart*, CollPart*, Vector3f&>(this, &Creature::resolveOneColl);
 	currOp = creatureObj;
 
 	if (isDebugCollision()) {

@@ -2768,7 +2768,7 @@ void BasePelletMgr::useModelMgr(int arg1, u32 arg2)
 	}
 
 	mModelMgr = new SysShape::ModelMgr(mConfigList->mConfigCnt, mModelData, arg1, arg2, modelType,
-	                                   new Delegate1<BasePelletMgr, SysShape::Model*>(this, &createModelCallback));
+	                                   new Delegate1<BasePelletMgr, SysShape::Model*>(this, &BasePelletMgr::createModelCallback));
 }
 
 /**

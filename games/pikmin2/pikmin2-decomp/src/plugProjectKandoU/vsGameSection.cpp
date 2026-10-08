@@ -436,7 +436,7 @@ void VsGameSection::loadChallengeStageList()
 	// If KFesVersion is enabled, use the alternate stage list config
 	void* file = JKRDvdRipper::loadToMainRAM(
 	    gGameConfig.mParms.mKFesVersion() ? "/user/Matoba/challenge/kfes-stages.txt" : "/user/Matoba/challenge/stages.txt", nullptr,
-	    Switch_0, nullptr, nullptr, JKRDvdRipper::ALLOC_DIR_BOTTOM, nullptr, nullptr, nullptr);
+	    Switch_0, 0, nullptr, JKRDvdRipper::ALLOC_DIR_BOTTOM, 0, nullptr, nullptr);
 
 	if (!file) {
 		return;
@@ -453,8 +453,8 @@ void VsGameSection::loadChallengeStageList()
  */
 void VsGameSection::loadVsStageList()
 {
-	void* file = JKRDvdRipper::loadToMainRAM("/user/abe/vs/stages.txt", nullptr, Switch_0, nullptr, nullptr, JKRDvdRipper::ALLOC_DIR_BOTTOM,
-	                                         nullptr, nullptr, nullptr);
+	void* file = JKRDvdRipper::loadToMainRAM("/user/abe/vs/stages.txt", nullptr, Switch_0, 0, nullptr, JKRDvdRipper::ALLOC_DIR_BOTTOM,
+	                                         0, nullptr, nullptr);
 	if (!file) {
 		return;
 	}

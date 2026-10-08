@@ -449,7 +449,7 @@ struct J2DAnmTextureSRTKey : public J2DAnmBase {
 		_50                = 0;
 		_4E                = 0;
 		_4C                = 0;
-		_60                = nullptr;
+		_60                = 0;
 		_64                = nullptr;
 		_5C                = nullptr;
 		_54                = nullptr;

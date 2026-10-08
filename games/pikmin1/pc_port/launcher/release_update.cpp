@@ -27,6 +27,9 @@ constexpr const char* kLatestReleaseApi
 // queda como alternativa.
 #ifdef _WIN32
 const char* const kAssetNames[] = { "nectar-windows.zip" };
+#elif defined(__ANDROID__)
+// Android: el .apk del release, se llame como se llame (open_nectar_0.9.apk).
+const char* const kAssetNames[] = { ".apk" };
 #else
 const char* const kAssetNames[] = { "nectar-linux.tar.gz", "Open_Nectar-x86_64.AppImage" };
 #endif
@@ -117,8 +120,14 @@ bool fetchLatestRelease(ReleaseInfo& release, std::string& error)
     if (const Json* assets = root.get("assets"); assets && assets->type == Json::Type::Array) {
         for (const char* wanted : kAssetNames) {
             for (const Json& asset : assets->items) {
-                if (release.assetUrl.empty() && asset.str("name") == wanted) {
-                    release.assetName = wanted;
+#ifdef __ANDROID__
+                const std::string name = asset.str("name");
+                const bool match = name.size() > 4 && name.compare(name.size() - 4, 4, wanted) == 0;
+#else
+                const bool match = asset.str("name") == wanted;
+#endif
+                if (release.assetUrl.empty() && match) {
+                    release.assetName = asset.str("name");
                     release.assetUrl = asset.str("browser_download_url");
                 }
             }

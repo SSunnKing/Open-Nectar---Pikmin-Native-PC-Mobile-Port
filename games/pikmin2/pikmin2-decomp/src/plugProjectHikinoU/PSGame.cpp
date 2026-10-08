@@ -457,7 +457,7 @@ void SysFactory::newSoundSystem()
 	mSolidHeap = makeSolidHeap(mSolidHeapSize, newheap, false);
 	P2ASSERTLINE(754, mSolidHeap);
 
-	PSSystem::SetupArg arg = { mSolidHeap, mHeapSize, 231, seqCpuSync, mAafFile, "/SeqTest/" };
+	PSSystem::SetupArg arg = { mSolidHeap, mHeapSize, 231, (void*)seqCpuSync, mAafFile, "/SeqTest/" };
 	P2ASSERTLINE(769, !PSSystem::spSysIF);
 	PSSystem::SysIF::sMakeJAISeCallback = mMakeSeFunc;
 	PSSystem::SysIF* sysif              = new PSSystem::SysIF(arg);

@@ -1,6 +1,8 @@
 // SDL2 adapter for the NextOS JAudio host renderer. Native S16 stereo PCM.
 #include "port/audio_sink.h"
 #include "audio/pc_ast_stream.h"
+
+extern "C" void pc_thp_mix(int16_t* out, size_t frames, int rate);
 #include <SDL.h>
 #include <limits>
 #include <cstdio>
@@ -80,6 +82,7 @@ int PikiAudioSinkQueue(const int16_t* pcm, size_t frames)
     }
     std::memcpy(mixed, pcm, frames * 4);
     pc_ast_mix(mixed, frames, outRate);
+    pc_thp_mix(mixed, frames, outRate); // vídeo sin dispositivo propio (Android)
     if (SDL_QueueAudio(device, mixed, static_cast<Uint32>(frames * 4)) != 0) return 0;
     submitted += frames;
     return 1;

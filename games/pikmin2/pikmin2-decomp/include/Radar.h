@@ -48,7 +48,7 @@ struct Radar {
 		{
 			mObjType = MAP_NULL_ICON;
 			mObject  = nullptr;
-			mCaveID  = nullptr;
+			mCaveID  = 0;
 		}
 
 		virtual ~Point() { } // _08 (weak)

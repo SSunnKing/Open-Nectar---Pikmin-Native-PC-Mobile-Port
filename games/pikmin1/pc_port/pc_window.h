@@ -94,6 +94,8 @@ bool pc_window_take_swarm_press(void);
 void pc_window_request_lockon_press(void);
 void pc_window_request_firstperson_press(void);
 void pc_window_request_charge_press(void);
+/// Botón táctil de la bomba (mod Bomb Control): como pulsar Bomb.
+void pc_window_request_bomb_press(int player);
 // Name for either kind of binding ("Mouse 4", "Space", ...).
 const char* pc_window_binding_name(int binding);
 // Whether a binding is currently held, given the keyboard and mouse state.

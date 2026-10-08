@@ -82,7 +82,7 @@ struct J3DPEBlock {
 	virtual J3DZMode* getZMode() { return nullptr; }         // _54 (weak)
 	virtual void setZCompLoc(const u8*) { }                  // _58 (weak)
 	virtual void setZCompLoc(u8) { }                         // _5C (weak)
-	virtual u8 getZCompLoc() const { return nullptr; }       // _60 (weak)
+	virtual u8 getZCompLoc() const { return 0; }       // _60 (weak)
 	virtual void setDither(const u8*) { }                    // _64 (weak)
 	virtual void setDither(u8) { }                           // _68 (weak)
 	virtual u8 getDither() const { return 0; }               // _6C (weak)

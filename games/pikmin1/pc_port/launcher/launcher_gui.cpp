@@ -19,7 +19,11 @@
 #include "backends/imgui_impl_sdl2.h"
 
 #include <SDL2/SDL.h>
+#ifdef __ANDROID__
+#include <GLES3/gl3.h>
+#else
 #include <SDL2/SDL_opengl.h>
+#endif
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -1504,10 +1508,16 @@ struct Hub {
     }
 };
 
+// Android: la interfaz se diseña para ~1180x780; en el móvil se dibuja a esa
+// escala virtual multiplicada por gUiScale (fuentes rasterizadas a la
+// densidad real para que el texto salga nítido).
+float gUiScale = 1.0f;
+
 void loadFonts(Fonts& fonts)
 {
     ImGuiIO& io = ImGui::GetIO();
     ImFontConfig cfg;
+    cfg.RasterizerDensity = gUiScale;
     cfg.FontDataOwnedByAtlas = false; // los datos viven en el ejecutable
     cfg.OversampleH = 3;
     auto* data = const_cast<unsigned char*>(kFontFredoka);
@@ -1708,6 +1718,19 @@ struct HubWindow::Impl {
     {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
+            if (gUiScale != 1.0f) {
+                // Coordenadas de la pantalla real → las de la interfaz virtual.
+                const float inv = 1.0f / gUiScale;
+                if (event.type == SDL_MOUSEMOTION) {
+                    event.motion.x = int(event.motion.x * inv);
+                    event.motion.y = int(event.motion.y * inv);
+                    event.motion.xrel = int(event.motion.xrel * inv);
+                    event.motion.yrel = int(event.motion.yrel * inv);
+                } else if (event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP) {
+                    event.button.x = int(event.button.x * inv);
+                    event.button.y = int(event.button.y * inv);
+                }
+            }
             ImGui_ImplSDL2_ProcessEvent(&event);
             if (event.type == SDL_QUIT) quitRequested = true;
             if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE
@@ -1725,6 +1748,11 @@ struct HubWindow::Impl {
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame();
+        if (gUiScale != 1.0f) {
+            ImGuiIO& io = ImGui::GetIO();
+            io.DisplayFramebufferScale = ImVec2(io.DisplayFramebufferScale.x * gUiScale, io.DisplayFramebufferScale.y * gUiScale);
+            io.DisplaySize = ImVec2(io.DisplaySize.x / gUiScale, io.DisplaySize.y / gUiScale);
+        }
         ImGui::NewFrame();
         const ImVec2 size = ImGui::GetIO().DisplaySize;
         hub->frame(size, t, dt, modal == Modal::None);
@@ -1773,18 +1801,29 @@ bool HubWindow::open(const HubState& state, std::string& error)
         error = SDL_GetError();
         return false;
     }
+#ifdef __ANDROID__
+    // Android: OpenGL ES 3.0 a pantalla completa (la ventana es la actividad).
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+#endif
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+#ifdef __ANDROID__
+    SDL_Window* window = SDL_CreateWindow("Open Nectar", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 0, 0,
+                                          SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_ALLOW_HIGHDPI);
+#else
     SDL_Window* window = SDL_CreateWindow("Open Nectar", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1180, 780,
                                           SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+#endif
     if (!window) {
         error = SDL_GetError();
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return false;
     }
+#ifndef __ANDROID__
     SDL_SetWindowMinimumSize(window, 960, 700);
     pc_icon_apply(window);
+#endif
     SDL_GLContext context = SDL_GL_CreateContext(window);
     if (!context) {
         error = SDL_GetError();
@@ -1794,6 +1833,14 @@ bool HubWindow::open(const HubState& state, std::string& error)
     }
     SDL_GL_MakeCurrent(window, context);
     SDL_GL_SetSwapInterval(1);
+#ifdef __ANDROID__
+    {
+        int w = 0, h = 0;
+        SDL_GL_GetDrawableSize(window, &w, &h);
+        const float s = std::min(float(w) / 1180.0f, float(h) / 780.0f);
+        gUiScale = std::max(1.0f, std::min(s, 4.0f));
+    }
+#endif
     m.window = window;
     m.context = context;
 
@@ -1801,7 +1848,11 @@ bool HubWindow::open(const HubState& state, std::string& error)
     ImGui::CreateContext();
     ImGui::GetIO().IniFilename = nullptr;
     ImGui_ImplSDL2_InitForOpenGL(window, context);
+#ifdef __ANDROID__
+    ImGui_ImplOpenGL3_Init("#version 300 es");
+#else
     ImGui_ImplOpenGL3_Init("#version 130");
+#endif
     applyTheme();
 
     m.hub = std::make_unique<Hub>(m.state, m.result);
@@ -1818,7 +1869,12 @@ bool HubWindow::open(const HubState& state, std::string& error)
     for (Texture& photo : hub.art.logs) hub.slideshow.add(photo);
     hub.art.logs.clear();
     hub.startCoverDownloads();
-    if (!m.state.installerOnly && m.state.games[0].installed) {
+#ifdef __ANDROID__
+    const bool checkReleases = m.state.games[0].installed || m.state.games[1].installed; // Android: sin pestañas, pero sí Update
+#else
+    const bool checkReleases = !m.state.installerOnly && m.state.games[0].installed;
+#endif
+    if (checkReleases) {
         hub.releaseCheck = std::make_shared<ReleaseCheck>();
         std::thread(ReleaseCheck::run, hub.releaseCheck).detach();
     }

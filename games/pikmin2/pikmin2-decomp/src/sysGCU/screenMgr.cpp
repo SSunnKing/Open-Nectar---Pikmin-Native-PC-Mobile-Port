@@ -685,7 +685,7 @@ bool Mgr::setDispMember(og::Screen::DispMemberBase* disp)
 		return mBackupScene->setDispMember(disp);
 	}
 
-	return nullptr;
+	return 0;
 }
 
 /**

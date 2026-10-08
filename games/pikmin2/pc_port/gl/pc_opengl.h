@@ -42,6 +42,18 @@
 // sufijo EXT; el mismo nombre que en escritorio deja el resto del código
 // igual. Si el driver no las expone, los punteros quedan nulos y se ignoran.
 #  include <GLES2/gl2ext.h>
+// Solo lo usan sondas de depuración de pc_gfx (volcar texturas): GLES 3.0 no
+// tiene glGetTexImage ni las constantes de tamaño de nivel.
+#  ifndef GL_TEXTURE_WIDTH
+#    define GL_TEXTURE_WIDTH 0x1000
+#  endif
+#  ifndef GL_TEXTURE_HEIGHT
+#    define GL_TEXTURE_HEIGHT 0x1001
+#  endif
+static inline void glGetTexImage(GLenum, GLint, GLenum, GLenum, void*) { }
+#  if !defined(GL_ES_VERSION_3_1)
+static inline void glGetTexLevelParameteriv(GLenum, GLint, GLenum, GLint* p) { if (p) *p = 0; }
+#  endif
 #  ifndef GL_TIME_ELAPSED
 #    define GL_TIME_ELAPSED GL_TIME_ELAPSED_EXT
 #  endif

@@ -52,7 +52,7 @@ void Radar::Mgr::clear()
 		pointList->clearRelations();
 		pointList->mObject  = nullptr;
 		pointList->mObjType = MAP_NULL_ICON;
-		pointList->mCaveID  = nullptr;
+		pointList->mCaveID  = 0;
 
 		mInactiveRadarNodes.add(&mPointList[i]);
 	}

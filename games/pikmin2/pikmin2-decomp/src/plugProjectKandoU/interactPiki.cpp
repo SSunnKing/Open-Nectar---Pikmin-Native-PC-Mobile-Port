@@ -695,7 +695,7 @@ bool InteractSwallow::actPiki(Game::Piki* piki)
 		f32 angle = JMAAtan2Radian(posDiff.x, posDiff.z);
 		InteractFlick swallowFlick(mCreature, 50.0f, 0.0f, -angle);
 		piki->stimulate(swallowFlick);
-		return;
+		return false;
 	}
 
 	if (piki->mCurrentState->invincible(piki)) {

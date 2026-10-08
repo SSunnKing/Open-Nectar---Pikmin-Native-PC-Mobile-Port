@@ -94,6 +94,14 @@ void pc_touch_mark_color_icon(float x0, float y0, float x1, float y1);
 int pc_touch_take_color_taps(void);
 
 /** Dibuja la capa sobre la ventana. Llamar tras pc_gfx_present(). */
+/* Lo que el juego cuenta del frame para mostrar u ocultar botones de contexto
+   (cruceta ↑/↓, cambiar de capitán). Lo pone el juego cada frame de partida. */
+#define PC_TOUCH_CTX_HOLDING      (1u << 0) /* Pikmin en la mano */
+#define PC_TOUCH_CTX_SPRAY_BITTER (1u << 1) /* P2: hay spray amargo */
+#define PC_TOUCH_CTX_SPRAY_SPICY  (1u << 2) /* P2: hay spray picante */
+#define PC_TOUCH_CTX_SWAP         (1u << 3) /* P2: se puede cambiar de capitán */
+void pc_touch_set_context(unsigned flags);
+
 void pc_touch_draw(void);
 
 /** Carga el arte (una vez, con contexto GL activo). */

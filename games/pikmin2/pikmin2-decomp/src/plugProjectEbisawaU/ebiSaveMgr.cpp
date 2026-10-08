@@ -478,8 +478,16 @@ void FSMState_NowSave::do_exec(TMgr* mgr)
 		break;
 	case 2:
 		if (sys->mCardMgr->isSaveInvalid()) {
+#ifdef PIKI_PC_PORT
+			// Como loadPlayer: si la tarjeta está ocupada, otro intento el
+			// siguiente frame en vez de un assert.
+			if (sys->mCardMgr->saveGameOption()) {
+				mState = 3;
+			}
+#else
 			P2ASSERTLINE(476, sys->mCardMgr->saveGameOption());
 			mState = 3;
+#endif
 		}
 		break;
 	case 3:

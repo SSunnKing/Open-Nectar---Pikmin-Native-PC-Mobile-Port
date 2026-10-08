@@ -24,7 +24,7 @@ LoadState::LoadState()
     , mNeedClearHeap(0)
 {
 	mController = new Controller(JUTGamePad::PORT_0);
-	mDelegate   = new Delegate<Game::VsGame::LoadState>(this, &dvdLoad);
+	mDelegate   = new Delegate<Game::VsGame::LoadState>(this, &LoadState::dvdLoad);
 }
 
 /**
@@ -101,7 +101,7 @@ void LoadState::exec(VsGameSection* section)
 			if (mDvdThreadCommand.mMode == DvdThreadCommand::CM_Completed) { // probably an enum
 				Screen::gGame2DMgr->set_FloorVS_LoadEnd();
 				if (mController->isButtonDown(JUTGamePad::PRESS_A | JUTGamePad::PRESS_START)) {
-					PSSystem::spSysIF->playSystemSe(PSSE_SY_FLOOR_COMPLETE, nullptr);
+					PSSystem::spSysIF->playSystemSe(PSSE_SY_FLOOR_COMPLETE, 0);
 					mAutoStartTime = 0.0f;
 				}
 			}

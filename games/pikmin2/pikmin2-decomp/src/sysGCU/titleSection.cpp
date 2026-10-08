@@ -47,9 +47,9 @@ Section::Section(JKRHeap* heap)
     , mButtonCallback(nullptr)
 {
 	mMovieIndex     = -1;
-	mButtonCallback = new Delegate<Section>(this, &loadResident);
+	mButtonCallback = new Delegate<Section>(this, &Section::loadResident);
 #if defined(VERSION_PAL)
-	mReloadMessageCallback = new Delegate<Section>(this, &reloadMessageResource);
+	mReloadMessageCallback = new Delegate<Section>(this, &Section::reloadMessageResource);
 #endif
 	og::Lib2D::create();
 	gPikmin2AramMgr->setLoadPermission(true);
@@ -185,9 +185,9 @@ void Section::init()
 	// this entire menu class seems to be for a scrapped debug menu
 	mMenu      = new Menu(mController1, JFWSystem::systemFont, false);
 	mMenu->_48 = 260;
-	mMenu->addKeyEvent(Menu::KeyEvent::U6, Controller::PRESS_B, new Delegate1<Section, Menu&>(this, &menuCancel));
+	mMenu->addKeyEvent(Menu::KeyEvent::U6, Controller::PRESS_B, new Delegate1<Section, Menu&>(this, &Section::menuCancel));
 	mMenu->addKeyEvent(Menu::KeyEvent::INVOKE_ACTION_ON_BUTTON_PRESS, Controller::PRESS_A,
-	                   new Delegate1<Section, Menu&>(this, &menuSelect));
+	                   new Delegate1<Section, Menu&>(this, &Section::menuSelect));
 
 	JUTFont* font;
 	int i     = 0;
