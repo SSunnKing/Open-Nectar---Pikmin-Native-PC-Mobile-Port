@@ -74,6 +74,11 @@ bool sShadowProjPerspective = false;
 bool sShadowExclude = false;
 
 bool shadow_recording_wanted() {
+#if PIKI_PC_VR
+    // The shadow mask is built by the post-processing pass, which a headset
+    // session never runs: recording would only pile up draws nobody consumes.
+    if (pc_vr_session_running()) return false;
+#endif
     return pc_post_shadows_active(sPostEffects) && sNativeFramebufferReady && !sPostRanThisFrame
         && sShadowProjPerspective && sProjOffX == 0.0f && sProjOffY == 0.0f; // sin pantalla partida
 }

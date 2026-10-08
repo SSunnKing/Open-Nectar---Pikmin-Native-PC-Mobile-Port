@@ -5,6 +5,9 @@
  */
 #include "Dolphin/pad.h"
 #include "pc_window.h"
+#if PIKI_PC_VR
+#include "vr/pc_vr.h"
+#endif
 
 #include <cstdio>
 #include <cstring>
@@ -41,6 +44,11 @@ void PADClamp(PADStatus* status)              { (void)status; }
 void PADClampCircle(PADStatus* status)        { (void)status; }
 void PADControlAllMotors(const u32* cmdArray) { (void)cmdArray; }
 void PADControlMotor(s32 chan, u32 command) {
+#if PIKI_PC_VR
+    // The game pulses the motor on and off to make intensity; the controllers'
+    // haptics follow the same pulses.
+    if (chan == 0) pc_vr_set_rumble(command == PAD_MOTOR_RUMBLE);
+#endif
     // Vibración por jugador: canal 0 = mando de P1, canal 1 = mando de P2.
     SDL_GameController* ctl = chan == 0 ? pc_window_get_controller() : chan == 1 ? pc_window_get_controller_p2() : nullptr;
     if (!ctl) return;

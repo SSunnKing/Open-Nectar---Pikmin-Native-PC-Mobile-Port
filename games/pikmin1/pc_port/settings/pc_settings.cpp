@@ -56,6 +56,9 @@
 #endif
 #include "gl/pc_gfx.h"
 #include "gl/pc_postprocess.h"
+#if PIKI_PC_VR
+#include "vr/pc_vr.h"
+#endif
 #include "Graphics.h"
 #include "GameStat.h"
 #include "Font.h"
@@ -1519,19 +1522,23 @@ bool padNavB(SDL_GameController* c) { return padEdge((c && SDL_GameControllerGet
 // may be either SDL buttons or the axis encodings used by the remapping page.
 // Keep these separate from padNavA/B: F1 navigation deliberately retains its
 // physical A/B convention.
-bool promptPadBinding(SDL_GameController* c, int action, int edgeSlot)
+bool promptPadBinding(SDL_GameController* c, int action, int edgeSlot, u16 otherButton)
 {
-	return c && padEdge(pc_window_gamepad_bind_held(c, pc_window_get_gamepad_binding(action)), edgeSlot);
+	// Sources that are not an SDL gamepad -- the touch layer, VR controllers --
+	// publish their buttons through the same mask the F1 navigation reads.
+	const bool held = (c && pc_window_gamepad_bind_held(c, pc_window_get_gamepad_binding(action)))
+	               || (sTouchFrameButtons & otherButton) != 0;
+	return padEdge(held, edgeSlot);
 }
 
 bool promptPadA(SDL_GameController* c)
 {
-	return promptPadBinding(c, PC_KEY_ACT_A, 4);
+	return promptPadBinding(c, PC_KEY_ACT_A, 4, PAD_BUTTON_A);
 }
 
 bool promptPadB(SDL_GameController* c)
 {
-	return promptPadBinding(c, PC_KEY_ACT_B, 5);
+	return promptPadBinding(c, PC_KEY_ACT_B, 5, PAD_BUTTON_B);
 }
 
 bool captureConfirmHeld(SDL_GameController* ctl)
@@ -1588,6 +1595,7 @@ void pcPlayerCountPromptInput();
 void pcDevAssignPromptInput();
 
 static bool sToggleRequested = false;
+static int sToggleGroup = -1; // the tab a requested toggle opens on, or -1 for the first
 static bool sTouchTapPending = false;
 static float sTouchTapX = 0.0f, sTouchTapY = 0.0f;
 static float sTouchDragY = 0.0f; // acumulado entre lecturas, normalizado
@@ -1770,7 +1778,9 @@ void pollMenuInput() {
     if (ctl2 == ctl1) ctl2 = nullptr;
     SDL_GameController* ctl = sMenuOpen ? menuController() : ctl1;
     const bool toggleRequested = sToggleRequested;
+    const int toggleGroup = sToggleGroup;
     sToggleRequested = false;
+    sToggleGroup = -1;
     const bool menuToggleHeld = ctl1 && SDL_GameControllerGetButton(
         ctl1, SDL_CONTROLLER_BUTTON_BACK) != 0;
     const bool menuToggleHeldP2 = ctl2 && SDL_GameControllerGetButton(
@@ -1877,6 +1887,7 @@ void pollMenuInput() {
         else {
             sMenuPlayer = 0;
             openMenu();
+            if (toggleRequested && toggleGroup >= 0) sOpenGroup = toggleGroup;
         }
         return;
     }
@@ -3565,6 +3576,15 @@ void pc_settings_request_toggle(void) {
     sToggleRequested = true;
 }
 
+void pc_settings_request_toggle_vr(void) {
+    sToggleRequested = true;
+#if PIKI_PC_VR
+    // The tab that lists the controllers, and holds the settings that can only
+    // be judged with the headset on.
+    sToggleGroup = PC_SET_GROUP_VR;
+#endif
+}
+
 void pc_settings_touch_buttons(unsigned short pressed) {
     sTouchButtons |= pressed;
 }
@@ -4288,7 +4308,7 @@ void pcPlayerCountPromptInput() {
     }
 
     SDL_GameController* ctl = pc_window_get_controller();
-    if (ctl) {
+    if (ctl || sTouchFrameButtons) {
         if (padNavLeft(ctl))  left   = true;
         if (padNavRight(ctl)) right  = true;
         if (promptPadA(ctl))  accept = true;
@@ -6059,6 +6079,9 @@ const char* pc_settings_group_name(int group) {
     case PC_SET_GROUP_CHEATS: return "Cheats";
     case PC_SET_GROUP_DATA: return "Data";
     case PC_SET_GROUP_ACHIEVEMENTS: return "Achievements";
+#if PIKI_PC_VR
+    case PC_SET_GROUP_VR: return "VR";
+#endif
     case PC_SET_PICKER_RESOLUTION: return "Resolution";
     case PC_SET_PICKER_TEXPACKS: return "Texture Packs";
     case PC_SET_PICKER_HDMODELS: return "HD Models";
@@ -6078,6 +6101,9 @@ const char* pc_settings_group_summary(int group) {
     case PC_SET_GROUP_CHEATS: return "Day, health, Pikmin limit, whistle";
     case PC_SET_GROUP_DATA: return "Saves, reset settings";
     case PC_SET_GROUP_ACHIEVEMENTS: return "Unlocked achievements and how to get the rest";
+#if PIKI_PC_VR
+    case PC_SET_GROUP_VR: return "What each control on the Quest Touch controllers does";
+#endif
     default: return "";
     }
 }
@@ -6250,7 +6276,7 @@ namespace {
 // página de vídeo, de Advanced, de Graphics, de Mods...), así que reordenar
 // aquí no toca qué hace cada ajuste ni cómo se guarda: el .conf va por nombre.
 // ---------------------------------------------------------------------------
-enum RowSrc { SRC_MAIN, SRC_ADV, SRC_GFX, SRC_MODS, SRC_DATA, SRC_KEYS, SRC_PADS, SRC_RECENTER, SRC_ACH };
+enum RowSrc { SRC_MAIN, SRC_ADV, SRC_GFX, SRC_MODS, SRC_DATA, SRC_KEYS, SRC_PADS, SRC_RECENTER, SRC_ACH, SRC_VR, SRC_VRSET };
 struct GroupRow {
     RowSrc src;
     int idx;
@@ -6403,8 +6429,114 @@ const GroupRow* achievementRows() {
 
 int achievementAtRow(int row) { return row >= 0 && row < PC_ACH_COUNT ? kAchOrder[row] : -1; }
 
+#if PIKI_PC_VR
+// The VR tab opens with the interface's own settings, which are the headset's
+// rather than the game's: they live in pikmin_vr.ini (pc_vr.h) and take effect
+// as they are changed, so the size can be set by looking at it. idx is the row.
+const GroupRow kVrSettingRows[] = {
+    { SRC_VRSET, 0, "Interface",
+      "On your head: the interface stays in view however you turn. In the room: it hangs where you last faced and "
+      "follows only when you turn well away." },
+    { SRC_VRSET, 1, "Interface Size",
+      "How far out the corners of the interface reach. 100% is the edge of what both eyes see; you cannot turn your "
+      "head towards something worn on it, so bring it in until the corners are easy to look at." },
+    { SRC_VRSET, 2, "Interface Distance", "How far away the interface appears to be. Its size in your view does not change." },
+};
+
+// Then what each control on a pair of Quest Touch controllers does, for
+// looking up with the headset on. Read only: the mapping itself is in
+// pc_vr_read_pad (pc_port/vr/pc_vr_xr.cpp), and this has to be kept in step
+// with it by hand. A row is the control, what it does in a word or two, and the
+// longer account shown beside it. Quest 2 and Quest 3 controllers have the same
+// controls, so one list serves both.
+struct VrLegendRow {
+    const char* control;
+    const char* does;
+    const char* help;
+};
+
+const VrLegendRow kVrLegend[] = {
+    // Right hand
+    { "Point the controller", "Cursor",
+      "The cursor goes where the right controller's laser meets the ground.\n\n"
+      "Meta Quest 2 and Quest 3 Touch controllers. left_handed=1 in pikmin_vr.ini swaps the two hands." },
+    { "Trigger", "A: pluck, throw",
+      "Pluck a sprout, or hold to pick a Pikmin up. Let go, or flick your hand forward, to throw it; flick with the "
+      "trigger still held to throw one after another. Selects in menus." },
+    { "Grip", "B: whistle", "Whistle, centred where you point. Goes back in menus." },
+    { "A / B", "A / B", "The same as the trigger and the grip." },
+    { "Stick", "Swarm",
+      "Moves the Pikmin swarm, as the C-stick does. right_stick_turns=1 in pikmin_vr.ini makes it turn the view "
+      "instead, and swarming moves to the left grip." },
+    { "Stick click", "R", "The GameCube's R button." },
+    // Left hand
+    { "Stick", "Move", "Moves the captain, relative to where you are looking." },
+    { "Stick click", "View behind captain",
+      "Swings the view round behind the captain, looking the way he faces. In tabletop it turns the level instead." },
+    { "Trigger", "L", "The GameCube's L button." },
+    { "X / Y", "Disband / map", "X breaks up the squad. Y opens the map." },
+    { "Menu", "Start: pause", "Pauses the game." },
+    { "Grip", "VR button", "Hold it for the controls in the next section." },
+    // Left grip held
+    { "Right stick sideways", "Turn", "Turns the view in steps. In tabletop it spins the table." },
+    { "Right stick up / down", "Zoom", "Moves the view closer or further. In tabletop it resizes the table." },
+    { "Move the left hand", "Drag table", "Tabletop only: the table follows your hand." },
+    { "X", "Re-anchor", "Re-anchors your play space where you are sitting or standing now." },
+    { "Y", "Next view", "Third-person, tabletop, first-person, and round again." },
+    { "B", "Hide / show UI",
+      "Puts the interface over the level away, or brings it back. Menus and the map are always shown." },
+    { "Menu", "This menu", "Opens and closes these settings." },
+    { "Left stick", "D-pad", "The GameCube's D-pad." },
+    { "Left stick click", "Z", "The GameCube's Z button." },
+    // In this menu
+    { "Left stick", "Move, change", "Up and down move through the rows. Right opens a row's options." },
+    { "Right stick sideways", "Switch tab", "The left trigger (previous) and a click of the right stick (next) do the same." },
+    { "Trigger or A", "Select", "Selects, or applies an option." },
+    { "Grip or B", "Back", "Goes back. From the list of rows it saves and closes the menu." },
+};
+
+template <size_t N> constexpr int countOf(const VrLegendRow (&)[N]) { return (int)N; }
+
+constexpr int kVrRowCount = int(sizeof(kVrSettingRows) / sizeof(kVrSettingRows[0]) + sizeof(kVrLegend) / sizeof(kVrLegend[0]));
+
+const GroupRow* vrRows() {
+    static GroupRow rows[kVrRowCount];
+    static bool built = false;
+    if (!built) {
+        built = true;
+        int n = 0;
+        for (const GroupRow& row : kVrSettingRows) rows[n++] = row;
+        for (int i = 0; i < countOf(kVrLegend); i++) rows[n++] = { SRC_VR, i, kVrLegend[i].control, kVrLegend[i].help };
+    }
+    return rows;
+}
+
+void vrSettingValue(int i, char* value, size_t n) {
+    switch (i) {
+    case 0: snprintf(value, n, "%s", pc_vr_hud_on_head() ? "On your head" : "In the room"); break;
+    case 1: snprintf(value, n, "%d%%", int(lroundf(pc_vr_hud_fill() * 100.0f))); break;
+    case 2: snprintf(value, n, "%.1f m", pc_vr_hud_distance()); break;
+    default: value[0] = '\0';
+    }
+}
+
+void vrSettingChange(int i, bool left, bool right) {
+    const float dir = left ? -1.0f : right ? 1.0f : 0.0f;
+    switch (i) {
+    case 0: if (left || right) pc_vr_set_hud_on_head(!pc_vr_hud_on_head()); break;
+    // In whole steps, whatever the file held: 5% of the field, a tenth of a metre.
+    case 1: pc_vr_set_hud_fill((lroundf(pc_vr_hud_fill() * 20.0f) + dir) / 20.0f); break;
+    case 2: pc_vr_set_hud_distance((lroundf(pc_vr_hud_distance() * 10.0f) + dir) / 10.0f); break;
+    default: break;
+    }
+}
+#endif
+
 const GroupRow* groupRows(int group, int* count) {
     switch (group) {
+#if PIKI_PC_VR
+    case PC_SET_GROUP_VR: *count = kVrRowCount; return vrRows();
+#endif
     case PC_SET_GROUP_ACHIEVEMENTS: *count = PC_ACH_COUNT; return achievementRows();
     case PC_SET_GROUP_DISPLAY: *count = countOf(kDisplayRows); return kDisplayRows;
     case PC_SET_GROUP_GRAPHICS: *count = countOf(kGraphicsRows); return kGraphicsRows;
@@ -6463,6 +6595,13 @@ const GroupSection kSections[] = {
 #endif
     { PC_SET_GROUP_DATA, 0, "SAVE FILE" },
     { PC_SET_GROUP_DATA, 2, "SETTINGS" },
+#if PIKI_PC_VR
+    { PC_SET_GROUP_VR, 0, "INTERFACE" },
+    { PC_SET_GROUP_VR, 3, "CONTROLS: RIGHT HAND" },
+    { PC_SET_GROUP_VR, 9, "CONTROLS: LEFT HAND" },
+    { PC_SET_GROUP_VR, 15, "CONTROLS: HOLDING THE LEFT GRIP" },
+    { PC_SET_GROUP_VR, 24, "CONTROLS: IN THIS MENU" },
+#endif
 };
 
 const char* rowSection(int group, int row) {
@@ -6527,6 +6666,12 @@ const char* disabledReason(const GroupRow& r) {
     case SRC_MODS:
         if (r.idx == 16 && !sPending.lockOn) return "Turn on Lock-On first.";
         break;
+#if PIKI_PC_VR
+    case SRC_VRSET:
+        if (!pc_vr_session_running()) return "Put the headset on to change this.";
+        if (r.idx != 0 && !pc_vr_hud_on_head()) return "Only used with the interface on your head.";
+        break;
+#endif
     default:
         break;
     }
@@ -6701,6 +6846,16 @@ void pc_settings_row_value(int group, int row, char* out, unsigned long n) {
             else snprintf(out, n, "A: reset");
             break;
         case SRC_ACH: snprintf(out, n, "%d pts", pc_achievement_info(r->idx).points); break;
+        case SRC_VR:
+#if PIKI_PC_VR
+            snprintf(out, n, "%s", kVrLegend[r->idx].does);
+#endif
+            break;
+        case SRC_VRSET:
+#if PIKI_PC_VR
+            vrSettingValue(r->idx, out, (size_t)n);
+#endif
+            break;
         case SRC_KEYS:
         case SRC_PADS: snprintf(out, n, "Open  >"); break;
         case SRC_RECENTER: {
@@ -6767,6 +6922,9 @@ void pc_settings_row_change(int group, int row, int dir, bool ok) {
             graphicsRowChange(r->idx, left, right, false);
             break;
         case SRC_MODS: modsRowChange(r->idx, left, right); break;
+#if PIKI_PC_VR
+        case SRC_VRSET: vrSettingChange(r->idx, left, right); break;
+#endif
         case SRC_DATA:
             if (!ok) return;
             if (r->idx < 2) saveDataRowAction(r->idx);
@@ -6949,6 +7107,9 @@ void headlessDump(const std::string& message = std::string(), bool messageIsErro
         // Logros: solo lectura y dependen de la partida. Datos: acciones con
         // diálogos del juego (el reset tiene su propia orden).
         if (g == PC_SET_GROUP_ACHIEVEMENTS || g == PC_SET_GROUP_DATA) continue;
+#if PIKI_PC_VR
+        if (g == PC_SET_GROUP_VR) continue; // a legend, not settings
+#endif
         if (!firstGroup) out += ',';
         firstGroup = false;
         out += "{\"id\":" + std::to_string(g) + ",\"name\":";

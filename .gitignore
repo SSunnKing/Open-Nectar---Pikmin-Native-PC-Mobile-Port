@@ -27,3 +27,6 @@ games/pikmin2/pikmin2-decomp/aoi.exe
 # Salida de los scripts de release
 build-release/
 release-out/
+
+# Pikmin VR: local install used while developing (extracted game data, saves)
+/game/

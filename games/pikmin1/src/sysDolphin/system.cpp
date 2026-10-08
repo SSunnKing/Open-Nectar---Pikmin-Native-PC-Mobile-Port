@@ -12,6 +12,9 @@
 #include "settings/pc_settings.h"
 #include "timing/pc_render_packet.h"
 #include "mods/pc_vs_arena.h"
+#if defined(PIKI_PC_VR)
+#include "vr/pc_vr.h"
+#endif
 #endif
 
 #include "bigFont.h"
@@ -337,7 +340,13 @@ void System::run(BaseApp* app)
 
 		// Get schedule from fixed-step scheduler
 		double now = std::chrono::steady_clock::now().time_since_epoch().count() / 1e9;
+#if defined(PIKI_PC_VR)
+		// A headset's compositor paces the loop through xrWaitFrame, at 72-120 Hz. Scheduling at the 120 Hz clamp means
+		// there is always a tick ready when the headset wants a frame, instead of the loop sleeping through one.
+		PcFrameSchedule schedule = frameScheduler.advance(now, pc_vr_session_running() ? 0 : mFrameRate);
+#else
 		PcFrameSchedule schedule = frameScheduler.advance(now, mFrameRate);
+#endif
 
 		if (schedule.logicalTicks > 0) {
 #if PIKI_PC_PORT

@@ -34,6 +34,9 @@
 #include "pc_texpack.h"
 #include "../timing/pc_render_phase.h"
 #include "../timing/pc_tick_profiler.h"
+#if PIKI_PC_VR
+#include "../vr/pc_vr.h"
+#endif
 
 #include "pc_opengl.h"
 #ifdef __ANDROID__
@@ -98,6 +101,10 @@ static bool sAnisotropySupported = false;
 static bool sFilteringReported = false;
 static PFNGLBINDVERTEXARRAYPROC glBindVertexArray_ptr = nullptr;
 static PFNGLBLENDEQUATIONPROC glBlendEquation_ptr = nullptr;
+// VR only: the interface is composited over the world by the headset, so its
+// alpha has to come out as coverage rather than as alpha squared.
+static PFNGLBLENDFUNCSEPARATEPROC glBlendFuncSeparate_ptr = nullptr;
+static PFNGLBLENDEQUATIONSEPARATEPROC glBlendEquationSeparate_ptr = nullptr;
 static PFNGLGENBUFFERSPROC glGenBuffers_ptr = nullptr;
 static PFNGLDRAWBUFFERSPROC glDrawBuffers_ptr = nullptr;
 static PFNGLBINDBUFFERPROC glBindBuffer_ptr = nullptr;
@@ -174,6 +181,8 @@ static void load_gl_functions() {
     }
     glBindVertexArray_ptr = (PFNGLBINDVERTEXARRAYPROC)SDL_GL_GetProcAddress("glBindVertexArray");
     glBlendEquation_ptr = (PFNGLBLENDEQUATIONPROC)SDL_GL_GetProcAddress("glBlendEquation");
+    glBlendFuncSeparate_ptr = (PFNGLBLENDFUNCSEPARATEPROC)SDL_GL_GetProcAddress("glBlendFuncSeparate");
+    glBlendEquationSeparate_ptr = (PFNGLBLENDEQUATIONSEPARATEPROC)SDL_GL_GetProcAddress("glBlendEquationSeparate");
     glGenBuffers_ptr = (PFNGLGENBUFFERSPROC)SDL_GL_GetProcAddress("glGenBuffers");
     glDrawBuffers_ptr = (PFNGLDRAWBUFFERSPROC)SDL_GL_GetProcAddress("glDrawBuffers");
     glBindBuffer_ptr = (PFNGLBINDBUFFERPROC)SDL_GL_GetProcAddress("glBindBuffer");
@@ -795,6 +804,10 @@ static bool sGpuSkinningEnabled = false;
 // rediscovering it as visual corruption later.
 static uint64_t sGlStateEpoch = 0;
 void pc_gfx_flush_batch(void);
+// Defined with the rest of the draw-state diagnostics, below; called from the
+// two places a draw is actually issued, which is where the vertex count is known.
+struct Vertex;
+static void debug_log_draw_state(size_t vertexCount, const Vertex* firstVertex);
 // Called from each GL-state setter *after* its redundancy guard and *before*
 // it touches GL, so the pending batch is drawn under the state it was built
 // with. Placing it after the guard matters: most of the game's state
@@ -958,6 +971,10 @@ struct ResidentMesh {
     bool skinned = false;   // carries PNMTXIDX: draw with the palette
     int paletteSlots = 0;   // slots the palette upload must cover
     uintptr_t lo = 0, hi = 0; // range of every CPU byte the parse read
+    // Vertex alpha range, for the draw diagnostics: a mesh whose opacity is
+    // meant to vary across it is the one thing the draw state cannot show,
+    // because by then the vertices are on the GPU.
+    float alphaMin = 1.0f, alphaMax = 1.0f, alphaMean = 1.0f;
     // Signature of the parse inputs.
     GXAttrType desc[GX_VA_MAX_ATTR] = {};
     u8 fmtMask = 0;
@@ -1008,6 +1025,75 @@ static bool sAlphaUpdate = true;
 static float sCopyClearColor[4] = { 0.1f, 0.1f, 0.15f, 1.0f };
 static float sCopyClearDepth = 1.0f;
 static u8 sNumTevStages = 1;
+
+// ── VR: the world span ──────────────────────────────────────────────────────
+//
+// Between pc_gfx_vr_world_begin and _end every draw goes to both eyes instead
+// of the internal target. The game has already put vertices in the head's view
+// space -- it multiplies by the camera on the CPU, and the camera was set to the
+// headset's head pose before the world was drawn -- so each eye needs only its
+// offset from the head and its lens. Both are folded into the projection
+// uniform, the one matrix every path goes through: CPU-pretransformed vertices,
+// the skinning palette, view-space quads.
+//
+// Everything else about a draw is shared between the eyes: program, uniforms,
+// textures, vertex buffer. A second eye costs a draw call, not a second run of
+// the game's renderer, which the game could not survive: its world simulation
+// runs inside the draw.
+#if PIKI_PC_VR
+static bool sVrWorldActive = false;
+static bool sVrWorldDrawn = false;
+static bool sVrProjPerspective = false;
+static float sVrEyeProj[2][16];
+// What the open batch was built with. Uniforms are written when a batch opens
+// and the draw happens later (see the batching invariant), so the eye matrices
+// are captured then too, not read at draw time.
+static bool sVrDrawPerspective = false;
+static float sVrDrawEyeProj[2][16];
+static float sVrDrawProj[16];
+
+static void vr_update_eye_projections() {
+    // C_MTXPerspective's terms: m22 = -n/(f-n), m23 = -fn/(f-n). The eyes use
+    // the same planes so fog, which rebuilds distance from them, stays right.
+    const float m22 = sProjMatrix[10];
+    const float m23 = sProjMatrix[14];
+    float nearZ = 10.0f, farZ = 10000.0f;
+    if (m22 != 0.0f && m22 != 1.0f) {
+        const float f = m23 / m22;
+        const float n = -m22 * f / (1.0f - m22);
+        if (f > n && n > 0.0f) {
+            nearZ = n;
+            farZ = f;
+        }
+    }
+    for (int eye = 0; eye < 2; ++eye) pc_vr_eye_projection(eye, nearZ, farZ, sVrEyeProj[eye]);
+}
+
+static void vr_capture_draw_projection() {
+    if (!sVrWorldActive) return;
+    sVrDrawPerspective = sVrProjPerspective;
+    memcpy(sVrDrawEyeProj, sVrEyeProj, sizeof(sVrDrawEyeProj));
+    memcpy(sVrDrawProj, sProjMatrix, sizeof(sVrDrawProj));
+}
+#endif
+
+// What each texture decoded to, for the draw log: a combiner that multiplies
+// by a texture's alpha produces nothing when that texture decodes to zero, and
+// the draw state alone cannot show it, because the texels are the input.
+struct PcDebugTexInfo {
+    unsigned format = 0;
+    unsigned width = 0, height = 0;
+    unsigned colourMax = 0;
+    unsigned alphaMin = 0, alphaMax = 0;
+    unsigned wrapS = 0, wrapT = 0;
+    unsigned alphaMean = 0;
+    unsigned mipmapped = 0;
+};
+static std::unordered_map<unsigned, PcDebugTexInfo> sDebugTexInfo;
+
+// Defined with the other draw diagnostics further down; the texture decoder
+// and the display-list parser both report through it, and both come first.
+static bool pc_gfx_draw_debug_enabled();
 
 // Per-stage TEV state. Defaults mirror the GX hardware reset state: pass
 // rasterized color through to PREV, so nothing renders black before the game
@@ -1961,13 +2047,17 @@ static const char* vShaderTail =
     // useMatrixQuick). Passing the transformed normal rotates it twice and
     // pushes the sphere-map coordinates off the useful range, which is what
     // made the gloss on Olimar, the pellets and the ship disappear.
+    // GX feeds a texture coordinate into the matrix as (s, t, 1, 1). The third
+    // column of a texture matrix is therefore a constant term, which is where
+    // scrolling and projection offsets live: a zero there drops them silently,
+    // and a matrix holding its whole mapping in that column collapses to one texel.
     "vec2 genTc(int slot, vec4 viewPos, vec3 nrm, vec2 uvIn, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3) {\n"
     "    int mode = uTcMode[slot];\n"
     "    if (mode == 0) return uvIn;\n"
     "    vec4 src = (mode == 1) ? viewPos\n"
     "             : (mode == 2) ? vec4(nrm, 1.0)\n"
-    "             : (mode >= 11) ? vec4((mode == 11) ? tc0 : (mode == 12) ? tc1 : (mode == 13) ? tc2 : tc3, 0.0, 1.0)\n"
-    "             : vec4(rawTc(mode - 3), 0.0, 1.0);\n"
+    "             : (mode >= 11) ? vec4((mode == 11) ? tc0 : (mode == 12) ? tc1 : (mode == 13) ? tc2 : tc3, 1.0, 1.0)\n"
+    "             : vec4(rawTc(mode - 3), 1.0, 1.0);\n"
     "    return (uTcMtx[slot] * src).xy;\n"
     "}\n"
     "void main() {\n"
@@ -3101,6 +3191,13 @@ static void perf_gpu_scene_begin() {
 }
 
 void pc_gfx_begin_frame(void) {
+#if PIKI_PC_VR
+    // Waits for the headset's next frame when a session runs; the world span
+    // never carries over from one frame to the next.
+    pc_vr_frame_begin();
+    sVrWorldActive = false;
+    sVrWorldDrawn = false;
+#endif
     sUi43 = false;
     sHudWide = false;
     sMenuClip43 = false;
@@ -3289,8 +3386,23 @@ void pc_gfx_begin_frame(void) {
                 baseHeight = baseWidth / sCurrentAspectRatio;
             }
         }
-        const int wantedWidth = std::max(160, int(lroundf(baseWidth * sRenderScale)));
-        const int wantedHeight = std::max(120, int(lroundf(baseHeight * sRenderScale)));
+        float renderScale = sRenderScale;
+#if PIKI_PC_VR
+        if (pc_vr_session_running()) {
+            // In the headset the internal target is the floating panel, whatever
+            // shape and size the window on the monitor happens to be. It matches
+            // the panel swapchain (pc_vr_xr.cpp), so presenting it is a copy
+            // rather than a rescale -- on a standalone headset that matters.
+            int panelWidth = 0, panelHeight = 0;
+            pc_vr_interface_size(&panelWidth, &panelHeight);
+            baseWidth = float(panelWidth);
+            baseHeight = float(panelHeight);
+            sCurrentAspectRatio = baseWidth / baseHeight;
+            renderScale = 1.0f;
+        }
+#endif
+        const int wantedWidth = std::max(160, int(lroundf(baseWidth * renderScale)));
+        const int wantedHeight = std::max(120, int(lroundf(baseHeight * renderScale)));
         if (wantedWidth != sRenderWidth || wantedHeight != sRenderHeight) {
             sRenderWidth = wantedWidth;
             sRenderHeight = wantedHeight;
@@ -4241,6 +4353,9 @@ static void post_apply_before_interface()
     if (sPostRanThisFrame) return;
     if (!sNativeFramebufferReady || !glBindFramebuffer_ptr || !glBlitFramebuffer_ptr) return;
     if (!pc_post_any_enabled(sPostEffects)) return;
+#if PIKI_PC_VR
+    if (pc_vr_session_running()) return;
+#endif
 
     // The port batches draws. Anything still pending belongs to the world, and
     // running the pass first would leave it to be drawn over the top of a
@@ -4351,6 +4466,116 @@ static void post_apply_before_interface()
     invalidate_uniform_cache();
 }
 
+#if PIKI_PC_VR
+// Shows the frame on the monitor while the headset has it: the left eye when
+// a world was drawn, the flat screen otherwise.
+static void vr_mirror_to_window(bool world) {
+#ifdef __ANDROID__
+    // Standalone: the activity's surface is behind the headset's own compositor
+    // and nobody ever sees it. Blitting a full frame into it every frame is
+    // pure cost.
+    (void)world;
+    return;
+#else
+    if (sDrawableWidth <= 0 || sDrawableHeight <= 0) return;
+    GLuint source = sNativeFramebuffer;
+    GLint sourceX = 0, sourceY = 0;
+    int sourceWidth = sRenderWidth, sourceHeight = sRenderHeight;
+    PcVrEyeTarget eye;
+    if (world && pc_vr_eye_target(0, &eye)) {
+        source = eye.framebuffer;
+        sourceX = eye.x;
+        sourceY = eye.y;
+        sourceWidth = eye.width;
+        sourceHeight = eye.height;
+    }
+    const float scale = std::min(float(sDrawableWidth) / float(sourceWidth), float(sDrawableHeight) / float(sourceHeight));
+    const GLint outWidth = GLint(sourceWidth * scale), outHeight = GLint(sourceHeight * scale);
+    const GLint outX = (sDrawableWidth - outWidth) / 2, outY = (sDrawableHeight - outHeight) / 2;
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, source);
+    glBindFramebuffer_ptr(GL_DRAW_FRAMEBUFFER, 0);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glBlitFramebuffer_ptr(sourceX, sourceY, sourceX + sourceWidth, sourceY + sourceHeight, outX, outY, outX + outWidth,
+                          outY + outHeight, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+#endif
+}
+#endif
+
+void pc_gfx_vr_world_begin(void) {
+#if PIKI_PC_VR
+    if (sVrWorldActive || !sNativeFramebufferReady || !glBindFramebuffer_ptr || !pc_vr_frame_active()) return;
+    pc_gfx_flush_batch();
+
+    GLboolean colourMask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+    GLboolean depthMask = GL_TRUE;
+    glGetBooleanv(GL_COLOR_WRITEMASK, colourMask);
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
+    const GLboolean scissorWasEnabled = glIsEnabled(GL_SCISSOR_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(GL_TRUE);
+#if PIKI_USE_GLES
+    glClearDepthf(sCopyClearDepth);
+#else
+    glClearDepth(sCopyClearDepth);
+#endif
+    // The internal target becomes the interface layer: everything drawn after
+    // the world lands on transparency, and the headset composites it.
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+    // PIKMIN_VR_CLEAR_DEBUG=1 paints the cleared background magenta. Anything
+    // that then comes out tinted is blending over the background rather than
+    // over the geometry that should be behind it.
+    static const bool clearDebugAlways = std::getenv("PIKMIN_VR_CLEAR_DEBUG") != nullptr;
+    const bool clearDebug = clearDebugAlways || (pc_vr_debug_mode() & 4) != 0;
+
+    // Then the eyes, from the game's clear colour as the screen would be, and
+    // the stereo target stays bound until the world is finished.
+    PcVrEyeTarget target;
+    if (!pc_vr_eye_target(0, &target)) {
+        glColorMask(colourMask[0], colourMask[1], colourMask[2], colourMask[3]);
+        glDepthMask(depthMask);
+        if (scissorWasEnabled) glEnable(GL_SCISSOR_TEST);
+        return;
+    }
+    glBindFramebuffer_ptr(GL_FRAMEBUFFER, target.framebuffer);
+    if (clearDebug) {
+        glClearColor(1.0f, 0.0f, 1.0f, 1.0f);
+    } else {
+        // The game's own clear, alpha included. Forcing alpha to 1 here looks
+        // harmless -- the compositor treats the eye image as opaque either way
+        // -- but GX materials may blend against destination alpha, and then the
+        // eyes would shade differently from the flat screen.
+        glClearColor(sCopyClearColor[0], sCopyClearColor[1], sCopyClearColor[2], sCopyClearColor[3]);
+    }
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+    glColorMask(colourMask[0], colourMask[1], colourMask[2], colourMask[3]);
+    glDepthMask(depthMask);
+    // The per-eye scissor is what keeps one eye out of the other's half, so it
+    // has to be on for the whole span whatever the game last asked for.
+    glEnable(GL_SCISSOR_TEST);
+
+    sVrWorldActive = true;
+    sVrWorldDrawn = true;
+    if (sVrProjPerspective) vr_update_eye_projections();
+#endif
+}
+
+void pc_gfx_vr_world_end(void) {
+#if PIKI_PC_VR
+    if (!sVrWorldActive) return;
+    pc_gfx_flush_batch();
+    sVrWorldActive = false;
+    // Back to the interface layer for the HUD and everything after it.
+    glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
+    invalidate_gl_pipeline_guards();
+#endif
+}
+
 void pc_gfx_present(void) {
     pc_gfx_flush_batch();
 #ifdef GL_TIME_ELAPSED
@@ -4361,6 +4586,22 @@ void pc_gfx_present(void) {
 #endif
     if (!sNativeFramebufferReady || !glBindFramebuffer_ptr || !glBlitFramebuffer_ptr) return;
     if (sDrawableWidth <= 0 || sDrawableHeight <= 0) return;
+#if PIKI_PC_VR
+    if (pc_vr_session_running()) {
+        // No post-processing: depth of field and ambient occlusion assume one
+        // symmetric view, and the eyes are neither.
+        sPostRanThisFrame = false;
+        shadow_frame_reset();
+        sVrWorldActive = false;
+        pc_vr_submit(sVrWorldDrawn ? 1 : 0, sNativeColorTexture, sRenderWidth, sRenderHeight);
+        vr_mirror_to_window(sVrWorldDrawn);
+        glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
+        glEnable(GL_SCISSOR_TEST);
+        if (glActiveTexture_ptr) glActiveTexture_ptr(GL_TEXTURE0);
+        invalidate_gl_pipeline_guards();
+        return;
+    }
+#endif
 #ifdef GL_TIME_ELAPSED
     PerfGpuQuery* gpuQuery = nullptr;
     if (sGpuTimingEnabled && sPerfGpuQueriesReady) {
@@ -4540,6 +4781,10 @@ void pc_gfx_set_projection(const Mtx44 mtx, GXProjectionType type) {
         }
         ++sProjMtxGen;
     }
+#if PIKI_PC_VR
+    sVrProjPerspective = type == GX_PERSPECTIVE;
+    if (sVrWorldActive && sVrProjPerspective && mtx) vr_update_eye_projections();
+#endif
 }
 
 void pc_gfx_set_current_mtx(u32 id) {
@@ -4733,11 +4978,29 @@ void pc_gfx_set_blend_mode(GXBlendMode type, GXBlendFactor srcFactor, GXBlendFac
             case GX_BL_DSTALPHA: d = GL_DST_ALPHA; break;
             case GX_BL_INVDSTALPHA: d = GL_ONE_MINUS_DST_ALPHA; break;
         }
+#if PIKI_PC_VR
+        // Over the transparent interface layer, alpha must accumulate as
+        // coverage (the headset composites it premultiplied); the plain
+        // function would square it and leave translucent windows washed out.
+        // The world is opaque to the compositor, so it keeps the game's own
+        // blending -- water and every other translucent surface included.
+        if (pc_vr_session_running() && !sVrWorldActive && glBlendFuncSeparate_ptr) {
+            glBlendFuncSeparate_ptr(s, d, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        } else
+#endif
         glBlendFunc(s, d);
     } else if (type == GX_BM_SUBTRACT) {
         glEnable(GL_BLEND);
-        glBlendEquation_ptr(GL_FUNC_SUBTRACT);
-        glBlendFunc(GL_ONE, GL_ONE);
+#if PIKI_PC_VR
+        if (pc_vr_session_running() && !sVrWorldActive && glBlendEquationSeparate_ptr && glBlendFuncSeparate_ptr) {
+            glBlendEquationSeparate_ptr(GL_FUNC_SUBTRACT, GL_FUNC_ADD);
+            glBlendFuncSeparate_ptr(GL_ONE, GL_ONE, GL_ZERO, GL_ONE);
+        } else
+#endif
+        {
+            glBlendEquation_ptr(GL_FUNC_SUBTRACT);
+            glBlendFunc(GL_ONE, GL_ONE);
+        }
     } else if (type == GX_BM_LOGIC) {
         glDisable(GL_BLEND);
 #if PIKI_USE_GLES
@@ -4783,18 +5046,29 @@ void pc_gfx_set_cull_mode(GXCullMode mode) {
     }
 }
 
+// In VR the interface layer's alpha is what the headset composites with, so
+// anything that writes colour must write alpha too, whatever GX asked for.
+static GXBool alpha_write_enabled() {
+#if PIKI_PC_VR
+    // Only the interface layer needs it: that is the surface whose alpha the
+    // headset composites with. The world keeps GX's own rule.
+    if (pc_vr_session_running() && !sVrWorldActive) return sColorUpdate;
+#endif
+    return sAlphaUpdate;
+}
+
 void pc_gfx_set_color_update(GXBool updateEnable) {
     if (sColorUpdate == updateEnable) return;
     sColorUpdate = updateEnable;
     pc_gfx_note_gl_state_change();
-    glColorMask(sColorUpdate, sColorUpdate, sColorUpdate, sAlphaUpdate);
+    glColorMask(sColorUpdate, sColorUpdate, sColorUpdate, alpha_write_enabled());
 }
 
 void pc_gfx_set_alpha_update(GXBool updateEnable) {
     if (sAlphaUpdate == updateEnable) return;
     sAlphaUpdate = updateEnable;
     pc_gfx_note_gl_state_change();
-    glColorMask(sColorUpdate, sColorUpdate, sColorUpdate, sAlphaUpdate);
+    glColorMask(sColorUpdate, sColorUpdate, sColorUpdate, alpha_write_enabled());
 }
 
 void pc_gfx_set_alpha_compare(GXCompare comp0, u8 ref0, GXAlphaOp op, GXCompare comp1, u8 ref1) {
@@ -5562,6 +5836,31 @@ void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, G
         }
     }
 
+    if (pc_gfx_draw_debug_enabled()) {
+        u8 lo[4] = { 255, 255, 255, 255 };
+        u8 hi[4] = { 0, 0, 0, 0 };
+        for (size_t i = 0; i + 3 < rgba.size(); i += 4) {
+            for (int c = 0; c < 4; ++c) {
+                if (rgba[i + c] < lo[c]) lo[c] = rgba[i + c];
+                if (rgba[i + c] > hi[c]) hi[c] = rgba[i + c];
+            }
+        }
+        PcDebugTexInfo info;
+        info.format = unsigned(format);
+        info.width = width;
+        info.height = height;
+        info.colourMax = hi[0] > hi[1] ? (hi[0] > hi[2] ? hi[0] : hi[2]) : (hi[1] > hi[2] ? hi[1] : hi[2]);
+        info.alphaMin = lo[3];
+        info.alphaMax = hi[3];
+        info.wrapS = unsigned(wrapS);
+        info.wrapT = unsigned(wrapT);
+        unsigned long long alphaSum = 0;
+        size_t texels = 0;
+        for (size_t i = 3; i < rgba.size(); i += 4) { alphaSum += rgba[i]; ++texels; }
+        info.alphaMean = texels ? unsigned(alphaSum / texels) : 0;
+        info.mipmapped = mipmap != GX_FALSE ? 1u : 0u;
+        sDebugTexInfo[texId] = info;
+    }
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
     note_texture_bytes(key, size_t(width) * size_t(height) * 4);
     // After the upload: the mip chain is built from the data, so it cannot be
@@ -6909,6 +7208,43 @@ static uint64_t compute_batch_state_key_full() {
 // outside our reach) counts differently from one caused by material state.
 static inline double submit_clock_ms();
 
+#if PIKI_PC_VR
+static void draw_arrays(GLenum mode, GLint first, GLsizei count) {
+    // Bit 512 replaces additive blending with a straight copy. An additive
+    // layer that contributes nothing visible is indistinguishable from one that
+    // is never drawn, until it is made to paint its own colour outright.
+    if (!sVrWorldActive) {
+        glDrawArrays(mode, first, count);
+        return;
+    }
+    // The stereo target is bound for the whole world span (see
+    // pc_gfx_vr_world_begin): only the viewport, the scissor and the projection
+    // move between the eyes. Rebinding a framebuffer here instead would make a
+    // tile-based GPU resolve its tiles twice per draw.
+    GLint viewport[4] = { 0, 0, 0, 0 };
+    GLint scissor[4] = { 0, 0, 0, 0 };
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    glGetIntegerv(GL_SCISSOR_BOX, scissor);
+    for (int eye = 0; eye < 2; ++eye) {
+        PcVrEyeTarget target;
+        if (!pc_vr_eye_target(eye, &target)) continue;
+        glViewport(target.x, target.y, target.width, target.height);
+        // The scissor keeps an eye's geometry out of the other's half.
+        glScissor(target.x, target.y, target.width, target.height);
+        // An orthographic draw inside the world (a fade over it) covers each
+        // eye the way it covered the screen.
+        glUniformMatrix4fv_ptr(sLoc.projMtx, 1, GL_FALSE, sVrDrawPerspective ? sVrDrawEyeProj[eye] : sVrDrawProj);
+        glDrawArrays(mode, first, count);
+    }
+    // Leave GL as the port's redundancy guards believe it to be.
+    glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+    glScissor(scissor[0], scissor[1], scissor[2], scissor[3]);
+    glUniformMatrix4fv_ptr(sLoc.projMtx, 1, GL_FALSE, sVrDrawProj);
+}
+#else
+static inline void draw_arrays(GLenum mode, GLint first, GLsizei count) { glDrawArrays(mode, first, count); }
+#endif
+
 // ── Primitive batching (PERF-NATIVE-002) ────────────────────────────────────
 //
 // The port used to emit one glDrawArrays per GX primitive: ~8.000 draws of ten
@@ -6996,6 +7332,11 @@ static bool batching_enabled() {
         const char* value = getenv("PIKMIN_BATCH");
         return !(value != nullptr && value[0] == '0');
     }();
+#if PIKI_PC_VR
+    // Also switchable in the headset, so a scene can be compared with and
+    // without batching without restarting into it twice.
+    if ((pc_vr_debug_mode() & 32) != 0) return false;
+#endif
     return enabled;
 }
 
@@ -7155,7 +7496,8 @@ void pc_gfx_flush_batch(void) {
     gl_error_checkpoint("batch upload");
     const GLint firstVertex = static_cast<GLint>(sVboWriteOffset / sizeof(Vertex));
     shadow_record_stream(sBatchVerts, sBatchMode);
-    glDrawArrays(sBatchMode, firstVertex, (GLsizei)sBatchVerts.size());
+    debug_log_draw_state(sBatchVerts.size(), sBatchVerts.empty() ? nullptr : &sBatchVerts[0]);
+    draw_arrays(sBatchMode, firstVertex, (GLsizei)sBatchVerts.size());
     gl_error_checkpoint("batch draw");
 
     if (profiling) {
@@ -7301,6 +7643,138 @@ static void upload_matrix_palette(int slots) {
 // every uniform, textures. Shared by the batched immediate path (pc_gfx_end)
 // and the resident-mesh path, which has no vertex stream to hand over.
 // stateT0 is the clock at entry when profiling, so gl:program can be split out.
+// ── Draw-state diagnostics ──────────────────────────────────────────────────
+// What a pass is actually asking the hardware for. Reading it beats guessing:
+// a material that comes out wrong on screen says nothing about whether its
+// texture, its blend or its TEV is at fault, and this says which.
+static const char* sDebugSpan = nullptr;
+// Budget of per-draw reports, refilled for each pass: the first pass of a frame
+// would otherwise spend the whole frame's budget and the passes after it --
+// which are the ones being investigated -- would never print.
+static int sDebugDrawsLeft = 0;
+
+// Vertex alpha range of the resident mesh being drawn, or -1 when the draw
+// came from the streaming batch, whose vertices the logger can read directly.
+static float sDebugMeshAlpha[3] = { -1.0f, -1.0f, -1.0f };
+
+// Which vertex colour encodings have been decoded so far, reported with each
+// pass rather than once: the one-shot report is evicted from the device log
+// ring long before a capture is taken.
+static unsigned sSeenColorFormats = 0;
+
+static bool pc_gfx_draw_debug_enabled() {
+    static const bool enabled = std::getenv("PIKMIN_DRAW_DEBUG") != nullptr;
+    return enabled;
+}
+
+void pc_gfx_debug_span(const char* name) {
+    static const bool enabled = std::getenv("PIKMIN_DRAW_DEBUG") != nullptr;
+    static uint64_t drawsAtSpanStart = 0;
+    static const char* openSpan = nullptr;
+    const bool verbose = (pc_vr_debug_mode() & 16) != 0;
+    sDebugDrawsLeft    = (enabled && name != nullptr && sGfxFrameSerial % 120 == 0) ? (verbose ? 64 : 3) : 0;
+    if (enabled && sGfxFrameSerial % 120 == 0) {
+        if (name != nullptr) {
+            drawsAtSpanStart = sPerfDraws;
+            openSpan = name;
+        } else if (openSpan != nullptr) {
+            // How much a pass actually drew. A pass that draws nothing looks
+            // exactly like one whose draws are wrong, until this says which.
+            printf("[PC GX] %s: %llu draws (colour formats seen: 0x%x)\n", openSpan,
+                   (unsigned long long)(sPerfDraws - drawsAtSpanStart), sSeenColorFormats);
+            fflush(stdout);
+            openSpan = nullptr;
+        }
+    }
+    sDebugSpan = name;
+}
+
+static void debug_log_draw_state(size_t vertexCount, const Vertex* firstVertex) {
+    static const bool enabled = std::getenv("PIKMIN_DRAW_DEBUG") != nullptr;
+    // A few draws per pass every couple of seconds: enough to characterise it,
+    // little enough to leave the frame rate alone. The verbose mode lifts that
+    // to the whole pass, for finding the one draw that paints a given surface.
+    if (!enabled || !sDebugSpan || sDebugDrawsLeft <= 0) return;
+    --sDebugDrawsLeft;
+
+    GLint blendSrc = 0, blendDst = 0;
+    glGetIntegerv(GL_BLEND_SRC_RGB, &blendSrc);
+    glGetIntegerv(GL_BLEND_DST_RGB, &blendDst);
+    const GLboolean blendOn = glIsEnabled(GL_BLEND);
+    const GLboolean depthOn = glIsEnabled(GL_DEPTH_TEST);
+    GLboolean depthMask = GL_TRUE;
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
+    GLboolean colourMask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+    glGetBooleanv(GL_COLOR_WRITEMASK, colourMask);
+
+    // Where the raster colour is meant to come from, and what the vertices
+    // actually carry: a surface that should take its colour from the vertices
+    // goes black if they arrive black, which looks identical to a black material.
+    const char* colourSource = sChannels[0].matSrc == GX_SRC_REG ? "REG" : "VTX";
+    // Alpha has its own source. A sheet whose opacity is meant to come from the
+    // vertices goes fully opaque if the vertices arrive without colour, which is
+    // indistinguishable from a material set to opaque.
+    const char* alphaSource = sChannels[0].alphaMatSrc == GX_SRC_REG ? "REG" : "VTX";
+    printf("[PC GX] %s: verts=%zu src=%s/%s valpha=(%.2f..%.2f mean %.2f) vcol=(%.2f,%.2f,%.2f,%.2f) stages=%d tex0=%u tex1=%u texEnabled=%d,%d "
+           "blend=%d(src=0x%x dst=0x%x) depth=%d/%d "
+           "mask=%d%d%d%d mat=(%.2f,%.2f,%.2f,%.2f) alphaCmp=%d/%d op=%d ref=%.2f/%.2f chan0=%d lightMask=0x%x pretransformed=%d\n",
+           sDebugSpan, vertexCount, colourSource, alphaSource, sDebugMeshAlpha[0], sDebugMeshAlpha[1], sDebugMeshAlpha[2],
+           firstVertex ? firstVertex->r : -1.0f, firstVertex ? firstVertex->g : -1.0f,
+           firstVertex ? firstVertex->b : -1.0f, firstVertex ? firstVertex->a : -1.0f, int(sNumTevStages), sBoundTextures[0],
+           sBoundTextures[1],
+           sNumTevStages > 0 ? int(sTevStages[0].textureEnabled) : -1,
+           sNumTevStages > 1 ? int(sTevStages[1].textureEnabled) : -1,
+           int(blendOn), unsigned(blendSrc), unsigned(blendDst), int(depthOn), int(depthMask),
+           int(colourMask[0]), int(colourMask[1]), int(colourMask[2]), int(colourMask[3]),
+           sChannels[0].matColor[0], sChannels[0].matColor[1], sChannels[0].matColor[2], sChannels[0].matColor[3],
+           int(sAlphaComp0), int(sAlphaComp1), int(sAlphaOp), sAlphaRef0, sAlphaRef1,
+           int(sChannels[0].enabled), unsigned(sChannels[0].lightMask), int(sVerticesPretransformed));
+
+    // What the combiner was actually told to do. A surface whose colour comes
+    // from a konst or a TEV register, rather than from the raster, is black for
+    // a completely different reason than one whose material is black, and the
+    // state above cannot tell the two apart.
+    for (int i = 0; i < int(sNumTevStages) && i < GX_MAXTEVSTAGE; ++i) {
+        const TevStageState& st = sTevStages[i];
+        printf("[PC GX]   stage%d: cIn=%d,%d,%d,%d aIn=%d,%d,%d,%d cOp=%d/%d/%d/%d->%d aOp=%d/%d/%d/%d->%d "
+               "ras=%d tex=%d/%d ksel=%d/%d\n",
+               i, int(st.colorIn[0]), int(st.colorIn[1]), int(st.colorIn[2]), int(st.colorIn[3]),
+               int(st.alphaIn[0]), int(st.alphaIn[1]), int(st.alphaIn[2]), int(st.alphaIn[3]),
+               int(st.colorOp), int(st.colorBias), int(st.colorScale), int(st.colorClamp), int(st.colorOutReg),
+               int(st.alphaOp), int(st.alphaBias), int(st.alphaScale), int(st.alphaClamp), int(st.alphaOutReg),
+               st.rasChannel, int(st.texMap), int(st.texCoord),
+               int(sKonstColorSel[i]), int(sKonstAlphaSel[i]));
+    }
+    // How each texture coordinate is produced. A stage that samples a healthy
+    // texture and still reads zero is being handed the wrong coordinates.
+    for (int slot = 0; slot < 2; ++slot) {
+        const TexCoordGen& g = sTexCoordGen[slot];
+        const u32 mtxIdx = g.mtxIdx < 64 ? g.mtxIdx : 0;
+        const float* m = sTexMatrices[mtxIdx];
+        printf("[PC GX]   tcgen%d: active=%d type=%d src=%d mtx=%u row0=(%.2f,%.2f,%.2f,%.2f) "
+               "row1=(%.2f,%.2f,%.2f,%.2f)\n",
+               slot, int(g.active), int(g.type), int(g.src), unsigned(mtxIdx),
+               m[0], m[4], m[8], m[12], m[1], m[5], m[9], m[13]);
+    }
+    for (int unit = 0; unit < 2; ++unit) {
+        const auto found = sDebugTexInfo.find(unsigned(sBoundTextures[unit]));
+        if (found == sDebugTexInfo.end()) continue;
+        const PcDebugTexInfo& t = found->second;
+        printf("[PC GX]   tex%d=%u: %ux%u fmt=%u colourMax=%u alpha=%u..%u mean=%u wrap=%u/%u mip=%u\n",
+               unit, unsigned(sBoundTextures[unit]), t.width, t.height, t.format,
+               t.colourMax, t.alphaMin, t.alphaMax, t.alphaMean, t.wrapS, t.wrapT, t.mipmapped);
+    }
+    printf("[PC GX]   prev=(%.2f,%.2f,%.2f,%.2f) reg0=(%.2f,%.2f,%.2f,%.2f) reg1=(%.2f,%.2f,%.2f,%.2f) "
+           "reg2=(%.2f,%.2f,%.2f,%.2f) k0=(%.2f,%.2f,%.2f,%.2f) k1=(%.2f,%.2f,%.2f,%.2f)\n",
+           sTevRegisters[0][0], sTevRegisters[0][1], sTevRegisters[0][2], sTevRegisters[0][3],
+           sTevRegisters[1][0], sTevRegisters[1][1], sTevRegisters[1][2], sTevRegisters[1][3],
+           sTevRegisters[2][0], sTevRegisters[2][1], sTevRegisters[2][2], sTevRegisters[2][3],
+           sTevRegisters[3][0], sTevRegisters[3][1], sTevRegisters[3][2], sTevRegisters[3][3],
+           sKonstColors[0][0], sKonstColors[0][1], sKonstColors[0][2], sKonstColors[0][3],
+           sKonstColors[1][0], sKonstColors[1][1], sKonstColors[1][2], sKonstColors[1][3]);
+    fflush(stdout);
+}
+
 static void apply_draw_state(bool profilingSubmit, double stateT0) {
     // Pick the program for this material first: every uniform below is written
     // through sLoc, which describes whichever program is now bound.
@@ -7309,6 +7783,9 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
     filesel_debug_log_draw();
 
     glUniformMatrix4fv_ptr(sLoc.projMtx, 1, GL_FALSE, sProjMatrix);
+#if PIKI_PC_VR
+    vr_capture_draw_projection();
+#endif
     static const float identity[16] = {
         1, 0, 0, 0,
         0, 1, 0, 0,
@@ -7920,10 +8397,23 @@ static inline u8 get_color_size(GXCompType type) {
 }
 
 static inline void read_attr_color(const u8* ptr, GXCompType type, u8& r, u8& g, u8& b, u8& a) {
-    if (type == GX_RGBA8 || type == GX_RGBX8) {
+    if (type == GX_RGBA8) {
         r = ptr[0]; g = ptr[1]; b = ptr[2]; a = ptr[3];
-    } else if (type == GX_RGB8 || type == GX_RGBA6) {
+    } else if (type == GX_RGBX8) {
+        // The fourth byte is padding, not alpha: GX rasterises an RGB format as
+        // opaque whatever it holds.
         r = ptr[0]; g = ptr[1]; b = ptr[2]; a = 255;
+    } else if (type == GX_RGB8) {
+        r = ptr[0]; g = ptr[1]; b = ptr[2]; a = 255;
+    } else if (type == GX_RGBA6) {
+        // Four 6-bit channels packed into 24 bits, not three bytes: decoding it
+        // as RGB8 loses the alpha entirely, and a surface whose opacity comes
+        // from its vertices (water shading, fades) then paints solid.
+        const u32 val = (u32(ptr[0]) << 16) | (u32(ptr[1]) << 8) | u32(ptr[2]);
+        r = (val >> 18) & 0x3F; r = (r << 2) | (r >> 4);
+        g = (val >> 12) & 0x3F; g = (g << 2) | (g >> 4);
+        b = (val >> 6) & 0x3F;  b = (b << 2) | (b >> 4);
+        a = val & 0x3F;         a = (a << 2) | (a >> 4);
     } else if (type == GX_RGB565) {
         u16 val;
         memcpy(&val, ptr, sizeof(u16));
@@ -8409,6 +8899,17 @@ static bool mesh_upload(ResidentMesh& mesh, const std::vector<Vertex>& verts) {
     glBindBuffer_ptr(GL_ARRAY_BUFFER, sVBO);
     mesh.firstVertex = GLint(sMeshArenaUsed / sizeof(Vertex));
     mesh.vertexCount = GLsizei(verts.size());
+    if (pc_gfx_draw_debug_enabled()) {
+        mesh.alphaMin = 1.0f;
+        mesh.alphaMax = 0.0f;
+        double alphaSum = 0.0;
+        for (const Vertex& v : verts) {
+            if (v.a < mesh.alphaMin) mesh.alphaMin = v.a;
+            if (v.a > mesh.alphaMax) mesh.alphaMax = v.a;
+            alphaSum += v.a;
+        }
+        mesh.alphaMean = verts.empty() ? 1.0f : float(alphaSum / double(verts.size()));
+    }
     sMeshArenaUsed += bytes;
     sResidentMeshes[mesh.list] = mesh;
     return true;
@@ -8431,7 +8932,13 @@ static void draw_resident_mesh(ResidentMesh& mesh) {
     if (profiling) sSubmitUniformMs += t2 - t1;
     glBindVertexArray_ptr(sMeshVAO);
     shadow_record_resident(mesh.firstVertex, mesh.vertexCount);
-    glDrawArrays(GL_TRIANGLES, mesh.firstVertex, mesh.vertexCount);
+    // Resident meshes live in the GPU arena; their vertices are not to hand here.
+    sDebugMeshAlpha[0] = mesh.alphaMin;
+    sDebugMeshAlpha[1] = mesh.alphaMax;
+    sDebugMeshAlpha[2] = mesh.alphaMean;
+    debug_log_draw_state(size_t(mesh.vertexCount), nullptr);
+    sDebugMeshAlpha[0] = sDebugMeshAlpha[1] = sDebugMeshAlpha[2] = -1.0f;
+    draw_arrays(GL_TRIANGLES, mesh.firstVertex, mesh.vertexCount);
     glBindVertexArray_ptr(GLuint(sStreamVAO));
     if (profiling) {
         sSubmitDrawMs += submit_clock_ms() - t2;
@@ -8805,6 +9312,10 @@ static void pc_gfx_call_display_list_impl(const void* list, u32 nbytes) {
                     const VertexFormatState& fmtState = sVtxFormats[format][attr];
                     u8 r, g, b, a;
                     read_attr_color(element, fmtState.type, r, g, b, a);
+                    // Which colour encodings the game's models actually use,
+                    // reported once each: the packed ones carry the alpha that
+                    // vertex-shaded transparency depends on.
+                    sSeenColorFormats |= 1u << (unsigned(fmtState.type) & 7u);
                     if (attr == GX_VA_CLR0) {
                         v.r = r / 255.0f;
                         v.g = g / 255.0f;
