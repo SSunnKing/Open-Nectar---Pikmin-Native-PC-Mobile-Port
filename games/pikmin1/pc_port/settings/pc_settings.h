@@ -30,6 +30,8 @@ int pc_settings_menu_is_open(void);
 /// Pide abrir/cerrar el menú desde fuera del teclado (botón táctil). Se
 /// atiende en la siguiente lectura de entrada, como si fuera F1.
 void pc_settings_request_toggle(void);
+/// The same from a headset's controllers: the menu opens on its VR tab.
+void pc_settings_request_toggle_vr(void);
 /// Entrada de los controles táctiles. Los botones se consumen en el siguiente
 /// frame; el toque usa coordenadas normalizadas de la ventana (0..1).
 void pc_settings_touch_buttons(unsigned short pressed);

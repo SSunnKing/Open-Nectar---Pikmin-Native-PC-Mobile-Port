@@ -1366,8 +1366,13 @@ void pc_window_poll_events(PADStatus* pad) {
             if (vr.dpadDown || vr.stickY < -0.55f) menuButtons |= PAD_BUTTON_DOWN;
             if (vr.dpadLeft || vr.stickX < -0.55f) menuButtons |= PAD_BUTTON_LEFT;
             if (vr.dpadRight || vr.stickX > 0.55f) menuButtons |= PAD_BUTTON_RIGHT;
+            // Tabs: the shoulder buttons on a gamepad. The pointing hand's stick
+            // is free in a menu, and left and right on it say it better than L
+            // and R do on controllers that have neither.
+            if (vr.l || vr.substickX < -0.55f) menuButtons |= PAD_TRIGGER_L;
+            if (vr.r || vr.substickX > 0.55f) menuButtons |= PAD_TRIGGER_R;
             if (menuButtons) pc_settings_touch_buttons(menuButtons);
-            if (vr.settingsToggle) pc_settings_request_toggle();
+            if (vr.settingsToggle) pc_settings_request_toggle_vr();
 #endif
         }
     }

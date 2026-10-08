@@ -59,9 +59,16 @@ The left grip is the **VR button**. While it is held:
 | Move the left hand | Drag the table (tabletop) |
 | X | Face where you are looking |
 | Y | Next rig: third-person, tabletop, first-person |
-| Menu | Open the port's own settings menu |
+| B | Hide or show the interface over the level |
+| Menu | Open the port's own settings menu; the pointing hand's stick switches its tabs |
 | Left stick | D-pad |
 | Left stick click | Z |
+
+The **VR** tab of the port's settings menu lists all of this in the game, and
+the menu opens on it when it is called up from the controllers. The list is a
+table in `pc_port/settings/pc_settings.cpp` (`kVrLegend`), kept in step with
+`pc_vr_read_pad` by hand. Above it on the same tab are the three `hud` settings
+below, which take effect as they are changed.
 
 ## Settings
 
@@ -88,7 +95,7 @@ re-read at startup:
 | `left_handed` | 0 | Swaps the pointing and off hands |
 | `right_stick_turns` | 1 | Pointing hand's stick turns the view; 0 puts swarming there instead |
 | `hud` | `head` | `head` wears the interface like a visor, in view however you turn; `room` hangs it where you last faced |
-| `hud_fill` | 1.0 | With `hud=head`, how much of the view both eyes share it spans; lower pulls its edges in |
+| `hud_fill` | 0.8 | With `hud=head`, how far out its corners reach: 1.0 is the edge of what both eyes see, lower pulls it in |
 | `hud_distance` | 1.1 | With `hud=head`, how far away it appears to be, in metres |
 
 The lean is a pitch about your own left-right axis as of the last re-anchor (VR
@@ -153,10 +160,13 @@ adb shell rm -r /data/local/tmp/nectar-assets
   draw and cannot be run twice.
 - **The interface.** Anything drawn outside that span lands in the ordinary
   render target over transparency and is shown as a quad layer, which is also
-  how whole flat screens (title, file select, results) are presented. Over the
-  world the quad is in view space, as wide as the field both eyes share, so it
-  rides the head (`hud=room` hangs it in the room instead); a whole flat screen
-  always hangs in the room.
+  how whole flat screens (title, file select, results) are presented. The
+  target is 4:3 in a headset, the squarest shape the game lays its interface
+  out for. Over the world the quad is in view space, so it rides the head, with
+  its corners at the edge of the field both eyes share; its outermost pixels
+  are drawn out to the edge of the view, so that a veil the game lays over the
+  whole screen covers the whole view rather than a rectangle in it.
+  `hud=room` hangs it in the room instead, where a whole flat screen always is.
 
 `pc_vr_rig.*` holds the mapping between tracking space and the world, and is
 plain maths with no OpenXR or GL in it, so `pc_vr_rig_test` can check the

@@ -14,6 +14,9 @@ enum PcSettingsGroup {
 	PC_SET_GROUP_CHEATS,      ///< límite de Pikmin, día, vida, silbato, lanzamiento, debug
 	PC_SET_GROUP_DATA,        ///< exportar/importar partida + restaurar ajustes
 	PC_SET_GROUP_ACHIEVEMENTS, ///< logros (pc_achievements): solo lectura
+#if PIKI_PC_VR
+	PC_SET_GROUP_VR, ///< what each control on the Touch controllers does: read only
+#endif
 	PC_SET_GROUP_COUNT,
 	/// Selectores (no aparecen como grupo). OK elige/actúa.
 	PC_SET_PICKER_RESOLUTION = 100,

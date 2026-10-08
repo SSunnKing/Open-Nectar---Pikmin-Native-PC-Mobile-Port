@@ -60,13 +60,19 @@ The left grip is the **VR button**. While it is held:
 | Move the left hand | Drag the table (tabletop) |
 | X | Re-anchor your play space where you are sitting or standing now |
 | Y | Next rig: third-person, tabletop, first-person |
-| Menu | Open the port's settings menu |
+| B | Hide or show the interface over the level |
+| Menu | Open the port's settings menu; the right stick switches its tabs |
 | Left stick | D-pad |
 | Left stick click | Z |
 
 Throwing works either way: let go of the trigger, or flick your hand forward
 while holding it. A flick while the trigger stays down picks up the next
 Pikmin, so you can throw a line of them without releasing.
+
+All of this is listed in the game too. VR button + Menu opens the port's
+settings menu on its **VR** tab, which says what each control does. The same
+tab sets where the interface goes, its size and its distance; they change as
+you adjust them, so the size can be set by looking at it.
 
 ## Settings
 
@@ -93,7 +99,7 @@ startup:
 | `left_handed` | 0 | Swaps the pointing and off hands |
 | `right_stick_turns` | 0 | 1 puts turning on the right stick and swarming on the VR button |
 | `hud` | `head` | `head` wears the interface like a visor, in view however you turn; `room` hangs it where you last faced |
-| `hud_fill` | 1.0 | With `hud=head`, how much of the view both eyes share it spans; lower pulls its edges in |
+| `hud_fill` | 0.8 | With `hud=head`, how far out its corners reach: 1.0 is the edge of what both eyes see, lower pulls it in |
 | `hud_distance` | 1.1 | With `hud=head`, how far away it appears to be, in metres |
 
 The lean is about your own left-right axis as of the last re-anchor (VR button
