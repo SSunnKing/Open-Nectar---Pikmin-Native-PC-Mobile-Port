@@ -522,6 +522,9 @@ void sendSeAllParameter(JAISe* se)
 	                             JAIGlobalParameter::getParamSeDolbyCenterValue() / 127.0f);
 
 	if (seqData->_44[se->_14]) {
+		if (seqData->mPlayerParams[se->_14].mCommand.mCommand == nullptr) {
+			SystemInterface::outerInit(seqData, &seqData->mSequence->mSeqParameter.mTrack, se->_14, 0xFFFF, 0);
+		}
 		SystemInterface::setSeqPortargsU32(SequenceMgr::getPlayTrackInfo(seHandle->_14), se->_14, 2, seqData->_44[se->_14]);
 		seqData->mPlayerParams[se->_14].mCommand.addPortCmdOnce();
 	}
