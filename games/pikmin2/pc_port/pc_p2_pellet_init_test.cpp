@@ -15,7 +15,7 @@ int main() {
     // that Pellet::onInit unconditionally copies for every kind.
     char name[] = "treasure";
     host->mTextIdentifier = guest->mTextIdentifier = name;
-    host->mPelletType = guest->mPelletType = Game::PelletType::Treasure;
+    host->mPelletType = guest->mPelletType = PelletType::Treasure;
     host->mPelletIndex = guest->mPelletIndex = 17;
     const u16 hostColor = host->mPelletColor, guestColor = guest->mPelletColor;
     assert(hostColor == 0 && guestColor == 0 && hostColor == guestColor);
@@ -25,3 +25,4 @@ int main() {
     host->~PelletInitArg(); guest->~PelletInitArg();
     std::puts("pellet birth defaults resist poisoned stack and preserve explicit colors");
 }
+
