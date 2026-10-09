@@ -1112,7 +1112,9 @@ void JASTrack::close()
 		}
 	}
 
+#ifndef PIKI_PC_PORT
 	_35B = 0;
+#endif
 
 	for (int i = 0; i < 16; i++) {
 		if (mChildList[i]) {
@@ -1132,6 +1134,10 @@ void JASTrack::close()
 		it = next;
 	}
 
+#ifdef PIKI_PC_PORT
+	// Zero acknowledges that child tracks and channels have finished closing.
+	_35B = 0;
+#endif
 	if (_366) {
 		delete this;
 	}
