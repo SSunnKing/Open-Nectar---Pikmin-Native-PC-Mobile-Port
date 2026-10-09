@@ -161,9 +161,8 @@ void EndingState::exec(SingleGameSection* game)
 		case EndingStatus_PlayMoviePayDebt:
 			mTHPPlayer->update();
 			if (mThpState != 0) {
-				if (mTHPPlayer->isFinishLoading()) {
+				if (mTHPPlayer->isFinishLoading() && mTHPPlayer->play()) {
 					mThpState = 0;
-					mTHPPlayer->play();
 				}
 			} else {
 				if (mTHPPlayer->isFinishPlaying()) {
@@ -177,9 +176,8 @@ void EndingState::exec(SingleGameSection* game)
 		case EndingStatus_PlayMovieCredits:
 			mTHPPlayer->update();
 			if (mThpState != 0) {
-				if (mTHPPlayer->isFinishLoading()) {
+				if (mTHPPlayer->isFinishLoading() && mTHPPlayer->play()) {
 					mThpState = 0;
-					mTHPPlayer->play();
 				}
 			} else {
 				if (mTHPPlayer->isFinishPlaying()) {
@@ -229,9 +227,8 @@ void EndingState::exec(SingleGameSection* game)
 		case EndingStatus_PlayMoviePostDebtStart:
 			mTHPPlayer->update();
 			if (mThpState != 0) {
-				if (mTHPPlayer->isFinishLoading()) {
+				if (mTHPPlayer->isFinishLoading() && mTHPPlayer->play()) {
 					mThpState = 0;
-					mTHPPlayer->play();
 				}
 			} else {
 				if (mTHPPlayer->isFinishPlaying()) {
@@ -243,9 +240,8 @@ void EndingState::exec(SingleGameSection* game)
 		case EndingStatus_PlayMovieAllTreasure:
 			mTHPPlayer->update();
 			if (mThpState != 0) {
-				if (mTHPPlayer->isFinishLoading()) {
+				if (mTHPPlayer->isFinishLoading() && mTHPPlayer->play()) {
 					mThpState = 0;
-					mTHPPlayer->play();
 				}
 			} else if (mTHPPlayer->isFinishPlaying()) {
 				mTHPPlayer->stop();
@@ -266,9 +262,8 @@ void EndingState::exec(SingleGameSection* game)
 		case EndingStatus_Unused9:
 			mTHPPlayer->update();
 			if (mThpState != 0) {
-				if (mTHPPlayer->isFinishLoading()) {
+				if (mTHPPlayer->isFinishLoading() && mTHPPlayer->play()) {
 					mThpState = 0;
-					mTHPPlayer->play();
 				}
 			} else {
 				if (mTHPPlayer->isFinishPlaying()) {
