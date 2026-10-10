@@ -6,6 +6,9 @@
 #include "PSSystem/PSDirector.h"
 #include "stream.h"
 #include "CNode.h"
+#ifdef PIKI_PC_PORT
+#include "JSystem/JAudio/JAS/JASMutexLock.h"
+#endif
 
 namespace PSSystem {
 
@@ -333,8 +336,15 @@ SeqBase::~SeqBase()
  */
 bool SeqBase::isPlaying()
 {
+#ifdef PIKI_PC_PORT
+	JASCriticalSection criticalSection;
+#endif
 	if (mSeqSound) {
+#ifdef PIKI_PC_PORT
+		u8 state = mSeqSound->_35B;
+#else
 		u8 state = (u8)mSeqSound->mSeqParameter.mTrack.mSeqCtrl.mState.b[3];
+#endif
 		if (state == 0 || state == 2) {
 			return false;
 		}
@@ -451,8 +461,15 @@ void SeqBase::exec()
 		}
 	}
 
+#ifdef PIKI_PC_PORT
+	JASCriticalSection criticalSection;
+#endif
 	if (!(*getHandleP()) && mSeqSound) {
+#ifdef PIKI_PC_PORT
+		u8 state = mSeqSound->_35B;
+#else
 		u8 state = (u8)mSeqSound->mSeqParameter.mTrack.mSeqCtrl.mState.b[3];
+#endif
 		if (state == 0 || state == 2) {
 			mSeqSound = nullptr;
 		}
@@ -486,7 +503,11 @@ void SeqBase::startSeq()
 	JUT_ASSERTLINE(538, sound, "seq not played");
 	sound->mSeq = this;
 	setConfigVolume();
+#ifdef PIKI_PC_PORT
+	mSeqSound = &sound->mSeqParameter.mTrack;
+#else
 	mSeqSound = (SeqSound*)&(sound)->mSeqParameter.mTrack.mHead;
+#endif
 	OSUnlockMutex(&mMutex);
 }
 

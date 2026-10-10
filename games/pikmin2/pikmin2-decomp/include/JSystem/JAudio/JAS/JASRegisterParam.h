@@ -13,6 +13,10 @@ struct JASRegisterParam {
 	void inherit(const JASRegisterParam&);
 	u8 getBankNumber() const;
 	u8 getProgramNumber() const;
+#ifdef PIKI_PC_PORT
+	u16 read16Alias(u8 index) const;
+	void write16Alias(u8 index, u16 value);
+#endif
 
 	// unused/inlined:
 	void setFlag(u16);

@@ -1112,7 +1112,9 @@ void JASTrack::close()
 		}
 	}
 
+#ifndef PIKI_PC_PORT
 	_35B = 0;
+#endif
 
 	for (int i = 0; i < 16; i++) {
 		if (mChildList[i]) {
@@ -1132,6 +1134,10 @@ void JASTrack::close()
 		it = next;
 	}
 
+#ifdef PIKI_PC_PORT
+	// Zero acknowledges that child tracks and channels have finished closing.
+	_35B = 0;
+#endif
 	if (_366) {
 		delete this;
 	}
@@ -1344,6 +1350,12 @@ u16 JASTrack::readReg16(u8 reg)
 		break;
 
 	default:
+#ifdef PIKI_PC_PORT
+		if (reg >= 0x10 && reg <= 0x17) {
+			result = mRegisterParam.read16Alias(reg - 0x10);
+			break;
+		}
+#endif
 		result = mRegisterParam._00[reg];
 		break;
 	}
@@ -1389,6 +1401,10 @@ void JASTrack::writeRegDirect(u8 reg, u16 value)
 		break;
 			}	}
 
+#ifdef PIKI_PC_PORT
+	if (reg >= 0x10 && reg <= 0x17) mRegisterParam.write16Alias(reg - 0x10, value);
+	else
+#endif
 	mRegisterParam._00[reg] = value;
 	mRegisterParam._00[3]   = newVal;
 }
@@ -1589,6 +1605,10 @@ void JASTrack::writeRegParam(u8 p1)
 		break;
 			}	}
 
+#ifdef PIKI_PC_PORT
+	if (nextByte >= 0x10 && nextByte <= 0x17) mRegisterParam.write16Alias(nextByte - 0x10, val23);
+	else
+#endif
 	mRegisterParam._00[nextByte] = val23;
 	mRegisterParam._00[3]        = val29;
 

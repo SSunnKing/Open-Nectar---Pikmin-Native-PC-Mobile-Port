@@ -53,6 +53,11 @@ bool JASCallbackMgr::reject(JASCallback*)
  */
 void JASCallbackMgr::callback()
 {
+#ifdef PIKI_PC_PORT
+    // Scene sequence heaps are destroyed with interrupts disabled. Dispatch
+    // must hold the same guard while the audio thread reads their bytecode.
+    JASCriticalSection criticalSection;
+#endif
 	for (int i = 0; i < 0x10; i++) {
 		TCallback* cb = &mCallbacks[i];
 		if (cb->mFunction && cb->mFunction(cb->mArgument) < 0) {

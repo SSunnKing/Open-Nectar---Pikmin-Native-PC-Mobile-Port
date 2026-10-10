@@ -12,7 +12,9 @@ JASPortCmd::TPortHead JASPortCmd::sCommandListStay;
 bool JASPortCmd::addPortCmdOnce()
 {
 	int interrupts = OSDisableInterrupts();
-	bool result    = sCommandListOnce.append(this);
+	// A child track can be created after the initial trackInit pass.
+	// Keep its command off the audio queue until outerInit publishes it.
+	bool result = mCommand != nullptr && sCommandListOnce.append(this);
 	OSRestoreInterrupts(interrupts);
 	return result;
 }
@@ -43,12 +45,14 @@ u32 JASPortCmd::cancelPortCmdStay()
  */
 bool JASPortCmd::setPortCmd(Command command, JASPortArgs* args)
 {
-	if (mList != nullptr) {
-		return false;
+	int interrupts = OSDisableInterrupts();
+	bool result = mList == nullptr;
+	if (result) {
+		mCommand     = command;
+		mCommandArgs = args;
 	}
-	mCommand     = command;
-	mCommandArgs = args;
-	return true;
+	OSRestoreInterrupts(interrupts);
+	return result;
 }
 
 /**

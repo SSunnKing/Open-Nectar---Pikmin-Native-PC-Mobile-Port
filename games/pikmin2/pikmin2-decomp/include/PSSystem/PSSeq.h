@@ -130,7 +130,12 @@ struct SeqBase : public JSULink<SeqBase> {
 	SeqPauseOffReservator mPauseOffRes; // _38
 	PauseMode mPauseMode;               // _44 - enum maybe? 0x4 size
 	u8 mPausedMinVolume;                // _48
-	SeqSound* mSeqSound;                // _4C
+#ifdef PIKI_PC_PORT
+	// Retain the track after handle release until the audio thread acknowledges stop.
+	JASTrack* mSeqSound;              // _4C
+#else
+	SeqSound* mSeqSound;              // _4C
+#endif
 	OSMutex mMutex;                     // _50
 };
 

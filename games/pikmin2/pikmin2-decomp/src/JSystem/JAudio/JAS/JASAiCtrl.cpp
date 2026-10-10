@@ -150,10 +150,16 @@ void updateDSP()
 	int subframes              = getSubFrames();
 	u32 count                  = JASAudioThread::snIntCount;
 	history[subframes - count] = delta;
+#ifndef PIKI_PC_PORT
+	// This compares hardware DSP completion interrupts with their frame gap.
+	// The software DSP advances all seven subframes synchronously, including
+	// consecutive queued DMA frames: host scheduling gaps are not DSP overload.
+	// Applying the console heuristic here drops healthy sustained voices.
 	if (subframes != count && ((history[0] / (f32)delta) < 1.1f)) {
 		JASReport("kill DSP channel");
 		JASDSPChannel::killActiveChannel();
 	}
+#endif
 	JASDSPChannel::updateAll();
 	subframeCallback();
 	JASKernel::probeFinish(3);

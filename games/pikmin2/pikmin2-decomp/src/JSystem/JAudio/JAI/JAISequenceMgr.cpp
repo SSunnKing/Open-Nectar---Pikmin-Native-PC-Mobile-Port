@@ -10,6 +10,7 @@
 #include "JSystem/JAudio/JAS/JASResArcLoader.h"
 #include "JSystem/JKernel/JKRArchive.h"
 #ifdef PIKI_PC_PORT
+#include "JSystem/JAudio/JAS/JASMutexLock.h"
 #include <cstdio>
 #include <cstdlib>
 #endif
@@ -330,6 +331,9 @@ void checkPlayingSeq()
 			for (u8 j = 0; j < JAIGlobalParameter::getParamSeqTrackMax() + 1; j++) {
 				if (info->_44[j] != 0) {
 					if (j == 32 || (1 << j & info->mSequence->mSeqParameter.mUpdateData->_04) != 0) {
+						if (info->mPlayerParams[j].mCommand.mCommand == nullptr) {
+							SystemInterface::outerInit(info, &info->mSequence->mSeqParameter.mTrack, j, 0xFFFF, 0);
+						}
 						SystemInterface::setSeqPortargsU32(info, j, 2, info->_44[j]);
 						info->mPlayerParams[j].mCommand.addPortCmdOnce();
 					}
@@ -366,6 +370,10 @@ void checkStartedSeq()
  */
 void checkReadSeq()
 {
+#ifdef PIKI_PC_PORT
+	// Keep the stopped-track check and its reuse in one audio critical section.
+	JASCriticalSection criticalSection;
+#endif
 	JAISequence* seq;
 	for (u32 i = 0; i < JAIGlobalParameter::getParamSeqPlayTrackMax(); i++) {
 		SeqUpdateData* info = &seqTrackInfo[i];

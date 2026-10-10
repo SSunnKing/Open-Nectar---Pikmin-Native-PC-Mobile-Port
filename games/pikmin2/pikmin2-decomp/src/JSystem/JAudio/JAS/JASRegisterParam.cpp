@@ -1,5 +1,20 @@
 #include "JSystem/JAudio/JAS/JASRegisterParam.h"
 #include "JSystem/JSupport/JSU.h"
+#ifdef PIKI_PC_PORT
+// BMS registers 0x10..0x17 are the high/low halves of 0x28..0x2b.
+// Select the logical halves instead of walking beyond the six-element _00 array.
+u16 JASRegisterParam::read16Alias(u8 index) const
+{
+	return _20[index / 2] >> ((index & 1) ? 0 : 16);
+}
+
+void JASRegisterParam::write16Alias(u8 index, u16 value)
+{
+	unsigned shift = (index & 1) ? 0 : 16;
+	u32 mask = static_cast<u32>(0xffff) << shift;
+	_20[index / 2] = (_20[index / 2] & ~mask) | (static_cast<u32>(value) << shift);
+}
+#endif
 
 /**
  * @note Address: 0x8009C714
