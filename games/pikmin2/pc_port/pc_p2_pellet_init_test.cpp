@@ -25,4 +25,3 @@ int main() {
     host->~PelletInitArg(); guest->~PelletInitArg();
     std::puts("pellet birth defaults resist poisoned stack and preserve explicit colors");
 }
-
