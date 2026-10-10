@@ -68,7 +68,7 @@ def main():
     root = Path(__file__).resolve().parents[1]
     path = 'games/pikmin2/pikmin2-decomp/src/JSystem/JAudio/JAS/JASAiCtrl.cpp'
     current = (root / path).read_text()
-    original = subprocess.check_output(['git', 'show', 'bb787017ef6243d0ab8fe32ed87ba9052d931c8e:' + path], cwd=root, text=True)
+    original = subprocess.check_output(['git', 'show', 'ab7d8069af4a63f0d1dcfa94361cf91bed2699ca:' + path], cwd=root, text=True)
     out = root / 'output/host-dsp-timing'
     out.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
@@ -93,7 +93,7 @@ def main():
     audio = root / 'games/pikmin2/pc_port/audio'
     renderer = out / 'sustained-renderer.exe'
     subprocess.run([args.compiler, '-std=c++17', '-O2', '-Wno-register', '-DPIKI_PC_PORT',
-                    '-I' + str(root / 'include'), '-I' + str(audio),
+                    '-I' + str(root / 'games/pikmin1/include'), '-I' + str(audio),
                     str(root / 'tests/pikmin2_sustained_renderer.cpp'),
                     str(audio / 'pc_dsp_host.cpp'), str(audio / 'pc_aram.cpp'),
                     '-o', str(renderer)], check=True, env=env)

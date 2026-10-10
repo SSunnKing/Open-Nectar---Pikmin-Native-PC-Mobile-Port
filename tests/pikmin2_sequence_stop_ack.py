@@ -28,6 +28,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     prefix = r'''
 #include <type_traits>
+#include <initializer_list>
 #include <cstdio>
 #include "PSSystem/PSSeq.h"
 #include "PSSystem/PSSystemIF.h"
@@ -62,7 +63,7 @@ int main() {
 }
 '''
     flags = ['-w', '-std=c++17', '-fpermissive', '-DPIKI_PC_PORT', '-DVERSION_GPVE01',
-             '-include', str(game / 'pikmin2-decomp-adapter/pikmin2_pc_types.h')]
+             '-include', str(game / 'pikmin2-decomp-adapter/pikmin2_pc_types.h'), '-include', str(game / 'pikmin2-decomp/include/Dolphin/os.h'), '-include', str(game / 'pikmin2-decomp/include/Dolphin/mtx.h')]
     flags += ['-I' + str(game / path) for path in ('pikmin2-decomp-adapter', 'pc_port', 'pikmin2-decomp/include')]
     env = dict(os.environ)
     compiler_dir = str(Path(args.compiler).resolve().parent)
