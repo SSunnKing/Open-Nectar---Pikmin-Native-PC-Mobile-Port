@@ -2420,6 +2420,10 @@ static const char* vShaderTail =
     "vec3 genTc(int slot, vec4 viewPos, vec3 nrm, vec2 uvIn, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, int vIdx) {\n"
     "    int mode = uTcMode[slot];\n"
     "    if (mode == 0) return vec3(uvIn, 1.0);\n"
+    // CPU-baked JPA screen coordinates retain Q through interpolation.
+    // Q is -view Z for this narrowly identified projection; reconstruct S/T
+    // before rasterization and let the fragment shader perform the divide.
+    "    if (mode == 15) { float q = abs(viewPos.z) > 1e-6 ? -viewPos.z : 1.0; return vec3(uvIn * q, q); }\n"
     "    vec4 src = (mode == 1) ? viewPos\n"
     "             : (mode == 2) ? vec4(nrm, 1.0)\n"
     "             : (mode >= 11) ? vec4((mode == 11) ? tc0 : (mode == 12) ? tc1 : (mode == 13) ? tc2 : tc3, 0.0, 1.0)\n"
@@ -9581,7 +9585,8 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
                 mode = (type >= 2 && type <= 9) ? 11 + int(src - GX_TG_TEXCOORD0) : 3;
             }
         }
-        if (slot < 4 && (sTexBakedMask & (1 << slot))) mode = 0; // ya calculada en la CPU
+        if (slot < 4 && (sTexBakedMask & (1 << slot)))
+            mode = sTexCoordGen[slot].src == GX_TG_POS ? 15 : 0;
         if (sLoc.tcMode[slot] >= 0) glUniform1i_ptr(sLoc.tcMode[slot], mode);
         if (mode != 0 && sLoc.tcMtx[slot] >= 0) {
             u32 mtxIdx = (slot < 8) ? sTexCoordGen[slot].mtxIdx : 0;
@@ -11460,8 +11465,8 @@ static void pc_gfx_call_display_list_impl(const void* list, u32 nbytes) {
                 // camera image as a disc instead of a local distortion.
                 //
                 // Bake S/T here only for the screen projection used by JPA.
-                // Its Q is -view-Z, the same value as clip W, so dividing at
-                // the vertex is equivalent to GX's interpolated S/T/Q.  Other
+                // Its Q is -view-Z. genTc mode 15 reconstructs S/T/Q from
+                // this normalized pair before perspective interpolation. Other
                 // POS texgens remain in the shader because their Q need not
                 // have that property.
                 for (int slot = 0; slot < 4; ++slot) {

@@ -118,9 +118,10 @@ void MovieState::exec(SingleGameSection* gs)
 		mMoviePlayer->update();
 		switch (mIsMovieLoaded) {
 		case false:
-			if (mMoviePlayer->isFinishLoading()) {
+			// Loading may complete after update() observed STATE_Load. Retry
+			// until play succeeds rather than permanently latching a stopped movie.
+			if (mMoviePlayer->isFinishLoading() && mMoviePlayer->play()) {
 				mIsMovieLoaded = true;
-				mMoviePlayer->play();
 			}
 			break;
 		case true:

@@ -1,4 +1,8 @@
 #include "Game/FieldVtxColorMgr.h"
+#ifdef PIKI_PC_PORT
+#include "pc_p2_field_vtx_decode.h"
+#include "P2Macros.h"
+#endif
 
 namespace Game {
 
@@ -69,6 +73,9 @@ void FieldVtxColorMgr::createFieldVtxColorInfo()
 	}
 
 	for (u16 i = 0; i < mModelData->getVertexNum(); i++) {
+#ifdef PIKI_PC_PORT
+        if (getColorInfo(i).mColorIdx == 0xFFFF) continue;
+#endif
 		GXColor& thisColor = color[getColorInfo(i).mColorIdx];
 		if (thisColor.a) {
 			mInfoCount++;
@@ -86,6 +93,9 @@ void FieldVtxColorMgr::createFieldVtxColorInfo()
 	for (u16 i = 0; i < mModelData->getVertexNum(); i++) {
 		oldInfo = &mInfo[i];
 
+#ifdef PIKI_PC_PORT
+        if (oldInfo->mColorIdx == 0xFFFF) continue;
+#endif
 		if (color[oldInfo->mColorIdx].a) {
 			newInfos[infoCount++] = *oldInfo;
 		}
@@ -315,9 +325,26 @@ void FieldVtxColorMgr::setupFieldVtxColorInfo(J3DShape* shape)
 			}
 			break;
 		}
+#ifdef PIKI_PC_PORT
+        if (static_cast<unsigned>(descList->mType) >= sizeof(indices) / sizeof(indices[0])) {
+            P2ASSERTLINE(__LINE__, false);
+            return;
+        }
+#endif
 		p3 += indices[descList->mType];
 		descList++;
 	}
+
+#ifdef PIKI_PC_PORT
+    for (u16 i = 0; i < shape->getMtxGroupNum(); ++i) {
+        const auto* draw = shape->getShapeDraw(i);
+        const bool valid = p2_field_vtx::decode(draw->mDisplayList, draw->mDlSize, p3, p1, p2,
+            mModelData->getVertexNum(), mModelData->getVertexColorNum(),
+            [&](u16 position, u16 color) { mInfo[position].setVtxColorIndex(color); });
+        P2ASSERTLINE(__LINE__, valid);
+    }
+    return;
+#endif
 
 	for (u16 i = 0; i < shape->getMtxGroupNum(); i++) {
 		u8* dispList = const_cast<u8*>(shape->getShapeDraw(i)->mDisplayList);

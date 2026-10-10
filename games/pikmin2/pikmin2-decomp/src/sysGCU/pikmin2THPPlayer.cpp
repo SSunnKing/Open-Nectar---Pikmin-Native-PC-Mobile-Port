@@ -276,7 +276,7 @@ bool THPPlayer::play()
 	if (PSSystem::pcSoundReady())
 		PSStop2DStream();
 	if (mState == STATE_Play) {
-		THPPlayerPlay();
+		if (!THPPlayerPlay()) return false;
 		f32 vol = PSSystem::spSysIF ? 127.0f * PSGetSystemIFA()->mBgmVolume : 127.0f;
 #else
 	PSStop2DStream();

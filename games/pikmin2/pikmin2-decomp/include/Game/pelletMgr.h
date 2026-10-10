@@ -158,6 +158,9 @@ struct PelletIterator {
 struct PelletInitArg : public CreatureInitArg {
 	PelletInitArg()
 	{
+        // Non-colored pellet generators leave this field at its default,
+        // but Pellet::onInit copies it for every kind.
+        mPelletColor = 0;
 		mDoSkipCreateModel    = false;
 		mState                = PelBirthType_Normal;
 		mPelletType           = PelletType::Invalid;
