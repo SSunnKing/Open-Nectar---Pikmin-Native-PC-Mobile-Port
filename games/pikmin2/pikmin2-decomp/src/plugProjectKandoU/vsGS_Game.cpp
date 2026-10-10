@@ -21,6 +21,9 @@
 #include "Controller.h"
 #include "PikiAI.h"
 #include "Radar.h"
+#ifdef PIKI_PC_PORT
+#include "pc_speedrun.h"
+#endif
 #include "nans.h"
 
 namespace Game {
@@ -800,6 +803,11 @@ void GameState::onMovieDone(VsGameSection* section, MovieConfig* config, u32 unu
 
 	} else if (config->is("s09_holein")) {
 		PSMCancelToPauseOffMainBgm();
+#ifdef PIKI_PC_PORT
+		if (gameSystem->isChallengeMode()) {
+			pc_speedrun_on_challenge_floor_end(Radar::Mgr::getNumOtakaraItems());
+		}
+#endif
 		section->mCurrentFloor++;
 		LoadArg arg;
 		arg.mGameLoadType  = 0;
@@ -837,6 +845,11 @@ void GameState::onMovieDone(VsGameSection* section, MovieConfig* config, u32 unu
 
 	} else if (config->is("s0C_cv_escape")) {
 		PSMCancelToPauseOffMainBgm();
+#ifdef PIKI_PC_PORT
+		if (gameSystem->isChallengeMode()) {
+			pc_speedrun_on_challenge_floor_end(Radar::Mgr::getNumOtakaraItems());
+		}
+#endif
 		ResultArg arg;
 		arg.mEndFlag.clear();
 		arg.mEndFlag.typeView |= 0x1;

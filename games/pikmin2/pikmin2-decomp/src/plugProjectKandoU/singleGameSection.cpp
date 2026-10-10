@@ -1,3 +1,7 @@
+#ifdef PIKI_PC_PORT
+#include "pc_speedrun.h"
+#endif
+#include "GameFlow.h"
 #include "Game/BaseGameSection.h"
 #include "Game/GameSystem.h"
 #include "Game/Piki.h"
@@ -310,6 +314,16 @@ void SingleGameSection::onInit()
  */
 bool SingleGameSection::doUpdate()
 {
+#ifdef PIKI_PC_PORT
+	// Reset rápido del modo Speedrun: se termina la sección entera, desde
+	// cualquier estado (superficie, cueva, mapa, cinemática), y la siguiente
+	// vuelve a ser una de juego en vez del título. Su selección de partida
+	// empieza otra run (pc_speedrun_take_restart).
+	if (!mDoEnd && pc_speedrun_take_reset()) {
+		GameFlow::mActiveSectionFlag = GameFlow::SN_SingleGame;
+		mDoEnd                       = true;
+	}
+#endif
 	if (!mDoEnd) {
 		mFsm->exec(this);
 

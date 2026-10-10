@@ -12,7 +12,10 @@
 #include "zen/ogNitaku.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_permadeath.h"
+#include "pc_day_history.h"
 #include "randomizer/pc_randomizer.h"
+#include "settings/pc_settings_p2d.h"
+#include "Matrix4f.h"
 #include <cstdio>
 #include "P2D/Picture.h"
 #include "P2D/Font.h"
@@ -30,6 +33,46 @@ static f32 filesel_fx_x(int slot, P2DPane* pane)
 {
 	(void)slot;
 	return f32(pane->getPosH()) + f32(pane->getWidth()) / 2.0f + f32(pc_gfx_menu_shift_center());
+}
+
+// ─── Selector de días (pc_day_history.h) ───
+// L/R recorren los días guardados de la ranura marcada; sus datos (día,
+// piezas, Pikmin) sustituyen a los de la ranura en pantalla y A carga ese día.
+// sPcDayOrig guarda los datos de la tarjeta para volver al día guardado.
+static int sPcDayChoice[3];          // 0 = el día guardado
+static CardQuickInfo sPcDayOrig[3];
+static int sPcDays[3][64];
+static int sPcDayCount[3];
+
+static void pcDaysReset(const CardQuickInfo* infos)
+{
+	for (int i = 0; i < 3; i++) {
+		sPcDayChoice[i] = 0;
+		sPcDayOrig[i]   = infos[i];
+		sPcDayCount[i]  = 0;
+		if (pc_days_enabled() && infos[i].mSaveStatus == PlayState::ReadyToSave && !pc_permadeath_slot(i)) {
+			sPcDayCount[i] = pc_days_list(i, sPcDays[i], 64);
+		}
+	}
+}
+
+// Día que se ve ahora en la ranura.
+static int pcDayShown(int slot) { return sPcDayChoice[slot] ? sPcDayChoice[slot] : sPcDayOrig[slot].mCurrentDay; }
+
+// Día siguiente en esa dirección (el guardado cuenta aunque no esté en el
+// historial); 0 si no hay.
+static int pcDayStep(int slot, int dir)
+{
+	const int shown = pcDayShown(slot);
+	const int saved = sPcDayOrig[slot].mCurrentDay;
+	int best = 0;
+	for (int i = -1; i < sPcDayCount[slot]; i++) {
+		const int d = i < 0 ? saved : sPcDays[slot][i];
+		if (dir < 0 ? d < shown && d > best : d > shown && (!best || d < best)) {
+			best = d;
+		}
+	}
+	return best;
 }
 #endif
 
@@ -116,6 +159,9 @@ void zen::ogScrFileSelectMgr::copyCardInfosSub()
 	for (int i = 0; i < 3; i++) {
 		mCardInfo[i] = infos[i];
 	}
+#if defined(PIKI_PC_PORT)
+	pcDaysReset(infos);
+#endif
 }
 
 /**
@@ -1144,6 +1190,27 @@ int zen::ogScrFileSelectMgr::CanToCopy(int fileSlot)
  */
 void zen::ogScrFileSelectMgr::OperateSelect(Controller* controller)
 {
+#if defined(PIKI_PC_PORT)
+	// Selector de días: L día anterior, R posterior.
+	const int dayDir = controller->keyClick(KBBTN_L) ? -1 : controller->keyClick(KBBTN_R) ? 1 : 0;
+	if (dayDir && !mSaveMode && sPcDayCount[mCurrSlotIdx] > 0) {
+		const int slot = mCurrSlotIdx;
+		const int day  = pcDayStep(slot, dayDir);
+		CardQuickInfo shown = sPcDayOrig[slot];
+		if (day && (day == sPcDayOrig[slot].mCurrentDay || gameflow.mMemoryCard.pcDayQuickInfo(slot, day, shown))) {
+			SeSystem::playSysSe(ogEnumFix(SYSSE_MOVE1, JACSYS_Move1));
+			sPcDayChoice[slot] = day == sPcDayOrig[slot].mCurrentDay ? 0 : day;
+			// Solo lo que se ve: la carga sigue usando el archivo de la tarjeta.
+			mCardInfo[slot].mCurrentDay        = shown.mCurrentDay;
+			mCardInfo[slot].mCurrentPartsCount = shown.mCurrentPartsCount;
+			mCardInfo[slot].mRedPikiCount      = shown.mRedPikiCount;
+			mCardInfo[slot].mYellowPikiCount   = shown.mYellowPikiCount;
+			mCardInfo[slot].mBluePikiCount     = shown.mBluePikiCount;
+			OnOffKetaNissuu(slot);
+		}
+		return;
+	}
+#endif
 	if (controller->keyClick(KBBTN_MSTICK_LEFT) && mCurrSlotIdx > 0) {
 		SeSystem::playSysSe(ogEnumFix(SYSSE_MOVE1, JACSYS_Move1));
 		mCurrSlotIdx--;
@@ -1165,6 +1232,7 @@ void zen::ogScrFileSelectMgr::OperateSelect(Controller* controller)
 		// pantalla. Se mantiene la animación del icono (sube con estela) pero
 		// sin el círculo que se expande ni el fundido a negro del final.
 		mPcKeepScreenOnExit = mCardInfo[mCurrSlotIdx].mSaveStatus != PlayState::ReadyToSave;
+		pc_days_set_choice(mCurrSlotIdx, mSaveMode ? 0 : sPcDayChoice[mCurrSlotIdx]);
 		if (!mPcKeepScreenOnExit) {
 			KetteiEffectStart();
 		}
@@ -1613,6 +1681,24 @@ void zen::ogScrFileSelectMgr::draw(Graphics& gfx)
 	mFileInfoScreen->draw(chromeX, 0, &perspGraph);
 	pc_gfx_set_menu_clip_43(0);
 	pc_gfx_set_scissor(0, 0, (u32)virtW, 480);
+	// Selector de días: flechas a los lados de la ranura marcada, apagadas
+	// si no hay más días en ese sentido.
+	if (mSelectState != Inactive && !mSaveMode && sPcDayCount[mCurrSlotIdx] > 0) {
+		PcSettingsP2DFrame frame(virtW, 480);
+		Matrix4f ortho;
+		gfx.setOrthogonal(ortho.mMtx, RectArea(0, 0, virtW, 480));
+		P2DPane* icon  = mIconOnyonPanes[mCurrSlotIdx];
+		const int cx   = int(filesel_fx_x(mCurrSlotIdx, icon));
+		const int cy   = icon->getPosV() + icon->getHeight() / 2;
+		const Colour on(255, 225, 90, 255), off(120, 120, 120, 140);
+		const Colour cl = pcDayStep(mCurrSlotIdx, -1) ? on : off;
+		const Colour cr = pcDayStep(mCurrSlotIdx, 1) ? on : off;
+		pc_settings_p2d_text_styled(cx - 92, cy - 14, "<", cl, cl, 20, 28);
+		pc_settings_p2d_text_styled(cx - 92, cy + 14, "L", cl, cl, 10, 14);
+		pc_settings_p2d_text_styled(cx + 76, cy - 14, ">", cr, cr, 20, 28);
+		pc_settings_p2d_text_styled(cx + 78, cy + 14, "R", cr, cr, 10, 14);
+	}
+	perspGraph.setPort(); // el fundido va con la perspectiva de la pantalla
 	mBlackOverlayScreen->draw(0, 0, &perspGraph);
 #else
 	mCopyCursorsScreen->draw(0, 0, &perspGraph);

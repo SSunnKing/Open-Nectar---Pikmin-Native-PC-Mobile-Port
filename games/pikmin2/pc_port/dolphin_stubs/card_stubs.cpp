@@ -324,6 +324,15 @@ std::string pc_card_save_dir()
 	return fs::absolute(saveRoot(), error).string();
 }
 
+// Registro del modo Speedrun (pc_speedrun.cpp): save/speedrun, creada si no existe.
+std::string pc_card_speedrun_dir()
+{
+	std::error_code error;
+	const fs::path dir = saveRoot() / "speedrun";
+	fs::create_directories(dir, error);
+	return dir.string();
+}
+
 extern "C" {
 
 void CARDInit(void)

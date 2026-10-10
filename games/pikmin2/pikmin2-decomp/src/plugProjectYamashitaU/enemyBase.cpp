@@ -2125,13 +2125,38 @@ void EnemyBase::bounceProcedure(Sys::Triangle* triangle)
  * @note Address: 0x80104340
  * @note Size: 0x6D4
  */
+#ifdef PIKI_PC_PORT
+// Diagnóstico: primer paso de la física que deja la velocidad disparada
+// (Bulborb enano que desaparece al caerle un Pikmin encima).
+static void pcTraceEnemyVel(EnemyBase* enemy, const char* stage, f32 frameRate)
+{
+	const Vector3f& v = enemy->mCurrentVelocity;
+	if ((v.x == v.x && v.y == v.y && v.z == v.z) && fabsf(v.x) <= 1.0e6f && fabsf(v.y) <= 1.0e6f && fabsf(v.z) <= 1.0e6f) {
+		return;
+	}
+	static int sReports = 0;
+	if (sReports < 20) {
+		sReports++;
+		fprintf(stderr, "[VEL] Enemy %s stage=%s vel=(%g,%g,%g) accel=(%g,%g,%g) target=(%g,%g,%g) frameRate=%g dt=%g mass=%g\n",
+		        enemy->getCreatureName(), stage, v.x, v.y, v.z, enemy->mAcceleration.x, enemy->mAcceleration.y, enemy->mAcceleration.z,
+		        enemy->mTargetVelocity.x, enemy->mTargetVelocity.y, enemy->mTargetVelocity.z, frameRate, sys->mDeltaTime, enemy->mMass);
+		fflush(stderr);
+	}
+}
+#define PC_TRACE_ENEMY_VEL(stage) pcTraceEnemyVel(this, stage, frameRate)
+#else
+#define PC_TRACE_ENEMY_VEL(stage)
+#endif
+
 void EnemyBase::collisionMapAndPlat(f32 frameRate)
 {
+	PC_TRACE_ENEMY_VEL("enter");
 	// If isn't stuck
 	if (!isStickTo()) {
 		// Apply simulation for ground or flying enemies
 		if (!(isEvent(0, EB_Untargetable))) {
 			doSimulationGround(frameRate);
+			PC_TRACE_ENEMY_VEL("ground");
 		} else {
 			doSimulationFlying(frameRate);
 
@@ -2162,6 +2187,7 @@ void EnemyBase::collisionMapAndPlat(f32 frameRate)
 		mapMgr->traceMove(moveInfo, frameRate);
 
 		mCurrentVelocity = newVelocity;
+		PC_TRACE_ENEMY_VEL("mapTrace");
 
 		// Apply acceleration by converting the velocity to a direction,
 		// clamping it, and then setting the velocity again
@@ -2199,6 +2225,7 @@ void EnemyBase::collisionMapAndPlat(f32 frameRate)
 		if (platMgr && isEvent(0, EB_PlatformCollEnabled)) {
 			moveInfo.mVelocity = &mCurrentVelocity;
 			platMgr->traceMove(moveInfo, frameRate);
+			PC_TRACE_ENEMY_VEL("platTrace");
 
 			if (!mFloorTriangle) {
 				if (moveInfo.mFloorTriangle) {

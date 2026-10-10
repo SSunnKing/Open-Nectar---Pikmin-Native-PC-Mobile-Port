@@ -62,6 +62,8 @@ enum {
     PC_KEY_ACT_GYRO_RECENTER = 23,
     // Mod "Bomb Control": el amarillo con bomba la lanza al cursor o la suelta.
     PC_KEY_ACT_BOMB          = 24,
+    // Modo Speedrun: mantener 1 s reinicia la run (pc_speedrun.cpp).
+    PC_KEY_ACT_SPEEDRUN_RESET = 25,
     PC_KEY_ACT_COUNT
 };
 void pc_window_set_key_binding(int action, SDL_Scancode scancode);

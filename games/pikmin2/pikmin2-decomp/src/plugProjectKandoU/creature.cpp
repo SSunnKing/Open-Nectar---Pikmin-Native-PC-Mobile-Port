@@ -791,6 +791,27 @@ void Creature::resolveOneColl(CollPart* source, CollPart* dest, Vector3f& direct
 	if (!checkSum2) {
 		applyImpulse(pointSource, updatedVec1);
 		op->applyImpulse(pointDest, updatedVec2);
+#ifdef PIKI_PC_PORT
+		{
+			// Diagnóstico: impulso de colisión que dispara la velocidad.
+			Vector3f v1 = getVelocity();
+			Vector3f v2 = op->getVelocity();
+			if (!(fabsf(v1.y) <= 1.0e6f && fabsf(v2.y) <= 1.0e6f && fabsf(v1.x) <= 1.0e6f && fabsf(v2.x) <= 1.0e6f
+			      && fabsf(v1.z) <= 1.0e6f && fabsf(v2.z) <= 1.0e6f)) {
+				static int sReports = 0;
+				if (sReports < 20) {
+					sReports++;
+					fprintf(stderr,
+					        "[VEL] impulse %s(m=%g v=%g,%g,%g) <-> %s(m=%g v=%g,%g,%g) sepDot=%g totalMass2=%g posFac=%g normal=(%g,%g,%g) "
+					        "velSrc=(%g,%g,%g) velDst=(%g,%g,%g)\n",
+					        getCreatureName(), mMass, v1.x, v1.y, v1.z, op->getCreatureName(), op->mMass, v2.x, v2.y, v2.z, sepDot,
+					        totalMass2, posFac, collisionNormal.x, collisionNormal.y, collisionNormal.z, velAtSource.x, velAtSource.y,
+					        velAtSource.z, velAtDest.x, velAtDest.y, velAtDest.z);
+					fflush(stderr);
+				}
+			}
+		}
+#endif
 		return;
 	}
 

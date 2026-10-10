@@ -10,6 +10,8 @@
 namespace JStudio {
 extern f64 gPcJStudioSubFrame;
 }
+extern "C" int pc_settings_get_hide_olimar_text(void);
+extern "C" int pc_speedrun_active(void);
 #endif
 #include "Screen/Game2DMgr.h"
 #include "Game/GameSystem.h"
@@ -32,6 +34,43 @@ extern f64 gPcJStudioSubFrame;
 
 static const u32 padding[]    = { 0, 0, 0 };
 static const char className[] = "moviePlayer";
+
+#ifdef PIKI_PC_PORT
+/**
+ * Mod "Hide Drake Texts": demos de historia cuyo único contenido es la Drake
+ * explicando algo (primer Pikmin de cada color, cuevas, compuertas, néctar,
+ * aerosoles, mejoras...). Se saltan solas en cuanto cargan, sin mostrarse.
+ * Quedan fuera las de argumento y las que mueven nave/cebollas a la vista
+ * (llegadas, cebollas que despiertan, agujeros que aparecen, Louie).
+ */
+static const char* const sPcDrakeTextDemos[] = {
+	"g01_pick_me",        "g03_meet_redpikmin",  "g04_find_treasure",     "g05_find_cave",     "g05_find_hole",
+	"g07_cv_gamestart",   "g08_first_return",    "g09_first_sunset",      "g0A_cv_find_hole",  "g0B_cv_find_fountain",
+	"g16_",               "g18_find_gate",       "g19_find_rock",         "g1A_red_doping",    "g1B_black_doping",
+	"g1F_meet_yellow",    "g21_meet_blue",       "g24_meet_black",        "g26_inout_black",   "g27_meet_white",
+	"g29_inout_white",    "g2B_white_poison",    "g2C_inout_red",         "g2D_red_extract",   "g2E_black_extract",
+	"g32_get_map",        "g33_camera_demo",     "g34_yellow_extract",    "g38_find_whitepom", "g39_find_blackpom",
+	"s11_dope",           "x02_watch_red",       "x04_exp_y",             "x06_join",          "x07_first_recovery",
+	"x08_cv_suck_carcass", "x09_exp_detector",   "x13_exp_leafchappy",    "x15_exp_x",         "x16_hiba",
+	"x17_join_guide",     "x18_exp_pellet",      "x20_blackman",
+};
+
+static bool pcIsDrakeTextDemo(Game::MovieConfig* config)
+{
+	if (!config || !Game::gameSystem || !Game::gameSystem->isStoryMode() || !pc_settings_get_hide_olimar_text()) {
+		return false;
+	}
+	for (u32 i = 0; i < sizeof(sPcDrakeTextDemos) / sizeof(sPcDrakeTextDemos[0]); i++) {
+		if (config->is(const_cast<char*>(sPcDrakeTextDemos[i]))) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// La demo en curso se salta sola (no se dibuja su texto ni se aclara la pantalla).
+static bool sPcAutoSkipDemo = false;
+#endif
 
 namespace Game {
 
@@ -565,6 +604,12 @@ bool MoviePlayer::update(Controller* input1, Controller* input2)
 			setPauseAndDraw(mCurrentConfig);
 			mDemoState = DEMOSTATE_Playing;
 			u16 flag   = mCurrentConfig->mDrawType;
+#ifdef PIKI_PC_PORT
+			sPcAutoSkipDemo = pcIsDrakeTextDemo(mCurrentConfig);
+			if (sPcAutoSkipDemo) {
+				// Sigue en negro: skip() la cierra en el primer frame de juego.
+			} else
+#endif
 			if (!(flag & 4) && flag & 2) {
 				gameSystem->startFadein(0.5f);
 			} else {
@@ -712,6 +757,12 @@ bool MoviePlayer::update(Controller* input1, Controller* input2)
 			mObjectSystem->entry();
 		}
 #endif
+#ifdef PIKI_PC_PORT
+		if (sPcAutoSkipDemo && mDemoState == DEMOSTATE_Playing && mStudioControl) {
+			sPcAutoSkipDemo = false;
+			skip();
+		}
+#endif
 		if (mDemoState == DEMOSTATE_Playing && mFlags.isSet(MVP_DoSkip) && !mStudioControl->mSuspend) {
 			if (((input1->getButtonDown() & Controller::PRESS_ABXYLRZ) || (input2 && (input2->getButton() & Controller::PRESS_ABXYLRZ)))
 			    && mCurrentConfig->isSkippable()) {
@@ -719,7 +770,15 @@ bool MoviePlayer::update(Controller* input1, Controller* input2)
 
 			} else if (((input1->getButtonDown() & Controller::PRESS_START)
 			            || (input2 && (input2->getButtonDown() & Controller::PRESS_START)))
+#ifdef PIKI_PC_PORT
+			           // Port: Start salta cualquier demo, como en Pikmin 1. El
+			           // vaciado de Finishing ejecuta el resto del guion, así que
+			           // nave, cebollas y capitanes quedan donde los deja el final.
+			           // En Speedrun, solo lo que se salta en GameCube.
+			           && (!pc_speedrun_active() || !mCurrentConfig->isNeverSkippable())) {
+#else
 			           && !mCurrentConfig->isNeverSkippable()) {
+#endif
 				skip();
 			}
 		}
@@ -733,7 +792,7 @@ bool MoviePlayer::update(Controller* input1, Controller* input2)
  */
 void MoviePlayer::draw(Graphics& gfx)
 {
-	if (isFlag(MVP_IsActive) && mTextControl) {
+	if (isFlag(MVP_IsActive) && mTextControl PIKI_PC_ONLY(&& !pcIsDrakeTextDemo(mCurrentConfig))) {
 		gfx.mOrthoGraph.setPort();
 		mTextControl->draw(gfx);
 	}

@@ -1,3 +1,7 @@
+#ifdef PIKI_PC_PORT
+#include "pc_speedrun.h"
+#endif
+#include "GameFlow.h"
 #include "Dolphin/rand.h"
 #include "efx/TEnemyApsmoke.h"
 #include "Game/Cave/RandMapMgr.h"
@@ -250,6 +254,14 @@ int VsGameSection::getCurrFloor()
  */
 bool VsGameSection::doUpdate()
 {
+#ifdef PIKI_PC_PORT
+	// Reset rápido del modo Speedrun (Desafío): como en la historia, se termina
+	// la sección y la de juego siguiente empieza otra run (que vuelve aquí).
+	if (!mIsMenuRunning && pc_speedrun_take_reset()) {
+		GameFlow::mActiveSectionFlag = GameFlow::SN_SingleGame;
+		mIsMenuRunning               = true;
+	}
+#endif
 	if (mIsMenuRunning) {
 		mIsMainActive = false;
 		return false;

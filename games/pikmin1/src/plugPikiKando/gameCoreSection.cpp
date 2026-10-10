@@ -2113,23 +2113,48 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 // cache needed for a valid result do not exist until initStage has finished.
 static void pcApplyPendingTutorialSkip()
 {
+	// TEMP diagnóstico: latido del update de GameCore.
+	if (getenv("PIKMIN_SR_DEBUG")) {
+		static Uint32 last = 0;
+		if (SDL_GetTicks() - last > 2000) {
+			last = SDL_GetTicks();
+			fprintf(stderr, "[PC] tutorial skip tick: pending=%d tutorial=%d\n", int(pc_tutorial_skip_pending()),
+			        int(playerState->isTutorial()));
+		}
+	}
 	if (!pc_tutorial_skip_pending()) {
 		return;
 	}
+	// TEMP diagnóstico (speedrun F11): por qué no se aplica, una vez por cambio.
+	static int lastWhy = -1;
+	auto trace = [](int why) {
+		static const char* const kWhy[] = { "challenge or not tutorial (cleared)", "no stage / not Impact Site", "movie",
+			                                "tutorial text", "day end active", "day end triggered", "no red onion" };
+		if (why != lastWhy) fprintf(stderr, "[PC] tutorial skip blocked: %s\n", kWhy[why]);
+		lastWhy = why;
+	};
 	if (gameflow.mIsChallengeMode || !playerState->isTutorial()) {
+		trace(0);
 		pc_tutorial_skip_clear_pending();
 		return;
 	}
 	if (!flowCont.mCurrentStage || flowCont.mCurrentStage->mStageID != STAGE_Practice
 	    || gameflow.mMoviePlayer->mIsActive || gameflow.mIsTutorialTextActive
 	    || gameflow.mIsDayEndActive || gameflow.mIsDayEndTriggered) {
+		trace(!flowCont.mCurrentStage || flowCont.mCurrentStage->mStageID != STAGE_Practice ? 1
+		      : gameflow.mMoviePlayer->mIsActive                                       ? 2
+		      : gameflow.mIsTutorialTextActive                                         ? 3
+		      : gameflow.mIsDayEndActive                                               ? 4
+		                                                                               : 5);
 		return;
 	}
 
 	GoalItem* onion = itemMgr ? itemMgr->getContainer(Red) : nullptr;
 	if (!onion) {
+		trace(6);
 		return; // Stage objects are not ready yet; retry on the next frame.
 	}
+	lastWhy = -1;
 
 	// Stop the tutorial boot animation before it emits its first seed; the
 	// canonical post-tutorial inventory is supplied below instead.

@@ -184,6 +184,15 @@ bool pc_speedrun_intro_open_if_needed(void);
 bool pc_speedrun_intro_active(void);
 int  pc_speedrun_intro_result(void);
 void pc_speedrun_intro_draw(void);
+// Splits visibles bajo el reloj del modo Speedrun (1-10).
+int  pc_settings_get_speedrun_splits_shown(void);
+// Categoría del modo Speedrun (PC_SR_CAT_* de pc_speedrun.h).
+int  pc_settings_get_speedrun_category(void);
+// LiveSplit (pc_livesplit.h): opción, ocultar el reloj propio, host y puerto.
+int  pc_settings_get_speedrun_livesplit(void);
+int  pc_settings_get_speedrun_ls_hide_clock(void);
+const char* pc_settings_get_speedrun_ls_host(void);
+int  pc_settings_get_speedrun_ls_port(void);
 // Explicación del modo Randomizer al elegirlo en el título. CONTINUE = seguir
 // a capitán y slots, BACK = volver al título.
 enum { PC_RANDOMIZER_INTRO_PENDING = 0, PC_RANDOMIZER_INTRO_CONTINUE = 1, PC_RANDOMIZER_INTRO_BACK = 2 };

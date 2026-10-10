@@ -1,3 +1,6 @@
+#ifdef PIKI_PC_PORT
+#include "pc_speedrun.h"
+#endif
 #include "Game/BirthMgr.h"
 #include "Game/DeathMgr.h"
 #include "Game/GameSystem.h"
@@ -44,6 +47,9 @@ CaveResultState::CaveResultState()
 void CaveResultState::init(SingleGameSection* section, StateArg* arg)
 {
 	playData->mCavePokoCount = 0;
+#ifdef PIKI_PC_PORT
+	pc_speedrun_on_cave_exit(section->mCaveID.getID());
+#endif
 	gameSystem->detachObjectMgr(generalEnemyMgr);
 	gameSystem->detachObjectMgr(mapMgr);
 	gameSystem->setPause(true, "caver-init", 3);

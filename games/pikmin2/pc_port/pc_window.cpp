@@ -4,6 +4,7 @@
 #include "pc_window.h"
 #include "pc_gyro.h"
 #include "pc_icon.h"
+#include "pc_speedrun.h"
 #if PIKI_PC_TOUCH
 #include "gl/pc_gfx.h"
 #include "touch/pc_touch.h"
@@ -219,6 +220,7 @@ static bool sMouseWarped = false;
 
 // Control mode
 static int sControlMode = PC_CONTROL_CLASSIC;
+static int effectiveControlMode() { return pc_speedrun_active() ? PC_CONTROL_CLASSIC : sControlMode; }
 static float sMouseSensitivity = 2.0f;
 static bool sSettingsMenuOpen = false;
 
@@ -256,6 +258,7 @@ const SDL_Scancode kDefaultKeyBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_LOCKON      */ SDL_SCANCODE_R, // F chocaba con C-Stick Left
     /* PC_KEY_ACT_FIRSTPERSON */ SDL_SCANCODE_V,
     /* PC_KEY_ACT_GYRO_RECENTER */ SDL_SCANCODE_UNKNOWN, // el giroscopio va en el mando
+    /* PC_KEY_ACT_SPEEDRUN_RESET */ SDL_SCANCODE_F5,
 };
 
 SDL_Scancode pc_window_default_key_binding2(int action) {
@@ -293,6 +296,7 @@ const int kDefaultGamepadBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_LOCKON      */ SDL_CONTROLLER_BUTTON_RIGHTSTICK,
     /* PC_KEY_ACT_FIRSTPERSON */ SDL_CONTROLLER_BUTTON_LEFTSTICK,
     /* PC_KEY_ACT_GYRO_RECENTER */ -1, // sin botón libre por defecto; se asigna en Controls
+    /* PC_KEY_ACT_SPEEDRUN_RESET */ -1, // sin botón libre por defecto; se asigna en Controls
 };
 
 // Action names for UI display.
@@ -302,7 +306,7 @@ static const char* kKeyActionNames[PC_KEY_ACT_COUNT] = {
     "Stick Up", "Stick Down", "Stick Left", "Stick Right",
     "C-Stick Up", "C-Stick Down", "C-Stick Left", "C-Stick Right",
     "Swarm to cursor",
-    "Lock-On", "First Person", "Gyro Recenter",
+    "Lock-On", "First Person", "Gyro Recenter", "Speedrun Reset",
 };
 
 static void initKeyBindings() {
@@ -578,7 +582,7 @@ void pc_window_message_control_label(char tag, char* buf, unsigned bufSize)
 	snprintf(buf, bufSize, "%s", pc_window_binding_name(pc_window_get_key_binding(action)));
 
 	// Mouse buttons are fixed conveniences (not F1 remaps): L=A, R=B, M=Z.
-	if (sControlMode != PC_CONTROL_CLASSIC) {
+	if (effectiveControlMode() != PC_CONTROL_CLASSIC) {
 		const char* mouse = mouseButtonAliasForTag(tag);
 		if (mouse) {
 			const size_t used = strlen(buf);
@@ -1052,7 +1056,7 @@ void pc_window_poll_events(PADStatus* pad) {
                 // Issue #52: Escape (or the OS) can drop the mouse out of
                 // relative mode, which froze the cursor until the option was
                 // toggled. A click in the window takes it back.
-                if (!sSettingsMenuOpen && sControlMode == PC_CONTROL_MOUSE_CURSOR && !sMouseRelativeMode
+                if (!sSettingsMenuOpen && effectiveControlMode() == PC_CONTROL_MOUSE_CURSOR && !sMouseRelativeMode
                     && event.button.which != SDL_TOUCH_MOUSEID) {
                     sMouseRelativeMode = true;
                     SDL_SetRelativeMouseMode(SDL_TRUE);
@@ -1110,7 +1114,7 @@ void pc_window_poll_events(PADStatus* pad) {
                 }
                 // Toggle relative mouse mode with Tab key
                 if (event.key.keysym.scancode == SDL_SCANCODE_TAB
-                    && sControlMode == PC_CONTROL_MOUSE_CURSOR && !sSettingsMenuOpen) {
+                    && effectiveControlMode() == PC_CONTROL_MOUSE_CURSOR && !sSettingsMenuOpen) {
                     sMouseRelativeMode = !sMouseRelativeMode;
                     SDL_SetRelativeMouseMode(sMouseRelativeMode ? SDL_TRUE : SDL_FALSE);
                     // Clear mouse deltas on relative mode toggle
@@ -1181,7 +1185,7 @@ void pc_window_poll_events(PADStatus* pad) {
     const Uint32 boundMouse = SDL_GetMouseState(NULL, NULL);
     // La segunda tecla con un clic solo cuenta fuera de Classic, como los clics
     // fijos que sustituye (en Classic el ratón no juega).
-    const bool mouseSecondOk = sControlMode != PC_CONTROL_CLASSIC;
+    const bool mouseSecondOk = effectiveControlMode() != PC_CONTROL_CLASSIC;
     auto held = [&](int action) {
         if (pc_window_binding_held(sKeyBindings[action], state, boundMouse)) return true;
         const int second = sKeyBindings2[action];
@@ -1309,7 +1313,7 @@ void pc_window_poll_events(PADStatus* pad) {
     // ── Mouse Input (Virtual Cursor) ──
     // In mouse modes: mouse controls virtual cursor (separate from movement stick)
     // Movement stick (stickX/stickY) comes from WASD or gamepad left stick
-    if (sControlMode != PC_CONTROL_CLASSIC) {
+    if (effectiveControlMode() != PC_CONTROL_CLASSIC) {
         int mouseX, mouseY;
         Uint32 mouseState = 0;
         bool isRelative = sMouseRelativeMode;
@@ -1724,7 +1728,7 @@ void pc_window_set_settings_menu_open(bool open) {
     }
 
     SDL_ShowCursor(SDL_DISABLE);
-    sMouseRelativeMode = sControlMode == PC_CONTROL_MOUSE_CURSOR;
+    sMouseRelativeMode = effectiveControlMode() == PC_CONTROL_MOUSE_CURSOR;
     SDL_SetRelativeMouseMode(sMouseRelativeMode ? SDL_TRUE : SDL_FALSE);
     
     // Consume any pending relative mouse motion after menu closes

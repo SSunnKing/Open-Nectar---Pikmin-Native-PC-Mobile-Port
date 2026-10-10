@@ -3,6 +3,7 @@ extern "C" {
 int pc_p2_permadeath_active(void);
 void pc_p2_rules_erase_current_save(void);
 }
+#include "pc_speedrun.h"
 #endif
 #include "Game/Entities/BlackMan.h"
 #include "Game/GameConfig.h"
@@ -168,6 +169,22 @@ void CaveState::exec(SingleGameSection* game)
 	if (game->mCurrentState->mId != mId) {
 		return;
 	}
+
+#ifdef PIKI_PC_PORT
+	// Atajo de prueba del modo Speedrun (PIKMIN_SR_DEBUG=1): F7 sale de la
+	// cueva con resultado, como al acabar la cinemática del géiser
+	// (onMovieDone, "s0C_cv_escape"). El split lo pone CaveResultState::init.
+	if (pc_speedrun_debug_take_cave_exit()) {
+		gameSystem->resetFlag(GAMESYS_IsGameWorldActive);
+		PSMCancelToPauseOffMainBgm();
+		moviePlayer->clearSuspendedDemo();
+		pikiMgr->caveSaveAllPikmins(true, true);
+		CaveResultArg arg;
+		arg.mGameState = MapEnter_CaveGeyser;
+		transit(game, SGS_CaveResult, &arg);
+		return;
+	}
+#endif
 
 	game->updateCaveScreen();
 

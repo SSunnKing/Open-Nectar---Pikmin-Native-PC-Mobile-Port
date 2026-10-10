@@ -22,6 +22,7 @@
 #include "zen/ogTitle.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
+#include "pc_speedrun.h"
 #endif
 
 class TitleSetupSection;
@@ -815,6 +816,9 @@ void TitlesSection::init()
 {
 #if defined(PIKI_PC_PORT)
 	pc_gfx_set_dof_focus(0.0f);
+	// Volver al título acaba cualquier run de Speedrun (o práctica): el modo
+	// se vuelve a elegir desde el menú.
+	pc_speedrun_set_active(false);
 #endif
 	Node::init("<TitlesSection>");
 	Jac_BackDVDBuffer();

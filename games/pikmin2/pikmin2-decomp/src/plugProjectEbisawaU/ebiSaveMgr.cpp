@@ -1,3 +1,6 @@
+#ifdef PIKI_PC_PORT
+#include "pc_speedrun.h"
+#endif
 #include "ebi/Save.h"
 #include "Controller.h"
 #include "ebi/Utility.h"
@@ -717,6 +720,15 @@ TMgr::TMgr()
  */
 void TMgr::start()
 {
+#ifdef PIKI_PC_PORT
+	// Speedrun: una run es una sola sentada y no guarda. Termina como si se
+	// hubiera elegido "no guardar", que todos los que la abren tratan como
+	// seguir jugando.
+	if (pc_speedrun_active()) {
+		goEnd_(End_SelectNoSave);
+		return;
+	}
+#endif
 	if (!mIsAutosaveOn) {
 		mStateMachine.transit(this, DoYouSave, nullptr);
 	} else {

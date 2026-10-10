@@ -1,5 +1,10 @@
 #ifdef PIKI_PC_PORT
 extern "C" void pc_p2_rules_begin_new_run(void);
+extern "C" void pc_p2_rules_set_pending(int permadeath, int hard);
+#include "pc_speedrun.h"
+#include "Game/MemoryCard/Mgr.h"
+#include "stream.h"
+#include "GameFlow.h"
 #include "settings/pc_settings.h"
 #endif
 #include "Game/MoviePlayer.h"
@@ -12,6 +17,7 @@ extern "C" int pc_gfx_p2_tile_edges(float gxY0, float gxY1, float period, float 
 extern "C" void pc_gfx_p2_sides_static(int capture);
 extern "C" void pc_gfx_p2_sides_static_reset(void);
 static int sPcSidesFrames = 0;
+static bool sPcSpeedrunRestart = false; // reset rápido: otra run sin el menú del modo
 #endif
 #include "Game/GameConfig.h"
 #include "Game/AIConstants.h"
@@ -103,7 +109,18 @@ void FileState::exec(SingleGameSection* game)
 
 		mLoadDelegate = new Delegate<FileState>(this, &FileState::dvdload);
 		game->loadSync(mLoadDelegate, false);
+#ifdef PIKI_PC_PORT
+		// Speedrun (opción del título): sin selector de ranuras, el menú del modo;
+		// tras un reset rápido, otra run directamente.
+		sPcSpeedrunRestart = pc_speedrun_active() && pc_speedrun_take_restart();
+		if (pc_speedrun_active() && !sPcSpeedrunRestart) {
+			pc_speedrun_menu_open();
+		} else if (!pc_speedrun_active()) {
+			mFSMgr->start();
+		}
+#else
 		mFSMgr->start();
+#endif
 		mIsNotInitialized = false;
 
 	} else if (mMainHeap) {
@@ -128,6 +145,48 @@ void FileState::exec(SingleGameSection* game)
 		if (pc_erased_notice_active()) {
 			return;
 		}
+		if (pc_speedrun_active()) {
+			if (!sPcSpeedrunRestart && pc_speedrun_menu_active()) {
+				return;
+			}
+			if ((sPcSpeedrunRestart || pc_speedrun_menu_result() == PC_SPEEDRUN_MENU_START)
+			    && pc_speedrun_category_is_challenge()) {
+				// Desafío: la sección pasa a ser la del Modo Desafío; el reloj
+				// espera a que se elija el primer nivel.
+				sPcSpeedrunRestart = false;
+				pc_speedrun_start_timer();
+				GameFlow::mActiveSectionFlag = GameFlow::SN_ChallengeGame;
+				game->flow_goto_title();
+				return;
+			}
+			if (sPcSpeedrunRestart || pc_speedrun_menu_result() == PC_SPEEDRUN_MENU_START) {
+				sPcSpeedrunRestart = false;
+				// Una run es una sola sentada: partida nueva sin tarjeta, por el
+				// mismo camino que "jugar sin guardar" (FSMState_CardError), y
+				// el guardado se salta (ebi::Save::TMgr::start). Speedrun es Normal.
+				static_cast<Game::MemoryCard::Mgr*>(sys->mCardMgr)->loadPlayerForNoCard(0);
+				gameSystem->mTimeMgr->mDayCount = 0;
+				// Práctica de un día N > 1: la partida tal como empezaba ese día en
+				// una run (punto de práctica); PlayData::read pone también el día.
+				if (pc_speedrun_practice_day() > 1) {
+					u8* buffer = new u8[PLAYER_FILE_SIZE];
+					if (pc_speedrun_practice_point_load(pc_speedrun_practice_day(), buffer, PLAYER_FILE_SIZE)) {
+						RamStream stream(buffer, PLAYER_FILE_SIZE);
+						playData->read(stream);
+					} else {
+						pc_speedrun_set_practice_day(1);
+					}
+					delete[] buffer;
+				}
+				pc_p2_rules_set_pending(0, 0);
+				pc_p2_rules_begin_new_run();
+				pc_speedrun_start_timer();
+				startGame(game);
+			} else {
+				game->flow_goto_title();
+			}
+			return;
+		}
 #endif
 		mFSMgr->update();
 
@@ -141,6 +200,7 @@ void FileState::exec(SingleGameSection* game)
 				gameSystem->mTimeMgr->mDayCount = 0;
 #ifdef PIKI_PC_PORT
 				pc_p2_rules_begin_new_run();
+				pc_speedrun_start_timer();
 #endif
 				startGame(game);
 				break;

@@ -10,6 +10,9 @@
 #include "efx/TEnemyDive.h"
 #include "nans.h"
 #include "Radar.h"
+#ifdef PIKI_PC_PORT
+extern "C" int pc_settings_get_whistle_pluck(void);
+#endif
 #include "SoundID.h"
 
 namespace Game {
@@ -651,7 +654,12 @@ bool Item::interactFue(InteractFue& whistle)
 {
 	if (canPullout() != false && isAlive()) {
 		Navi* navi = static_cast<Navi*>(whistle.mCreature);
+#ifdef PIKI_PC_PORT
+		// Mod "Whistle Pluck": el silbato arranca brotes sin la mejora.
+		if (!navi->getOlimarData()->hasItem(OlimarData::ODII_ProfessionalNoisemaker) && !pc_settings_get_whistle_pluck()) {
+#else
 		if (!navi->getOlimarData()->hasItem(OlimarData::ODII_ProfessionalNoisemaker)) {
+#endif
 			return false;
 		}
 

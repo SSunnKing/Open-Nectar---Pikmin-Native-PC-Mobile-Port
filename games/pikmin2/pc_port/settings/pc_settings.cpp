@@ -53,6 +53,8 @@
 #include "Texture.h"
 #endif
 #include "pc_achievements.h"
+#include "pc_speedrun.h"
+#include "pc_livesplit.h"
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
 #endif
@@ -181,6 +183,8 @@ struct PcConfig {
     int noTrip = 0;             // los Pikmin no tropiezan al correr
     int onionStep10 = 0;        // Y + arriba/abajo en la cebolla mueve de 10 en 10
     int instantWhistle = 0;     // los Pikmin silbados se unen sin la reacción de girarse
+    int whistlePluck = 0;       // el silbato arranca los brotes bajo el cursor
+    int hideOlimarText = 0;     // sin los textos de la Drake (tutoriales y avisos)
     // Cheats.
     int pikiInvincible = 0;     // los Pikmin no mueren (ataques, fuego, agua, gas, aplastados)
     int allFlowers = 0;         // todo Pikmin lleva flor
@@ -245,6 +249,16 @@ struct PcConfig {
     // variable: the launcher starts the game as a child process, so an
     // exported variable does not reliably reach it.
     int debugKeys = 0;
+    // Modo Speedrun (opción del título): explicación ya vista, categoría
+    // (PC_SR_CAT_*) y splits visibles bajo el reloj (1-10).
+    int speedrunIntroHidden = 0;
+    int speedrunCategory = 0;
+    int speedrunSplitsShown = 5;
+    // Cliente del LiveSplit Server (pc_livesplit.cpp): apagado por defecto.
+    int speedrunLiveSplit = 0;
+    int speedrunLsHideClock = 0; // con LiveSplit conectado, sin reloj ni splits propios
+    char speedrunLsHost[64] = "127.0.0.1";
+    int speedrunLsPort = 16834;
     // Texture pack (PLAN_TEXTURAS_HD fase 2): nombre de carpeta bajo
     // Load/Textures/ que se indexa al arrancar. Se aplica reiniciando: el
     // índice del pack se construye una sola vez, en pc_texpack_init.
@@ -291,6 +305,8 @@ struct PcConfig {
         noTrip = 0;
         onionStep10 = 0;
         instantWhistle = 0;
+        whistlePluck = 0;
+        hideOlimarText = 0;
         pikiInvincible = 0;
         allFlowers = 0;
         carrySpeedPct = 100;
@@ -1163,6 +1179,8 @@ void saveConfig() {
     out << "noTrip = " << sConfig.noTrip << "\n";
     out << "onionStep10 = " << sConfig.onionStep10 << "\n";
     out << "instantWhistle = " << sConfig.instantWhistle << "\n";
+    out << "whistlePluck = " << sConfig.whistlePluck << "\n";
+    out << "hideOlimarText = " << sConfig.hideOlimarText << "\n";
     out << "pikiInvincible = " << sConfig.pikiInvincible << "\n";
     out << "allFlowers = " << sConfig.allFlowers << "\n";
     out << "carrySpeedPct = " << sConfig.carrySpeedPct << "\n";
@@ -1200,6 +1218,13 @@ void saveConfig() {
     out << "brightness = " << sConfig.brightness << "\n";
     out << "saturation = " << sConfig.saturation << "\n";
     out << "debugKeys = " << sConfig.debugKeys << "\n";
+    out << "speedrunIntroHidden = " << sConfig.speedrunIntroHidden << "\n";
+    out << "speedrunCategory = " << sConfig.speedrunCategory << "\n";
+    out << "speedrunSplitsShown = " << sConfig.speedrunSplitsShown << "\n";
+    out << "speedrunLiveSplit = " << sConfig.speedrunLiveSplit << "\n";
+    out << "speedrunLsHideClock = " << sConfig.speedrunLsHideClock << "\n";
+    out << "speedrunLsHost = " << sConfig.speedrunLsHost << "\n";
+    out << "speedrunLsPort = " << sConfig.speedrunLsPort << "\n";
     out << "texturePack = " << sConfig.texturePack << "\n";
     out << "texturePackEnabled = " << sConfig.texturePackEnabled << "\n";
     out << "hdModelsDisabled = " << sConfig.hdModelsDisabled << "\n";
@@ -1366,6 +1391,12 @@ void loadConfig() {
         else if (key == "instantWhistle") {
             sConfig.instantWhistle = atoi(val.c_str()) ? 1 : 0;
         }
+        else if (key == "whistlePluck") {
+            sConfig.whistlePluck = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "hideOlimarText") {
+            sConfig.hideOlimarText = atoi(val.c_str()) ? 1 : 0;
+        }
         else if (key == "pikiInvincible") sConfig.pikiInvincible = atoi(val.c_str()) ? 1 : 0;
         else if (key == "allFlowers") sConfig.allFlowers = atoi(val.c_str()) ? 1 : 0;
         else if (key == "carrySpeedPct") sConfig.carrySpeedPct = clampSpeedPct(atoi(val.c_str()));
@@ -1464,6 +1495,27 @@ void loadConfig() {
         }
         else if (key == "debugKeys") {
             sConfig.debugKeys = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "speedrunIntroHidden") {
+            sConfig.speedrunIntroHidden = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "speedrunCategory") {
+            sConfig.speedrunCategory = std::clamp(atoi(val.c_str()), 0, PC_SR_CAT_COUNT - 1);
+        }
+        else if (key == "speedrunSplitsShown") {
+            sConfig.speedrunSplitsShown = std::clamp(atoi(val.c_str()), 1, 10);
+        }
+        else if (key == "speedrunLiveSplit") {
+            sConfig.speedrunLiveSplit = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "speedrunLsHideClock") {
+            sConfig.speedrunLsHideClock = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "speedrunLsHost") {
+            if (!val.empty()) snprintf(sConfig.speedrunLsHost, sizeof(sConfig.speedrunLsHost), "%s", val.c_str());
+        }
+        else if (key == "speedrunLsPort") {
+            sConfig.speedrunLsPort = std::clamp(atoi(val.c_str()), 1, 65535);
         }
         else if (key == "texturePack") {
             const bool safe = !val.empty() && val.size() < 64
@@ -1612,6 +1664,7 @@ void latchKeys() {
 // prompt has to read input from inside this function: keys are latched right
 // after it returns, so anything polling later in the frame sees no edges.
 void pcNewGamePromptInput();
+void pcSpeedrunMenuInput();
 void pcErasedNoticeInput();
 void pcPlayerCountPromptInput();
 void pcDevAssignPromptInput();
@@ -1832,6 +1885,15 @@ void pollMenuInput() {
         pcNewGamePromptInput();
         return;
     }
+#if PIKI_P2_HOST
+    if (pc_speedrun_menu_active()) {
+#if PIKI_PC_TOUCH
+        pc_touch_claim_game_menu();
+#endif
+        pcSpeedrunMenuInput();
+        return;
+    }
+#endif
     if (pc_playercount_prompt_active()) {
 #if PIKI_PC_TOUCH
         pc_touch_claim_game_menu();
@@ -2705,6 +2767,12 @@ void modsRowChange(int row, bool left, bool right) {
     }
     else if (row == 25) {
         if (left || right) sPending.instantWhistle = sPending.instantWhistle ? 0 : 1;
+    }
+    else if (row == 34) {
+        if (left || right) sPending.whistlePluck = sPending.whistlePluck ? 0 : 1;
+    }
+    else if (row == 36) {
+        if (left || right) sPending.hideOlimarText = sPending.hideOlimarText ? 0 : 1;
     }
     // Cheats (26-32). Hard los anula, como la vida y el día.
     else if (row >= 26 && row <= 32) {
@@ -4791,6 +4859,415 @@ void pc_newgame_prompt_draw(void)
 
     drawHelpLine(panelX + panelW / 2, panelY + panelH - 46, "Arrows: move    A: select    B: back", dim, panelW - 60);
 }
+
+// ─── Menú del modo Speedrun de Pikmin 2 ───
+//
+// Lo abre la selección de partida al entrar por la opción Speedrun del
+// título. Una run es una sola sentada: no hay ranuras ni guardado. Start Run
+// empieza la partida y el reloj; B vuelve al título. Mismo estilo que la
+// ventana New Game (placas y fuente del atlas de Pikmin 2).
+namespace {
+enum SrPage { SR_Menu, SR_How, SR_Settings, SR_Times, SR_ConfirmReset };
+enum SrRow { SRM_Start, SRM_Category, SRM_Practice, SRM_Times, SRM_How, SRM_Settings, SRM_Splits, SRM_LiveSplit, SRM_LsHideClock };
+const int kSrMainRows[]     = { SRM_Start, SRM_Category, SRM_Practice, SRM_Times, SRM_How, SRM_Settings };
+const int kSrSettingsRows[] = { SRM_Splits, SRM_LiveSplit, SRM_LsHideClock };
+const char* const kSrRowLabels[] = { "Start Run", "Category", "Practice", "Best Times", "How It Works", "Settings",
+                                     "Splits shown", "LiveSplit", "Hide game clock" };
+// Posición de una fila en la página principal (para volver a ella).
+int srMainIndex(int row)
+{
+    for (int i = 0; i < int(sizeof(kSrMainRows) / sizeof(kSrMainRows[0])); i++)
+        if (kSrMainRows[i] == row) return i;
+    return 0;
+}
+// Aviso de la exportación a LiveSplit, unos segundos en Best Times.
+char   sSrExportMsg[96] = "";
+Uint32 sSrExportMsgAt   = 0;
+
+bool sSrMenuOpen   = false;
+bool sSrMenuArmed  = false; // como New Game: espera a soltar lo que abrió el menú
+int  sSrMenuResult = PC_SPEEDRUN_MENU_PENDING;
+int  sSrPage       = SR_Menu;
+int  sSrSel        = 0;
+
+const int kSrPanelW = 560;
+const int kSrRowH   = 52;
+const int kSrBoxW   = 300;
+const int kSrBoxH   = 40;
+
+const int* srRows(int& count)
+{
+    if (sSrPage == SR_Settings) {
+        count = int(sizeof(kSrSettingsRows) / sizeof(kSrSettingsRows[0]));
+        return kSrSettingsRows;
+    }
+    count = int(sizeof(kSrMainRows) / sizeof(kSrMainRows[0]));
+    return kSrMainRows;
+}
+int srPanelH(int count) { return 84 + count * kSrRowH + 70; }
+int srRowY(int panelY, int i) { return panelY + 76 + i * kSrRowH; }
+
+void srCategoryStep(int dir)
+{
+    int c = sConfig.speedrunCategory;
+    c = (c + (dir < 0 ? PC_SR_CAT_COUNT - 1 : 1)) % PC_SR_CAT_COUNT;
+    sConfig.speedrunCategory = sPending.speedrunCategory = c;
+    saveConfig();
+}
+
+void srSplitsStep(int dir)
+{
+    int n = sConfig.speedrunSplitsShown;
+    n = dir < 0 ? std::max(1, n - 1) : dir > 0 ? std::min(10, n + 1) : n % 10 + 1;
+    sConfig.speedrunSplitsShown = sPending.speedrunSplitsShown = n;
+    saveConfig();
+}
+
+void pcSpeedrunMenuInput()
+{
+    if (!sSrMenuOpen) return;
+    if (!sSrMenuArmed) {
+        SDL_GameController* pad = pc_window_get_controller();
+        const bool padHeld = pad && (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A)
+                                     || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_B));
+        const Uint8* keys = SDL_GetKeyboardState(nullptr);
+        const bool keyHeld = keys && (keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_ESCAPE]);
+        sTouchTapPending = false;
+        if (padHeld || keyHeld || sTouchFrameButtons != 0) return;
+        sSrMenuArmed = true;
+        pc_menu_edge_reset();
+        return;
+    }
+
+    bool left   = keyWentDown(SDL_SCANCODE_LEFT)  || keyWentDown(SDL_SCANCODE_A);
+    bool right  = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
+    bool up     = keyWentDown(SDL_SCANCODE_UP)    || keyWentDown(SDL_SCANCODE_W);
+    bool down   = keyWentDown(SDL_SCANCODE_DOWN)  || keyWentDown(SDL_SCANCODE_S);
+    bool accept = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_SPACE);
+    bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE);
+    bool xPress = keyWentDown(SDL_SCANCODE_X);
+    bool yPress = keyWentDown(SDL_SCANCODE_E);
+
+    left   |= (sTouchFrameButtons & PAD_BUTTON_LEFT) != 0;
+    right  |= (sTouchFrameButtons & PAD_BUTTON_RIGHT) != 0;
+    up     |= (sTouchFrameButtons & PAD_BUTTON_UP) != 0;
+    down   |= (sTouchFrameButtons & PAD_BUTTON_DOWN) != 0;
+    accept |= (sTouchFrameButtons & PAD_BUTTON_A) != 0;
+    cancel |= (sTouchFrameButtons & PAD_BUTTON_B) != 0;
+    xPress |= (sTouchFrameButtons & PAD_BUTTON_X) != 0;
+    yPress |= (sTouchFrameButtons & PAD_BUTTON_Y) != 0;
+
+    int count = 0;
+    const int* rows = srRows(count);
+    if (sTouchTapPending) {
+        sTouchTapPending = false;
+        // En las listas, un toque elige la fila; en la explicación, vuelve.
+        if (sSrPage != SR_Menu && sSrPage != SR_Settings) {
+            accept = true;
+        } else {
+            int sw, sh;
+            ngScreen(&sw, &sh);
+            const float y = sTouchTapY * sh;
+            const int panelY = sh / 2 - srPanelH(count) / 2;
+            for (int i = 0; i < count; i++) {
+                const float rowY = float(srRowY(panelY, i));
+                if (y >= rowY - 6.0f && y <= rowY + kSrBoxH + 6.0f) {
+                    sSrSel = i;
+                    accept = true;
+                }
+            }
+        }
+    }
+
+    SDL_GameController* ctl = pc_window_get_controller();
+    if (ctl) {
+        if (padNavLeft(ctl))  left   = true;
+        if (padNavRight(ctl)) right  = true;
+        if (padNavUp(ctl))    up     = true;
+        if (padNavDown(ctl))  down   = true;
+        if (promptPadA(ctl))  accept = true;
+        if (promptPadB(ctl))  cancel = true;
+        // X e Y del mando por flanco, como las demás pulsaciones.
+        static bool sPadXWas = false, sPadYWas = false;
+        const bool padX = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_X) != 0;
+        const bool padY = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_Y) != 0;
+        if (padX && !sPadXWas) xPress = true;
+        if (padY && !sPadYWas) yPress = true;
+        sPadXWas = padX;
+        sPadYWas = padY;
+    }
+
+    if (sSrPage == SR_How) {
+        if (accept || cancel) {
+            sSrPage = SR_Menu;
+            sSrSel  = srMainIndex(SRM_How);
+        }
+        return;
+    }
+    if (sSrPage == SR_Times) {
+        if (yPress) {
+            // Exportar los splits a LiveSplit; el resultado sale en la página.
+            char name[64];
+            if (pc_speedrun_export_lss(name, sizeof(name)))
+                snprintf(sSrExportMsg, sizeof(sSrExportMsg), "Saved save/speedrun/%s", name);
+            else
+                snprintf(sSrExportMsg, sizeof(sSrExportMsg), "Nothing to export: finish a run first");
+            sSrExportMsgAt = SDL_GetTicks();
+        } else if (xPress && pc_speedrun_has_pb()) {
+            sSrPage = SR_ConfirmReset;
+        } else if (accept || cancel) {
+            sSrPage = SR_Menu;
+            sSrSel  = srMainIndex(SRM_Times);
+        }
+        return;
+    }
+    if (sSrPage == SR_ConfirmReset) {
+        if (accept) {
+            pc_speedrun_reset_records();
+            sSrPage = SR_Times;
+        } else if (cancel) {
+            sSrPage = SR_Times;
+        }
+        return;
+    }
+
+    if (up)   sSrSel = (sSrSel + count - 1) % count;
+    if (down) sSrSel = (sSrSel + 1) % count;
+    const int row = rows[sSrSel];
+    if (row == SRM_Category && (left || right || accept)) {
+        srCategoryStep(left ? -1 : 1);
+        pc_speedrun_set_practice_day(0); // los puntos de práctica son de cada categoría
+    } else if (row == SRM_Practice && (left || right || accept)) {
+        // Off, día 1 y los días con punto de práctica.
+        pc_speedrun_set_practice_day(pc_speedrun_next_practice_day(pc_speedrun_practice_day(), left ? -1 : 1));
+    } else if (row == SRM_Splits && (left || right || accept)) {
+        srSplitsStep(left ? -1 : right ? 1 : 0);
+    } else if ((row == SRM_LiveSplit || row == SRM_LsHideClock) && (left || right || accept)) {
+        int& v = row == SRM_LiveSplit ? sConfig.speedrunLiveSplit : sConfig.speedrunLsHideClock;
+        v = !v;
+        (row == SRM_LiveSplit ? sPending.speedrunLiveSplit : sPending.speedrunLsHideClock) = v;
+        saveConfig();
+    } else if (accept) {
+        if (row == SRM_Start) {
+            sSrMenuResult = PC_SPEEDRUN_MENU_START;
+            sSrMenuOpen   = false;
+        } else if (row == SRM_How) {
+            sSrPage = SR_How;
+        } else if (row == SRM_Times) {
+            sSrPage = SR_Times;
+            sSrExportMsg[0] = '\0';
+        } else if (row == SRM_Settings) {
+            sSrPage = SR_Settings;
+            sSrSel  = 0;
+        }
+    } else if (cancel) {
+        if (sSrPage == SR_Settings) {
+            sSrPage = SR_Menu;
+            sSrSel  = srMainIndex(SRM_Settings);
+        } else {
+            sSrMenuResult = PC_SPEEDRUN_MENU_BACK;
+            sSrMenuOpen   = false;
+        }
+    }
+}
+
+// Texto centrado, una línea por cada '\n'. Devuelve la y siguiente.
+int srCenteredLines(int cx, int y, const char* text, Colour c, int lineH)
+{
+    for (const char* p = text; *p;) {
+        const char* end = std::strchr(p, '\n');
+        char line[160];
+        snprintf(line, sizeof(line), "%.*s", end ? (int)(end - p) : (int)std::strlen(p), p);
+        f1Text(cx - f1TextW(line, 12) / 2, y, line, c, 12, 18);
+        y += lineH;
+        p = end ? end + 1 : p + std::strlen(p);
+    }
+    return y;
+}
+
+// Best Times de la categoría: PB con sus splits (hasta tres columnas: una run
+// completa de Pikmin 2 lleva un split por día y por cueva), Sum of Best y las
+// últimas runs.
+void srDrawTimes(DGXGraphics* gfx, int screenW, int screenH, bool confirm)
+{
+    const int panelW = 720, panelH = 440;
+    const int panelX = screenW / 2 - panelW / 2, panelY = screenH / 2 - panelH / 2;
+    drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
+    char header[64];
+    snprintf(header, sizeof(header), "Best Times: %s", pc_speedrun_category_name(pc_speedrun_category()));
+    drawPikminHeader(gfx, panelX, panelY, panelW, header);
+    const Colour title(255, 207, 75, 255), body(205, 239, 250, 255), dim(150, 170, 190, 255);
+    const int lx = panelX + 36, rx = panelX + panelW - 36;
+    auto right = [](int x, int y, const char* t, Colour c, int fw, int fh) { f1Text(x - f1TextW(t, fw), y, t, c, fw, fh); };
+    char buf[96], t[32];
+
+    if (!pc_speedrun_has_pb()) {
+        const char* none = "No finished runs yet.";
+        f1Text(panelX + panelW / 2 - f1TextW(none, 14) / 2, panelY + panelH / 2 - 20, none, body, 14, 20);
+    } else {
+        pc_speedrun_format_time(pc_speedrun_pb_ms(), t, sizeof(t));
+        f1Text(lx, panelY + 62, "Personal Best", title, 14, 20);
+        right(rx, panelY + 62, t, title, 14, 20);
+        if (pc_speedrun_category_is_challenge()) snprintf(buf, sizeof(buf), "%s", pc_speedrun_pb_date());
+        else snprintf(buf, sizeof(buf), "%d days   %s", pc_speedrun_pb_days(), pc_speedrun_pb_date());
+        f1Text(lx, panelY + 88, buf, dim, 10, 15);
+        pc_speedrun_format_time(pc_speedrun_sum_of_best(), t, sizeof(t));
+        snprintf(buf, sizeof(buf), "Sum of Best  %s", t);
+        right(rx, panelY + 88, buf, dim, 10, 15);
+
+        const int n = pc_speedrun_pb_split_count();
+        const int perCol = 12, cols = n > perCol * 2 ? 3 : n > perCol ? 2 : 1;
+        const int colW = (rx - lx) / (cols > 1 ? cols : 2);
+        for (int i = 0; i < n && i < perCol * 3; i++) {
+            const int cx = lx + (i / perCol) * colW, y = panelY + 114 + (i % perCol) * 16;
+            f1Text(cx, y, pc_speedrun_pb_split_name(i), body, 8, 13);
+            pc_speedrun_format_time(pc_speedrun_pb_split_ms(i), t, sizeof(t));
+            right(cx + colW - 12, y, t, body, 8, 13);
+        }
+        if (n > perCol * 3) {
+            snprintf(buf, sizeof(buf), "... %d more", n - perCol * 3);
+            right(rx, panelY + 114 + perCol * 16, buf, dim, 8, 13);
+        }
+
+        f1Text(lx, panelY + 322, "Recent Runs", title, 11, 16);
+        for (int i = 0; i < pc_speedrun_recent_count(); i++) {
+            unsigned long long ms = 0;
+            int days = 0;
+            const char* date = "";
+            pc_speedrun_recent(i, &ms, &days, &date);
+            pc_speedrun_format_time(ms, t, sizeof(t));
+            if (pc_speedrun_category_is_challenge()) snprintf(buf, sizeof(buf), "%s   %s", t, date);
+            else snprintf(buf, sizeof(buf), "%s   %dd   %s", t, days, date);
+            f1Text(lx + (i % 3) * ((rx - lx) / 3), panelY + 344 + (i / 3) * 18, buf, body, 8, 13);
+        }
+    }
+
+    if (confirm) {
+        drawHelpLine(panelX + panelW / 2, panelY + panelH - 46, "Erase all records of this category?    A: erase    B: keep",
+                     Colour(255, 160, 120, 255), panelW - 60);
+    } else if (sSrExportMsg[0] && SDL_GetTicks() - sSrExportMsgAt < 4000) {
+        drawHelpLine(panelX + panelW / 2, panelY + panelH - 46, sSrExportMsg, title, panelW - 60);
+    } else {
+        drawHelpLine(panelX + panelW / 2, panelY + panelH - 46,
+                     pc_speedrun_has_pb() ? "B: back    X: erase records    Y / E: export to LiveSplit" : "B: back",
+                     dim, panelW - 60);
+    }
+}
+} // namespace
+
+void pc_speedrun_menu_open(void)
+{
+    sSrMenuOpen   = true;
+    sSrMenuArmed  = false;
+    sSrMenuResult = PC_SPEEDRUN_MENU_PENDING;
+    sSrSel        = 0;
+    // La explicación se abre sola solo la primera vez.
+    sSrPage = sConfig.speedrunIntroHidden ? SR_Menu : SR_How;
+    if (!sConfig.speedrunIntroHidden) {
+        sConfig.speedrunIntroHidden = sPending.speedrunIntroHidden = 1;
+        saveConfig();
+    }
+    pc_menu_edge_reset();
+}
+
+bool pc_speedrun_menu_active(void) { return sSrMenuOpen; }
+
+int pc_speedrun_menu_result(void) { return sSrMenuResult; }
+
+void pc_speedrun_menu_draw(void)
+{
+    PC_SETTINGS_HOST_ALLOC();
+    if (!sSrMenuOpen) return;
+    if (!gsys || !gsys->mDGXGfx) return;
+    DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+    ensureFont();
+    if (!sFont) return;
+
+    int screenW, screenH;
+    ngScreen(&screenW, &screenH);
+    PcSettingsP2DFrame nativeFrame(screenW, screenH);
+    Matrix4f ortho;
+    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
+
+    const Colour gold(255, 207, 75, 255);
+    const Colour pale(205, 239, 250, 255);
+    const Colour dim(150, 170, 190, 255);
+
+    if (sSrPage == SR_How) {
+        const int panelW = 640, panelH = 420;
+        const int panelX = screenW / 2 - panelW / 2, panelY = screenH / 2 - panelH / 2;
+        drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
+        drawPikminHeader(gfx, panelX, panelY, panelW, "Speedrun");
+        srCenteredLines(panelX + panelW / 2, panelY + 70,
+                        "A real-time timer runs from New Game to the end\n"
+                        "of the category, loads included, with a split\n"
+                        "for every day and every cave.\n"
+                        "\n"
+                        "Everything plays like the original game: the\n"
+                        "gameplay mods in F1 are off, cutscenes only skip\n"
+                        "where they could on GameCube, and nothing is saved.\n"
+                        "\n"
+                        "Your best times are kept for each category, and\n"
+                        "Practice replays a single day from where a run got.",
+                        pale, 24);
+        drawHelpLine(panelX + panelW / 2, panelY + panelH - 46, "A / B: back", dim, panelW - 60);
+        return;
+    }
+    if (sSrPage == SR_Times || sSrPage == SR_ConfirmReset) {
+        srDrawTimes(gfx, screenW, screenH, sSrPage == SR_ConfirmReset);
+        return;
+    }
+
+    int count = 0;
+    const int* rows = srRows(count);
+    const int panelW = kSrPanelW, panelH = srPanelH(count);
+    const int panelX = screenW / 2 - panelW / 2, panelY = screenH / 2 - panelH / 2;
+    drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
+    drawPikminHeader(gfx, panelX, panelY, panelW, sSrPage == SR_Settings ? "Speedrun Settings" : "Speedrun");
+
+    for (int i = 0; i < count; i++) {
+        const int row  = rows[i];
+        const bool sel = i == sSrSel;
+        const int boxX = panelX + panelW / 2 - kSrBoxW / 2;
+        const int boxY = srRowY(panelY, i);
+        if (sel) f1Text(boxX - 16, boxY + 10, ">", gold, 14, 20);
+        if (pc_settings_p2d_active()) {
+            if (sel) pc_settings_p2d_plate(boxX, boxY, kSrBoxW, kSrBoxH, 2);
+            pc_settings_p2d_plate(boxX, boxY, kSrBoxW, kSrBoxH, 1);
+        } else {
+            const Colour fill = sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220);
+            gfx->setColour(fill, true);
+            gfx->setAuxColour(fill);
+            gfx->fillRectangle(RectArea(boxX, boxY, boxX + kSrBoxW, boxY + kSrBoxH));
+        }
+        char label[64];
+        if (row == SRM_Start && pc_speedrun_practice_day() > 0) {
+            snprintf(label, sizeof(label), "Start Practice");
+        } else if (row == SRM_Category) {
+            snprintf(label, sizeof(label), "< %s >", pc_speedrun_category_name(sConfig.speedrunCategory));
+        } else if (row == SRM_Practice && pc_speedrun_practice_day() == 0) {
+            snprintf(label, sizeof(label), "%s: < Off >", kSrRowLabels[row]);
+        } else if (row == SRM_Practice) {
+            snprintf(label, sizeof(label), "%s: < Day %d >", kSrRowLabels[row], pc_speedrun_practice_day());
+        } else if (row == SRM_Splits) {
+            snprintf(label, sizeof(label), "%s: < %d >", kSrRowLabels[row], sConfig.speedrunSplitsShown);
+        } else if (row == SRM_LiveSplit) {
+            snprintf(label, sizeof(label), "%s: < %s >", kSrRowLabels[row],
+                     !sConfig.speedrunLiveSplit ? "Off" : pc_livesplit_connected() ? "Connected" : "Waiting");
+        } else if (row == SRM_LsHideClock) {
+            snprintf(label, sizeof(label), "%s: < %s >", kSrRowLabels[row], sConfig.speedrunLsHideClock ? "On" : "Off");
+        } else {
+            snprintf(label, sizeof(label), "%s", kSrRowLabels[row]);
+        }
+        const Colour tc = sel ? Colour(255, 255, 255, 255) : dim;
+        f1Text(boxX + kSrBoxW / 2 - f1TextW(label, 14) / 2, boxY + 10, label, tc, 14, 20);
+    }
+
+    const char* help = sSrPage == SR_Settings ? "Arrows: change    B: back"
+                                              : "Arrows: move    A: select    B: title screen";
+    drawHelpLine(panelX + panelW / 2, panelY + panelH - 46, help, dim, panelW - 60);
+}
+
 bool pc_devassign_prompt_active(void) { return false; }
 bool pc_captain_prompt_active(void) { return false; }
 #endif // !PIKI_P2_HOST (pantallas de Pikmin 1: permadeath, cooperativo, capitan)
@@ -5869,40 +6346,49 @@ void pc_settings_draw(void) {
 }
 
 int pc_settings_get_fps_mode(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.fpsMode;
 }
 
 int pc_settings_get_chain_actions(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.chainActions;
 }
 
 int pc_settings_get_better_pathfinding(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.betterPathfinding;
 }
 
 int pc_settings_get_blues_only_water(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.bluesOnlyWater;
 }
 
 int pc_settings_get_idle_counter(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.idleCounter;
 }
 
 int pc_settings_get_fireflies(void) { return sConfig.fireflies; }
 
 int pc_settings_get_eternal_night(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.eternalNight;
 }
 
 int pc_settings_get_navi_health_pct(void) {
+    if (pc_speedrun_active()) return 100;
     return pc_hardmode_active() ? 100 : sConfig.naviHealthPct;
 }
 
 int pc_settings_get_teki_health_pct(void) {
+    if (pc_speedrun_active()) return 100;
     return pc_hardmode_active() ? 100 : sConfig.tekiHealthPct;
 }
 
 int pc_settings_get_infinite_day(void) {
+    if (pc_speedrun_active()) return 0;
     // VS: el día no avanza; la partida la cierra su propio reloj.
     if (pc_vs_active()) return 1;
     return pc_hardmode_active() ? 0 : sConfig.infiniteDay;
@@ -5911,46 +6397,58 @@ int pc_settings_get_infinite_day(void) {
 float pc_settings_get_free_camera_pad_scale(void) { return sConfig.freeCamPadPct / 100.0f; }
 
 int pc_settings_get_free_camera(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.freeCamera;
 }
 
 int pc_settings_get_whistle_radius_pct(void) {
+    if (pc_speedrun_active()) return 100;
     return sConfig.whistleRadiusPct;
 }
 
 float pc_settings_get_throw_speed_scale(void) {
+    if (pc_speedrun_active()) return 1.0f;
     return sConfig.throwSpeedPct / 100.0f;
 }
 
 int pc_settings_get_throw_cancel_b(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.throwCancelB;
 }
 
 int pc_settings_get_quick_grab(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.quickGrab;
 }
 
 int pc_settings_get_no_trip(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.noTrip;
 }
 
 int pc_settings_get_onion_step10(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.onionStep10;
 }
 
-int pc_settings_get_piki_invincible(void) { return pc_hardmode_active() ? 0 : sConfig.pikiInvincible; }
-int pc_settings_get_all_flowers(void) { return pc_hardmode_active() ? 0 : sConfig.allFlowers; }
-float pc_settings_get_carry_speed_scale(void) { return pc_hardmode_active() ? 1.0f : sConfig.carrySpeedPct / 100.0f; }
-float pc_settings_get_navi_speed_scale(void) { return pc_hardmode_active() ? 1.0f : sConfig.naviSpeedPct / 100.0f; }
-int pc_settings_get_unlock_zones(void) { return pc_hardmode_active() ? 0 : sConfig.unlockZones; }
-int pc_settings_get_no_day_advance(void) { return pc_hardmode_active() ? 0 : sConfig.noDayAdvance; }
-int pc_settings_get_all_onions(void) { return pc_hardmode_active() ? 0 : sConfig.allOnions; }
+int pc_settings_get_piki_invincible(void) { if (pc_speedrun_active()) return 0; return pc_hardmode_active() ? 0 : sConfig.pikiInvincible; }
+int pc_settings_get_all_flowers(void) { if (pc_speedrun_active()) return 0; return pc_hardmode_active() ? 0 : sConfig.allFlowers; }
+float pc_settings_get_carry_speed_scale(void) { if (pc_speedrun_active()) return 1.0f; return pc_hardmode_active() ? 1.0f : sConfig.carrySpeedPct / 100.0f; }
+float pc_settings_get_navi_speed_scale(void) { if (pc_speedrun_active()) return 1.0f; return pc_hardmode_active() ? 1.0f : sConfig.naviSpeedPct / 100.0f; }
+int pc_settings_get_unlock_zones(void) { if (pc_speedrun_active()) return 0; return pc_hardmode_active() ? 0 : sConfig.unlockZones; }
+int pc_settings_get_no_day_advance(void) { if (pc_speedrun_active()) return 0; return pc_hardmode_active() ? 0 : sConfig.noDayAdvance; }
+int pc_settings_get_all_onions(void) { if (pc_speedrun_active()) return 0; return pc_hardmode_active() ? 0 : sConfig.allOnions; }
 
 int pc_settings_get_instant_whistle(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.instantWhistle;
 }
 
+int pc_settings_get_whistle_pluck(void) { if (pc_speedrun_active()) return 0; return sConfig.whistlePluck; }
+int pc_settings_get_hide_olimar_text(void) { if (pc_speedrun_active()) return 0; return sConfig.hideOlimarText; }
+
 int pc_settings_get_gyro_enabled(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.gyroEnabled;
 }
 
@@ -5976,14 +6474,17 @@ void pc_settings_set_gyro_bias(const float bias[3]) {
 }
 
 int pc_settings_get_lock_on(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.lockOn;
 }
 
 int pc_settings_get_throw_while_moving(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.throwWhileMoving;
 }
 
 int pc_settings_get_first_person(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.firstPerson;
 }
 
@@ -5993,12 +6494,12 @@ int pc_settings_get_first_person(void) {
 static int sFirstPersonActive[2] = { 0, 0 };
 
 int pc_first_person_active_for(int player) {
-    if (!sConfig.firstPerson) sFirstPersonActive[0] = sFirstPersonActive[1] = 0;
+    if (!pc_settings_get_first_person()) sFirstPersonActive[0] = sFirstPersonActive[1] = 0;
     return player == 1 ? sFirstPersonActive[1] : sFirstPersonActive[0];
 }
 
 void pc_first_person_toggle_for(int player) {
-    if (!sConfig.firstPerson) return;
+    if (!pc_settings_get_first_person()) return;
     int& fp = sFirstPersonActive[player == 1 ? 1 : 0];
     fp = !fp;
 }
@@ -6007,6 +6508,7 @@ int pc_first_person_active(void) { return pc_first_person_active_for(0); }
 void pc_first_person_toggle(void) { pc_first_person_toggle_for(0); }
 
 int pc_settings_get_charge(void) {
+    if (pc_speedrun_active()) return 0;
     // El charge no significa nada sin un objetivo fijado.
     return sConfig.lockOn ? sConfig.charge : 0;
 }
@@ -6019,14 +6521,17 @@ float pc_mods_teki_damage(float damage) {
 }
 
 int pc_settings_get_hold_to_pluck(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.holdToPluck;
 }
 
 int pc_settings_get_mouse_wheel_action(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.mouseWheelAction;
 }
 
 int pc_settings_get_piki_limit(void) {
+    if (pc_speedrun_active()) return 100;
     if (pc_hardmode_active() && sConfig.pikiLimit > PC_HARDMODE_PIKI_LIMIT)
         return PC_HARDMODE_PIKI_LIMIT;
 #if PIKI_P2_HOST
@@ -6037,6 +6542,7 @@ int pc_settings_get_piki_limit(void) {
 }
 
 int pc_settings_get_day_minutes(void) {
+    if (pc_speedrun_active()) return 0;
     if (pc_hardmode_active() && (sConfig.dayMinutes == 0 || sConfig.dayMinutes > PC_HARDMODE_DAY_MINUTES))
         return PC_HARDMODE_DAY_MINUTES;
     return sConfig.dayMinutes;
@@ -6071,7 +6577,15 @@ int pc_settings_get_hd_model_enabled(int row) {
     return row < 0 || row >= 6 || !(sConfig.hdModelsDisabled & (1 << row));
 }
 
+int pc_settings_get_speedrun_category(void) { return sConfig.speedrunCategory; }
+int pc_settings_get_speedrun_splits_shown(void) { return sConfig.speedrunSplitsShown; }
+int pc_settings_get_speedrun_livesplit(void) { return sConfig.speedrunLiveSplit; }
+int pc_settings_get_speedrun_ls_hide_clock(void) { return sConfig.speedrunLsHideClock; }
+const char* pc_settings_get_speedrun_ls_host(void) { return sConfig.speedrunLsHost; }
+int pc_settings_get_speedrun_ls_port(void) { return sConfig.speedrunLsPort; }
+
 int pc_settings_get_debug_keys(void) {
+    if (pc_speedrun_active()) return 0;
     return sConfig.debugKeys;
 }
 
@@ -6221,6 +6735,8 @@ void modsRowValue(int i, char* value, size_t n) {
     case 23: snprintf(value, n, "%s", sPending.noTrip ? "On" : "Off (original)"); break;
     case 24: snprintf(value, n, "%s", sPending.onionStep10 ? "On" : "Off (original)"); break;
     case 25: snprintf(value, n, "%s", sPending.instantWhistle ? "On" : "Off (original)"); break;
+    case 34: snprintf(value, n, "%s", sPending.whistlePluck ? "On" : "Off (original)"); break;
+    case 36: snprintf(value, n, "%s", sPending.hideOlimarText ? "On" : "Off (original)"); break;
     case 28: speedPctLabel(sPending.carrySpeedPct, value, n); break;
     case 29: speedPctLabel(sPending.naviSpeedPct, value, n); break;
     case 26: case 27: case 30: case 31: case 32: {
@@ -6390,6 +6906,8 @@ const GroupRow kCameraRows[] = {
 
 const GroupRow kGameplayRows[] = {
 #if PIKI_P2_HOST
+    { SRC_MODS, 34, "Whistle Pluck", "Hold the whistle over sprouts to pluck them one after another." },
+    { SRC_MODS, 36, "Hide Drake Texts", "The ship's tutorial and notice texts are skipped without showing up. Story texts stay." },
     { SRC_MODS, 25, "Instant Whistle Response", "Whistled Pikmin join the squad at once, without stopping to turn and look first." },
     { SRC_MODS, 23, "No Tripping", "Pikmin running in the squad never trip and fall behind." },
     { SRC_MODS, 40, "Eternal Night", "Always night above ground, whatever the day length." },

@@ -3,6 +3,7 @@ extern "C" {
 int pc_p2_permadeath_active(void);
 void pc_p2_rules_erase_current_save(void);
 }
+#include "pc_speedrun.h"
 #endif
 #include "Game/DeathMgr.h"
 #include "Game/GameConfig.h"
@@ -470,6 +471,47 @@ void GameState::exec(SingleGameSection* game)
 		return;
 	}
 
+#ifdef PIKI_PC_PORT
+	// Atajos de prueba del modo Speedrun (PIKMIN_SR_DEBUG=1): F6 va al
+	// atardecer por el camino de "Ir al atardecer" y F8 cierra la categoría
+	// (F7, salida de cueva, en CaveState::exec).
+	if (pc_speedrun_debug_take_finish()) {
+		pc_speedrun_on_finish(-1, gameSystem->mTimeMgr->mDayCount);
+	}
+	if (pc_speedrun_debug_take_cave_warp() && ItemCave::mgr) {
+		// Junto a Emergence Cave ('t_01') o, si no está en este mapa, la primera
+		// cueva abierta. A 40 de su centro: Navi::checkCave la ofrece a menos de 80.
+		ItemCave::Item* target = nullptr;
+		Iterator<BaseItem> iterator(ItemCave::mgr);
+		CI_LOOP(iterator)
+		{
+			ItemCave::Item* hole = static_cast<ItemCave::Item*>(*iterator);
+			if (!hole->isAlive() || hole->mBarrel) {
+				continue;
+			}
+			if (!target || hole->mCaveID.getID() == 't_01') {
+				target = hole;
+			}
+		}
+		Navi* navi = naviMgr->getActiveNavi();
+		if (target && navi) {
+			Vector3f pos = target->getPosition();
+			pos.x += 40.0f;
+			if (mapMgr) {
+				pos.y = mapMgr->getMinY(pos);
+			}
+			navi->setPosition(pos, false);
+			pikiMgr->moveAllPikmins(pos, 50.0f, nullptr);
+		}
+	}
+	if (pc_speedrun_debug_take_day_end()) {
+		gameSystem->resetFlag(GAMESYS_IsGameWorldActive);
+		DayEndArg arg(DayEndState::DETYPE_Normal);
+		transit(game, SGS_DayEnd, &arg);
+		return;
+	}
+#endif
+
 	game->updateMainMapScreen();
 
 	// Check starting the "you appear lost" cutscene timer
@@ -492,6 +534,9 @@ void GameState::exec(SingleGameSection* game)
 		pikiMgr->forceEnterPikmins(false);
 		game->saveToGeneratorCache(game->mCurrentCourseInfo);
 		game->advanceDayCount();
+#ifdef PIKI_PC_PORT
+		pc_speedrun_on_finish(PC_SR_FINISH_DEBT, gameSystem->mTimeMgr->mDayCount);
+#endif
 		gameSystem->setPause(false, "repay-done", 3);
 		EndingArg arg(0);
 		transit(game, SGS_Ending, &arg);
@@ -501,6 +546,9 @@ void GameState::exec(SingleGameSection* game)
 		pikiMgr->forceEnterPikmins(false);
 		game->saveToGeneratorCache(game->mCurrentCourseInfo);
 		game->advanceDayCount();
+#ifdef PIKI_PC_PORT
+		pc_speedrun_on_finish(PC_SR_FINISH_COMPLETE, gameSystem->mTimeMgr->mDayCount);
+#endif
 		gameSystem->setPause(false, "repay-done", 3);
 		EndingArg arg(EndingState::Ending_IsComplete);
 		transit(game, SGS_Ending, &arg);

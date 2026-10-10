@@ -1,3 +1,6 @@
+#ifdef PIKI_PC_PORT
+#include "pc_speedrun.h"
+#endif
 #include "Game/VsGame.h"
 #include "Game/SingleGame.h"
 #include "Game/MoviePlayer.h"
@@ -120,6 +123,12 @@ void ResultState::prepareMorimuraInfo(VsGameSection* section)
 			sys->getPlayCommonData()->challenge_setKunsho(stageIndex);
 		}
 	}
+#ifdef PIKI_PC_PORT
+	if (gameSystem->isChallengeMode()) {
+		pc_speedrun_on_challenge_result(stageIndex, stageData->mStageIndex, isNormalEnd(),
+		                                sys->getPlayCommonData()->challenge_get_coursenum());
+	}
+#endif
 }
 
 /**

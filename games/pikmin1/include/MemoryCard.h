@@ -70,6 +70,12 @@ public:
 	void repairFile();
 	bool didSaveFail();
 	void getQuickInfos(CardQuickInfo*);
+#if defined(PIKI_PC_PORT)
+	// Selector de días (pc_day_history.h): datos de un día guardado de la
+	// ranura, y su carga en la tarjeta como un guardado más.
+	bool pcDayQuickInfo(int slot, int day, CardQuickInfo& out);
+	bool pcRestoreDay(int slot, int day);
+#endif
 
 protected:
 	u32 calcChecksum(void*, u32);

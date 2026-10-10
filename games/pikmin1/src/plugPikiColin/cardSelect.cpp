@@ -21,6 +21,7 @@
 #include "pc_permadeath.h"
 #include "pc_coop.h"
 #include "pc_speedrun.h"
+#include "pc_day_history.h"
 #include "randomizer/pc_randomizer.h"
 #include "mods/pc_vs_arena.h"
 #include "pc_window.h"
@@ -93,7 +94,12 @@ struct CardSelectSetupSection : public Node {
 		pc_erased_notice_open_if_queued();
 		// El selector 1P/2P va antes del slot (PLAN_COOP fase 0b). Challenge
 		// mode se lo salta: siempre 1 jugador.
-		if (gameflow.mIsChallengeMode && pc_vs_pending() && pc_coop_take_chosen_at_title()) {
+		if (pc_speedrun_take_restart()) {
+			// Speedrun: reset rápido, otra run de la misma categoría sin menús.
+			pc_window_input_reset_assignment();
+			pc_coop_set_captain(0, PC_CAPTAIN_OLIMAR);
+			pcStartSpeedrunRun();
+		} else if (gameflow.mIsChallengeMode && pc_vs_pending() && pc_coop_take_chosen_at_title()) {
 			// VS: primero la explicación y las reglas; luego mandos y
 			// capitanes de los dos jugadores; sin fichero.
 			mAwaitingVsRules = true;
@@ -188,8 +194,21 @@ struct CardSelectSetupSection : public Node {
 	/// en el slot 1 de la tarjeta propia del modo (se vacía si guarda una run
 	/// anterior); el reloj arranca aquí, como "seleccionar partida nueva".
 	/// Si la tarjeta no responde, se abre la selección normal como respaldo.
+	/// 5 Parts carga su race file si lo hay; el Desafío va a la selección de
+	/// partida del Modo Desafío con la tarjeta normal.
 	void pcStartSpeedrunRun()
 	{
+		const int category = pc_speedrun_category();
+		if (category == PC_SR_CAT_CHALLENGE) {
+			gameflow.mGamePrefs.mHasSaveGame = false;
+			gameflow.mIsChallengeMode        = TRUE;
+		}
+		// Partida guardada que se carga en vez de una nueva: el race file de
+		// 5 Parts (día 2) o un punto de práctica (su día).
+		const int practiceDay = pc_speedrun_practice_day();
+		const bool race       = practiceDay > 1 ? pc_speedrun_practice_restore(practiceDay)
+		                                         : category == PC_SR_CAT_5_PARTS && pc_speedrun_race_restore();
+		const int raceDay     = practiceDay > 1 ? practiceDay : 2;
 		MemoryCard& card = gameflow.mMemoryCard;
 		card.getMemoryCardState(false);
 		// La tarjeta escribe en su propio hilo: makeDefaultFile y delFile solo
@@ -205,9 +224,26 @@ struct CardSelectSetupSection : public Node {
 			memcardWindow->start(gameflow.mIsChallengeMode);
 			return;
 		}
+		if (category == PC_SR_CAT_CHALLENGE) {
+			// Desafío: su tarjeta ya lista, a la comprobación del Modo Desafío.
+			pc_speedrun_start_timer();
+			memcardWindow = new zen::ogScrFileChkSelMgr();
+			memcardWindow->start(gameflow.mIsChallengeMode);
+			return;
+		}
 		CardQuickInfo infos[4];
 		card.getQuickInfos(infos);
-		if (infos[0].mSaveStatus == PlayState::ReadyToSave) {
+		// Válida: la partida del slot 1, en el día que toca.
+		const bool raceOk = race && infos[0].mSaveStatus == PlayState::ReadyToSave && infos[0].mCurrentDay == raceDay;
+		if (race && !raceOk) {
+			if (practiceDay > 1) {
+				pc_speedrun_practice_delete(practiceDay);
+				pc_speedrun_set_practice_day(1);
+			} else {
+				pc_speedrun_race_delete();
+			}
+		}
+		if (infos[0].mSaveStatus == PlayState::ReadyToSave && !raceOk) {
 			card.delFile(infos[0]);
 			CardUtilIdleWhileBusy();
 			card.hasCardFinished();
@@ -671,7 +707,7 @@ struct CardSelectSetupSection : public Node {
 				// created without ever asking. It looked like a European
 				// problem because that install started with an empty card;
 				// USA does the same on a card with nothing on it.
-				if (card.mSaveStatus != PlayState::ReadyToSave && pc_speedrun_active()) {
+				if (card.mSaveStatus != PlayState::ReadyToSave && pc_speedrun_active() && !gameflow.mIsChallengeMode) {
 					// Speedrun: partida nueva Normal sin preguntar (ni
 					// Permadeath ni Hard). Aquí empieza el tiempo, como en
 					// speedrun.com: al seleccionar la partida nueva.
@@ -712,6 +748,19 @@ struct CardSelectSetupSection : public Node {
 					mPromptBackdrop        = mPromptBackdropNext;
 					pc_newgame_prompt_open();
 					return;
+				}
+				// Selector de días: se eligió un día anterior; su archivo pasa a
+				// la tarjeta como un guardado más y la ranura se vuelve a leer.
+				{
+					const int slot = returnCode - zen::ogScrFileChkSelMgr::FILECHKSEL_SlotOffset;
+					const int day  = pc_days_take_choice(slot);
+					if (day > 0 && gameflow.mMemoryCard.pcRestoreDay(slot, day)) {
+						CardUtilIdleWhileBusy();
+						gameflow.mMemoryCard.hasCardFinished();
+						CardQuickInfo infos[4];
+						gameflow.mMemoryCard.getQuickInfos(infos);
+						card = infos[slot];
+					}
 				}
 #endif
 				// we selected a a save file (A, B, or C)

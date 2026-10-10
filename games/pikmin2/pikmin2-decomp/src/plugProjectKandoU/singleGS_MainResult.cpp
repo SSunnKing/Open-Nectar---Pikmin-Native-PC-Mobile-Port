@@ -1,3 +1,10 @@
+#ifdef PIKI_PC_PORT
+#include "pc_speedrun.h"
+#include "Game/MemoryCard/Mgr.h"
+#include "Game/GameSystem.h"
+#include "Game/TimeMgr.h"
+#include "stream.h"
+#endif
 #include "Game/SingleGame.h"
 #include "Game/Navi.h"
 #include "Game/generalEnemyMgr.h"
@@ -102,6 +109,19 @@ unknown MainResultState::open2D(SingleGameSection* game)
 	mStatus = Result_ScreenActive;
 	playData->clearCurrentCave();
 	playData->setSaveFlag(STORYSAVE_WorldMap, mBeforeSaveDelegate);
+#ifdef PIKI_PC_PORT
+	// Modo Speedrun: la run no guarda, pero el estado con el que empieza el día
+	// siguiente (lo mismo que escribiría el guardado de ahora) queda como punto
+	// de práctica de ese día. PlayData::write solo serializa.
+	if (pc_speedrun_wants_practice_point()) {
+		u8* buffer = new u8[PLAYER_FILE_SIZE];
+		memset(buffer, 0, PLAYER_FILE_SIZE);
+		RamStream stream(buffer, PLAYER_FILE_SIZE);
+		playData->write(stream);
+		pc_speedrun_practice_point_save(gameSystem->mTimeMgr->mDayCount + 1, buffer, PLAYER_FILE_SIZE);
+		delete[] buffer;
+	}
+#endif
 	int pokos = playData->mPokoCount;
 	kh::Screen::MailCategory mailtype;
 	if (pokos < 3000) {

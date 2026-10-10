@@ -165,10 +165,13 @@ fs::path saveRoot()
 // El modo Speedrun tiene su propia tarjeta (save/speedrun/card0): sus
 // partidas vanilla no se mezclan con las normales ni al revés. El Randomizer
 // igual (save/randomizer/card0): sus tres ranuras son independientes de las
-// del juego normal.
+// del juego normal. Dentro del Speedrun, 5 Parts usa su propia tarjeta
+// (save/speedrun/5-parts/card0, la del race file) y el Desafío la suya
+// (save/speedrun/challenge/card0).
 fs::path root(s32 channel)
 {
-	const fs::path base = pc_speedrun_active()            ? saveRoot() / "speedrun"
+	const char* speedrunSub = pc_speedrun_active() ? pc_speedrun_card_subdir() : nullptr;
+	const fs::path base = speedrunSub                     ? saveRoot() / "speedrun" / speedrunSub
 	                      : pc_randomizer_menu_pending() ? saveRoot() / "randomizer"
 	                                                     : saveRoot();
 	return base / (channel == 0 ? "card0" : "card1");
@@ -324,6 +327,12 @@ std::string pc_card_save_dir()
 	return fs::absolute(saveRoot(), error).string();
 }
 
+// Carpeta de la tarjeta en uso (normal, Randomizer...): historial de días.
+std::string pc_card_root_dir()
+{
+	return root(0).string();
+}
+
 // Carpeta de datos del modo Speedrun (tarjeta propia y registro de tiempos).
 std::string pc_card_speedrun_dir()
 {
@@ -331,6 +340,78 @@ std::string pc_card_speedrun_dir()
 	const fs::path dir = saveRoot() / "speedrun";
 	fs::create_directories(dir, error);
 	return dir.string();
+}
+
+// Race file de 5 Parts: copia de su tarjeta guardada al empezar la primera run.
+namespace {
+fs::path raceDir() { return saveRoot() / "speedrun" / "5-parts" / "race"; }
+fs::path raceCardDir() { return saveRoot() / "speedrun" / "5-parts" / "card0"; }
+}
+
+// Puntos de práctica: save/speedrun/practice/<categoría>/dayN, copias de la
+// tarjeta de las runs de historia (save/speedrun/card0).
+namespace {
+fs::path practiceDir(int day)
+{
+	const char* slug = pc_speedrun_category() == PC_SR_CAT_LOW_PIKMIN ? "low-pikmin" : "all-parts";
+	return saveRoot() / "speedrun" / "practice" / slug / ("day" + std::to_string(day));
+}
+fs::path storyCardDir() { return saveRoot() / "speedrun" / "card0"; }
+}
+
+bool pc_speedrun_practice_exists(int day)
+{
+	std::error_code error;
+	return fs::is_directory(practiceDir(day), error);
+}
+
+bool pc_speedrun_practice_restore(int day)
+{
+	std::error_code error;
+	if (!pc_speedrun_practice_exists(day)) return false;
+	fs::remove_all(storyCardDir(), error);
+	fs::copy(practiceDir(day), storyCardDir(), fs::copy_options::recursive, error);
+	return !error;
+}
+
+void pc_speedrun_practice_save(int day)
+{
+	std::error_code error;
+	if (!fs::is_directory(storyCardDir(), error)) return;
+	const fs::path dir = practiceDir(day);
+	fs::remove_all(dir, error);
+	fs::create_directories(dir.parent_path(), error);
+	fs::copy(storyCardDir(), dir, fs::copy_options::recursive, error);
+	if (error) fs::remove_all(dir, error);
+}
+
+void pc_speedrun_practice_delete(int day)
+{
+	std::error_code error;
+	fs::remove_all(practiceDir(day), error);
+}
+
+bool pc_speedrun_race_restore(void)
+{
+	std::error_code error;
+	if (!fs::is_directory(raceDir(), error)) return false;
+	fs::remove_all(raceCardDir(), error);
+	fs::copy(raceDir(), raceCardDir(), fs::copy_options::recursive, error);
+	return !error;
+}
+
+void pc_speedrun_race_save(void)
+{
+	std::error_code error;
+	if (fs::exists(raceDir(), error) || !fs::is_directory(raceCardDir(), error)) return;
+	fs::copy(raceCardDir(), raceDir(), fs::copy_options::recursive, error);
+	if (error) fs::remove_all(raceDir(), error);
+}
+
+void pc_speedrun_race_delete(void)
+{
+	std::error_code error;
+	fs::remove_all(raceDir(), error);
 }
 
 extern "C" {

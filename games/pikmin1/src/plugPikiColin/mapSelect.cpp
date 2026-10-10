@@ -20,6 +20,9 @@
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
 #endif
+#if defined(PIKI_PC_PORT)
+#include "pc_speedrun.h"
+#endif
 
 /// Size of the message heap (102 kb).
 #define MESSAGE_HEAP_SIZE (0x19800)
@@ -266,6 +269,14 @@ public:
 			} else
 #endif
 			{
+#if defined(PIKI_PC_PORT)
+				// Speedrun: reset rápido también desde el mapa.
+				if (pc_speedrun_take_reset()) {
+					mNextSectionsFlag = PACK_NEXT_ONEPLAYER(ONEPLAYER_CardSelect);
+					mSectionState     = Exit;
+					gsys->setFade(0.0f);
+				}
+#endif
 				// process challenge mode if we've made a decision
 				if (selectWindow && selectWindow->update(mController)) {
 					zen::DrawCMcourseSelect::returnStatusFlag chalStatus = selectWindow->getReturnStatusFlag();
@@ -380,6 +391,10 @@ public:
 	void enterCourse(StageInfo* info)
 	{
 		flowCont.mCurrentStage = info;
+#if defined(PIKI_PC_PORT)
+		// Speedrun: 5 Parts y el Desafío ponen el reloj en marcha al entrar.
+		pc_speedrun_on_enter_course(info->mStageID);
+#endif
 		sprintf(flowCont.mCurrStageFilePath, "%s", info->mFileName);
 		sprintf(flowCont.mDoorStageFilePath, "%s", info->mFileName);
 		if (gameflow.mGamePrefs.isChallengeOpen()) {

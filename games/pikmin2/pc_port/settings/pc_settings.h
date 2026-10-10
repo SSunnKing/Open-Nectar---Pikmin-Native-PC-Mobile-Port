@@ -87,6 +87,8 @@ int pc_settings_get_no_trip(void);
 int pc_settings_get_onion_step10(void);
 /// Los Pikmin silbados se unen al grupo al instante, sin la reacción de LookAt.
 int pc_settings_get_instant_whistle(void);
+int pc_settings_get_whistle_pluck(void);
+int pc_settings_get_hide_olimar_text(void);   ///< P2: textos de la Drake
 /// Cheats. Todos vuelven al original con el modo Hard activo.
 int pc_settings_get_piki_invincible(void);
 int pc_settings_get_all_flowers(void);
@@ -179,6 +181,25 @@ void pc_newgame_prompt_draw(void);
 int  pc_newgame_prompt_result(void);
 /// True after accept on the second prompt if Hard was chosen.
 bool pc_newgame_prompt_chose_hard(void);
+
+/* Menú del modo Speedrun (P2): lo abre la selección de partida cuando se
+   entra por la opción Speedrun del título. Start Run / Category / How It
+   Works / Settings; la explicación se abre sola la primera vez. */
+#define PC_SPEEDRUN_MENU_PENDING (-1)
+#define PC_SPEEDRUN_MENU_BACK    (0)
+#define PC_SPEEDRUN_MENU_START   (1)
+void pc_speedrun_menu_open(void);
+bool pc_speedrun_menu_active(void);
+int  pc_speedrun_menu_result(void);
+void pc_speedrun_menu_draw(void);
+int  pc_settings_get_speedrun_category(void);
+int  pc_settings_get_speedrun_splits_shown(void);
+// LiveSplit Server (pc_livesplit.cpp): encendido, ocultar el reloj propio con
+// LiveSplit conectado, y dirección (speedrunLsHost/Port en el .conf).
+int  pc_settings_get_speedrun_livesplit(void);
+int  pc_settings_get_speedrun_ls_hide_clock(void);
+const char* pc_settings_get_speedrun_ls_host(void);
+int  pc_settings_get_speedrun_ls_port(void);
 
 /* Selector 1 jugador / 2 jugadores (PLAN_COOP fase 0b). Lo abre la sección de
    selección de slot justo al entrar desde "Empezar". Si se eligen 2 jugadores

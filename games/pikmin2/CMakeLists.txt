@@ -312,6 +312,8 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
         ${PC_PORT_DIR}/pc_achievements.cpp
         ${PC_PORT_DIR}/pc_p2_cheats.cpp
         ${PC_PORT_DIR}/pc_p2_rules.cpp
+        ${PC_PORT_DIR}/pc_speedrun.cpp
+        ${PC_PORT_DIR}/pc_livesplit.cpp
         ${PC_PORT_DIR}/dolphin_stubs/p2_gx_stubs.cpp
         ${PC_PORT_DIR}/dolphin_stubs/p2_os_host.cpp
         ${PC_PORT_DIR}/dolphin_stubs/pc_thp.cpp
@@ -423,6 +425,10 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
         target_link_options(${P2_GAME} PRIVATE "-Wl,-z,max-page-size=16384")
     else()
         target_link_libraries(${P2_GAME} PRIVATE ${P2_LEGACY} m Threads::Threads ${P2_SDL_LIBS} OpenGL::GL)
+    endif()
+    # Cliente TCP de LiveSplit (pc_livesplit.cpp), modo Speedrun.
+    if(WIN32)
+        target_link_libraries(${P2_GAME} PRIVATE ws2_32)
     endif()
     # -rdynamic + libdl: readable symbol names in the crash backtrace (pc_main.cpp).
     if(NOT WIN32)

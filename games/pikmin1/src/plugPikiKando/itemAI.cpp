@@ -1,6 +1,7 @@
 #include "ItemAI.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
+#include "pc_speedrun.h"
 #endif
 #include "BaseInf.h"
 #include "BombItem.h"
@@ -784,6 +785,7 @@ void GoalAI::BootEmit::act(AICreature* item)
 		seed->mParentOnion = obj;
 #if defined(PIKI_PC_PORT)
 		seed->mPcOwner = obj->mPcOwner;
+		pc_speedrun_on_onion_sprout();
 #endif
 		C_SAI(seed)->start(seed, PikiHeadAI::PIKIHEAD_Flying);
 		return;
@@ -904,6 +906,7 @@ void GoalAI::EmitPiki::act(AICreature* item)
 			seed->mParentOnion = obj;
 #if defined(PIKI_PC_PORT)
 			seed->mPcOwner = obj->mPcOwner;
+			pc_speedrun_on_onion_sprout();
 #endif
 			C_SAI(seed)->start(seed, PikiHeadAI::PIKIHEAD_Flying);
 		} else {

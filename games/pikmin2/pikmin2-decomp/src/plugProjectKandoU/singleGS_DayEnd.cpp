@@ -1,3 +1,6 @@
+#ifdef PIKI_PC_PORT
+#include "pc_speedrun.h"
+#endif
 #include "Game/Entities/ItemOnyon.h"
 #include "Game/GameSystem.h"
 #include "Game/MoviePlayer.h"
@@ -41,6 +44,9 @@ void DayEndState::init(SingleGameSection* game, StateArg* arg)
 	DayEndArg* castedArg = static_cast<DayEndArg*>(arg);
 	P2ASSERTLINE(67, castedArg != nullptr);
 	mDayEndType = castedArg->mEndType;
+#ifdef PIKI_PC_PORT
+	pc_speedrun_on_day_end(game->mCurrentCourseInfo ? (int)game->mCurrentCourseInfo->mCourseIndex : -1);
+#endif
 	mTimer      = 0.0f;
 	gameSystem->setPause(true, "dayend", 3);
 	mStatus = DESTATE_PlayCutscene;

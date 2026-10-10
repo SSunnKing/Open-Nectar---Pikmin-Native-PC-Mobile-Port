@@ -36,6 +36,7 @@ class Texture;
 /// Depuración: con PIKMIN_UNLOCK_ALL=1 todos los mapas (historia y desafío)
 /// cuentan como abiertos, sin tocar la partida guardada.
 bool pc_unlock_all_stages();
+bool pc_speedrun_challenge_all_open(); // pc_speedrun.cpp: 200 Pikmin Challenge, las cinco zonas
 /// Cheat "Unlock All Zones": a diferencia del anterior, sí se graba en la partida.
 bool pc_cheat_unlock_zones();
 #endif
@@ -545,7 +546,9 @@ struct GamePrefs : public CoreNode {
 	bool isStageOpen(int chalStageID)
 	{
 #if defined(PIKI_PC_PORT)
-		if (pc_unlock_all_stages() && chalStageID >= CHALSTAGE_START && chalStageID <= CHALSTAGE_COUNT) return true;
+		if ((pc_unlock_all_stages() || pc_speedrun_challenge_all_open()) && chalStageID >= CHALSTAGE_START
+		    && chalStageID <= CHALSTAGE_COUNT)
+			return true;
 #endif
 		// Lesser than *or equal to* `CHALSTAGE_COUNT` is probably a bug; inherited from Story Mode's handling of stage IDs for test maps.
 		if (chalStageID >= CHALSTAGE_START && chalStageID <= CHALSTAGE_COUNT) {

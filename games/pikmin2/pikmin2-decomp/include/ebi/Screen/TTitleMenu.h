@@ -7,6 +7,15 @@
 
 struct Controller;
 
+// Opciones del menú del título. El port añade una séptima, "Speedrun", que se
+// monta en tiempo de ejecución a partir de la de Challenge Mode (ver
+// TTitleMenu::pcAddSpeedrunEntry en ebiScreenTitleMenu.cpp).
+#ifdef PIKI_PC_PORT
+#define EBI_TITLE_MENU_NUM (7)
+#else
+#define EBI_TITLE_MENU_NUM (6)
+#endif
+
 namespace ebi {
 namespace Screen {
 
@@ -59,7 +68,18 @@ struct TTitleMenu : public TScreenBase {
 	    , mMenuCloseCounterMax(0)
 	    , mState(0)
 	{
+#ifdef PIKI_PC_PORT
+		mPcHasSpeedrun = false;
+		mPcFitPane     = nullptr;
+#endif
 	}
+
+	// Opciones en uso: 7 con la de Speedrun montada, 6 si no.
+#ifdef PIKI_PC_PORT
+	int menuNum() const { return mPcHasSpeedrun ? 7 : 6; }
+#else
+	int menuNum() const { return 6; }
+#endif
 
 	virtual void doSetArchive(JKRArchive*);          // _24
 	virtual void doOpenScreen(ArgOpen*);             // _28
@@ -77,6 +97,16 @@ struct TTitleMenu : public TScreenBase {
 	bool isCancel();
 	void showPika_(s32);
 	void hidePika_(s32);
+#ifdef PIKI_PC_PORT
+	bool pcAddSpeedrunEntry(JKRArchive*, J2DPane** iconLeft, J2DPane** iconRight);
+	bool mPcHasSpeedrun; // false si no se pudo montar (sin letras latinas)
+	// Panel entre ROOT y NULL_001 que encaja las siete filas entre el logo y
+	// el copyright, con su escala y desplazamiento para cada mState.
+	J2DPane* mPcFitPane;
+	f32 mPcFitScale[2];
+	f32 mPcFitX[2];
+	f32 mPcFitY[2];
+#endif
 
 	// _00     = VTBL
 	// _00-_08 = TScreenBase
@@ -87,18 +117,18 @@ struct TTitleMenu : public TScreenBase {
 	bool mDoCloseMenu;                   // _41
 	u32 mMenuCloseCounter;               // _44
 	u32 mMenuCloseCounterMax;            // _48
-	TTitleMenu_Object_Icon mObjIcon[6];  // _4C
-	TTitleMenu_Object_Icon mObjIcon2[6]; // _94
+	TTitleMenu_Object_Icon mObjIcon[EBI_TITLE_MENU_NUM];  // _4C
+	TTitleMenu_Object_Icon mObjIcon2[EBI_TITLE_MENU_NUM]; // _94
 	int mState;                          // _DC (0 means no challenge mode, 1 means challenge mode)
 	P2DScreen::Mgr_tuning* mMainScreen;  // _E0
-	J2DPane* mCategoryPanes[6];          // _E4
-	int mPikiCounts[6];                  // _FC
-	J2DPane* mPikaPanes[6][100];         // _114
-	E2DCallBack_AnmBase mAnims1[2][6];   // _A74
-	E2DCallBack_AnmBase mAnims2[6];      // _D44
-	E2DCallBack_AnmBase mAnims3[6];      // _EAC
-	E2DCallBack_AnmBase mAnims4[6];      // _1014
-	E2DCallBack_AnmBase mAnims5[6];      // _117C
+	J2DPane* mCategoryPanes[EBI_TITLE_MENU_NUM];          // _E4
+	int mPikiCounts[EBI_TITLE_MENU_NUM];                  // _FC
+	J2DPane* mPikaPanes[EBI_TITLE_MENU_NUM][100];         // _114
+	E2DCallBack_AnmBase mAnims1[2][EBI_TITLE_MENU_NUM];   // _A74
+	E2DCallBack_AnmBase mAnims2[EBI_TITLE_MENU_NUM];      // _D44
+	E2DCallBack_AnmBase mAnims3[EBI_TITLE_MENU_NUM];      // _EAC
+	E2DCallBack_AnmBase mAnims4[EBI_TITLE_MENU_NUM];      // _1014
+	E2DCallBack_AnmBase mAnims5[EBI_TITLE_MENU_NUM];      // _117C
 	E2DCallBack_AnmBase mAnim6;          // _117C
 	E2DCallBack_AnmBase mAnim7;          // _117C
 	E2DCallBack_CalcAnimation mAnim8;    // _117C

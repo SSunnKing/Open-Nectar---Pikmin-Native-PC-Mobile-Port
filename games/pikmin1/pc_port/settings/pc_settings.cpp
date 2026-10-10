@@ -47,6 +47,7 @@
 #include "pc_vs.h"
 #include "pc_achievements.h"
 #include "pc_speedrun.h"
+#include "pc_livesplit.h"
 #include "pc_captain_preview.h"
 #include "mods/pc_hd_model_convert.h"
 #include "randomizer/pc_randomizer.h"
@@ -154,6 +155,14 @@ struct PcConfig {
     int bombControl = 0;
     int hideOlimarText = 0;     // sin los textos de Olimar (primer Pikmin, piezas, avisos)
     int speedrunIntroHidden = 0; // explicación del modo Speedrun ya vista (se abre sola solo la primera vez)        // botón Bomb: el amarillo con bomba la lanza al cursor o la suelta
+    int speedrunCategory = 0;    // categoría del modo Speedrun (PC_SR_CAT_*)
+    int speedrunSplitsShown = 4;
+    // LiveSplit (servidor TCP): opcional, apagado por defecto. Host y puerto
+    // solo en el archivo de ajustes (otro PC de la red, p. ej. desde Android).
+    int speedrunLiveSplit = 0;
+    int speedrunLsHideClock = 0; // con LiveSplit conectado, sin reloj ni splits propios
+    char speedrunLsHost[64] = "127.0.0.1";
+    int speedrunLsPort = 16834; // splits visibles bajo el reloj del modo Speedrun (1-10)
     int onionStep10 = 0;        // Y + arriba/abajo en la cebolla mueve de 10 en 10
     int instantWhistle = 0;     // los Pikmin silbados se unen sin la reacción de girarse
     // Cheats.
@@ -1107,6 +1116,12 @@ void saveConfig() {
     out << "fireflies = " << sConfig.fireflies << "\n";
     out << "hideOlimarText = " << sConfig.hideOlimarText << "\n";
     out << "speedrunIntroHidden = " << sConfig.speedrunIntroHidden << "\n";
+    out << "speedrunCategory = " << sConfig.speedrunCategory << "\n";
+    out << "speedrunSplitsShown = " << sConfig.speedrunSplitsShown << "\n";
+    out << "speedrunLiveSplit = " << sConfig.speedrunLiveSplit << "\n";
+    out << "speedrunLsHideClock = " << sConfig.speedrunLsHideClock << "\n";
+    out << "speedrunLsHost = " << sConfig.speedrunLsHost << "\n";
+    out << "speedrunLsPort = " << sConfig.speedrunLsPort << "\n";
     out << "onionStep10 = " << sConfig.onionStep10 << "\n";
     out << "instantWhistle = " << sConfig.instantWhistle << "\n";
     out << "pikiInvincible = " << sConfig.pikiInvincible << "\n";
@@ -1296,6 +1311,24 @@ void loadConfig() {
         }
         else if (key == "speedrunIntroHidden") {
             sConfig.speedrunIntroHidden = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "speedrunCategory") {
+            sConfig.speedrunCategory = std::clamp(atoi(val.c_str()), 0, PC_SR_CAT_COUNT - 1);
+        }
+        else if (key == "speedrunLiveSplit") {
+            sConfig.speedrunLiveSplit = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "speedrunLsHideClock") {
+            sConfig.speedrunLsHideClock = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "speedrunLsHost") {
+            if (!val.empty()) snprintf(sConfig.speedrunLsHost, sizeof(sConfig.speedrunLsHost), "%s", val.c_str());
+        }
+        else if (key == "speedrunLsPort") {
+            sConfig.speedrunLsPort = std::clamp(atoi(val.c_str()), 1, 65535);
+        }
+        else if (key == "speedrunSplitsShown") {
+            sConfig.speedrunSplitsShown = std::clamp(atoi(val.c_str()), 1, 10);
         }
         else if (key == "hideOlimarText") {
             sConfig.hideOlimarText = atoi(val.c_str()) ? 1 : 0;
@@ -3756,7 +3789,7 @@ bool sTutorialSkipPending = false;
 
 // Menú del modo Speedrun: Start Run / Best Times / How It Works. La
 // explicación se abre sola la primera vez (speedrunIntroHidden = ya vista).
-enum SrPage { SR_Menu, SR_How, SR_Times, SR_ConfirmReset };
+enum SrPage { SR_Menu, SR_How, SR_Times, SR_ConfirmReset, SR_Settings };
 
 bool pc_speedrun_intro_open_if_needed(void) {
     sSpeedrunIntroOpen   = true;
@@ -3777,24 +3810,105 @@ bool pc_speedrun_intro_active(void) { return sSpeedrunIntroOpen; }
 int pc_speedrun_intro_result(void) { return sSpeedrunIntroResult; }
 
 namespace {
-constexpr int kSrMenuItems = 3;
-const char* const kSrMenuLabels[kSrMenuItems] = { "Start Run", "Best Times", "How It Works" };
+enum SrMenuRow {
+    SRM_Start, SRM_Category, SRM_Practice, SRM_Times, SRM_How, SRM_Settings, SRM_Splits, SRM_ResetKey, SRM_ResetPad,
+    SRM_LiveSplit, SRM_LsHideClock, kSrMenuItems
+};
+const char* const kSrMenuLabels[kSrMenuItems] = { "Start Run", "Category", "Practice", "Best Times", "How It Works",
+                                                  "Settings", "Splits shown", "Reset key", "Reset button",
+                                                  "LiveSplit", "Hide game clock" };
+// Filas de cada página: la principal y Settings (ajustes del modo).
+const int kSrMainRows[]     = { SRM_Start, SRM_Category, SRM_Practice, SRM_Times, SRM_How, SRM_Settings };
+const int kSrSettingsRows[] = { SRM_Splits, SRM_ResetKey, SRM_ResetPad, SRM_LiveSplit, SRM_LsHideClock };
+constexpr int kSrMenuRowH   = 44;
+
+const int* srRows(int& count) {
+    if (sSrPage == SR_Settings) {
+        count = int(sizeof(kSrSettingsRows) / sizeof(kSrSettingsRows[0]));
+        return kSrSettingsRows;
+    }
+    count = int(sizeof(kSrMainRows) / sizeof(kSrMainRows[0]));
+    return kSrMainRows;
+}
+int srPanelH(int count) { return 22 + count * kSrMenuRowH + 60; }
+
+// Captura de la tecla o el botón de reset (lo mismo que en Controls).
+char   sSrExportMsg[96] = "";
+Uint32 sSrExportMsgAt   = 0; // el aviso de la exportación dura unos segundos
+int  sSrCapture     = 0;     // 0 = no, SRM_ResetKey o SRM_ResetPad
+bool sSrCaptureWait = false; // esperar a soltar antes y después de capturar
+
+void srSetResetKey(int sc) {
+    sConfig.keyboardBindings[PC_KEY_ACT_SPEEDRUN_RESET] = sPending.keyboardBindings[PC_KEY_ACT_SPEEDRUN_RESET] = sc;
+    pc_window_set_key_binding(PC_KEY_ACT_SPEEDRUN_RESET, static_cast<SDL_Scancode>(sc));
+    saveConfig();
+}
+void srSetResetPad(int bind) {
+    sConfig.gamepadBindings[PC_KEY_ACT_SPEEDRUN_RESET] = sPending.gamepadBindings[PC_KEY_ACT_SPEEDRUN_RESET] = bind;
+    pc_window_set_gamepad_binding(PC_KEY_ACT_SPEEDRUN_RESET, bind);
+    saveConfig();
+}
+
+// true mientras la captura consume la entrada. Esc cancela; Supr o
+// Retroceso dejan la acción sin tecla o botón.
+bool srPollCapture() {
+    if (!sSrCapture && !sSrCaptureWait) return false;
+    SDL_GameController* ctl = pc_window_get_controller();
+    if (sSrCaptureWait) {
+        if (!captureConfirmHeld(ctl) && !pc_window_gamepad_any_held(ctl)) sSrCaptureWait = false;
+        return true;
+    }
+    if (keyWentDown(SDL_SCANCODE_ESCAPE)) {
+        sSrCapture = 0;
+        return true;
+    }
+    const bool clear = keyWentDown(SDL_SCANCODE_DELETE) || keyWentDown(SDL_SCANCODE_BACKSPACE);
+    bool done = false;
+    if (sSrCapture == SRM_ResetKey) {
+        if (clear) {
+            srSetResetKey(SDL_SCANCODE_UNKNOWN);
+            done = true;
+        }
+        for (int sc = 1; sc < SDL_NUM_SCANCODES && !done; sc++) {
+            if (!keyWentDown(static_cast<SDL_Scancode>(sc))) continue;
+            srSetResetKey(sc);
+            done = true;
+        }
+    } else {
+        const int bind = clear ? -1 : pc_window_gamepad_first_held_binding(ctl);
+        if (clear || bind >= 0) {
+            srSetResetPad(bind);
+            done = true;
+        }
+    }
+    if (done) {
+        sSrCapture     = 0;
+        sSrCaptureWait = true;
+    }
+    return true;
+}
 
 void pcSpeedrunIntroInput() {
     if (!sSpeedrunIntroOpen) return;
+    if (srPollCapture()) return;
     bool accept = menuOkKey()
                || (sTouchFrameButtons & PAD_BUTTON_A) != 0;
     bool back   = menuCancelKey() || (sTouchFrameButtons & PAD_BUTTON_B) != 0;
     bool up     = keyWentDown(SDL_SCANCODE_UP) || (sTouchFrameButtons & PAD_BUTTON_UP) != 0;
     bool down   = keyWentDown(SDL_SCANCODE_DOWN) || (sTouchFrameButtons & PAD_BUTTON_DOWN) != 0;
     bool xPress = keyWentDown(SDL_SCANCODE_X) || (sTouchFrameButtons & PAD_BUTTON_X) != 0;
+    bool yPress = keyWentDown(SDL_SCANCODE_E) || (sTouchFrameButtons & PAD_BUTTON_Y) != 0;
+    bool left   = keyWentDown(SDL_SCANCODE_LEFT) || (sTouchFrameButtons & PAD_BUTTON_LEFT) != 0;
+    bool right  = keyWentDown(SDL_SCANCODE_RIGHT) || (sTouchFrameButtons & PAD_BUTTON_RIGHT) != 0;
     if (sTouchTapPending) {
         sTouchTapPending = false;
         // En el menú, un toque sobre una opción la elige; en las páginas, vuelve.
-        if (sSrPage == SR_Menu) {
+        if (sSrPage == SR_Menu || sSrPage == SR_Settings) {
+            int count = 0;
+            srRows(count);
             const float y = sTouchTapY * 480.0f;
-            const int row = int((y - (240.0f - 70.0f)) / 44.0f);
-            if (row >= 0 && row < kSrMenuItems) { sSrSel = row; accept = true; }
+            const int row = int((y - (240.0f - srPanelH(count) / 2 + 22)) / kSrMenuRowH);
+            if (row >= 0 && row < count) { sSrSel = row; accept = true; }
         } else {
             accept = true;
         }
@@ -3805,33 +3919,83 @@ void pcSpeedrunIntroInput() {
         if (promptPadB(ctl)) back = true;
         if (padNavUp(ctl)) up = true;
         if (padNavDown(ctl)) down = true;
+        if (padNavLeft(ctl)) left = true;
+        if (padNavRight(ctl)) right = true;
         static bool sPadXWas = false;
         const bool padX = pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_X));
         if (padX && !sPadXWas) xPress = true;
         sPadXWas = padX;
+        static bool sPadYWas = false;
+        const bool padY = pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_Y));
+        if (padY && !sPadYWas) yPress = true;
+        sPadYWas = padY;
     }
 
     switch (sSrPage) {
     case SR_Menu:
-        if (up)   sSrSel = (sSrSel + kSrMenuItems - 1) % kSrMenuItems;
-        if (down) sSrSel = (sSrSel + 1) % kSrMenuItems;
-        if (accept) {
-            if (sSrSel == 0) {
+    case SR_Settings: {
+        int count = 0;
+        const int* rows = srRows(count);
+        if (up)   sSrSel = (sSrSel + count - 1) % count;
+        if (down) sSrSel = (sSrSel + 1) % count;
+        const int row = rows[sSrSel];
+        if (row == SRM_Category && (left || right || accept)) {
+            // Categoría: izquierda/derecha o A la cambian, en círculo.
+            int c = sConfig.speedrunCategory;
+            c = (c + (left ? PC_SR_CAT_COUNT - 1 : 1)) % PC_SR_CAT_COUNT;
+            sConfig.speedrunCategory = sPending.speedrunCategory = c;
+            saveConfig();
+        } else if (row == SRM_Practice && (left || right || accept)) {
+            // Práctica: Off, día 1 y los días con punto de práctica.
+            if (pc_speedrun_category_uses_days())
+                pc_speedrun_set_practice_day(pc_speedrun_next_practice_day(pc_speedrun_practice_day(), left ? -1 : 1));
+        } else if (row == SRM_Splits && (left || right || accept)) {
+            // Splits visibles: izquierda/derecha cambian, A avanza (de 10 vuelve a 1).
+            int n = sConfig.speedrunSplitsShown;
+            n = left ? std::max(1, n - 1) : right ? std::min(10, n + 1) : n % 10 + 1;
+            sConfig.speedrunSplitsShown = sPending.speedrunSplitsShown = n;
+            saveConfig();
+        } else if ((row == SRM_LiveSplit || row == SRM_LsHideClock) && (left || right || accept)) {
+            int& v = row == SRM_LiveSplit ? sConfig.speedrunLiveSplit : sConfig.speedrunLsHideClock;
+            v = !v;
+            (row == SRM_LiveSplit ? sPending.speedrunLiveSplit : sPending.speedrunLsHideClock) = v;
+            saveConfig();
+        } else if ((row == SRM_ResetKey || row == SRM_ResetPad) && accept) {
+            sSrCapture     = row;
+            sSrCaptureWait = true;
+        } else if (accept) {
+            if (row == SRM_Start) {
                 sSpeedrunIntroOpen   = false;
                 sSpeedrunIntroResult = PC_SPEEDRUN_INTRO_CONTINUE;
+            } else if (row == SRM_Settings) {
+                sSrPage = SR_Settings;
+                sSrSel  = 0;
             } else {
-                sSrPage = sSrSel == 1 ? SR_Times : SR_How;
+                sSrPage = row == SRM_Times ? SR_Times : SR_How;
             }
+        } else if (back && sSrPage == SR_Settings) {
+            // Settings vuelve a la página principal, con Settings marcado.
+            sSrPage = SR_Menu;
+            sSrSel  = 5;
         } else if (back) {
             sSpeedrunIntroOpen   = false;
             sSpeedrunIntroResult = PC_SPEEDRUN_INTRO_BACK;
         }
         break;
+    }
     case SR_How:
         if (accept || back) sSrPage = SR_Menu;
         break;
     case SR_Times:
-        if (xPress && pc_speedrun_has_pb()) sSrPage = SR_ConfirmReset;
+        if (yPress) {
+            // Exportar los splits a LiveSplit; el resultado sale en la página.
+            char name[64];
+            if (pc_speedrun_export_lss(name, sizeof(name)))
+                snprintf(sSrExportMsg, sizeof(sSrExportMsg), "Saved save/speedrun/%s", name);
+            else
+                snprintf(sSrExportMsg, sizeof(sSrExportMsg), "Nothing to export: finish a run first");
+            sSrExportMsgAt = SDL_GetTicks();
+        } else if (xPress && pc_speedrun_has_pb()) sSrPage = SR_ConfirmReset;
         else if (accept || back) sSrPage = SR_Menu;
         break;
     case SR_ConfirmReset:
@@ -3854,12 +4018,26 @@ void drawSrHow(DGXGraphics* gfx, int screenW, int screenH) {
     const int panelX = screenW / 2 - panelW / 2, panelY = screenH / 2 - panelH / 2 + 10;
     drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
     drawPikminHeader(gfx, panelX, panelY, panelW, "How It Works");
+    // Reglas de speedrun.com de la categoría elegida.
+    static const char* const kRules[PC_SR_CAT_COUNT][3] = {
+        { "All Parts: Start Run begins a new game. The timer",
+          "starts then and stops when the Secret Safe is",
+          "collected. One split per day." },
+        { "Low-Pikmin: All Parts, but the Onions may produce",
+          "at most " PC_SR_SPROUT_LIMIT_TEXT " sprouts. Going over voids the run.",
+          "One split per day." },
+        { "5 Parts: play Day 1 and save (25 Red Leaf Pikmin).",
+          "Later runs load that race file. The timer starts on",
+          "entering Forest of Hope; one split per part." },
+        { "200 Pikmin Challenge: all five stages are open. The",
+          "timer starts on the first stage and stops leaving the",
+          "last one with 200 in all five. One split per stage." },
+    };
+    const char* const* rules = kRules[pc_speedrun_category()];
     const char* lines[6] = { "Pikmin exactly as it shipped on GameCube.",
                              "No gameplay changes and no control upgrades:",
                              "every mod, cheat and port option that alters play is off.",
-                             "Start Run begins a new game right away, with no file",
-                             "select. The timer starts then and stops when the",
-                             "Secret Safe is collected. One split per day." };
+                             rules[0], rules[1], rules[2] };
     for (int i = 0; i < 6; i++) {
         const Colour c = i < 3 ? Colour(214, 224, 245, 255) : Colour(170, 190, 215, 255);
         drawTextOutline(panelX + panelW / 2 - menuTextWidth(lines[i]) / 2, panelY + 34 + i * 30 + (i >= 3 ? 8 : 0),
@@ -3872,7 +4050,9 @@ void drawSrTimes(DGXGraphics* gfx, int screenW, int screenH, bool confirm) {
     const int panelW = 600, panelH = 372;
     const int panelX = screenW / 2 - panelW / 2, panelY = screenH / 2 - panelH / 2 + 30;
     drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
-    drawPikminHeader(gfx, panelX, panelY, panelW, "Best Times");
+    char header[48];
+    snprintf(header, sizeof(header), "Best Times: %s", pc_speedrun_category_name(pc_speedrun_category()));
+    drawPikminHeader(gfx, panelX, panelY, panelW, header);
     const Colour kTitle(255, 205, 60, 255), kBody(214, 224, 245, 255), kDim(150, 165, 195, 255);
     const int lx = panelX + 36, rx = panelX + panelW - 36;
     char buf[64], t[32];
@@ -3885,7 +4065,8 @@ void drawSrTimes(DGXGraphics* gfx, int screenW, int screenH, bool confirm) {
         pc_speedrun_format_time(pc_speedrun_pb_ms(), t, sizeof(t));
         srText(lx, panelY + 26, "Personal Best", kTitle, 14, 21);
         srTextRight(rx, panelY + 26, t, kTitle, 14, 21);
-        snprintf(buf, sizeof(buf), "%d days   %s", pc_speedrun_pb_days(), pc_speedrun_pb_date());
+        if (pc_speedrun_category_uses_days()) snprintf(buf, sizeof(buf), "%d days   %s", pc_speedrun_pb_days(), pc_speedrun_pb_date());
+        else snprintf(buf, sizeof(buf), "%s", pc_speedrun_pb_date());
         srText(lx, panelY + 50, buf, kDim, 10, 15);
         pc_speedrun_format_time(pc_speedrun_sum_of_best(), t, sizeof(t));
         snprintf(buf, sizeof(buf), "Sum of Best  %s", t);
@@ -3907,7 +4088,8 @@ void drawSrTimes(DGXGraphics* gfx, int screenW, int screenH, bool confirm) {
             u64 ms = 0; int days = 0; const char* date = "";
             pc_speedrun_recent(i, &ms, &days, &date);
             pc_speedrun_format_time(ms, t, sizeof(t));
-            snprintf(buf, sizeof(buf), "%s   %dd   %s", t, days, date);
+            if (pc_speedrun_category_uses_days()) snprintf(buf, sizeof(buf), "%s   %dd   %s", t, days, date);
+            else snprintf(buf, sizeof(buf), "%s   %s", t, date);
             srText(lx + (i % 2) * colW, panelY + 274 + (i / 2) * 18, buf, kBody, 9, 14);
         }
     }
@@ -3915,9 +4097,12 @@ void drawSrTimes(DGXGraphics* gfx, int screenW, int screenH, bool confirm) {
     if (confirm) {
         drawHelpLine(panelX + panelW / 2, panelY + panelH - 36, "Erase all records?    A: erase    B: keep",
                      Colour(255, 160, 120, 255));
+    } else if (sSrExportMsg[0] && SDL_GetTicks() - sSrExportMsgAt < 4000) {
+        drawHelpLine(panelX + panelW / 2, panelY + panelH - 36, sSrExportMsg, Colour(255, 205, 60, 255));
     } else {
         drawHelpLine(panelX + panelW / 2, panelY + panelH - 36,
-                     pc_speedrun_has_pb() ? "B / Esc: back    X: erase records" : "B / Esc: back",
+                     pc_speedrun_has_pb() ? "B: back    X: erase records    Y / E: export to LiveSplit"
+                                          : "B: back    Y / E: export to LiveSplit",
                      Colour(150, 165, 195, 255));
     }
 }
@@ -3942,14 +4127,46 @@ void pc_speedrun_intro_draw(void) {
         return;
     }
 
-    const int panelW = 420, panelH = 200;
+    int count = 0;
+    const int* rows = srRows(count);
+    const int panelW = 560, panelH = srPanelH(count);
     const int panelX = screenW / 2 - panelW / 2, panelY = screenH / 2 - panelH / 2;
     drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
-    drawPikminHeader(gfx, panelX, panelY, panelW, "Speedrun");
-    for (int i = 0; i < kSrMenuItems; i++) {
-        drawGlassOption(panelX + 40, panelY + 22 + i * 44, panelW - 80, 40, kSrMenuLabels[i], i == sSrSel, 18, 26);
+    drawPikminHeader(gfx, panelX, panelY, panelW, sSrPage == SR_Settings ? "Speedrun Settings" : "Speedrun");
+    for (int r = 0; r < count; r++) {
+        const int i = rows[r];
+        char label[64];
+        if (i == SRM_Start && pc_speedrun_practice_day() > 0)
+            snprintf(label, sizeof(label), "Start Practice");
+        else if (i == SRM_Practice && !pc_speedrun_category_uses_days())
+            snprintf(label, sizeof(label), "%s: n/a", kSrMenuLabels[i]);
+        else if (i == SRM_Practice && pc_speedrun_practice_day() == 0)
+            snprintf(label, sizeof(label), "%s: < Off >", kSrMenuLabels[i]);
+        else if (i == SRM_Practice)
+            snprintf(label, sizeof(label), "%s: < Day %d >", kSrMenuLabels[i], pc_speedrun_practice_day());
+        else if (i == SRM_Category)
+            snprintf(label, sizeof(label), "%s: < %s >", kSrMenuLabels[i], pc_speedrun_category_name(pc_speedrun_category()));
+        else if (i == SRM_Splits)
+            snprintf(label, sizeof(label), "%s: < %d >", kSrMenuLabels[i], sConfig.speedrunSplitsShown);
+        else if (i == sSrCapture)
+            snprintf(label, sizeof(label), "%s", i == SRM_ResetKey ? "Press a key..." : "Press a button...");
+        else if (i == SRM_ResetKey)
+            snprintf(label, sizeof(label), "%s: %s", kSrMenuLabels[i],
+                     pc_window_binding_name(sConfig.keyboardBindings[PC_KEY_ACT_SPEEDRUN_RESET]));
+        else if (i == SRM_ResetPad)
+            snprintf(label, sizeof(label), "%s: %s", kSrMenuLabels[i],
+                     pc_window_get_gamepad_button_name(sConfig.gamepadBindings[PC_KEY_ACT_SPEEDRUN_RESET]));
+        else if (i == SRM_LiveSplit)
+            snprintf(label, sizeof(label), "%s: < %s >", kSrMenuLabels[i],
+                     !sConfig.speedrunLiveSplit ? "Off" : pc_livesplit_connected() ? "Connected" : "Waiting");
+        else if (i == SRM_LsHideClock)
+            snprintf(label, sizeof(label), "%s: < %s >", kSrMenuLabels[i], sConfig.speedrunLsHideClock ? "On" : "Off");
+        else snprintf(label, sizeof(label), "%s", kSrMenuLabels[i]);
+        drawGlassOption(panelX + 40, panelY + 22 + r * kSrMenuRowH, panelW - 80, kSrMenuRowH - 4, label, r == sSrSel, 18, 26);
     }
-    drawHelpLine(panelX + panelW / 2, panelY + 160, "A / Enter: select    B / Esc: back", Colour(150, 165, 195, 255));
+    const char* help = sSrCapture ? "Hold it 1 s in game to reset    Esc: cancel    Del: none"
+                                  : "A / Enter: select    B / Esc: back";
+    drawHelpLine(panelX + panelW / 2, panelY + panelH - 40, help, Colour(150, 165, 195, 255));
 }
 
 // ─── Randomizer: explicación y ajustes ───
@@ -6424,6 +6641,12 @@ void pc_settings_draw(void) {
     drawF1Page(gfx);
 }
 
+int pc_settings_get_speedrun_splits_shown(void) { return sConfig.speedrunSplitsShown; }
+int pc_settings_get_speedrun_category(void) { return sConfig.speedrunCategory; }
+int pc_settings_get_speedrun_livesplit(void) { return sConfig.speedrunLiveSplit; }
+int pc_settings_get_speedrun_ls_hide_clock(void) { return sConfig.speedrunLsHideClock; }
+const char* pc_settings_get_speedrun_ls_host(void) { return sConfig.speedrunLsHost; }
+int pc_settings_get_speedrun_ls_port(void) { return sConfig.speedrunLsPort; }
 int pc_settings_get_fps_mode(void) { if (pc_speedrun_active()) return 0;
     return sConfig.fpsMode;
 }

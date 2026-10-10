@@ -1,3 +1,6 @@
+#ifdef PIKI_PC_PORT
+#include "pc_speedrun.h"
+#endif
 #include "Title.h"
 #include "ebi/title/TTitle.h"
 #include "og/ogLib2D.h"
@@ -167,6 +170,13 @@ void Section::loadResident()
 void Section::init()
 {
 	sys->heapStatusStart("TitleSection::init", nullptr);
+#ifdef PIKI_PC_PORT
+	// En el título no hay run: se apaga el modo (reloj, HUD y ajustes vanilla)
+	// y vuelve el progreso del Desafío del jugador si una run lo había dejado
+	// como en una partida nueva.
+	pc_speedrun_challenge_progress_restore();
+	pc_speedrun_set_active(0);
+#endif
 
 	sys->heapStatusStart("JMANewSinTable", nullptr);
 	sys->heapStatusEnd("JMANewSinTable");
@@ -448,6 +458,13 @@ void Section::doUpdateMainTitle()
 				seq->startSeq();
 			}
 			break;
+#ifdef PIKI_PC_PORT
+		case ebi::TMainTitleMgr::Select_Speedrun:
+			// Modo Speedrun: el menú del modo sale en la selección de partida.
+			pc_speedrun_set_active(1);
+			GameFlow::mActiveSectionFlag = GameFlow::SN_SingleGame;
+			break;
+#endif
 		case ebi::TMainTitleMgr::Select_NULL:
 			mIsMainActive = true;
 			break;

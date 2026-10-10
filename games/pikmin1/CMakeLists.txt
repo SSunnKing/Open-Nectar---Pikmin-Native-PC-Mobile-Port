@@ -274,6 +274,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_whistle_pluck.cpp
     pc_port/pc_discord.cpp
     pc_port/pc_speedrun.cpp
+    pc_port/pc_livesplit.cpp
+    pc_port/pc_day_history.cpp
     pc_port/pc_art.cpp
     pc_port/pc_icon.cpp
     pc_port/settings/pc_glass_menu.cpp
@@ -565,7 +567,7 @@ if (WIN32)
     # SDL2main NO se enlaza: aporta un WinMain que llama a SDL_main, y este
     # proyecto declara SDL_MAIN_HANDLED y define su propio main. Enlazarlo deja
     # SDL_main sin definir en todos los ejecutables.
-    target_link_libraries(${NECTAR_GAME} PRIVATE ${SDL2_LIBRARIES} opengl32 comdlg32)
+    target_link_libraries(${NECTAR_GAME} PRIVATE ${SDL2_LIBRARIES} opengl32 comdlg32 ws2_32)
 elseif (ANDROID)
     # En Android no hay X11 ni OpenGL de escritorio. GLESv3 y EGL vienen del
     # NDK; log y android los necesita la capa de plataforma (logcat, ciclo de

@@ -60,6 +60,8 @@ enum {
     PC_KEY_ACT_LOCKON       = 21,
     PC_KEY_ACT_FIRSTPERSON  = 22,
     PC_KEY_ACT_GYRO_RECENTER = 23,
+    // Modo Speedrun: mantener 1 s reinicia la run (pc_speedrun_take_reset).
+    PC_KEY_ACT_SPEEDRUN_RESET = 24,
     PC_KEY_ACT_COUNT
 };
 void pc_window_set_key_binding(int action, SDL_Scancode scancode);

@@ -286,6 +286,7 @@ const SDL_Scancode kDefaultKeyBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_FIRSTPERSON */ SDL_SCANCODE_V,
     /* PC_KEY_ACT_GYRO_RECENTER */ SDL_SCANCODE_UNKNOWN, // el giroscopio va en el mando
     /* PC_KEY_ACT_BOMB        */ SDL_SCANCODE_B, // B solo es "atrás" dentro de los menús
+    /* PC_KEY_ACT_SPEEDRUN_RESET */ SDL_SCANCODE_F5,
 };
 
 SDL_Scancode pc_window_default_key_binding2(int action) {
@@ -324,6 +325,7 @@ const int kDefaultGamepadBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_FIRSTPERSON */ SDL_CONTROLLER_BUTTON_LEFTSTICK,
     /* PC_KEY_ACT_GYRO_RECENTER */ -1, // sin botón libre por defecto; se asigna en Controls
     /* PC_KEY_ACT_BOMB        */ -1, // ídem
+    /* PC_KEY_ACT_SPEEDRUN_RESET */ -1, // Back abre los ajustes; se asigna en Controls o en el menú Speedrun
 };
 
 // Action names for UI display.
@@ -334,6 +336,7 @@ static const char* kKeyActionNames[PC_KEY_ACT_COUNT] = {
     "C-Stick Up", "C-Stick Down", "C-Stick Left", "C-Stick Right",
     "Swarm to cursor",
     "Lock-On", "First Person", "Gyro Recenter", "Bomb",
+    "Speedrun Reset",
 };
 
 static void initKeyBindings() {

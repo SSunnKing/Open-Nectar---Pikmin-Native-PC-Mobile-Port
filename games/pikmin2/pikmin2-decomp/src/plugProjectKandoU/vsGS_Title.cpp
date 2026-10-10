@@ -1,6 +1,57 @@
 #include "types.h"
 #ifdef PIKI_PC_PORT
 extern "C" void pc_gfx_set_post_allowed(int allowed);
+#include "pc_speedrun.h"
+#include "Game/Data.h"
+#include "System.h"
+#include "stream.h"
+#include <cstdlib>
+#include <cstring>
+
+// Progreso del Desafío del jugador (niveles abiertos, superados, flores y
+// récords: PlayChallengeGameData, en los datos comunes). Una run del Desafío
+// empieza como una partida nueva, solo con los cinco primeros niveles, y al
+// volver al título se devuelve lo del jugador. La copia va en malloc: dura
+// más que las secciones. El título vuelve a leer además las opciones de la
+// tarjeta, y la run no guarda (ebi::Save::TMgr::start).
+namespace {
+const int kPcChallengeBackupSize = 0x4000; // de sobra: las opciones enteras ocupan 0x2000
+u8* sPcChallengeBackup           = nullptr;
+bool sPcChallengeBackupValid     = false;
+} // namespace
+
+extern "C" void pc_speedrun_challenge_progress_reset(void)
+{
+	Game::PlayChallengeGameData& data = sys->getPlayCommonData()->mChallengeData;
+	if (!sPcChallengeBackupValid) {
+		if (!sPcChallengeBackup) {
+			sPcChallengeBackup = static_cast<u8*>(std::malloc(kPcChallengeBackupSize));
+		}
+		if (sPcChallengeBackup) {
+			std::memset(sPcChallengeBackup, 0, kPcChallengeBackupSize);
+			RamStream stream(sPcChallengeBackup, kPcChallengeBackupSize);
+			data.write(stream);
+			sPcChallengeBackupValid = true;
+		}
+	}
+	// Las marcas globales (Desafío desbloqueado, ya jugado, Louie) se quedan:
+	// no son progreso de la run y evitan el aviso de la primera vez.
+	BitFlag<u8> flags = data.mGlobalFlags;
+	data.reset();
+	// Una run del Desafío no exige tenerlo desbloqueado en la partida del jugador.
+	flags.set(Game::PlayChallengeGameData::PCGDF_IsPlayable);
+	data.mGlobalFlags = flags;
+}
+
+extern "C" void pc_speedrun_challenge_progress_restore(void)
+{
+	if (!sPcChallengeBackupValid) {
+		return;
+	}
+	RamStream stream(sPcChallengeBackup, kPcChallengeBackupSize);
+	sys->getPlayCommonData()->mChallengeData.read(stream);
+	sPcChallengeBackupValid = false;
+}
 #endif
 #include "Game/VsGame.h"
 #include "Game/SingleGame.h"
@@ -84,6 +135,13 @@ void TitleState::init(VsGameSection* section, StateArg* arg)
 
 	section->mChallengeStageData = nullptr;
 	section->mVsStageData        = nullptr;
+#ifdef PIKI_PC_PORT
+	// Speedrun del Desafío: la selección de niveles empieza como en una partida
+	// nueva (también tras un reset rápido).
+	if (pc_speedrun_challenge_awaiting()) {
+		pc_speedrun_challenge_progress_reset();
+	}
+#endif
 }
 
 static const char unusedVsTitleString[] = "コンクリート"; // 'concrete'
@@ -235,6 +293,11 @@ void TitleState::execChallenge(VsGameSection* section)
 			P2ASSERTLINE(323, data);
 			section->mChallengeStageData = data;
 			section->mChallengeStageNum  = stageNumber;
+#ifdef PIKI_PC_PORT
+			if (!section->mIsVersusMode) {
+				pc_speedrun_on_challenge_start(stageNumber);
+			}
+#endif
 
 			strcpy(section->mCaveInfoFilename, data->mCaveInfoFilename);
 

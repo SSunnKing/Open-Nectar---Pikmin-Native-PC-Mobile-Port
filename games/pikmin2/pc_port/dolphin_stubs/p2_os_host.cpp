@@ -27,6 +27,7 @@
 #include "JSystem/JKernel/JKRHeap.h"
 #include "THP/THPPlayer.h"
 #include "audio/pc_dsp_host.h"
+#include "pc_speedrun.h"
 
 RenderModeInfo gPcRenderInfoStore = {};
 
@@ -1059,10 +1060,13 @@ void VIWaitForRetrace()
 		pc_settings_request_toggle();
 	// Aviso de Lock-On (Camera > Lock-On) y, encima, el menu F1, sobre el
 	// frame terminado y antes de presentarlo.
+	pc_speedrun_frame();
 	pc_settings_p2_begin_frame();
 	pc_settings_draw_lock_on();
 	pc_settings_draw_idle_counter();
+	pc_speedrun_draw();
 	pc_newgame_prompt_draw();
+	pc_speedrun_menu_draw();
 	pc_erased_notice_draw();
 	pc_settings_draw();
 	pc_settings_draw_achievement_toast();

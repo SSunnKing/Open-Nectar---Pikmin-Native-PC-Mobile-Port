@@ -1258,6 +1258,22 @@ ModeState* RunningModeState::update(u32& result)
 		gameflow.mIsUIOverlayActive = mIsOverlayCached;
 		seSystem->playSysSe(SYSSE_UNPAUSE);
 	}
+#if defined(PIKI_PC_PORT)
+	else if (pc_speedrun_take_reset()) {
+		// Speedrun: reset rápido. CardSelect empieza otra run sin menús.
+		mParentSection->mPendingOnePlayerSectionID = ONEPLAYER_CardSelect;
+		gsys->setFade(0.0f);
+		return new QuittingGameModeState(mParentSection);
+	} else if (pc_speedrun_debug_take_day_end()) {
+		fprintf(stderr, "[SR debug] tutorial skip / day end: forceDayEnd\n"); // TEMP
+		// Speedrun, atajo de prueba (PIKMIN_SR_DEBUG): lo mismo que "Ir al atardecer".
+		gamecore->forceDayEnd();
+#if !defined(VERSION_PIKIDEMO) && !defined(VERSION_GPIJ01_01)
+		gameflow.mIsPauseAllowed = FALSE;
+#endif
+		gameflow.mIsDayEndTriggered = TRUE;
+	}
+#endif
 
 	return this;
 }
@@ -1962,6 +1978,7 @@ ModeState* DayOverModeState::initialisePhaseTwo()
 			info.mScore   = GameStat::allPikis;
 #if defined(PIKI_PC_PORT)
 			pc_achievements_on_challenge_score(info.mStageID, info.mScore);
+			pc_speedrun_on_challenge_result(flowCont.mCurrentStage->mStageID, info.mScore);
 #endif
 			// check if we got a new hiscore for this course, and update the info if so
 			gameflow.mGamePrefs.checkIsHiscore(info);

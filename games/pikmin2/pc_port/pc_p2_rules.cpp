@@ -1,6 +1,7 @@
 // Pikmin 2: Hard y Permadeath por partida (ver pc_p2_rules.h).
 
 #include "pc_p2_rules.h"
+#include "pc_speedrun.h"
 
 #include <SDL2/SDL.h>
 #include <cstdio>
@@ -26,9 +27,10 @@ int  sSlotBits[3]       = { 0, 0, 0 };
 
 extern "C" {
 
-int pc_p2_permadeath_active(void) { return sActivePermadeath ? 1 : 0; }
+// Speedrun es Normal: no se combina con Hard ni Permadeath.
+int pc_p2_permadeath_active(void) { return sActivePermadeath && !pc_speedrun_active() ? 1 : 0; }
 
-int pc_hardmode_active_c(void) { return sActiveHard ? 1 : 0; }
+int pc_hardmode_active_c(void) { return sActiveHard && !pc_speedrun_active() ? 1 : 0; }
 
 void pc_p2_rules_set_pending(int permadeath, int hard)
 {

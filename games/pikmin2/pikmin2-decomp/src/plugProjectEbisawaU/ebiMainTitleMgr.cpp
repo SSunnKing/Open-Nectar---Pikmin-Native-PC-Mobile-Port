@@ -162,6 +162,11 @@ void TMainTitleMgr::startMenuSet(s32, s32 select)
 	case Select_Bonus:
 		id = 5;
 		break;
+#ifdef PIKI_PC_PORT
+	case Select_Speedrun:
+		id = mTitleMenu.menuNum() > 6 ? 6 : 0;
+		break;
+#endif
 	default:
 		JUT_PANICLINE(177, "P2Assert");
 	}
@@ -348,6 +353,11 @@ void TMainTitleMgr::update()
 				case 5:
 					mSelectedMenuOption = Select_Bonus;
 					break;
+#ifdef PIKI_PC_PORT
+				case 6:
+					mSelectedMenuOption = Select_Speedrun;
+					break;
+#endif
 				}
 			}
 			title::titleMgr->breakup();
