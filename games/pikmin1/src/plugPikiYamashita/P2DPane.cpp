@@ -2,6 +2,11 @@
 #include "Dolphin/gx.h"
 #include "P2D/Graph.h"
 #include "P2D/Pane.h"
+#if defined(PIKI_PC_PORT)
+#include <cmath>
+#include "pc_gfx.h"
+#include "pc_menu_click.h"
+#endif
 #include "PSU/LinkList.h"
 #include "PSU/Tree.h"
 
@@ -218,6 +223,27 @@ P2DPane::~P2DPane()
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+// The drawn rectangle of a pane, in window pixels: its four corners through the matrix it was
+// drawn with. Perspective and rotation are in the corners, so the rectangle is where the pane
+// is seen, not where its layout bounds are.
+static void pcNoteClickTarget(const float (*mtx)[4], int tag, float width, float height)
+{
+	const float corners[4][2] = { { 0.0f, 0.0f }, { width, 0.0f }, { 0.0f, height }, { width, height } };
+	float minX = 0.0f, minY = 0.0f, maxX = 0.0f, maxY = 0.0f;
+	for (int i = 0; i < 4; i++) {
+		float wx = 0.0f, wy = 0.0f;
+		if (!pc_gfx_project_with_mtx(mtx, corners[i][0], corners[i][1], 0.0f, &wx, &wy)) return;
+		if (i == 0 || wx < minX) minX = wx;
+		if (i == 0 || wy < minY) minY = wy;
+		if (i == 0 || wx > maxX) maxX = wx;
+		if (i == 0 || wy > maxY) maxY = wy;
+	}
+	pc_menu_click_targets_add(tag, PcMenuClickRect{ int(std::floor(minX)), int(std::floor(minY)),
+	                                                int(std::ceil(maxX)), int(std::ceil(maxY)) });
+}
+#endif
+
 void P2DPane::draw(int xOffs, int yOffs, const P2DGrafContext* grafContext, bool applyScissor)
 {
 	P2DGrafContext context(*grafContext);
@@ -264,6 +290,13 @@ void P2DPane::draw(int xOffs, int yOffs, const P2DGrafContext* grafContext, bool
 			if (mCallBack) {
 				mCallBack->draw(this);
 			}
+#if defined(PIKI_PC_PORT)
+			if (mPcClickTag >= 0 && pc_menu_click_targets_collecting()) {
+				Matrix4f drawn;
+				context.mViewMtx.multiplyTo(mWorldMtx, drawn);
+				pcNoteClickTarget(drawn.mMtx, mPcClickTag, f32(getWidth()), f32(getHeight()));
+			}
+#endif
 
 			PSUTreeIterator<P2DPane> iter(mPaneTree.getFirstChild());
 			while (iter != mPaneTree.getEndChild()) {

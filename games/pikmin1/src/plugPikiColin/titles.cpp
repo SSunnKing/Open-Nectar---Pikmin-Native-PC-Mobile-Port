@@ -23,6 +23,7 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
 #include "pc_gfx.h"
+#include "pc_menu_click.h"
 #include "pc_speedrun.h"
 #include "pc_vs.h"
 #include "netplay/pc_coop_switch.h"
@@ -416,7 +417,20 @@ public:
 				if (!totalWindowOn) {
 
 					// handle pressing A or START on PRESS START screen
-					if (startWindowOn && !titleWindowOn && mController->keyClick(KBBTN_START | KBBTN_A)) {
+					bool startPressed = false;
+					if (startWindowOn && !titleWindowOn) {
+						startPressed = mController->keyClick(KBBTN_START | KBBTN_A);
+#if defined(PIKI_PC_PORT)
+						if (startWindow->pcPointerPressed()) {
+							startPressed = true;
+						}
+#endif
+					}
+					if (startPressed) {
+#if defined(PIKI_PC_PORT)
+						// The click that opened this menu must not also activate a row.
+						pc_menu_click_clear();
+#endif
 #if defined(VERSION_PIKIDEMO)
 						// demo doesn't use the title menu, jump straight into Forest of Hope challenge mode
 						mNextSectionsFlag                = PACK_NEXT_ONEPLAYER(ONEPLAYER_GameSetup);

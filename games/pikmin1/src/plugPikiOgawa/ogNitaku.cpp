@@ -9,6 +9,10 @@
 #include "pc_gfx.h"
 #include "touch/pc_touch.h"
 #endif
+#if defined(PIKI_PC_PORT)
+#include "pc_gfx.h"
+#include "pc_menu_click.h"
+#endif
 
 /**
  * @todo: Documentation
@@ -223,6 +227,39 @@ zen::ogNitakuMgr::NitakuStatus zen::ogNitakuMgr::update(Controller* input)
 			}
 		}
 #endif
+#endif
+#if defined(PIKI_PC_PORT)
+		// Mouse: a left click on Yes or No decides it, and a pointer resting on a choice moves
+		// the cursor there. The keyboard and controller path below does not change.
+		pc_menu_click_claim_pointer_menu();
+		if (!touchDecide && mTextBoxA && mTextBoxB) {
+			P2DTextBox* boxes[2] = { mTextBoxA, mTextBoxB };
+			PcMenuClickRect rects[2];
+			const int active[2] = { 1, 1 };
+			for (int i = 0; i < 2; i++) {
+				const PUTRect& b         = boxes[i]->getGlobalBounds();
+				const PcMenuClickRect r  = { b.mMinX, b.mMinY, b.mMaxX, b.mMaxY };
+				rects[i]                 = r;
+			}
+			const int virtW = pc_gfx_menu_virt_width();
+			float x         = 0.0f;
+			float y         = 0.0f;
+			if (pc_menu_click_take_graph(virtW, 480, &x, &y)) {
+				const PcMenuClickResult hit = pc_menu_click_resolve(PC_MENU_CLICK_MAIN, x, y, rects, active, 2, kPcMenuClickMargin);
+				if (hit.action == PC_MENU_CLICK_ACTIVATE) {
+					if ((hit.index == 0) != mIsYes) {
+						if (hit.index == 0) MoveCursorYes(0.25f); else MoveCursorNo(0.25f);
+					}
+					touchDecide = true;
+				}
+			} else if (pc_menu_click_read_pointer_graph(virtW, 480, &x, &y)) {
+				const PcMenuClickResult hover = pc_menu_click_hover(PC_MENU_CLICK_MAIN, x, y, rects, active, 2, kPcMenuClickMargin);
+				if (hover.action == PC_MENU_CLICK_HIGHLIGHT && (hover.index == 0) != mIsYes) {
+					if (hover.index == 0) MoveCursorYes(0.25f); else MoveCursorNo(0.25f);
+					seSystem->playSysSe(ogEnumFix(SYSSE_MOVE1, JACSYS_Move1));
+				}
+			}
+		}
 #endif
 		if (input->keyClick(KBBTN_MSTICK_UP)) {
 			if (mIsYes) {

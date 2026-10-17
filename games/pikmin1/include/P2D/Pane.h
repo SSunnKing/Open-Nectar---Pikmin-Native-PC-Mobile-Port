@@ -177,6 +177,10 @@ public:
 	}
 
 #if defined(PIKI_PC_PORT)
+	/// Tag de un objetivo de clic: al dibujarse, el rectángulo que ocupa en la ventana se anota
+	/// si su pantalla está recogiendo objetivos (pc_menu_click_targets_begin). -1: ninguno.
+	void setPcClickTag(int tag) { mPcClickTag = tag; }
+
 	/// Copia todo menos el árbol (queda huérfano) y el callback (nullptr).
 	void pcCopyPaneFrom(immut P2DPane& o)
 	{
@@ -248,6 +252,9 @@ protected:
 	s16 mOffsetY;               // _BA
 	f32 mRotation;              // _BC
 	Vector3f mScale;            // _C0
+#if defined(PIKI_PC_PORT)
+	int mPcClickTag = -1; // not copied by pcCopyPaneFrom: a clone is not a target
+#endif
 	int mCullMode;              // _CC
 	PSUTree<P2DPane> mPaneTree; // _D0
 };

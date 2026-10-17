@@ -345,6 +345,9 @@ void pc_gfx_get_drawable_size(int* width, int* height);
 // posición y proyección GX vigentes) a píxeles de ventana. Sirve para
 // colocar sprites de la capa sobre texto o paneles P2D. false si no se puede.
 bool pc_gfx_project_current(float x, float y, float z, float* winX, float* winY);
+// The same projection through an explicit 3x4 position matrix, read the way
+// pc_gfx_load_pos_mtx reads it. Nothing is loaded, so GX state is unchanged.
+bool pc_gfx_project_with_mtx(const float (*mtx)[4], float x, float y, float z, float* winX, float* winY);
 #endif
 
 #endif // PC_GFX_H

@@ -24,9 +24,19 @@
 #include "P2D/Pane.h"
 #include "settings/pc_settings.h"
 #include "pc_gfx.h"
+#include "pc_menu_click.h"
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
 #include "Dolphin/pad.h"
+#endif
+
+// Pointer intent for this frame, set by the card update and taken by OperateSelect.
+static bool sPcPointerEnter = false;
+static bool sPcPointerBack  = false;
+#if defined(PIKI_PC_PORT)
+// Click target kind of the save cards, and how far a click may miss a card's drawn edge.
+constexpr int kPcCardTargets = 0;
+constexpr float kPcCardMargin = 16.0f;
 #endif
 
 static f32 filesel_fx_x(int slot, P2DPane* pane)
@@ -496,6 +506,13 @@ void zen::ogScrFileSelectMgr::getPane_FileIcon()
 
 		mIconOnyonPanes[i]  = screen->search('fp', true);
 		mIconPikminPanes[i] = screen->search('fp_m', true);
+#if defined(PIKI_PC_PORT)
+		// A card's drawn icons record its window rectangle for slot i while the slots draw.
+		mIconOnyonPanes[i]->setPcClickTag(i);
+		mIconPikminPanes[i]->setPcClickTag(i);
+		mIconNewPanes[i]->setPcClickTag(i);
+		mIconEmptyPanes[i]->setPcClickTag(i);
+#endif
 
 		mIconOnyonPanes[i]->show();
 		mIconPikminPanes[i]->show();
@@ -1225,7 +1242,7 @@ void zen::ogScrFileSelectMgr::OperateSelect(Controller* controller)
 		return;
 	}
 
-	if (controller->keyClick(KBBTN_A)) {
+	if (controller->keyClick(KBBTN_A) || sPcPointerEnter) {
 		SeSystem::playSysSe(ogEnumFix(SYSSE_DECIDE1, JACSYS_Decide1));
 #if defined(PIKI_PC_PORT)
 		// Slot vacío: sigue el prompt de partida nueva encima de esta misma
@@ -1259,7 +1276,7 @@ void zen::ogScrFileSelectMgr::OperateSelect(Controller* controller)
 		return;
 	}
 
-	if (controller->keyClick(KBBTN_B)) {
+	if (controller->keyClick(KBBTN_B) || sPcPointerBack) {
 		mIsTailMoveEffectActive = true;
 		BeginFadeOut();
 		SeSystem::playSysSe(ogEnumFix(SYSSE_CANCEL, JACSYS_Cancel));
@@ -1570,6 +1587,33 @@ zen::ogScrFileSelectMgr::returnStatusFlag zen::ogScrFileSelectMgr::update(Contro
 			}
 		}
 #endif
+#if defined(PIKI_PC_PORT)
+			// Mouse, card select: hover selects the card under the pointer, a click enters it as A does,
+			// and a right click backs out as B does. Claimed in Normal only, so a left click is not also A.
+			sPcPointerEnter = false;
+			sPcPointerBack  = false;
+			if (mOperation == Normal) {
+				pc_menu_click_claim_pointer_menu();
+				int drawableW = 0, drawableH = 0;
+				pc_gfx_get_drawable_size(&drawableW, &drawableH);
+				float px = 0.0f, py = 0.0f;
+				int tag = -1;
+				if (pc_menu_click_read_pointer_normalized(&px, &py)
+				    && pc_menu_click_targets_hit(kPcCardTargets, px * drawableW, py * drawableH, kPcCardMargin, &tag)
+				    && tag != mCurrSlotIdx) {
+					SeSystem::playSysSe(ogEnumFix(SYSSE_MOVE1, JACSYS_Move1));
+					mCurrSlotIdx = tag;
+					setDataNumber(tag);
+				}
+				if (pc_menu_click_take(&px, &py)
+				    && pc_menu_click_targets_hit(kPcCardTargets, px * drawableW, py * drawableH, kPcCardMargin, &tag)) {
+					mCurrSlotIdx   = tag;
+					setDataNumber(tag);
+					sPcPointerEnter = true;
+				}
+				sPcPointerBack = pc_menu_click_take_back();
+			}
+#endif
 		switch (mOperation) {
 		case Normal:
 		{
@@ -1648,11 +1692,13 @@ void zen::ogScrFileSelectMgr::draw(Graphics& gfx)
 	// data_b is drawn by ogFileChkSel. Full width (issue #46): no 4:3 clip.
 	pc_gfx_apply_menu_clip_43();
 
+	pc_menu_click_targets_begin(kPcCardTargets);
 	for (int i = 0; i < 3; i++) {
 		const int slotX = pc_gfx_menu_shift_center();
 		mSlotScreensData[i]->draw(slotX, 0, &perspGraph);
 		mSlotScreensNoData[i]->draw(slotX, 0, &perspGraph);
 	}
+	pc_menu_click_targets_end();
 #else
 	P2DPerspGraph perspGraph(0, 0, 640, 480, 30.0f, 1.0f, 5000.0f);
 	perspGraph.setPort();

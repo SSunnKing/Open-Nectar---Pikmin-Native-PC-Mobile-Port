@@ -184,6 +184,10 @@ public:
 
 	void setKeyAssignDecide(u32 button) { mKeyDecide = button; }
 	void setKeyAssignCancel(u32 button) { mKeyCancel = button; }
+#if defined(PIKI_PC_PORT)
+	// Left clicks highlight and decide a row, a right click cancels. Off unless a menu asks.
+	void setPointerClicks(bool enabled) { mPointerClicks = enabled; }
+#endif
 
 	// DLL inlines to do:
 	int getSelectNo() { return mSelectedNum; }
@@ -214,6 +218,9 @@ protected:
 	u32 mEventFlag;                    // _18C
 	u32 mKeyDecide;                    // _190, see KeyboardButtons enum
 	u32 mKeyCancel;                    // _194, see KeyboardButtons enum
+#if defined(PIKI_PC_PORT)
+	bool mPointerClicks = false;
+#endif
 };
 
 /**
@@ -281,6 +288,12 @@ public:
 	bool checkSelectMenuCancel() { return mIsSelectMenuCancel; }
 	void setCancelKeyAssign(u32 key) { mKeyCancel = key; }
 	void setDecideKeyAssign(u32 key) { mKeyDecide = key; }
+#if defined(PIKI_PC_PORT)
+	// Left clicks select and confirm a row. Off except on the title's main menu.
+	void setPointerClicks(bool enabled) { mPointerClicks = enabled; }
+	// A right click cancels the menu, as B does. Off unless a menu asks (the pause confirmation).
+	void setPointerBack(bool enabled) { mPointerBack = enabled; }
+#endif
 
 protected:
 	void updateMenuPanes();
@@ -316,6 +329,10 @@ protected:
 	int mCancelSoundID;                // _1CC
 	int mCancelSelectMenuNo;           // _1D0
 	bool mIsSelectMenuCancel;          // _1D4
+#if defined(PIKI_PC_PORT)
+	bool mPointerClicks = false;
+	bool mPointerBack   = false;
+#endif
 };
 
 } // namespace zen

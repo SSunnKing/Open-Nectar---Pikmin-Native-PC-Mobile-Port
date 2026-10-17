@@ -3,6 +3,12 @@
 #include "touch/pc_touch.h"
 #include "pc_gfx.h"
 #endif
+#if defined(PIKI_PC_PORT)
+#include "pc_menu_click.h"
+#if !PIKI_PC_TOUCH
+#include "pc_gfx.h"
+#endif
+#endif
 #include "DebugLog.h"
 #include "P2D/TextBox.h"
 #include "SoundMgr.h"
@@ -358,6 +364,9 @@ zen::DrawMenu::DrawMenu(immut char* bloFileName, bool useAlphaMgr, bool useTexAn
 	setCancelSE(SYSSE_CANCEL);
 	mIsSelectMenuCancel = false;
 	setCancelSelectMenuNo(-1);
+#if defined(PIKI_PC_PORT)
+	mPointerClicks = false;
+#endif
 	mParentPane = mScreen.search('pall', true);
 	mParentPane->setOffset(mParentPane->getWidth() >> 1, mParentPane->getHeight() >> 1);
 
@@ -625,6 +634,10 @@ bool zen::DrawMenu::update(Controller* controller)
 #if PIKI_PC_TOUCH
 	if (mState != STATUS_Inactive) pc_touch_claim_game_menu();
 #endif
+#if defined(PIKI_PC_PORT)
+	// Only the title's main menu opts in to pointer clicks. It holds the pointer while shown.
+	if (mPointerClicks && mState != STATUS_Inactive) pc_menu_click_claim_pointer_menu();
+#endif
 	if (mState != STATUS_Inactive) {
 		_104 += gsys->getFrameTime();
 		if (_104 > _108) {
@@ -668,7 +681,61 @@ bool zen::DrawMenu::update(Controller* controller)
 					}
 				}
 #endif
+#if defined(PIKI_PC_PORT)
+				// Desktop left click. Only the title's main menu opts in, so
+				// pause and the other DrawMenus keep ignoring the mouse.
+				if (mPointerClicks && !touchDecide && mMenuItems && mSelectCount > 0) {
+					float menuX = 0.0f;
+					float menuY = 0.0f;
+					if (pc_menu_click_take_graph(pc_gfx_menu_virt_width(), 480, &menuX, &menuY)) {
+						constexpr int kMaxClickRows = 32;
+						PcMenuClickRect rects[kMaxClickRows];
+						int active[kMaxClickRows];
+						const int n = mSelectCount < kMaxClickRows ? mSelectCount : kMaxClickRows;
+						for (int i = 0; i < n; i++) {
+							const PUTRect& bounds = mMenuItems[i].getTouchBounds();
+							rects[i].minX = bounds.mMinX;
+							rects[i].minY = bounds.mMinY;
+							rects[i].maxX = bounds.mMaxX;
+							rects[i].maxY = bounds.mMaxY;
+							active[i]     = mMenuItems[i].getActiveSw() ? 1 : 0;
+						}
+						const PcMenuClickResult hit = pc_menu_click_resolve(PC_MENU_CLICK_MAIN, menuX, menuY, rects, active, n,
+						                                                    kPcMenuClickMargin);
+						if (hit.action == PC_MENU_CLICK_ACTIVATE) {
+							mCurrentSelect = hit.index;
+							touchDecide    = true;
+						}
+					}
+				}
+#endif
 				updateSelectMenuNo(controller);
+#if defined(PIKI_PC_PORT)
+				// Pointer motion moves the existing row highlight and does not confirm it.
+				if (mPointerClicks && mMenuItems && mSelectCount > 0) {
+					float menuX = 0.0f;
+					float menuY = 0.0f;
+					if (pc_menu_click_read_pointer_graph(pc_gfx_menu_virt_width(), 480, &menuX, &menuY)) {
+						constexpr int kMaxClickRows = 32;
+						PcMenuClickRect rects[kMaxClickRows];
+						int active[kMaxClickRows];
+						const int n = mSelectCount < kMaxClickRows ? mSelectCount : kMaxClickRows;
+						for (int i = 0; i < n; i++) {
+							const PUTRect& bounds = mMenuItems[i].getTouchBounds();
+							rects[i].minX = bounds.mMinX;
+							rects[i].minY = bounds.mMinY;
+							rects[i].maxX = bounds.mMaxX;
+							rects[i].maxY = bounds.mMaxY;
+							active[i]     = mMenuItems[i].getActiveSw() ? 1 : 0;
+						}
+						const PcMenuClickResult hover
+						    = pc_menu_click_hover(PC_MENU_CLICK_MAIN, menuX, menuY, rects, active, n, kPcMenuClickMargin);
+						if (hover.action == PC_MENU_CLICK_HIGHLIGHT) {
+							mCurrentSelect = hover.index;
+						}
+					}
+				}
+#endif
 				if (mCurrentSelect != oldSelect) {
 					SeSystem::playSysSe(SYSSE_MOVE1);
 					_11C              = 0.0f;
@@ -686,7 +753,12 @@ bool zen::DrawMenu::update(Controller* controller)
 					SeSystem::playSysSe(SYSSE_DECIDE1);
 					mState = STATUS_FadeOut;
 				}
-				if (controller->keyClick(mKeyCancel)) {
+#if defined(PIKI_PC_PORT)
+				const bool pointerBack = mPointerBack && pc_menu_click_take_back();
+#else
+				const bool pointerBack = false;
+#endif
+				if (controller->keyClick(mKeyCancel) || pointerBack) {
 					SeSystem::playSysSe(mCancelSoundID);
 					mState              = STATUS_FadeOut;
 					mIsSelectMenuCancel = true;
