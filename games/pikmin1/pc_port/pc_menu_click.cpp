@@ -29,14 +29,30 @@ int pc_menu_click_hit(float x, float y, const PcMenuClickRect* rects, const int*
 	if (!rects || count <= 0) {
 		return -1;
 	}
-	for (int i = 0; i < count; i++) {
-		if (active && !active[i]) {
-			continue;
+	// Rows can overlap: a text pane is taller than the row pitch. The row whose centre is
+	// nearest wins, so the boundary falls halfway between two rows. The margin only widens
+	// the search when no row contains the point.
+	for (int pass = 0; pass < 2; pass++) {
+		const float slack = pass == 0 ? 0.0f : margin;
+		int best          = -1;
+		float bestDist    = 0.0f;
+		for (int i = 0; i < count; i++) {
+			const PcMenuClickRect& b = rects[i];
+			if (x < float(b.minX) - slack || x > float(b.maxX) + slack || y < float(b.minY) - slack
+			    || y > float(b.maxY) + slack) {
+				continue;
+			}
+			const float dx   = x - 0.5f * float(b.minX + b.maxX);
+			const float dy   = y - 0.5f * float(b.minY + b.maxY);
+			const float dist = dx * dx + dy * dy;
+			if (best < 0 || dist < bestDist) {
+				best     = i;
+				bestDist = dist;
+			}
 		}
-		const PcMenuClickRect& b = rects[i];
-		if (x >= float(b.minX) - margin && x <= float(b.maxX) + margin && y >= float(b.minY) - margin
-		    && y <= float(b.maxY) + margin) {
-			return i;
+		if (best >= 0) {
+			// A locked row can be the nearest one. Its active neighbour must not take the click.
+			return (active && !active[best]) ? -1 : best;
 		}
 	}
 	return -1;

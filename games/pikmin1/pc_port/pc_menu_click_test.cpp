@@ -85,11 +85,20 @@ int main()
 	    = pc_menu_click_resolve(PC_MENU_CLICK_MAIN, 10.0f, 10.0f, kMainButtons, kMainActive, 3, kPcMenuClickMargin);
 	check(mainMiss.action == PC_MENU_CLICK_IGNORE, "main menu background does not activate a row");
 
-	// Overlap uses the first row, matching the menu's existing touch scan.
+	// Identical rects tie, and the first one keeps the point.
 	const PcMenuClickRect overlap[] = { { 0, 0, 100, 100 }, { 0, 0, 100, 100 } };
 	const int overlapActive[]       = { 1, 1 };
 	const int first = pc_menu_click_hit(50.0f, 50.0f, overlap, overlapActive, 2, 0.0f);
-	check(first == 0, "overlapping buttons keep the first match");
+	check(first == 0, "identical overlapping buttons keep the first match");
+
+	// Rows whose panes overlap split at the midline between their centres. A locked row
+	// that is nearest takes no click, so its active neighbour does not get it.
+	const PcMenuClickRect tall[] = { { 0, 0, 100, 36 }, { 0, 30, 100, 66 } };
+	const int tallActive[]       = { 1, 1 };
+	const int tallLocked[]       = { 1, 0 };
+	check(pc_menu_click_hit(50.0f, 31.0f, tall, tallActive, 2, 0.0f) == 0, "a point above the midline takes the upper row");
+	check(pc_menu_click_hit(50.0f, 34.0f, tall, tallActive, 2, 0.0f) == 1, "a point below the midline takes the lower row");
+	check(pc_menu_click_hit(50.0f, 34.0f, tall, tallLocked, 2, 0.0f) == -1, "a locked row nearest the point takes no click");
 
 	// Pause, file select, and the rest are not these two screens.
 	PcMenuClickResult other

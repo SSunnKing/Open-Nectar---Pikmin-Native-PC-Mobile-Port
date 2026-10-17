@@ -41,8 +41,10 @@ constexpr float kPcMenuClickMargin = 8.0f;
 // A full-screen backdrop covers the root on both axes. A button does not.
 bool pc_menu_click_is_button_rect(PcMenuClickRect pane, PcMenuClickRect root);
 
-// First active rect that contains the point, expanded by margin. -1 on a miss.
-// active may be null, which treats every rect as active. Inactive rects are skipped.
+// Nearest rect that contains the point, judged first without the margin and then with it.
+// Rows may overlap, and the nearest centre wins. -1 on a miss, and also when the nearest
+// row is inactive (a locked row must not hand its click to a neighbour). active may be
+// null, which treats every rect as active.
 int pc_menu_click_hit(float x, float y, const PcMenuClickRect* rects, const int* active, int count, float margin);
 
 // Pointer moved, no click. A hit highlights that button and does not activate it.
