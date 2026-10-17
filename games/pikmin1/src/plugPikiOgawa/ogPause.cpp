@@ -64,6 +64,7 @@ zen::ogScrPauseMgr::ogScrPauseMgr()
 #endif
 #if defined(PIKI_PC_PORT)
 	mSubMenu->setPointerClicks(true); // the quit and save confirmation rows, mouse only
+	mSubMenu->setPointerBack(true); // a right click cancels the confirmation, as B does
 #endif
 	mSubMenuScreen          = mSubMenu->getScreenPtr();
 	mQuitChalModeSubTextBox = static_cast<P2DTextBox*>(mSubMenuScreen->search('yame', true));

@@ -753,7 +753,12 @@ bool zen::DrawMenu::update(Controller* controller)
 					SeSystem::playSysSe(SYSSE_DECIDE1);
 					mState = STATUS_FadeOut;
 				}
-				if (controller->keyClick(mKeyCancel)) {
+#if defined(PIKI_PC_PORT)
+				const bool pointerBack = mPointerBack && pc_menu_click_take_back();
+#else
+				const bool pointerBack = false;
+#endif
+				if (controller->keyClick(mKeyCancel) || pointerBack) {
 					SeSystem::playSysSe(mCancelSoundID);
 					mState              = STATUS_FadeOut;
 					mIsSelectMenuCancel = true;

@@ -291,6 +291,8 @@ public:
 #if defined(PIKI_PC_PORT)
 	// Left clicks select and confirm a row. Off except on the title's main menu.
 	void setPointerClicks(bool enabled) { mPointerClicks = enabled; }
+	// A right click cancels the menu, as B does. Off unless a menu asks (the pause confirmation).
+	void setPointerBack(bool enabled) { mPointerBack = enabled; }
 #endif
 
 protected:
@@ -329,6 +331,7 @@ protected:
 	bool mIsSelectMenuCancel;          // _1D4
 #if defined(PIKI_PC_PORT)
 	bool mPointerClicks = false;
+	bool mPointerBack   = false;
 #endif
 };
 
