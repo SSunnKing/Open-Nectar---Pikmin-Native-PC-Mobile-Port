@@ -278,3 +278,51 @@ bool pc_menu_click_window_to_graph(int winW, int winH, int x, int y, int virtW, 
 	}
 	return true;
 }
+
+static int sTargetKind = -1;
+static int sPendingCount = 0;
+static PcMenuClickRect sPendingRect[PC_MENU_CLICK_TARGET_MAX];
+static int sPendingTag[PC_MENU_CLICK_TARGET_MAX];
+static int sCommittedCount[PC_MENU_CLICK_TARGET_KINDS];
+static PcMenuClickRect sCommittedRect[PC_MENU_CLICK_TARGET_KINDS][PC_MENU_CLICK_TARGET_MAX];
+static int sCommittedTag[PC_MENU_CLICK_TARGET_KINDS][PC_MENU_CLICK_TARGET_MAX];
+
+void pc_menu_click_targets_begin(int kind)
+{
+	sTargetKind   = (kind >= 0 && kind < PC_MENU_CLICK_TARGET_KINDS) ? kind : -1;
+	sPendingCount = 0;
+}
+
+bool pc_menu_click_targets_collecting(void)
+{
+	return sTargetKind >= 0;
+}
+
+void pc_menu_click_targets_add(int tag, PcMenuClickRect windowRect)
+{
+	if (sTargetKind < 0 || sPendingCount >= PC_MENU_CLICK_TARGET_MAX) return;
+	sPendingRect[sPendingCount] = windowRect;
+	sPendingTag[sPendingCount]  = tag;
+	++sPendingCount;
+}
+
+void pc_menu_click_targets_end(void)
+{
+	if (sTargetKind >= 0) {
+		for (int i = 0; i < sPendingCount; i++) {
+			sCommittedRect[sTargetKind][i] = sPendingRect[i];
+			sCommittedTag[sTargetKind][i]  = sPendingTag[i];
+		}
+		sCommittedCount[sTargetKind] = sPendingCount;
+	}
+	sTargetKind = -1;
+}
+
+bool pc_menu_click_targets_hit(int kind, float px, float py, float margin, int* tag)
+{
+	if (kind < 0 || kind >= PC_MENU_CLICK_TARGET_KINDS || sCommittedCount[kind] <= 0) return false;
+	const int index = pc_menu_click_hit(px, py, sCommittedRect[kind], nullptr, sCommittedCount[kind], margin);
+	if (index < 0) return false;
+	if (tag) *tag = sCommittedTag[kind][index];
+	return true;
+}

@@ -322,6 +322,26 @@ int main()
 	check(!pc_menu_click_take_back(), "an untaken right click is dropped after the next sample");
 	pc_menu_click_reset();
 
+	// Click targets: a tagged pane's window rectangle is tested on the next click, per screen kind.
+	pc_menu_click_targets_begin(0);
+	pc_menu_click_targets_add(7, PcMenuClickRect{ 100, 100, 200, 200 });
+	pc_menu_click_targets_end();
+	int targetTag = -1;
+	check(pc_menu_click_targets_hit(0, 150.0f, 150.0f, kPcMenuClickMargin, &targetTag) && targetTag == 7,
+	      "a click inside a recorded target returns its tag");
+	check(!pc_menu_click_targets_hit(0, 400.0f, 400.0f, kPcMenuClickMargin, &targetTag),
+	      "a click outside every target misses");
+	check(!pc_menu_click_targets_hit(1, 150.0f, 150.0f, kPcMenuClickMargin, &targetTag),
+	      "another screen kind has no targets");
+	pc_menu_click_targets_begin(0);
+	pc_menu_click_targets_end();
+	check(!pc_menu_click_targets_hit(0, 150.0f, 150.0f, kPcMenuClickMargin, &targetTag),
+	      "a screen that draws no targets ends with an empty set");
+	pc_menu_click_targets_add(9, PcMenuClickRect{ 0, 0, 10, 10 });
+	check(!pc_menu_click_targets_collecting(), "targets added outside a collection are not collecting");
+	check(!pc_menu_click_targets_hit(0, 5.0f, 5.0f, kPcMenuClickMargin, &targetTag),
+	      "targets added outside a collection are dropped");
+
 	if (sFailures == 0) {
 		std::printf("pc_menu_click_test: all checks passed\n");
 		return 0;

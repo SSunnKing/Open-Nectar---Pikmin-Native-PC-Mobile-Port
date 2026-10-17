@@ -101,4 +101,19 @@ bool pc_menu_click_take_graph(int virtW, int virtH, float* x, float* y);
 // Window pixels to the menu graph. Returns false when a size is not positive.
 bool pc_menu_click_window_to_graph(int winW, int winH, int x, int y, int virtW, int virtH, float* gx, float* gy);
 
+// Click targets for panes that a perspective or rotated graph moves. A screen collects its
+// targets while it draws: each tagged pane adds its drawn window rectangle (drawable pixels)
+// between begin and end. The next click tests the last complete set of that kind. A set
+// that is not ended is not kept, and a screen that draws none ends with an empty set.
+enum {
+	PC_MENU_CLICK_TARGET_KINDS = 8,
+	PC_MENU_CLICK_TARGET_MAX   = 32,
+};
+void pc_menu_click_targets_begin(int kind);
+bool pc_menu_click_targets_collecting(void);
+void pc_menu_click_targets_add(int tag, PcMenuClickRect windowRect);
+void pc_menu_click_targets_end(void);
+// Nearest committed target of this kind under the point (drawable pixels). False on a miss.
+bool pc_menu_click_targets_hit(int kind, float px, float py, float margin, int* tag);
+
 #endif
