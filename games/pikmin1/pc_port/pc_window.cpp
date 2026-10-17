@@ -1139,6 +1139,7 @@ void pc_window_poll_events(PADStatus* pad) {
             }
 #endif
             case SDL_MOUSEBUTTONDOWN:
+                if (event.button.which != SDL_TOUCH_MOUSEID) pc_menu_click_note_mouse();
                 // Edge mask for binding capture: a click shorter than a frame
                 // is invisible to SDL_GetMouseState, so remember every press.
                 if (event.button.button >= 1 && event.button.button <= 8)
@@ -1214,8 +1215,10 @@ void pc_window_poll_events(PADStatus* pad) {
                 sLastPressKind = PC_INPUT_DEV_GAMEPAD;
                 sLastPressId   = event.cbutton.which;
                 sLastPressSerial++;
+                pc_menu_click_note_keys();
                 break;
             case SDL_KEYDOWN:
+                pc_menu_click_note_keys();
                 if (!event.key.repeat && event.key.keysym.scancode != SDL_SCANCODE_ESCAPE) {
                     sLastPressKind = PC_INPUT_DEV_KEYBOARD;
                     sLastPressId   = -1;
@@ -1258,6 +1261,28 @@ void pc_window_poll_events(PADStatus* pad) {
                     printf("[PC Port] Control mode: %s\n", modeNames[sControlMode]);
                 }
                 break;
+        }
+    }
+
+    // Sample the pointer once per logical tick, after the click edge. Menus
+    // read this to move the highlight. It is not a button press.
+    if (pad) {
+        if (sSettingsMenuOpen || !sWindow) {
+            pc_menu_click_clear_pointer();
+        } else {
+            int ww = 0;
+            int wh = 0;
+            SDL_GetWindowSize(sWindow, &ww, &wh);
+            int mx = 0;
+            int my = 0;
+            SDL_GetMouseState(&mx, &my);
+            const bool inside = (SDL_GetWindowFlags(sWindow) & SDL_WINDOW_MOUSE_FOCUS) != 0 && ww > 0 && wh > 0 && mx >= 0
+                                && my >= 0 && mx < ww && my < wh;
+            if (inside) {
+                pc_menu_click_set_pointer(float(mx) / float(ww), float(my) / float(wh));
+            } else {
+                pc_menu_click_clear_pointer();
+            }
         }
     }
 
@@ -1390,6 +1415,7 @@ void pc_window_poll_events(PADStatus* pad) {
     if (sController && !PC_NETPLAY_IGNORE_GAMEPADS) {
         usedGamepad = pc_window_read_gamepad(sController, button, stickX, stickY, substickX, substickY,
                                              triggerL, triggerR, sSwarmHeld);
+        if (usedGamepad) pc_menu_click_note_keys();
     }
     // Flanco del swarm de P1 una vez juntos teclado y mando (Charge).
     if (sSwarmHeld && !sSwarmWasDown[0]) sSwarmPending[0] = true;

@@ -20,6 +20,7 @@ enum PcMenuClickAction {
 	PC_MENU_CLICK_IGNORE      = 0,
 	PC_MENU_CLICK_PRESS_START = 1,
 	PC_MENU_CLICK_ACTIVATE    = 2,
+	PC_MENU_CLICK_HIGHLIGHT   = 3, // pointer is over this button; do not activate
 };
 
 struct PcMenuClickRect {
@@ -44,10 +45,28 @@ bool pc_menu_click_is_button_rect(PcMenuClickRect pane, PcMenuClickRect root);
 // active may be null, which treats every rect as active. Inactive rects are skipped.
 int pc_menu_click_hit(float x, float y, const PcMenuClickRect* rects, const int* active, int count, float margin);
 
-// Title: any hit presses Start. Main menu: a hit activates that item.
-// Any other screen ignores the point, including when it lands inside a rect.
+// Pointer moved, no click. A hit highlights that button and does not activate it.
+// Empty space and any other screen leave the result as ignore, index -1.
+PcMenuClickResult pc_menu_click_hover(int screen, float x, float y, const PcMenuClickRect* rects, const int* active,
+                                      int count, float margin);
+
+// Title: a click on a button presses Start. Main menu: a click activates that item.
+// Empty space does not activate. Any other screen ignores the point.
 PcMenuClickResult pc_menu_click_resolve(int screen, float x, float y, const PcMenuClickRect* rects, const int* active,
                                         int count, float margin);
+
+// Latest pointer position, normalized to the window. Moving it does not post a click.
+void pc_menu_click_set_pointer(float nx, float ny);
+void pc_menu_click_clear_pointer(void);
+// Reads the pointer only while the mouse drives the menus (see below). False when
+// no pointer is over the window, or while the keyboard or a controller drives.
+bool pc_menu_click_read_pointer_graph(int virtW, int virtH, float* x, float* y);
+
+// Which device drives the menus. Pointer motion or a mouse button hands them to the
+// mouse. A key press or controller input takes them back, so a pointer resting on
+// a button does not override the keyboard or a controller.
+void pc_menu_click_note_mouse(void);
+void pc_menu_click_note_keys(void);
 
 // One pending click. begin_tick() runs on the logical input sample (PADRead),
 // not on the extra poll at the end of the frame, so a click seen between those

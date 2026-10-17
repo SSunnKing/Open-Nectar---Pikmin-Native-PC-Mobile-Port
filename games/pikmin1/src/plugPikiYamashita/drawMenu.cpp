@@ -706,6 +706,32 @@ bool zen::DrawMenu::update(Controller* controller)
 				}
 #endif
 				updateSelectMenuNo(controller);
+#if defined(PIKI_PC_PORT)
+				// Pointer motion moves the existing row highlight and does not confirm it.
+				if (mPointerClicks && mMenuItems && mSelectCount > 0) {
+					float menuX = 0.0f;
+					float menuY = 0.0f;
+					if (pc_menu_click_read_pointer_graph(pc_gfx_menu_virt_width(), 480, &menuX, &menuY)) {
+						constexpr int kMaxClickRows = 32;
+						PcMenuClickRect rects[kMaxClickRows];
+						int active[kMaxClickRows];
+						const int n = mSelectCount < kMaxClickRows ? mSelectCount : kMaxClickRows;
+						for (int i = 0; i < n; i++) {
+							const PUTRect& bounds = mMenuItems[i].getTouchBounds();
+							rects[i].minX = bounds.mMinX;
+							rects[i].minY = bounds.mMinY;
+							rects[i].maxX = bounds.mMaxX;
+							rects[i].maxY = bounds.mMaxY;
+							active[i]     = mMenuItems[i].getActiveSw() ? 1 : 0;
+						}
+						const PcMenuClickResult hover
+						    = pc_menu_click_hover(PC_MENU_CLICK_MAIN, menuX, menuY, rects, active, n, kPcMenuClickMargin);
+						if (hover.action == PC_MENU_CLICK_HIGHLIGHT) {
+							mCurrentSelect = hover.index;
+						}
+					}
+				}
+#endif
 				if (mCurrentSelect != oldSelect) {
 					SeSystem::playSysSe(SYSSE_MOVE1);
 					_11C              = 0.0f;
