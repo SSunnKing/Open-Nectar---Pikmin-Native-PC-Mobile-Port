@@ -308,6 +308,16 @@ int main()
 	check(!pc_menu_click_pointer_menu_active(), "a claim lapses when the menu stops renewing it");
 	pc_menu_click_reset();
 
+	// A right click backs out of the VS lobby once. An untaken one is dropped after the next sample.
+	pc_menu_click_post_back();
+	check(pc_menu_click_take_back(), "a right click backs out once");
+	check(!pc_menu_click_take_back(), "a right click is taken once");
+	pc_menu_click_post_back();
+	pc_menu_click_begin_tick();
+	pc_menu_click_begin_tick();
+	check(!pc_menu_click_take_back(), "an untaken right click is dropped after the next sample");
+	pc_menu_click_reset();
+
 	if (sFailures == 0) {
 		std::printf("pc_menu_click_test: all checks passed\n");
 		return 0;

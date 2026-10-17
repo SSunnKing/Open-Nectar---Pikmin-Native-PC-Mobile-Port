@@ -12,6 +12,8 @@ static bool sSeenPointer = false;
 static bool sMouseDrives = false;
 static bool sActivity    = false;
 static int sClaimTick    = -100;
+static bool sBackPending = false;
+static int sBackTick     = -100;
 
 bool pc_menu_click_is_button_rect(PcMenuClickRect pane, PcMenuClickRect root)
 {
@@ -115,6 +117,7 @@ void pc_menu_click_reset(void)
 	sMouseDrives = false;
 	sActivity    = false;
 	sClaimTick   = -100;
+	sBackPending = false;
 }
 
 void pc_menu_click_set_pointer(float nx, float ny)
@@ -158,6 +161,19 @@ bool pc_menu_click_pointer_menu_active(void)
 	return sTick - sClaimTick <= 2;
 }
 
+void pc_menu_click_post_back(void)
+{
+	sBackPending = true;
+	sBackTick    = sTick;
+}
+
+bool pc_menu_click_take_back(void)
+{
+	const bool was = sBackPending;
+	sBackPending   = false;
+	return was;
+}
+
 bool pc_menu_click_read_pointer_graph(int virtW, int virtH, float* x, float* y)
 {
 	if (!sHasPointer || !sMouseDrives || virtW <= 0 || virtH <= 0) {
@@ -177,6 +193,9 @@ void pc_menu_click_begin_tick(void)
 	sTick++;
 	if (sPending && (sTick - sPostedTick) > 1) {
 		sPending = false;
+	}
+	if (sBackPending && (sTick - sBackTick) > 1) {
+		sBackPending = false;
 	}
 }
 

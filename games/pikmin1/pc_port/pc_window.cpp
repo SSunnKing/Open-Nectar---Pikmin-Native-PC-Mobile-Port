@@ -1140,6 +1140,8 @@ void pc_window_poll_events(PADStatus* pad) {
 #endif
             case SDL_MOUSEBUTTONDOWN:
                 if (event.button.which != SDL_TOUCH_MOUSEID) pc_menu_click_disarm_hover();
+                if (event.button.button == SDL_BUTTON_RIGHT && event.button.which != SDL_TOUCH_MOUSEID)
+                    pc_menu_click_post_back();
                 // Edge mask for binding capture: a click shorter than a frame
                 // is invisible to SDL_GetMouseState, so remember every press.
                 if (event.button.button >= 1 && event.button.button <= 8)

@@ -20,6 +20,7 @@
 #include "pc_file_dialog.h"
 #include "settings/pc_settings_p2d.h"
 #include "pc_menu_repeat.h"
+#include "pc_menu_click.h"
 #ifdef __ANDROID__
 #include "android/pc_texpack_android.h"
 #include "android/pc_save_android.h"
@@ -5977,6 +5978,7 @@ void pcVsRulesInput()
     bool right  = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
     bool accept = menuOkKey();
     bool cancel = menuCancelKey();
+    cancel |= pc_menu_click_take_back(); // a right click backs out; a mouse press only
     up |= (sTouchFrameButtons & PAD_BUTTON_UP) != 0;
     down |= (sTouchFrameButtons & PAD_BUTTON_DOWN) != 0;
     left |= (sTouchFrameButtons & PAD_BUTTON_LEFT) != 0;

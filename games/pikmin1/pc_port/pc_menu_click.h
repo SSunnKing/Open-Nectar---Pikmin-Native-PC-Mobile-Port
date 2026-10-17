@@ -79,6 +79,11 @@ bool pc_menu_click_take_activity(void);
 void pc_menu_click_claim_pointer_menu(void);
 bool pc_menu_click_pointer_menu_active(void);
 
+// A right click backs out of the VS lobby. One pending press, taken once. It lapses like a
+// click nobody takes.
+void pc_menu_click_post_back(void);
+bool pc_menu_click_take_back(void);
+
 // One pending click. begin_tick() runs on the logical input sample (PADRead),
 // not on the extra poll at the end of the frame, so a click seen between those
 // two polls is still available to the next menu update. A click nobody takes
