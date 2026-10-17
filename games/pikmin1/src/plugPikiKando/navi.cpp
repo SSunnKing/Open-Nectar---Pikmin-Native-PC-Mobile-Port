@@ -867,7 +867,8 @@ static bool pcSquadHasColor(int color)
  * Only colours actually in the squad take part, so one colour means the wheel
  * does nothing, two colours alternate and three cycle -- without special-casing
  * any of them. A preference whose colour ran out snaps to one that exists,
- * otherwise the wheel would appear stuck on an empty colour.
+ * otherwise the wheel would appear stuck on an empty colour. Until the first
+ * notch, tap or D-pad press there is no preference (-1).
  */
 static bool pcUpdatePreferredThrowColor(Navi* navi, bool allowKind = false)
 {
@@ -882,8 +883,8 @@ static bool pcUpdatePreferredThrowColor(Navi* navi, bool allowKind = false)
 #endif
 	// Netplay: the wheel and the touch icon live outside PADStatus, so
 	// deterministic mode drains and ignores them (the D-pad still steps). The
-	// wheel's job is a local control setting, so the sim takes its default
-	// (the colour), as every peer's does.
+	// wheel's job is a local control setting, so on every peer the sim acts as
+	// if it was never turned: no colour until the D-pad picks one.
 	const bool detMode = pc_netplay_deterministic();
 	if (detMode) {
 		touchSteps = 0;
@@ -939,6 +940,12 @@ static bool pcUpdatePreferredThrowColor(Navi* navi, bool allowKind = false)
 	if (wheelOn && pc_settings_get_mouse_wheel_action() == 0) {
 		const int wheelSteps = pc_window_take_wheel_steps();
 		if (!detMode) steps += wheelSteps;
+	}
+	// No colour chosen yet and no notch, tap or press now: stay at -1, the
+	// original choice of the nearest Pikmin of any colour. Taking present[0]
+	// here preferred blue, then red, before the player chose anything.
+	if (preferred < 0 && steps == 0) {
+		return kindChanged;
 	}
 	if (steps != 0) {
 		index = ((index + steps) % presentCount + presentCount) % presentCount;
