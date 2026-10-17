@@ -267,6 +267,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_gyro.cpp
     pc_port/pc_pad_axis.cpp
     pc_port/pc_menu_repeat.cpp
+    pc_port/pc_menu_click.cpp
     pc_port/pc_photo_mode.cpp
     pc_port/pc_record.cpp
     pc_port/pc_permadeath.cpp
@@ -1109,6 +1110,12 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_menu_repeat_test PRIVATE pc_port)
     target_compile_options(pc_menu_repeat_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_menu_repeat_test COMMAND pc_menu_repeat_test)
+
+    # Title screen and main menu clicks (no window, no disc)
+    add_executable(pc_menu_click_test pc_port/pc_menu_click_test.cpp pc_port/pc_menu_click.cpp)
+    target_include_directories(pc_menu_click_test PRIVATE pc_port)
+    target_compile_options(pc_menu_click_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_menu_click_test COMMAND pc_menu_click_test)
 
     # Host software DSP test (not linked into main game)
     add_executable(pc_dsp_host_test

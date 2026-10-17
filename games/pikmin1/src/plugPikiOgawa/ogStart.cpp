@@ -1,11 +1,14 @@
 #include "zen/ogStart.h"
 #include "DebugLog.h"
 #include "P2D/Graph.h"
+#include "P2D/Pane.h"
 #include "P2D/Screen.h"
+#include "PSU/Tree.h"
 #include "sysNew.h"
 #include "zen/DrawCommon.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
+#include "pc_menu_click.h"
 #endif
 
 /**
@@ -46,6 +49,60 @@ void zen::ogScrStartMgr::start()
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+namespace {
+
+void pcCollectTitleButtons(P2DPane* pane, const PcMenuClickRect& root, PcMenuClickRect* rects, int* active, int* count, int cap,
+                           bool skipSelf)
+{
+	if (!pane || !count || *count >= cap) {
+		return;
+	}
+	if (!skipSelf && pane->IsVisible()) {
+		const u16 type = pane->getTypeID();
+		if (type == PANETYPE_TextBox || type == PANETYPE_Picture) {
+			const PUTRect& bounds = pane->getGlobalBounds();
+			const PcMenuClickRect rect = { bounds.mMinX, bounds.mMinY, bounds.mMaxX, bounds.mMaxY };
+			if (pc_menu_click_is_button_rect(rect, root)) {
+				rects[*count]  = rect;
+				active[*count] = 1;
+				*count += 1;
+			}
+		}
+	}
+	for (PSUTree<P2DPane>* child = pane->getFirstChild(); child != nullptr; child = child->getNextChild()) {
+		pcCollectTitleButtons(child->getObject(), root, rects, active, count, cap, false);
+	}
+}
+
+} // namespace
+
+bool zen::ogScrStartMgr::pcPointerPressed()
+{
+	if (mState != START_Oscillate || !mRootPane) {
+		return false;
+	}
+	const PUTRect& rootBounds = mRootPane->getGlobalBounds();
+	const PcMenuClickRect root = { rootBounds.mMinX, rootBounds.mMinY, rootBounds.mMaxX, rootBounds.mMaxY };
+	constexpr int kMaxButtons = 16;
+	PcMenuClickRect rects[kMaxButtons];
+	int active[kMaxButtons];
+	int count = 0;
+	pcCollectTitleButtons(mRootPane, root, rects, active, &count, kMaxButtons, true);
+	if (count == 0) {
+		return false;
+	}
+	float x = 0.0f;
+	float y = 0.0f;
+	if (!pc_menu_click_take_graph(pc_gfx_menu_virt_width(), 480, &x, &y)) {
+		return false;
+	}
+	const PcMenuClickResult hit
+	    = pc_menu_click_resolve(PC_MENU_CLICK_TITLE, x, y, rects, active, count, kPcMenuClickMargin);
+	return hit.action == PC_MENU_CLICK_PRESS_START;
+}
+#endif
+
 void zen::ogScrStartMgr::stop()
 {
 	if (mState == START_Oscillate) {

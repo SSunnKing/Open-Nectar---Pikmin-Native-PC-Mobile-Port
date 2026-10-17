@@ -87,6 +87,10 @@ zen::ogScrTitleMgr::ogScrTitleMgr()
 	const PcMenuExtend extWithChallenge = { 4, 27, -72, 'yoko', 40 };
 	mMenuNoChallenge   = new DrawMenu("screen/blo/m_select.blo", false, false, &extNoChallenge);
 	mMenuWithChallenge = new DrawMenu("screen/blo/m_selec2.blo", false, false, &extWithChallenge);
+	// Left clicks land on these rows only. Options, sound, and the other
+	// panels stay on the controller.
+	mMenuNoChallenge->setPointerClicks(true);
+	mMenuWithChallenge->setPointerClicks(true);
 	pcInsertCoopItem(mMenuNoChallenge);
 	pcInsertCoopItem(mMenuWithChallenge);
 	pcSetupAdvancedMenu();

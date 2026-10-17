@@ -2,6 +2,7 @@
 #include "port/jaudio_host.h"
 #endif
 #include "pc_window.h"
+#include "pc_menu_click.h"
 #include "pc_speedrun.h"
 #include "pc_gyro.h"
 #include "pc_icon.h"
@@ -1078,6 +1079,12 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
 }
 
 void pc_window_poll_events(PADStatus* pad) {
+    // Age a menu click only on the logical input sample. The present path
+    // polls again with a null pad and must not drop a click the menu has not
+    // seen yet.
+    if (pad) {
+        pc_menu_click_begin_tick();
+    }
 #if PIKI_USE_JAUDIO
     PikiJAudioTick();
 #else
@@ -1142,6 +1149,15 @@ void pc_window_poll_events(PADStatus* pad) {
                     int ww = 0, wh = 0;
                     SDL_GetWindowSize(sWindow, &ww, &wh);
                     if (ww > 0 && wh > 0) pc_settings_touch_tap(event.button.x / float(ww), event.button.y / float(wh));
+                } else if (!sSettingsMenuOpen && event.button.button == SDL_BUTTON_LEFT
+                           && event.button.which != SDL_TOUCH_MOUSEID) {
+                    // Title screen and main menu read this. It is not a game
+                    // button: Classic mode still ignores mouse buttons there.
+                    int ww = 0, wh = 0;
+                    if (sWindow) SDL_GetWindowSize(sWindow, &ww, &wh);
+                    if (ww > 0 && wh > 0) {
+                        pc_menu_click_post(event.button.x / float(ww), event.button.y / float(wh));
+                    }
                 }
                 // Issue #52: Escape (or the OS) can drop the mouse out of
                 // relative mode, which froze the cursor until the option was
