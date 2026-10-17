@@ -559,6 +559,14 @@ bool runWhilePainting(pikmin::launcher::HubWindow& hub, const std::string& phase
     return ok;
 }
 
+// Both are defined further down in this anonymous namespace. Declared here
+// because runUpdate below calls them before their definitions appear, which
+// does not compile: MSVC reports "error C3861: 'installPackage': identifier not
+// found" and GCC/Clang reject the call the same way, so the pikmin_launcher
+// target fails to build on every platform.
+bool installPackage(const fs::path& package, const fs::path& install, std::string& failure);
+void rememberInstallDirectory(const fs::path& directory);
+
 UpdateOutcome runUpdate(pikmin::launcher::HubWindow& hub, const fs::path& sourceDirectory, bool fromInsideInstall,
                         fs::path& playDirectory)
 {
