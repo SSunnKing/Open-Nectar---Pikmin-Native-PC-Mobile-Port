@@ -24,10 +24,6 @@
 
 // Local/online choice for Co-op and VS: only netplay builds with the online
 // transport define it (pc_online_menu.cpp); elsewhere they go straight on.
-__attribute__((weak)) bool pc_online_menu_available(void);
-__attribute__((weak)) void pc_online_menu_open(bool vs);
-__attribute__((weak)) bool pc_online_menu_active(void);
-__attribute__((weak)) int pc_online_menu_update(Controller* input);
 
 namespace {
 int sPcOnlineAction = -1; // 2 Co-op / 3 VS while the local/online choice is open

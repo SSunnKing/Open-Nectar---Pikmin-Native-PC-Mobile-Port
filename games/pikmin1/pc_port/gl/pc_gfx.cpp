@@ -37,9 +37,11 @@
 #include "../netplay/pc_netplay_present.h"
 #include "../netplay/pc_netplay_loadguard.h"
 
-// Netplay keep-alive (pc_netplay_loadguard.h): strong-defined by
-// pc_netplay_session.cpp in netplay builds only, null otherwise.
-__attribute__((weak)) void pc_netplay_load_keepalive(int site);
+// Netplay keep-alive (pc_netplay_loadguard.h): declared in pc_netplay_session.h
+// and defined by pc_netplay_session.cpp in netplay builds, otherwise by
+// pc_netplay_hooks_off.cpp. It used to be a weak reference here, which MSVC
+// cannot express for functions (see pc_port/netplay/pc_netplay_hooks_off.cpp).
+#include "../netplay/pc_netplay_session.h"
 
 #include "pc_opengl.h"
 #ifdef __ANDROID__
@@ -8454,7 +8456,17 @@ static void handle_bp_reg(u32 hex) {
         pc_gfx_set_alpha_update(GXBool((hex >> 4) & 0x1));
         break;
     }
-    case 0xE0 ... 0xE7: { // TEV/Konst colors: RA and BG word pairs
+    // GNU case ranges (case LO ... HI) are a GCC/Clang extension that MSVC
+    // rejects, so each range is written as its individual labels. The labels
+    // fall through to the same block, which is exactly what the range meant.
+    case 0xE0:
+    case 0xE1:
+    case 0xE2:
+    case 0xE3:
+    case 0xE4:
+    case 0xE5:
+    case 0xE6:
+    case 0xE7: { // TEV/Konst colors: RA and BG word pairs
         // GXTevRegID is PREV=0, REG0=1, REG1=2, REG2=3, exactly matching
         // BP pairs E0/E1 through E6/E7. Bit 23 distinguishes 8-bit Konst
         // writes from signed 11-bit TEV-register writes.
@@ -8490,7 +8502,14 @@ static void handle_bp_reg(u32 hex) {
         }
         break;
     }
-    case 0x80 ... 0x87: { // TREF: TEV order, two stages per register
+    case 0x80:
+    case 0x81:
+    case 0x82:
+    case 0x83:
+    case 0x84:
+    case 0x85:
+    case 0x86:
+    case 0x87: { // TREF: TEV order, two stages per register
         const u32 base = reg - 0x80;
         const u32 s0 = base * 2, s1 = base * 2 + 1;
         if (s0 < GX_MAXTEVSTAGE) {
@@ -8509,7 +8528,38 @@ static void handle_bp_reg(u32 hex) {
         }
         break;
     }
-    case 0xC0 ... 0xDF: { // TEV combiner environment, color+alpha per stage
+    case 0xC0:
+    case 0xC1:
+    case 0xC2:
+    case 0xC3:
+    case 0xC4:
+    case 0xC5:
+    case 0xC6:
+    case 0xC7:
+    case 0xC8:
+    case 0xC9:
+    case 0xCA:
+    case 0xCB:
+    case 0xCC:
+    case 0xCD:
+    case 0xCE:
+    case 0xCF:
+    case 0xD0:
+    case 0xD1:
+    case 0xD2:
+    case 0xD3:
+    case 0xD4:
+    case 0xD5:
+    case 0xD6:
+    case 0xD7:
+    case 0xD8:
+    case 0xD9:
+    case 0xDA:
+    case 0xDB:
+    case 0xDC:
+    case 0xDD:
+    case 0xDE:
+    case 0xDF: { // TEV combiner environment, color+alpha per stage
         const u32 idx = reg - 0xC0;
         const u32 stage = idx >> 1;
         if (stage >= GX_MAXTEVSTAGE) break;
@@ -8548,7 +8598,14 @@ static void handle_bp_reg(u32 hex) {
         }
         break;
     }
-    case 0xF6 ... 0xFD: { // KSEL: konst selection plus two channels of a swap table
+    case 0xF6:
+    case 0xF7:
+    case 0xF8:
+    case 0xF9:
+    case 0xFA:
+    case 0xFB:
+    case 0xFC:
+    case 0xFD: { // KSEL: konst selection plus two channels of a swap table
         const u32 index = reg - 0xF6;
         const u32 evenStage = index * 2;
         if (evenStage < GX_MAXTEVSTAGE) {

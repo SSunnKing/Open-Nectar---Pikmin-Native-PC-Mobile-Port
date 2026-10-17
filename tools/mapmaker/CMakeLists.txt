@@ -85,6 +85,10 @@ target_include_directories(nectar_mapmaker PRIVATE
     "${NM_GEN}"
     "${NM_P1}/pc_port/launcher"
     "${NM_P1}/third_party/stb"
+    # <GL/gl.h> and <GL/glext.h>: a native Windows build has no Khronos copy, and the
+    # port ships the minimal glext.h the renderer needs under games/pikmin1/include.
+    "${NM_P1}/include"
+    "${NM_P1}/include/gl"
     "${NM_P1}/third_party/nlohmann/include"
     "${NM_P1}/third_party/imgui"
     "${NM_P1}/third_party/imgui/backends"
@@ -92,7 +96,11 @@ target_include_directories(nectar_mapmaker PRIVATE
 target_link_libraries(nectar_mapmaker PRIVATE nectar_mapcore ${NM_IMGUI} ${SDL2_LIBRARIES} Threads::Threads)
 if(WIN32)
     target_link_libraries(nectar_mapmaker PRIVATE comdlg32 ole32 shell32 uuid)
-    set_target_properties(nectar_mapmaker PROPERTIES WIN32_EXECUTABLE ON)
+    # Deliberately a console executable, like the game itself (see the -mconsole
+    # note in games/pikmin1/CMakeLists.txt). The editor reports progress on
+    # stdout, and a GUI-subsystem build would need a WinMain entry point this
+    # program does not define: it links with "unresolved external symbol WinMain
+    # referenced in __scrt_common_main_seh". MinGW's -mwindows masked this.
 endif()
 if(NOT MSVC)
     target_compile_options(nectar_mapmaker PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
@@ -102,3 +110,33 @@ set_target_properties(nectar_mapmaker PROPERTIES
     OUTPUT_NAME "nectar-mapmaker"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 install(TARGETS nectar_mapmaker RUNTIME DESTINATION bin)
+
+# On Windows, SDL2 is a DLL: copy it next to the editor so it starts from the
+# build tree. Same logic as pikmin_copy_sdl2_runtime() in games/pikmin1, which
+# cannot be used here because add_custom_command only accepts a target created in
+# the calling directory.
+if(WIN32)
+    set(_mapmaker_sdl2_dll "")
+    if(TARGET SDL2::SDL2)
+        get_target_property(_imported SDL2::SDL2 IMPORTED)
+        get_target_property(_type SDL2::SDL2 TYPE)
+        if(_imported AND _type STREQUAL "SHARED_LIBRARY")
+            get_target_property(_loc SDL2::SDL2 IMPORTED_LOCATION)
+            if(_loc)
+                get_filename_component(_dir "${_loc}" DIRECTORY)
+                foreach(_name SDL2.dll SDL2d.dll)
+                    if(EXISTS "${_dir}/${_name}")
+                        set(_mapmaker_sdl2_dll "${_dir}/${_name}")
+                        break()
+                    endif()
+                endforeach()
+            endif()
+        endif()
+    endif()
+    if(_mapmaker_sdl2_dll)
+        add_custom_command(TARGET nectar_mapmaker POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_mapmaker_sdl2_dll}" "$<TARGET_FILE_DIR:nectar_mapmaker>"
+            COMMENT "Placing the SDL2 runtime next to nectar-mapmaker"
+            VERBATIM)
+    endif()
+endif()

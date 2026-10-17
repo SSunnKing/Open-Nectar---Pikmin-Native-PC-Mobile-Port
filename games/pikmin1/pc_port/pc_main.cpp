@@ -59,15 +59,14 @@ __declspec(dllexport) int           AmdPowerXpressRequestHighPerformance = 1;
 #include "pc_vs.h"
 #include "settings/pc_settings_p2d.h"
 #include "netplay/pc_netplay_det.h"
+#include "netplay/pc_netplay_session.h"
+#include "netplay/pc_netplay_launch.h"
 #include "netplay/pc_input_log.h"
 #include "netplay/pc_state_hash.h"
 #include "netplay/pc_coop_switch.h"
 
 // Netplay session switches: strong-defined by pc_netplay_session.cpp in
 // netplay builds only, null otherwise.
-__attribute__((weak)) void pc_netplay_session_notify_argv(int argc, char** argv);
-__attribute__((weak)) void pc_netplay_launch_preinit(int argc, char** argv);
-__attribute__((weak)) void pc_netplay_launch_post_settings(void);
 
 int main(int argc, char* argv[])
 {

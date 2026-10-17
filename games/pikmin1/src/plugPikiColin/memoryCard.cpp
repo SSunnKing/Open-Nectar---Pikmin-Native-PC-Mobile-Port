@@ -10,10 +10,11 @@
 #include "pc_day_history.h"
 #include "randomizer/pc_randomizer.h"
 #include "netplay/pc_netplay_loadguard.h"
+#include "netplay/pc_netplay_session.h"
 // Netplay keep-alive (pc_netplay_loadguard.h): a save waits here for the card
 // thread inside one netplay tick. Strong-defined by pc_netplay_session.cpp in
 // netplay builds only, null otherwise.
-__attribute__((weak)) void pc_netplay_load_keepalive(int site);
+
 #endif
 #include "system.h"
 #include <string.h>

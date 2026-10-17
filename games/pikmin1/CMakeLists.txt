@@ -57,50 +57,145 @@ set(CLANG_LEGACY_RELAXATIONS
     $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-address-of-temporary>
     $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-unknown-warning-option>
 )
-set(LEGACY_COMPILE_OPTIONS
-    -include "${PC_PORT_DIR}/pc_types.h"
-    -fsigned-char
-    -fpermissive
-    ${CLANG_LEGACY_RELAXATIONS}
-    -Wno-narrowing
-    -Wno-multichar
-    -Wno-write-strings
-    -Wno-sign-compare
-    -Wno-unused-variable
-    -Wno-unused-but-set-variable
-    -Wno-parentheses
-    -Wno-delete-non-virtual-dtor
-    -Wno-reorder
-    -Wno-switch
-    -Wno-format
-    -Wno-attributes
-    -Wno-comment
-)
+# The decompiled sources are Metrowerks-era C++ that only GCC and Clang accept
+# verbatim. The else() branch below holds the flags those two compilers need;
+# MSVC (cl.exe) has no equivalent for -fpermissive and rejects every -Wno-* by
+# number, so it gets its own list in the if(MSVC) branch. Keeping the two apart
+# is what lets the Linux, MinGW, macOS and Android builds keep exactly the flags
+# they had.
+if(MSVC)
+    # /J- : plain char is signed, like -fsigned-char. The x86 default, but the
+    # decompilation has latent bugs in both directions (Font::charToIndex), so
+    # it is pinned explicitly rather than inherited from the ABI.
+    # /FI : force-include pc_types.h, like -include. It supplies the MetroWerks
+    # shims, the GCC builtins and the std:: float names the decompiled sources
+    # expect, none of which MSVC has.
+    # /permissive- is deliberately NOT used: it makes MSVC stricter than GCC.
+    # /Zc:__cplusplus : report the real __cplusplus. Without it MSVC keeps
+    # reporting 199711L even under /std:c++17, and include/types.h then defines
+    # a `nullptr` macro for pre-C++11 compilers ("we yearn for modernity") that
+    # corrupts the MSVC standard library and turns into "std::nullptr_t:
+    # redefinition; different basic types" in every translation unit. GCC, Clang
+    # and MinGW report the standard correctly, which is why only MSVC needs it.
+    #
+    # NOMINMAX / WIN32_LEAN_AND_MEAN: the few files that do include <windows.h>
+    # then still reach std::numeric_limits<...>::max() and friends. windows.h
+    # defines max/min as macros, and a native Windows build has no equivalent of
+    # the win32 code path's own care (pc_port/gl/pc_opengl.h) about it.
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+    # Tells pc_types.h that /UWIN32 below is expected to have removed WIN32, so a
+    # leak there is a hard error rather than a silent fallback. Only set for the
+    # MSVC-style builds, whose flags reach every target through
+    # target_compile_options; the MinGW toolchain path keeps pc_types.h's #undef
+    # fallback because its add_compile_options() is not as reliable.
+    add_compile_definitions(PIKI_ENFORCE_NO_WIN32=1)
+    set(LEGACY_FORCE_INCLUDE /FI"${PC_PORT_DIR}/pc_types.h")
+    set(LEGACY_COMPILE_OPTIONS
+        ${LEGACY_FORCE_INCLUDE}
+        /J-
+        /Zc:__cplusplus
+        # Remove WIN32 at the command line, not only in pc_types.h. CMake feeds
+        # WIN32 in through <PreprocessorDefinitions>; this lands in
+        # <AdditionalOptions>, which MSBuild emits afterwards, so it wins. Doing
+        # it here means the decompiled sources never take their original
+        # Win32/OpenGL path even if the /FI force-include fails, which is what
+        # pc_types.h's #error then verifies. See the note there.
+        /UWIN32
+        /wd4068 # unknown pragma (GCC #pragma diagnostics in the decompiled code)
+        /wd4100 # unreferenced formal parameter
+        /wd4127 # conditional expression is constant
+        /wd4189 # local variable is initialized but not referenced
+        /wd4244 # conversion may lose data
+        /wd4245 # signed/unsigned conversion mismatch
+        /wd4267 # size_t conversion may lose data
+        /wd4305 # truncation from double to float
+        /wd4311 # pointer truncation
+        /wd4312 # pointer/integer conversion of greater size
+        /wd4324 # structure padded due to alignment specifier
+        /wd4456 # declaration hides previous local declaration
+        /wd4457 # declaration hides function parameter
+        /wd4458 # declaration hides class member
+        /wd4700 # uninitialized local used
+        /wd4701 # potentially uninitialized local
+        /wd4702 # unreachable code
+        /wd4703 # potentially uninitialized local pointer
+        /wd4706 # assignment within conditional expression
+        /wd4800 # forcing value to bool
+        /wd4996 # functions marked deprecated by the CRT
+    )
+    set(NATIVE_COMPILE_OPTIONS
+        ${LEGACY_FORCE_INCLUDE}
+        /J-
+        /Zc:__cplusplus
+        /UWIN32
+        /W3
+        # The two diagnostics the GCC flags made errors are kept as errors, so
+        # the same classes of bug still stop a native Windows build.
+        /we4033 # 'function' : must return a value
+        /we4062 # enumerator is not handled in switch
+        /wd4068
+        /wd4100
+        /wd4127
+        /wd4189
+        /wd4244
+        /wd4245
+        /wd4267
+        /wd4305
+        /wd4311
+        /wd4312
+        /wd4456
+        /wd4457
+        /wd4458
+        /wd4701
+        /wd4702
+        /wd4996
+    )
+else()
+    set(LEGACY_COMPILE_OPTIONS
+        -include "${PC_PORT_DIR}/pc_types.h"
+        -fsigned-char
+        -fpermissive
+        ${CLANG_LEGACY_RELAXATIONS}
+        -Wno-narrowing
+        -Wno-multichar
+        -Wno-write-strings
+        -Wno-sign-compare
+        -Wno-unused-variable
+        -Wno-unused-but-set-variable
+        -Wno-parentheses
+        -Wno-delete-non-virtual-dtor
+        -Wno-reorder
+        -Wno-switch
+        -Wno-format
+        -Wno-attributes
+        -Wno-comment
+    )
 
-# Native code (pc_port, tests, launcher) should compile with strict warnings.
-# We keep -fpermissive because native code includes legacy Dolphin headers.
-set(NATIVE_COMPILE_OPTIONS
-    -include "${PC_PORT_DIR}/pc_types.h"
-    -fsigned-char
-    -fpermissive
-    ${CLANG_LEGACY_RELAXATIONS}
-    -Wall
-    -Wextra
-    $<$<CXX_COMPILER_ID:GNU>:-Wno-changes-meaning>
-    -Wno-narrowing
-    -Wno-multichar
-    -Wno-write-strings
-    -Wno-sign-compare
-    -Wno-unused-variable
-    -Wno-unused-but-set-variable
-    -Wno-parentheses
-    -Wno-delete-non-virtual-dtor
-    -Wno-reorder
-    -Wno-attributes
-    -Wno-comment
-    -Werror=return-type
-    -Werror=switch
-)
+    # Native code (pc_port, tests, launcher) should compile with strict warnings.
+    # We keep -fpermissive because native code includes legacy Dolphin headers.
+    set(NATIVE_COMPILE_OPTIONS
+        -include "${PC_PORT_DIR}/pc_types.h"
+        -fsigned-char
+        -fpermissive
+        ${CLANG_LEGACY_RELAXATIONS}
+        -Wall
+        -Wextra
+        $<$<CXX_COMPILER_ID:GNU>:-Wno-changes-meaning>
+        -Wno-narrowing
+        -Wno-multichar
+        -Wno-write-strings
+        -Wno-sign-compare
+        -Wno-unused-variable
+        -Wno-unused-but-set-variable
+        -Wno-parentheses
+        -Wno-delete-non-virtual-dtor
+        -Wno-reorder
+        -Wno-attributes
+        -Wno-comment
+        -Werror=return-type
+        -Werror=switch
+    )
+endif()
 
 # Off by default: the native mixer is the configuration known to work. Turn on
 # with -DPIKMIN_NATIVE_JAUDIO=ON to drive audio from the original engine.
@@ -221,7 +316,96 @@ else()
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(SDL2 REQUIRED sdl2)
     endif()
+
+    # The code includes <SDL2/SDL.h> everywhere. That layout is what every Linux
+    # and MinGW SDL2 package installs (headers in <prefix>/include/SDL2), but the
+    # official Windows development package from libsdl.org is flat: its headers
+    # are directly in <prefix>/include. CMake then hands us an include directory
+    # in which SDL.h exists but SDL2/SDL.h does not, so a native Windows build
+    # fails with "Cannot open include file: 'SDL2/SDL.h'".
+    #
+    # Rather than special-case Windows, check for the layout and synthesize it in
+    # the build tree when it is missing: <build>/sdl2-include/SDL2 is linked to
+    # the real header directory, so <SDL2/...> resolves on any package. This runs
+    # for every non-Android platform and is a no-op on Linux, macOS and MinGW,
+    # where the subdirectory is already there.
+    set(_sdl2_include_dir "")
+    foreach(_dir IN LISTS SDL2_INCLUDE_DIRS)
+        if(EXISTS "${_dir}/SDL2/SDL.h")
+            set(_sdl2_include_dir "${_dir}")
+            break()
+        endif()
+        if(EXISTS "${_dir}/SDL.h")
+            set(_sdl2_include_dir "${_dir}")
+            set(_sdl2_flat_layout TRUE)
+            break()
+        endif()
+    endforeach()
+    if(_sdl2_flat_layout AND _sdl2_include_dir)
+        set(_sdl2_shim "${CMAKE_CURRENT_BINARY_DIR}/sdl2-include")
+        file(MAKE_DIRECTORY "${_sdl2_shim}")
+        if(NOT EXISTS "${_sdl2_shim}/SDL2/SDL.h")
+            file(CREATE_LINK "${_sdl2_include_dir}" "${_sdl2_shim}/SDL2" SYMBOLIC)
+            if(NOT EXISTS "${_sdl2_shim}/SDL2/SDL.h")
+                # Symlinks can be unavailable (need privilege on Windows); copy.
+                file(COPY "${_sdl2_include_dir}/" DESTINATION "${_sdl2_shim}/SDL2")
+            endif()
+        endif()
+        message(STATUS "SDL2: flat include layout; exposing it as <SDL2/...> from ${_sdl2_shim}")
+        set(SDL2_INCLUDE_DIRS "${_sdl2_shim}" ${SDL2_INCLUDE_DIRS})
+    endif()
+    unset(_sdl2_flat_layout)
+
+    # ${NECTAR_LEGACY} is declared below, and its sources include pc_port/pc_window.h
+    # (which includes <SDL2/SDL.h>). A directory-scoped include_directories() only
+    # reaches targets created afterwards, so set it here rather than relying on the
+    # one further down. Headers only: the game target does the linking.
+    include_directories(${SDL2_INCLUDE_DIRS})
 endif()
+
+# Place SDL2's runtime next to each executable that links it.
+#
+# On Windows SDL2 is normally a DLL, and an .exe started outside Visual Studio
+# then fails immediately with 0xC0000135 (STATUS_DLL_NOT_FOUND) and no message --
+# the launcher hides its console, so there is nothing to read. Copying the DLL
+# the package actually points at makes a fresh build runnable straight away.
+# A no-op when SDL2 is static or when SDL2 is not a Windows build.
+function(pikmin_copy_sdl2_runtime target)
+    if(NOT WIN32 OR NOT TARGET ${target})
+        return()
+    endif()
+    # Prefer the imported target's own location: it is whatever the package
+    # configured, so this works for the libsdl.org zip as well as vcpkg/MSYS2.
+    set(_sdl2_dll "")
+    foreach(_candidate SDL2::SDL2 SDL2::SDL2-static)
+        if(TARGET ${_candidate})
+            get_target_property(_imported ${_candidate} IMPORTED)
+            get_target_property(_type ${_candidate} TYPE)
+            if(_imported AND _type STREQUAL "SHARED_LIBRARY")
+                get_target_property(_loc ${_candidate} IMPORTED_LOCATION)
+                if(_loc)
+                    get_filename_component(_dir "${_loc}" DIRECTORY)
+                    foreach(_name SDL2.dll SDL2d.dll)
+                        if(EXISTS "${_dir}/${_name}")
+                            set(_sdl2_dll "${_dir}/${_name}")
+                            break()
+                        endif()
+                    endforeach()
+                endif()
+            endif()
+        endif()
+        if(_sdl2_dll)
+            break()
+        endif()
+    endforeach()
+    if(NOT _sdl2_dll)
+        return()
+    endif()
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_sdl2_dll}" "$<TARGET_FILE_DIR:${target}>"
+        COMMENT "Placing $(<TARGET_FILE_BASE_NAME:${target}>)'s SDL2 runtime next to it"
+        VERBATIM)
+endfunction()
 
 # Paquetes de release: SDL2 y el runtime de C/C++ dentro de cada ejecutable,
 # para que la carpeta instalada sea solo el juego y el launcher. En Windows
@@ -543,6 +727,15 @@ add_library(${NECTAR_LEGACY} STATIC
     ${JAUDIO_TARGET_SOURCES}
 )
 target_compile_options(${NECTAR_LEGACY} PRIVATE ${LEGACY_COMPILE_OPTIONS})
+# Legacy sources include pc_port/pc_window.h, which includes <SDL2/SDL.h>. On the
+# non-MSVC builds that only worked because ${SDL2_INCLUDE_DIRS} is added globally
+# further down, after this target is declared; the Visual Studio generator resolves
+# includes per target, so name the dependency explicitly. Headers only: the game
+# target does the linking, and PUBLIC here would otherwise pick a shared SDL2 over
+# the static one PIKMIN_STATIC_RUNTIME asks for.
+if(SDL2_INCLUDE_DIRS)
+    target_include_directories(${NECTAR_LEGACY} PUBLIC ${SDL2_INCLUDE_DIRS})
+endif()
 
 # Native executable with strict flags. En Android es una biblioteca
 # compartida que carga la actividad Java de SDL (libnectar.so, con SDL_main
@@ -570,6 +763,11 @@ if(NECTAR_ONLINE)
 else()
     target_compile_definitions(${NECTAR_GAME} PRIVATE PIKI_NECTAR_ONLINE=0)
 endif()
+
+# The no-op netplay hooks (pc_port/netplay/pc_netplay_stubs.cpp) are supplied by
+# the block further down, added upstream on main; this branch originally carried
+# its own pc_netplay_hooks_off.cpp for the same symbols. Do not add a second one:
+# two definitions of pc_online_menu_* fail to link.
 
 # GX display lists, game logic and the software audio mixer execute on the host
 # CPU. Keep optimization level, machine-specific ISA and link-time optimization
@@ -805,10 +1003,13 @@ elseif (ANDROID)
     # Android 15 exige bibliotecas alineadas a páginas de 16 KB en arm64.
     target_link_options(${NECTAR_GAME} PRIVATE "-Wl,-z,max-page-size=16384")
 else()
+    # libm is its own library on Unix/macOS only. On Windows the C runtime carries
+    # the float functions, and linking `m` there fails at link time with
+    # "cannot open file 'm.lib'".
     if(PIKMIN_GLES)
-        target_link_libraries(${NECTAR_GAME} PRIVATE m ${SDL2_LIBRARIES} OpenGL::GLES3 $<$<NOT:$<PLATFORM_ID:Darwin>>:X11>)
+        target_link_libraries(${NECTAR_GAME} PRIVATE $<$<NOT:$<PLATFORM_ID:Windows>>:m> ${SDL2_LIBRARIES} OpenGL::GLES3 $<$<NOT:$<PLATFORM_ID:Darwin>>:X11>)
     else()
-        target_link_libraries(${NECTAR_GAME} PRIVATE m ${SDL2_LIBRARIES} OpenGL::GL $<$<NOT:$<PLATFORM_ID:Darwin>>:X11>)
+        target_link_libraries(${NECTAR_GAME} PRIVATE $<$<NOT:$<PLATFORM_ID:Windows>>:m> ${SDL2_LIBRARIES} OpenGL::GL $<$<NOT:$<PLATFORM_ID:Darwin>>:X11>)
     endif()
 endif()
 # Export symbol names so the diagnostic backtrace in pc_gfx.cpp prints function
@@ -838,6 +1039,7 @@ if (NOT ANDROID AND NOT WIN32)
         COMMAND /bin/chmod 775 "$<TARGET_FILE:${NECTAR_GAME}>"
         COMMENT "Ensuring the native Pikmin executable is runnable")
 endif()
+pikmin_copy_sdl2_runtime(${NECTAR_GAME})
 
 # Standalone first-run launcher. It accepts an original, uncompressed
 # GameCube ISO/GCM supplied by the user, extracts its FST into the per-user
@@ -1007,6 +1209,7 @@ if(PIKMIN_BUILD_LAUNCHER)
     # Both executables must remain side by side: the launcher resolves the game
     # binary relative to itself, so this also works in relocatable archives.
     install(TARGETS pikmin_launcher RUNTIME DESTINATION bin)
+    pikmin_copy_sdl2_runtime(pikmin_launcher)
 endif()
 
 install(TARGETS ${NECTAR_GAME} RUNTIME DESTINATION bin)
@@ -1065,7 +1268,10 @@ if(PIKMIN_BUILD_TESTS)
 
     # Envelope smoke test executable (not linked into main game)
     add_executable(pc_envelope_test pc_port/audio/pc_envelope_test.cpp pc_port/audio/pc_envelope.cpp)
-    target_link_libraries(pc_envelope_test PRIVATE m)
+    # libm is a separate library on Unix only; on Windows the C runtime provides
+    # the float functions, and linking `m` there fails with "cannot open file
+    # 'm.lib'". Same for the mixer test and the game itself below.
+    target_link_libraries(pc_envelope_test PRIVATE $<$<NOT:$<PLATFORM_ID:Windows>>:m>)
     target_compile_options(pc_envelope_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_envelope_test COMMAND pc_envelope_test)
 
@@ -1140,7 +1346,7 @@ if(PIKMIN_BUILD_TESTS)
         pc_port/audio/pc_sequence_archive.cpp
         pc_port/audio/pc_wave_bank.cpp
         src/jaudio/pikiseq.c)
-    target_link_libraries(pc_audio_mixer_test PRIVATE m ${SDL2_LIBRARIES})
+    target_link_libraries(pc_audio_mixer_test PRIVATE $<$<NOT:$<PLATFORM_ID:Windows>>:m> ${SDL2_LIBRARIES})
     target_compile_options(pc_audio_mixer_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/dataDir/SndData/Banks/pikibank.bx")
         add_test(NAME pc_audio_mixer_test COMMAND pc_audio_mixer_test)
@@ -1370,4 +1576,25 @@ endif()
 # donde busca el ejecutable para "Probar". Usa la ImGui del launcher.
 if (NECTAR_BUILD_MAPMAKER AND NOT ANDROID)
     add_subdirectory("${NECTAR_LIBS_DIR}/../tools/mapmaker" "${CMAKE_CURRENT_BINARY_DIR}/mapmaker")
+endif()
+
+# Give every executable defined in this file that links SDL2 the same runtime
+# next to it, so the test executables also run out of the build tree. Done at the
+# end so it covers targets created throughout the file. ${NECTAR_GAME} and
+# pikmin_launcher already got it where they were defined, and the mapmaker does
+# it in its own CMakeLists.txt because add_custom_command only accepts a target
+# created in the calling directory.
+if(WIN32)
+    get_property(_pikmin_all_targets DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_t IN LISTS _pikmin_all_targets)
+        if(TARGET ${_t})
+            get_target_property(_type ${_t} TYPE)
+            if(_type STREQUAL "EXECUTABLE")
+                get_target_property(_links ${_t} LINK_LIBRARIES)
+                if(_links MATCHES "SDL2")
+                    pikmin_copy_sdl2_runtime(${_t})
+                endif()
+            endif()
+        endif()
+    endforeach()
 endif()

@@ -1,0 +1,57 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "description": "Shared settings for every native Windows preset. Set SDL2_DIR (cache or environment variable) to the cmake/ directory of the SDL2 development package, e.g. -DSDL2_DIR=C:/SDL/SDL2-2.32.10/cmake",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/../../build/pikmin1-windows",
+      "cacheVariables": {
+        "SDL2_DIR": "$env{SDL2_DIR}",
+        "PIKMIN_BUILD_TESTS": "ON",
+        "PIKMIN_BUILD_LAUNCHER": "ON",
+        "PIKMIN_NATIVE_JAUDIO": "OFF"
+      }
+    },
+    {
+      "name": "windows-msvc",
+      "displayName": "Windows x64 (MSVC, cl.exe)",
+      "description": "Native Windows build with the MSVC toolset. No MinGW, no WSL. Configure with: cmake --preset windows-msvc -DSDL2_DIR=<sdl2>/cmake",
+      "inherits": "windows-base"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-msvc-relwithdebinfo",
+      "displayName": "Release + symbols",
+      "configurePreset": "windows-msvc",
+      "configuration": "RelWithDebInfo",
+      "targets": ["pikmin_pc", "pikmin_launcher"]
+    },
+    {
+      "name": "windows-msvc-release",
+      "displayName": "Release",
+      "configurePreset": "windows-msvc",
+      "configuration": "Release",
+      "targets": ["pikmin_pc", "pikmin_launcher"]
+    },
+    {
+      "name": "windows-msvc-debug",
+      "displayName": "Debug",
+      "configurePreset": "windows-msvc",
+      "configuration": "Debug",
+      "targets": ["pikmin_pc", "pikmin_launcher"]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-msvc",
+      "configurePreset": "windows-msvc",
+      "configuration": "RelWithDebInfo",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

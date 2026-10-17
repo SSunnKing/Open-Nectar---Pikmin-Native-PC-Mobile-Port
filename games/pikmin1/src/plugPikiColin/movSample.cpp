@@ -549,11 +549,11 @@ struct MovSampleSetupSection : public Node {
 	void setTevColors()
 	{
 #if PIKI_USE_DGX
-		GXSetTevColorS10(GX_TEVREG0, (GXColorS10) { -111, 0, -138, 68 });
-		GXSetTevKColor(GX_KCOLOR0, (GXColor) { 102, 0, 255, 50 });
-		GXSetTevKColor(GX_KCOLOR1, (GXColor) { 148, 0, 148, 148 });
-		GXSetTevKColor(GX_KCOLOR2, (GXColor) { 203, 0, 5, 207 });
-		GXSetTevKColor(GX_KCOLOR3, (GXColor) { 0, 255, 0, 0 });
+		GXSetTevColorS10(GX_TEVREG0, GXColorS10 { -111, 0, -138, 68 });
+		GXSetTevKColor(GX_KCOLOR0, GXColor { 102, 0, 255, 50 });
+		GXSetTevKColor(GX_KCOLOR1, GXColor { 148, 0, 148, 148 });
+		GXSetTevKColor(GX_KCOLOR2, GXColor { 203, 0, 5, 207 });
+		GXSetTevKColor(GX_KCOLOR3, GXColor { 0, 255, 0, 0 });
 #endif
 	}
 

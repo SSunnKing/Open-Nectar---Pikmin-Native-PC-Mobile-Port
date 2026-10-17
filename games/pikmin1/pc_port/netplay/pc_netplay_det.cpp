@@ -15,7 +15,12 @@
 #include <xmmintrin.h>
 #define PC_DET_HAVE_SSE_CSR 1
 #endif
-#if defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_X64)
+#if defined(__i386__) || defined(__x86_64__)
+// cl.exe has no GNU extended asm (__asm__ volatile("fldcw %0" : : "m"(cw))), and
+// inline asm is an x86-32/64 GCC/Clang feature only. On MSVC the SSE control word
+// set just above (PC_DET_HAVE_SSE_CSR) already fixes rounding and masks every
+// exception, which is the state determinism needs; the FPU control word is not
+// reachable from C there without the inline asm, so it is left alone.
 #define PC_DET_HAVE_X87_CW 1
 #endif
 #if !defined(PC_DET_HAVE_X87_CW)
@@ -114,8 +119,9 @@ void pc_netplay_on_tick_begin(void)
 #endif
 #if defined(PC_DET_HAVE_X87_CW)
 	// 0x037F: all exceptions masked, 64-bit precision, round-to-nearest.
-	// Set directly: include/Dolphin/float.h shadows the system <float.h>, so
-	// _controlfp is not reachable from here.
+	// A direct x87 load on GCC/Clang. This branch is not compiled for MSVC, which
+	// has no GNU extended asm (see PC_DET_HAVE_X87_CW above); the SSE control
+	// word set just above already covers rounding and exception masking there.
 	{
 		const unsigned short cw = 0x037Fu;
 		__asm__ volatile("fldcw %0" : : "m"(cw));

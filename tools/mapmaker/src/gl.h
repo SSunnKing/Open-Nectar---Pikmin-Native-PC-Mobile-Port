@@ -22,7 +22,18 @@
 #include <OpenGL/gl3.h>
 #else
 #include <GL/gl.h>
+#if defined(_WIN32)
+// Windows: the SDK's <GL/gl.h> stops at OpenGL 1.1 and ships no Khronos
+// <GL/glext.h>, so the modern entry points this file needs (buffers, VAOs,
+// shaders, FBOs) come from SDL's copy of the Khronos header, which is on the
+// include path on every platform. APIENTRY is defined above, so
+// SDL_opengl_glext.h does not pull in <windows.h> by itself.
+// Not games/pikmin1/include/GL/glext.h: that is a deliberately minimal stub for
+// the game's GX translator and does not carry these types.
+#include <SDL_opengl_glext.h>
+#else
 #include <GL/glext.h>
+#endif
 #endif
 
 #define NM_GL_FUNCS(X)                                                                                                                     \

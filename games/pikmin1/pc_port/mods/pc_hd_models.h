@@ -5,7 +5,14 @@
 
 class BaseShape;
 class Graphics;
-struct Matrix4f;
+// `class`, matching every other declaration of Matrix4f in the tree (Graphics.h,
+// KMath.h, Vector.h, system.h, ...). MSVC puts the class-key into the mangled
+// name, so this header declaring `struct Matrix4f` while the callers had
+// `class Matrix4f` emitted two different symbols for pc_hd_model_draw_rigid: the
+// definition came out as ...AEBUMatrix4f@@ and the call sites asked for
+// ...AEBVMatrix4f@@, so it stayed unresolved at link time. GCC and Clang ignore
+// the difference, which is why only a native Windows build ever saw this.
+class Matrix4f;
 
 // Optional high-definition replacement meshes (NHM1 packs under
 // Load/Models/). The original .mod files keep driving animation, collision

@@ -47,6 +47,7 @@
 #include "pc_vs.h"
 #include "mods/pc_vs_map.h"
 #include "netplay/pc_netplay_det.h"
+#include "netplay/pc_netplay_session.h"
 #include "pc_achievements.h"
 #include "pc_speedrun.h"
 #include "pc_livesplit.h"
@@ -583,7 +584,6 @@ constexpr float kBrightnessStops[] = { -0.15f, -0.10f, -0.05f, 0.0f, 0.05f, 0.10
 constexpr int kBrightnessStopCount = int(sizeof(kBrightnessStops) / sizeof(kBrightnessStops[0]));
 constexpr float kSaturationStops[] = { 0.0f, 0.5f, 0.8f, 1.0f, 1.2f, 1.5f, 2.0f };
 constexpr int kSaturationStopCount = int(sizeof(kSaturationStops) / sizeof(kSaturationStops[0]));
-
 
 // Field-limit stops. 100 is what the original game uses.
 constexpr int kPikiLimits[]   = { 50, 100, 150, 200, 300, 500, 750, PIKI_FIELD_LIMIT_MAX };
@@ -3471,7 +3471,6 @@ void drawTimedNotice(int centerX, int y) {
                     colour, Colour(10, 16, 36, 255), msg);
 }
 
-
 // ---------------------------------------------------------------------------
 // Página de pestañas de F1
 // ---------------------------------------------------------------------------
@@ -5058,7 +5057,6 @@ void pc_newgame_prompt_draw(void) {
     drawHelpLine(panelX + panelW / 2, panelY + 382, help, Colour(150, 165, 195, 255));
 }
 
-
 // ─── Selector 1P / 2P ───
 //
 // Se abre al entrar en la selección de slot desde "Empezar". Con 2 jugadores
@@ -5237,7 +5235,6 @@ void pc_playercount_prompt_draw(void) {
                           : "Left/Right: choose    A / Enter: next    B / Esc: back";
     drawHelpLine(panelX + panelW / 2, panelY + 212, help, Colour(150, 165, 195, 255));
 }
-
 
 // ─── Asignación de mandos por jugador ───
 //
@@ -7687,10 +7684,7 @@ bool hardLocked(const GroupRow& r) {
 // Online co-op lives in the netplay session (netplay builds only): weak
 // references, so builds without it link and simply never enable the row.
 }
-__attribute__((weak)) bool pc_netplay_online_is_guest(void);
-__attribute__((weak)) bool pc_netplay_online_spectating(void);
-__attribute__((weak)) void pc_netplay_online_request_leave(void);
-__attribute__((weak)) void pc_netplay_online_request_rejoin(void);
+
 namespace {
 bool online_guest() { return pc_netplay_online_is_guest != nullptr && pc_netplay_online_is_guest(); }
 bool online_spectating() { return pc_netplay_online_spectating != nullptr && pc_netplay_online_spectating(); }

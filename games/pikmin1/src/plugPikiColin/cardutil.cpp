@@ -5,10 +5,11 @@
 #include "gameflow.h"
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_loadguard.h"
+#include "netplay/pc_netplay_session.h"
 // Netplay keep-alive (pc_netplay_loadguard.h): card waits run inside one
 // netplay tick. Strong-defined by pc_netplay_session.cpp in netplay builds
 // only, null otherwise.
-__attribute__((weak)) void pc_netplay_load_keepalive(int site);
+
 #endif
 
 /// Global thread for async card operations called directly by the game code.

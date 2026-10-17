@@ -15,11 +15,12 @@
 #include <string>
 
 #include "netplay/pc_netplay_loadguard.h"
+#include "netplay/pc_netplay_session.h"
 
 // Netplay keep-alive (pc_netplay_loadguard.h): a slow stage load reads many
 // files inside one netplay tick. Strong-defined by pc_netplay_session.cpp in
 // netplay builds only, null otherwise.
-__attribute__((weak)) void pc_netplay_load_keepalive(int site);
+
 static inline void dvd_netplay_keepalive()
 {
     if (pc_netplay_load_keepalive != nullptr) pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteDvd);

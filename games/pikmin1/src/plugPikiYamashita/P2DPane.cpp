@@ -181,15 +181,19 @@ P2DPane::P2DPane(P2DPane* parent, RandomAccessStream* input, u16 paneType)
 	tag[3] = input->readByte();
 
 	// Pane tags are four-character big-endian values (for example 'pall').
-	// Select by actual host byte order rather than by a port build macro: native
-	// toolchains may compile this translation unit with a different definition
-	// set, but the resource format never changes.
-#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+	//
+	// Assemble the value explicitly instead of probing the host's byte order.
+	// The resource format is always big-endian, so this expression is correct on
+	// every host, and it does not depend on a compiler defining __BYTE_ORDER__.
+	// That macro is GCC/Clang-only: cl.exe defines neither it nor
+	// __ORDER_LITTLE_ENDIAN__, so the previous "host byte order" test silently
+	// took its big-endian branch and did `*(u32*)tag`, which byte-swaps on
+	// x86/x64. Every tag then failed to match its 'xxxx' literal and the game
+	// panicked with "tag <pall> is not found" the moment a .blo screen was read.
+	// Multi-character literals are not the problem: MSVC and GCC both pack
+	// 'pall' as 0x70616C6C.
 	mTagName = (static_cast<u32>(tag[0]) << 24) | (static_cast<u32>(tag[1]) << 16)
 	         | (static_cast<u32>(tag[2]) << 8) | static_cast<u32>(tag[3]);
-#else
-	mTagName = *(u32*)tag;
-#endif
 
 	mBounds.mMinX = (int)input->readShort();
 	mBounds.mMinY = (int)input->readShort();

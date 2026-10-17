@@ -85,12 +85,16 @@ typedef int BOOL;
 // with `__imp_`.  It's an ongoing TODO to catch all of the places where the `SYSCORE_API`
 // decorator is needed, but many of the hot exported types are already taken care of.  If
 // you are nonmatching due to `call [__imp_...]` or `mov r,[__imp_...]`, we missed a spot.
-#if defined(_MSC_VER)
+//
+// Keyed on SYSCORE_EXPORTS rather than _MSC_VER: this is the build that produces or
+// consumes the original Windows sysCore.dll, and the native PC port (Linux, macOS, and
+// now Windows via cl.exe/clang-cl) statically links everything and must not decorate
+// symbols __declspec(dllimport) or the link has nothing to import them from. The test
+// is unchanged for the DLL build, which always defines SYSCORE_EXPORTS.
 #if defined(SYSCORE_EXPORTS)
 #define SYSCORE_API __declspec(dllexport)
-#else
+#elif defined(_MSC_VER) && !defined(PIKI_PC_PORT)
 #define SYSCORE_API __declspec(dllimport)
-#endif
 #else
 // On MetroWerks, everything was statically linked, so this macro expands to nothing.
 #define SYSCORE_API
@@ -348,6 +352,12 @@ inline void padStack(void)
 #define CTORS DECL_SECT(".ctors")
 
 // If an unimplemented function is used by mistake (e.g. in modding), we should trap on that.
+//
+// Guarded: on a native Windows build this header used to select the _MSC_VER arm below,
+// whose `__asm { ud2 }` is an x86-only extension (error C4235/C2065 on x64). pc_types.h
+// already provides the trap the PC port actually wants -- a message naming the function --
+// and is force-included first, so keeping its definition is both correct and portable.
+#ifndef TRAP_UNIMPLEMENTED
 #if defined(__MWERKS__) // clang-format off
 #define TRAP_UNIMPLEMENTED asm { trap } ((void)0)
 #elif defined(_MSC_VER)
@@ -355,6 +365,7 @@ inline void padStack(void)
 #else
 #define TRAP_UNIMPLEMENTED ((void)0) /* Replace me */
 #endif // clang-format on
+#endif
 
 // Documenting MetroWerks intrinsic functions for PowerPC and placing them behind macros for portability.
 #if defined(__MWERKS__)

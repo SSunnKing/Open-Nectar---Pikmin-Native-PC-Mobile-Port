@@ -6,6 +6,7 @@
 #include "pc_gyro.h"
 #include "pc_icon.h"
 #include "netplay/pc_netplay_det.h"
+#include "netplay/pc_netplay_session.h"
 #if PIKI_PC_TOUCH
 #include "gl/pc_gfx.h"
 #include "touch/pc_touch.h"
@@ -60,7 +61,7 @@ static int  sKeyboardOwner = 0; // jugador que recibe teclado (0 salvo asignaci√
 
 // Netplay session: strong-defined by pc_netplay_session.cpp in netplay builds
 // only, null otherwise.
-__attribute__((weak)) bool pc_netplay_session_active(void);
+
 #if PIKI_NETPLAY_BUILD
 // Netplay input ownership (--netplay-input). A `keyboard` peer samples only
 // keys and mouse; a `gamepad` peer samples only its pad (keys and mouse are

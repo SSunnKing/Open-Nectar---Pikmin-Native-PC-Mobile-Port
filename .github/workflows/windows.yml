@@ -1,0 +1,63 @@
+name: Windows (native, MSVC)
+
+# Native Windows build and test of the Pikmin 1 port with the MSVC toolset: no
+# MinGW, no WSL, no cross-compilation. This is the path described in README.md
+# under "Windows (native, MSVC)".
+#
+# This file lives at the repository root because that is the only place GitHub
+# Actions reads workflows from. The workflows under games/pikmin1/.github/ were
+# never picked up (that is not a root .github directory), so they do not run.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    env:
+      # Pinned so a new SDL2 release cannot turn the build red without a change
+      # here. Bump it deliberately.
+      SDL2_VERSION: 2.32.10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch SDL2 (VC development package)
+        shell: pwsh
+        run: |
+          $url = "https://github.com/libsdl-org/SDL/releases/download/release-$env:SDL2_VERSION/SDL2-devel-$env:SDL2_VERSION-VC.zip"
+          $zip = Join-Path $env:RUNNER_TEMP 'SDL2-VC.zip'
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath (Join-Path $env:RUNNER_TEMP 'sdl2') -Force
+          # The zip contains a single SDL2-devel-<version>-VC directory.
+          $root = Get-ChildItem (Join-Path $env:RUNNER_TEMP 'sdl2') -Directory | Select-Object -First 1
+          if (-not (Test-Path (Join-Path $root.FullName 'cmake/sdl2-config.cmake'))) {
+            throw "SDL2 package has no cmake/sdl2-config.cmake in $($root.FullName)"
+          }
+          "SDL2_DIR=$($root.FullName)/cmake" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Configure
+        shell: pwsh
+        working-directory: games/pikmin1
+        run: cmake --preset windows-msvc "-DSDL2_DIR=$env:SDL2_DIR"
+
+      # The windows-msvc build preset only lists the game and launcher; build the
+      # whole directory so the test executables are produced as well.
+      - name: Build
+        shell: pwsh
+        working-directory: games/pikmin1
+        run: cmake --build ../../build/pikmin1-windows --config RelWithDebInfo -- /m
+
+      - name: Test
+        shell: pwsh
+        working-directory: games/pikmin1
+        run: ctest --test-dir ../../build/pikmin1-windows -C RelWithDebInfo --output-on-failure
+
+      - name: Upload binaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nectar-windows-msvc
+          path: build/pikmin1-windows/bin/RelWithDebInfo/
+          if-no-files-found: warn

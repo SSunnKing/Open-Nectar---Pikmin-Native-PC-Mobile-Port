@@ -475,7 +475,7 @@ void P2DPicture::setTevMode()
 	GXSetNumChans(1);
 
 	GXSetChanCtrl(GX_COLOR0A0, GX_FALSE, GX_SRC_REG, GX_SRC_REG, 0, GX_DF_NONE, GX_AF_NONE);
-	GXSetChanMatColor(GX_COLOR0A0, (GXColor) { 255, 255, 255, mAlpha });
+	GXSetChanMatColor(GX_COLOR0A0, GXColor { 255, 255, 255, mAlpha });
 
 	for (int i = 0; i < mTextureCount; i++) {
 		GXSetTevOrder((GXTevStageID)i, (GXTexCoordID)i, (GXTexMapID)i, GX_COLOR_NULL);
@@ -489,7 +489,7 @@ void P2DPicture::setTevMode()
 		return;
 	}
 
-	GXSetTevColor(GX_TEVREG2, (GXColor) { 255, 255, 255, 255 });
+	GXSetTevColor(GX_TEVREG2, GXColor { 255, 255, 255, 255 });
 	GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_TEXC, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO);
 	GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_TEXA, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO);
 	GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);

@@ -1,7 +1,11 @@
 #include "KMath.h"
 #include "AIConstant.h"
 #include "DebugLog.h"
-#include "Dolphin/float.h"
+// Was "Dolphin/float.h". That header referenced none of the symbols used here
+// (no __float_max, no FLT_*), and it shadowed the platform <float.h> because
+// include/Dolphin is on the include path; it has been removed for that reason.
+// types.h is included explicitly because the old header pulled it in.
+#include "types.h"
 #include "MapMgr.h"
 #include "zen/Math.h"
 

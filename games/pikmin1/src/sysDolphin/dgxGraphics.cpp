@@ -1526,7 +1526,7 @@ void DGXGraphics::setFog(bool enable)
 		}
 #endif
 	} else {
-		GXSetFog(GX_FOG_NONE, 0.0f, 0.0f, 0.0f, 0.0f, (GXColor) { 0, 0, 0, 0 });
+		GXSetFog(GX_FOG_NONE, 0.0f, 0.0f, 0.0f, 0.0f, GXColor { 0, 0, 0, 0 });
 	}
 }
 

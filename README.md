@@ -241,7 +241,7 @@ nectar-launcher --help
 ### Requirements
 
 - CMake 3.16+
-- C++17 compiler (GCC 10+ or Clang 12+)
+- C++17 compiler (GCC 10+ or Clang 12+; on Windows, MSVC 2022)
 - SDL2
 - OpenGL
 - zenity (optional on Linux, for the graphical dialog)
@@ -287,9 +287,42 @@ asks for, named `nectar`. `packaging/linux/build-release.sh` and
 [docs/COMPILAR_RELEASES.md](docs/COMPILAR_RELEASES.md) for every release
 package (Linux tar.gz and AppImage, Windows zip, Android APK).
 
-### Windows (cross-compiled from Linux)
+### Windows (native, MSVC)
 
-The Windows executable is built with MinGW-w64, cross-compiled from Linux.
+Building on Windows itself needs only Visual Studio 2022 with the
+**Desktop development with C++** workload (MSVC, Windows SDK and CMake). No
+MinGW and no WSL.
+
+Download the SDL2 **VC** development package (`SDL2-devel-<version>-VC.zip`) from
+the [SDL releases](https://github.com/libsdl-org/SDL/releases) and extract it
+anywhere. Then, from `games/pikmin1`, point `SDL2_DIR` at its `cmake` directory:
+
+```powershell
+cd games\pikmin1
+cmake --preset windows-msvc -DSDL2_DIR=C:/SDL/SDL2-2.32.10/cmake
+cmake --build --preset windows-msvc-relwithdebinfo
+```
+
+The result is `build\pikmin1-windows\bin\RelWithDebInfo\` with `nectar.exe`,
+`nectar-launcher.exe` and the `SDL2.dll` the build copies next to them, so the
+binaries run straight from the build tree.
+
+The build preset only builds the game and the launcher. To build and run the
+test suite:
+
+```powershell
+cmake --build build\pikmin1-windows --config RelWithDebInfo
+ctest --test-dir build\pikmin1-windows -C RelWithDebInfo
+```
+
+The official SDL2 VC package ships only a shared DLL, so `PIKMIN_STATIC_RUNTIME`
+cannot fold SDL2 into the executable on this path: ship `SDL2.dll` alongside it.
+The cross-compiled release path below still links SDL2 statically.
+
+### Windows (cross-compiled from Linux, release builds)
+
+This is the path the release zip uses. The Windows executable is built with
+MinGW-w64, cross-compiled from Linux.
 
 SDL2 for MinGW is expected in `third_party/SDL2-mingw64`. It is not committed to
 the repository; download `SDL2-devel-<version>-mingw.tar.gz` from the

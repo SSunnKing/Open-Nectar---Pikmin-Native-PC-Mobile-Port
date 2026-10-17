@@ -5,6 +5,9 @@
  * In Stage 3, VIWaitForRetrace will be replaced with SDL2 vsync/frame limiting.
  */
 #include "Dolphin/vi.h"
+
+#include "netplay/pc_netplay_hud.h"
+#include "netplay/pc_online_menu.h"
 #include "pc_window.h"
 #include "gl/pc_gfx.h"
 #include "pc_keycaps.h"
@@ -24,9 +27,9 @@
 #if defined(PIKI_PC_PORT)
 // Netplay session HUD: strong-defined by pc_netplay_hud.cpp in netplay builds
 // only, null otherwise.
-__attribute__((weak)) void pc_netplay_hud_draw(void);
+
 // Title local/online choice: pc_online_menu.cpp, online netplay builds only.
-__attribute__((weak)) void pc_online_menu_draw(void);
+
 #endif
 
 static u32 sRetraceCount = 0;
