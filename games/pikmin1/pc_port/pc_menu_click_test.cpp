@@ -283,6 +283,19 @@ int main()
 	pc_menu_click_set_pointer(0.46875f, 0.32f);
 	check(pc_menu_click_read_pointer_graph(640, 480, &movedX, &movedY), "moving the pointer again re-arms the highlight");
 
+	// Motion and clicks each count as activity once, for the title screen's idle timer.
+	pc_menu_click_reset();
+	check(!pc_menu_click_take_activity(), "no pointer means no activity");
+	pc_menu_click_set_pointer(0.1f, 0.1f);
+	check(!pc_menu_click_take_activity(), "the first pointer sample is not activity");
+	pc_menu_click_set_pointer(0.2f, 0.2f);
+	check(pc_menu_click_take_activity(), "pointer motion counts as activity");
+	check(!pc_menu_click_take_activity(), "pointer activity is taken once");
+	pc_menu_click_post(0.5f, 0.5f);
+	check(pc_menu_click_take_activity(), "a click counts as activity");
+	check(!pc_menu_click_take_activity(), "a click is taken once");
+	pc_menu_click_reset();
+
 	if (sFailures == 0) {
 		std::printf("pc_menu_click_test: all checks passed\n");
 		return 0;

@@ -10,6 +10,7 @@ static float sPointerNx = 0.0f;
 static float sPointerNy = 0.0f;
 static bool sSeenPointer = false;
 static bool sMouseDrives = false;
+static bool sActivity    = false;
 
 bool pc_menu_click_is_button_rect(PcMenuClickRect pane, PcMenuClickRect root)
 {
@@ -111,6 +112,7 @@ void pc_menu_click_reset(void)
 	sPointerNy  = 0.0f;
 	sSeenPointer = false;
 	sMouseDrives = false;
+	sActivity    = false;
 }
 
 void pc_menu_click_set_pointer(float nx, float ny)
@@ -119,6 +121,7 @@ void pc_menu_click_set_pointer(float nx, float ny)
 	// after a reset is not a move.
 	if (sSeenPointer && (nx != sPointerNx || ny != sPointerNy)) {
 		sMouseDrives = true;
+		sActivity    = true;
 	}
 	sSeenPointer = true;
 	sHasPointer  = true;
@@ -134,6 +137,13 @@ void pc_menu_click_clear_pointer(void)
 void pc_menu_click_disarm_hover(void)
 {
 	sMouseDrives = false;
+}
+
+bool pc_menu_click_take_activity(void)
+{
+	const bool was = sActivity;
+	sActivity      = false;
+	return was;
 }
 
 bool pc_menu_click_read_pointer_graph(int virtW, int virtH, float* x, float* y)
@@ -160,6 +170,7 @@ void pc_menu_click_begin_tick(void)
 
 void pc_menu_click_post(float nx, float ny)
 {
+	sActivity   = true;
 	sPending    = true;
 	sNx         = nx;
 	sNy         = ny;

@@ -70,6 +70,10 @@ bool pc_menu_click_read_pointer_graph(int virtW, int virtH, float* x, float* y);
 // on a button, such as after a click on Press Start, does not take the highlight back.
 void pc_menu_click_disarm_hover(void);
 
+// True once after pointer motion or a click, so the title screen can count the mouse as
+// input for its idle timeout. Taking it clears it.
+bool pc_menu_click_take_activity(void);
+
 // One pending click. begin_tick() runs on the logical input sample (PADRead),
 // not on the extra poll at the end of the frame, so a click seen between those
 // two polls is still available to the next menu update. A click nobody takes
