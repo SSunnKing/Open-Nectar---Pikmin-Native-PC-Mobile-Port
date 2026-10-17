@@ -226,7 +226,7 @@ int main()
 	check(!pc_menu_click_read_pointer_graph(640, 480, &movedX, &movedY), "the first pointer sample does not drive the menu");
 	pc_menu_click_set_pointer(0.46875f, 0.3125f);
 	check(pc_menu_click_read_pointer_graph(640, 480, &movedX, &movedY), "pointer motion gives the menus to the mouse");
-	pc_menu_click_note_keys();
+	pc_menu_click_disarm_hover();
 	check(!pc_menu_click_read_pointer_graph(640, 480, &movedX, &movedY), "a key press takes the menus back from the pointer");
 	pc_menu_click_set_pointer(0.46875f, 0.3125f);
 	check(!pc_menu_click_read_pointer_graph(640, 480, &movedX, &movedY), "a resting pointer does not take the menus back");
@@ -247,7 +247,7 @@ int main()
 		}
 	}
 	check(rowSelect == 0, "a pointer moved onto row 0 highlights it");
-	pc_menu_click_note_keys();
+	pc_menu_click_disarm_hover();
 	rowSelect = 2;
 	for (int frame = 0; frame < 3; frame++) {
 		pc_menu_click_set_pointer(0.46875f, 0.3125f);
@@ -269,6 +269,19 @@ int main()
 		}
 	}
 	check(rowSelect == 0, "moving the pointer again gives the highlight back to the mouse");
+
+	// A click disarms the highlight as well. It comes back only once the pointer moves.
+	pc_menu_click_reset();
+	pc_menu_click_set_pointer(0.1f, 0.1f);
+	pc_menu_click_set_pointer(0.46875f, 0.3125f);
+	check(pc_menu_click_read_pointer_graph(640, 480, &movedX, &movedY), "motion arms the highlight before a click");
+	pc_menu_click_disarm_hover();
+	check(!pc_menu_click_read_pointer_graph(640, 480, &movedX, &movedY), "a click disarms the highlight");
+	pc_menu_click_set_pointer(0.46875f, 0.3125f);
+	check(!pc_menu_click_read_pointer_graph(640, 480, &movedX, &movedY),
+	      "a pointer resting after a click does not re-arm the highlight");
+	pc_menu_click_set_pointer(0.46875f, 0.32f);
+	check(pc_menu_click_read_pointer_graph(640, 480, &movedX, &movedY), "moving the pointer again re-arms the highlight");
 
 	if (sFailures == 0) {
 		std::printf("pc_menu_click_test: all checks passed\n");

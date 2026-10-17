@@ -115,8 +115,8 @@ void pc_menu_click_reset(void)
 
 void pc_menu_click_set_pointer(float nx, float ny)
 {
-	// A pointer that moved since the last sample hands the menus to the mouse.
-	// The first sample after a reset is not a move.
+	// A pointer that moved since the last sample arms the highlight. The first sample
+	// after a reset is not a move.
 	if (sSeenPointer && (nx != sPointerNx || ny != sPointerNy)) {
 		sMouseDrives = true;
 	}
@@ -131,12 +131,7 @@ void pc_menu_click_clear_pointer(void)
 	sHasPointer = false;
 }
 
-void pc_menu_click_note_mouse(void)
-{
-	sMouseDrives = true;
-}
-
-void pc_menu_click_note_keys(void)
+void pc_menu_click_disarm_hover(void)
 {
 	sMouseDrives = false;
 }

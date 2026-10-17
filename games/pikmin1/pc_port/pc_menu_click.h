@@ -60,15 +60,15 @@ PcMenuClickResult pc_menu_click_resolve(int screen, float x, float y, const PcMe
 // Latest pointer position, normalized to the window. Moving it does not post a click.
 void pc_menu_click_set_pointer(float nx, float ny);
 void pc_menu_click_clear_pointer(void);
-// Reads the pointer only while the mouse drives the menus (see below). False when
-// no pointer is over the window, or while the keyboard or a controller drives.
+// Reads the pointer only while the highlight is armed (see below). False when no
+// pointer is over the window, or after a key, controller input, or mouse button
+// until the pointer moves again.
 bool pc_menu_click_read_pointer_graph(int virtW, int virtH, float* x, float* y);
 
-// Which device drives the menus. Pointer motion or a mouse button hands them to the
-// mouse. A key press or controller input takes them back, so a pointer resting on
-// a button does not override the keyboard or a controller.
-void pc_menu_click_note_mouse(void);
-void pc_menu_click_note_keys(void);
+// Pointer motion arms the highlight that follows the pointer. A key press, a controller
+// input, or a mouse button disarms it until the pointer moves again. A pointer resting
+// on a button, such as after a click on Press Start, does not take the highlight back.
+void pc_menu_click_disarm_hover(void);
 
 // One pending click. begin_tick() runs on the logical input sample (PADRead),
 // not on the extra poll at the end of the frame, so a click seen between those

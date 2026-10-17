@@ -1139,7 +1139,7 @@ void pc_window_poll_events(PADStatus* pad) {
             }
 #endif
             case SDL_MOUSEBUTTONDOWN:
-                if (event.button.which != SDL_TOUCH_MOUSEID) pc_menu_click_note_mouse();
+                if (event.button.which != SDL_TOUCH_MOUSEID) pc_menu_click_disarm_hover();
                 // Edge mask for binding capture: a click shorter than a frame
                 // is invisible to SDL_GetMouseState, so remember every press.
                 if (event.button.button >= 1 && event.button.button <= 8)
@@ -1215,10 +1215,10 @@ void pc_window_poll_events(PADStatus* pad) {
                 sLastPressKind = PC_INPUT_DEV_GAMEPAD;
                 sLastPressId   = event.cbutton.which;
                 sLastPressSerial++;
-                pc_menu_click_note_keys();
+                pc_menu_click_disarm_hover();
                 break;
             case SDL_KEYDOWN:
-                pc_menu_click_note_keys();
+                pc_menu_click_disarm_hover();
                 if (!event.key.repeat && event.key.keysym.scancode != SDL_SCANCODE_ESCAPE) {
                     sLastPressKind = PC_INPUT_DEV_KEYBOARD;
                     sLastPressId   = -1;
@@ -1415,7 +1415,7 @@ void pc_window_poll_events(PADStatus* pad) {
     if (sController && !PC_NETPLAY_IGNORE_GAMEPADS) {
         usedGamepad = pc_window_read_gamepad(sController, button, stickX, stickY, substickX, substickY,
                                              triggerL, triggerR, sSwarmHeld);
-        if (usedGamepad) pc_menu_click_note_keys();
+        if (usedGamepad) pc_menu_click_disarm_hover();
     }
     // Flanco del swarm de P1 una vez juntos teclado y mando (Charge).
     if (sSwarmHeld && !sSwarmWasDown[0]) sSwarmPending[0] = true;
