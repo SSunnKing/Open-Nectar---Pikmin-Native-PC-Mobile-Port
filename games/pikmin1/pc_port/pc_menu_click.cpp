@@ -174,16 +174,32 @@ bool pc_menu_click_take_back(void)
 	return was;
 }
 
+bool pc_menu_click_read_pointer_normalized(float* nx, float* ny)
+{
+	if (!sHasPointer || !sMouseDrives) {
+		return false;
+	}
+	if (nx) {
+		*nx = sPointerNx;
+	}
+	if (ny) {
+		*ny = sPointerNy;
+	}
+	return true;
+}
+
 bool pc_menu_click_read_pointer_graph(int virtW, int virtH, float* x, float* y)
 {
-	if (!sHasPointer || !sMouseDrives || virtW <= 0 || virtH <= 0) {
+	float nx = 0.0f;
+	float ny = 0.0f;
+	if (virtW <= 0 || virtH <= 0 || !pc_menu_click_read_pointer_normalized(&nx, &ny)) {
 		return false;
 	}
 	if (x) {
-		*x = sPointerNx * float(virtW);
+		*x = nx * float(virtW);
 	}
 	if (y) {
-		*y = sPointerNy * float(virtH);
+		*y = ny * float(virtH);
 	}
 	return true;
 }

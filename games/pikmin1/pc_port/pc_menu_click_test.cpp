@@ -216,6 +216,10 @@ int main()
 	float movedY = 0.0f;
 	check(pc_menu_click_read_pointer_graph(640, 480, &movedX, &movedY), "the menu can read the pointer");
 	check(movedX == 480.0f && movedY == 240.0f, "a later pointer move replaces the highlight position");
+	float normX = 0.0f;
+	float normY = 0.0f;
+	check(pc_menu_click_read_pointer_normalized(&normX, &normY) && normX == 0.75f && normY == 0.5f,
+	      "the normalized pointer is the window position, unscaled");
 	pc_menu_click_clear_pointer();
 	check(!pc_menu_click_read_pointer_graph(640, 480, &movedX, &movedY), "clearing the pointer leaves nothing to highlight");
 

@@ -1,6 +1,7 @@
 #include "zen/DrawWorldMap.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
+#include "pc_menu_click.h"
 #include "netplay/pc_sim_rng.h"
 // Estrellas fugaces por todo el ancho (los efectos del mapa centran en 320).
 // Netplay: the world map is UI only, so it draws from the cosmetic stream.
@@ -1216,7 +1217,9 @@ public:
 			mCurrentSelection = Yes;
 		}
 
-		bool touchDecide = false;
+		bool touchDecide   = false;
+		bool pointerDecide = false;
+		bool mouseBack     = false;
 #if PIKI_PC_TOUCH
 		pc_touch_claim_game_menu();
 		{
@@ -1234,6 +1237,31 @@ public:
 			}
 		}
 #endif
+#if defined(PIKI_PC_PORT)
+		// Mouse: motion over Yes or No selects it; a click on one decides it. Claimed, so the
+		// click is not also A. A right click is B.
+		pc_menu_click_claim_pointer_menu();
+		PcMenuClickRect rects[2];
+		for (int i = 0; i < 2; i++) {
+			const PUTRect& b = mMenuItems[i].getTouchBounds();
+			rects[i]         = { b.mMinX, b.mMinY, b.mMaxX, b.mMaxY };
+		}
+		float px = 0.0f, py = 0.0f, gx = 0.0f, gy = 0.0f;
+		if (pc_menu_click_read_pointer_normalized(&px, &py) && pc_gfx_menu_tap_to_graph(px, py, &gx, &gy)) {
+			const PcMenuClickResult hover = pc_menu_click_hover(PC_MENU_CLICK_MAIN, gx, gy, rects, nullptr, 2, kPcMenuClickMargin);
+			if (hover.index >= 0) {
+				mCurrentSelection = hover.index;
+			}
+		}
+		if (pc_menu_click_take(&px, &py) && pc_gfx_menu_tap_to_graph(px, py, &gx, &gy)) {
+			const PcMenuClickResult hit = pc_menu_click_resolve(PC_MENU_CLICK_MAIN, gx, gy, rects, nullptr, 2, kPcMenuClickMargin);
+			if (hit.action == PC_MENU_CLICK_ACTIVATE) {
+				mCurrentSelection = hit.index;
+				pointerDecide     = true;
+			}
+		}
+		mouseBack = pc_menu_click_take_back();
+#endif
 		currItem = &mMenuItems[mCurrentSelection];
 		for (int i = 0; i < 2; i++) {
 			mMenuItems[i].update(i == mCurrentSelection, mCharColor, mGradColor);
@@ -1244,12 +1272,12 @@ public:
 			mRightSpecCursor.move(currItem->getIconRPosH(), currItem->getIconRPosV(), 0.5f);
 		}
 
-		if (controller->keyClick(KBBTN_START | KBBTN_A) || touchDecide) {
+		if (controller->keyClick(KBBTN_START | KBBTN_A) || touchDecide || pointerDecide) {
 			SeSystem::playSysSe(SYSSE_DECIDE1);
 			res = true;
 		}
 
-		if (controller->keyClick(KBBTN_B)) {
+		if (controller->keyClick(KBBTN_B) || mouseBack) {
 			SeSystem::playSysSe(SYSSE_CANCEL);
 			mCurrentSelection = No;
 			res               = true;
@@ -1990,6 +2018,7 @@ protected:
 			point++;
 			STACK_PAD_VAR(1);
 		}
+		bool mouseBack = false;
 		if (controller) {
 #if PIKI_PC_TOUCH
 			pc_touch_claim_game_menu();
@@ -1998,6 +2027,16 @@ protected:
 				if (pc_touch_take_game_menu_tap(&nx, &ny) && pc_gfx_menu_tap_to_graph(nx, ny, &tx, &ty)) {
 					touchOperation(tx, ty);
 				}
+			}
+#endif
+#if defined(PIKI_PC_PORT)
+			// Claimed: a left click in Mouse Cursor mode is the click, not A. A right click is B only
+			// while the cursor moves; over a point it does nothing, as B does now.
+			pc_menu_click_claim_pointer_menu();
+			if (p2) {
+				pcMouseOperation();
+			} else {
+				mouseBack = pc_menu_click_take_back();
 			}
 #endif
 			if (p2) {
@@ -2010,13 +2049,70 @@ protected:
 					SeSystem::playSysSe(SYSSE_DECIDE1);
 					mEventFlag |= 0x10;
 				}
-			} else if (controller->keyClick(KBBTN_B)) {
+			} else if (controller->keyClick(KBBTN_B) || mouseBack) {
 				SeSystem::playSysSe(SYSSE_CANCEL);
 				mEventFlag |= 0x20;
 			}
 		}
 		return false;
 	}
+
+#if defined(PIKI_PC_PORT)
+	// Mouse: the open points are the rows. Motion over one selects it, as the stick does. A
+	// click on the selected point decides it, as A does; a click on another open point selects
+	// it. The conversion is letterbox-aware. The map notes its 640 x 480 space when it draws.
+	void pcMouseOperation()
+	{
+		PcMenuClickRect rects[5];
+		int active[5];
+		int selected               = -1;
+		WorldMapCoursePoint* point = mCoursePoints;
+		for (int i = 0; i < 5; i++, point++) {
+			active[i] = 0;
+			rects[i]  = { 0, 0, 0, 0 };
+			if (point == mSelectedPoint) {
+				selected = i;
+			}
+			P2DPicture* pic = point->getPicForTouch();
+			if (!point->getOpenSw() || !pic) {
+				continue;
+			}
+			const PUTRect& b = pic->getGlobalBounds();
+			rects[i]         = { b.mMinX, b.mMinY, b.mMaxX, b.mMaxY };
+			active[i]        = 1;
+		}
+
+		float px = 0.0f, py = 0.0f, gx = 0.0f, gy = 0.0f;
+		if (pc_menu_click_read_pointer_normalized(&px, &py) && pc_gfx_menu_tap_to_graph(px, py, &gx, &gy)) {
+			const PcMenuClickResult hover = pc_menu_click_hover(PC_MENU_CLICK_MAIN, gx, gy, rects, active, 5, kPcMenuClickMargin);
+			if (hover.index >= 0 && hover.index != selected) {
+				pcSelectPoint(hover.index);
+				selected = hover.index;
+			}
+		}
+
+		if (pc_menu_click_take(&px, &py) && pc_gfx_menu_tap_to_graph(px, py, &gx, &gy)) {
+			const PcMenuClickResult hit = pc_menu_click_resolve(PC_MENU_CLICK_MAIN, gx, gy, rects, active, 5, kPcMenuClickMargin);
+			if (hit.action == PC_MENU_CLICK_ACTIVATE) {
+				if (hit.index == selected) {
+					SeSystem::playSysSe(SYSSE_DECIDE1);
+					mEventFlag |= 0x10;
+				} else {
+					pcSelectPoint(hit.index);
+				}
+			}
+		}
+	}
+
+	void pcSelectPoint(int index)
+	{
+		SeSystem::playSysSe(SYSSE_MOVE1);
+		mSelectedPoint->nonSelect();
+		mSelectedPoint = &mCoursePoints[index];
+		mSelectedPoint->select();
+		mEventFlag |= 0x1;
+	}
+#endif
 
 #if PIKI_PC_TOUCH
 	// Toque en un punto del mapa: si es el seleccionado, confirma (como A);

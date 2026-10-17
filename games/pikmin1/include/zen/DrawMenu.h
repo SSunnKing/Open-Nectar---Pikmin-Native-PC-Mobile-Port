@@ -184,6 +184,10 @@ public:
 
 	void setKeyAssignDecide(u32 button) { mKeyDecide = button; }
 	void setKeyAssignCancel(u32 button) { mKeyCancel = button; }
+#if defined(PIKI_PC_PORT)
+	// Left clicks highlight and decide a row, a right click cancels. Off unless a menu asks.
+	void setPointerClicks(bool enabled) { mPointerClicks = enabled; }
+#endif
 
 	// DLL inlines to do:
 	int getSelectNo() { return mSelectedNum; }
@@ -214,6 +218,9 @@ protected:
 	u32 mEventFlag;                    // _18C
 	u32 mKeyDecide;                    // _190, see KeyboardButtons enum
 	u32 mKeyCancel;                    // _194, see KeyboardButtons enum
+#if defined(PIKI_PC_PORT)
+	bool mPointerClicks = false;
+#endif
 };
 
 /**

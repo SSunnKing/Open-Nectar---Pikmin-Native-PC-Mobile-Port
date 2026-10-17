@@ -64,6 +64,9 @@ void pc_menu_click_clear_pointer(void);
 // pointer is over the window, or after a key, controller input, or mouse button
 // until the pointer moves again.
 bool pc_menu_click_read_pointer_graph(int virtW, int virtH, float* x, float* y);
+// The same read, normalized to the window. Use it with pc_gfx_menu_tap_to_graph, which also
+// removes the letterbox that the scaled read above ignores.
+bool pc_menu_click_read_pointer_normalized(float* nx, float* ny);
 
 // Pointer motion arms the highlight that follows the pointer. A key press, a controller
 // input, or a mouse button disarms it until the pointer moves again. A pointer resting
