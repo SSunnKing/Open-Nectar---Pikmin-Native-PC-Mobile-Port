@@ -1695,21 +1695,33 @@ void pc_window_set_window_size(int w, int h) {
     // shorter than the window makes the OS shorten it, and SDL then reports the
     // shorter size, which would look like a change on every settings apply.
     const bool sizeChanged = w != sRequestedWidth || h != sRequestedHeight;
+    // Read the display before resizing: on Windows and X11, SDL picks it from
+    // the window's center, which the resize moves.
+    const int display = sizeChanged ? SDL_GetWindowDisplayIndex(sWindow) : -1;
     SDL_SetWindowSize(sWindow, w, h);
     sRequestedWidth = w;
     sRequestedHeight = h;
-    if (sizeChanged) {
+    if (sizeChanged && display >= 0) {
         // SDL keeps the top-left corner when a window grows, so a window created
         // centered at 1280x720 ends up off-center and past the right edge at a
         // larger size. Re-center it on its own display, inside the usable area
-        // (below the menu bar, above the Dock). SDL_WINDOWPOS_CENTERED would move
-        // it to the primary display instead.
-        SDL_Rect usable {};
-        const int display = SDL_GetWindowDisplayIndex(sWindow);
-        if (display >= 0 && SDL_GetDisplayUsableBounds(display, &usable) == 0) {
+        // (the display minus taskbars, docks and menu bars). SDL_WINDOWPOS_CENTERED
+        // would move it to the primary display instead.
+        // X11 can report an empty usable area; use the whole display then.
+        SDL_Rect area {};
+        const bool haveUsable = SDL_GetDisplayUsableBounds(display, &area) == 0 && area.w > 0 && area.h > 0;
+        if (haveUsable || SDL_GetDisplayBounds(display, &area) == 0) {
+            // SDL_SetWindowPosition places the client area, so center the whole
+            // frame and keep the title bar on the usable area. A window larger than
+            // the area keeps the frame's top-left corner on it. Backends without
+            // border sizes (macOS) count as zero.
+            int top = 0, left = 0, bottom = 0, right = 0;
+            if (SDL_GetWindowBordersSize(sWindow, &top, &left, &bottom, &right) != 0) {
+                top = left = bottom = right = 0;
+            }
             SDL_SetWindowPosition(sWindow,
-                usable.x + std::max(0, (usable.w - w) / 2),
-                usable.y + std::max(0, (usable.h - h) / 2));
+                area.x + left + std::max(0, (area.w - (w + left + right)) / 2),
+                area.y + top + std::max(0, (area.h - (h + top + bottom)) / 2));
         }
     }
     sWindowWidth = w;
