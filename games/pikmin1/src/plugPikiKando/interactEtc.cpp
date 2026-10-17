@@ -37,14 +37,6 @@ bool InteractWarn::actPiki(Piki* piki) immut
 		return false;
 	}
 
-#if defined(PIKI_PC_PORT)
-	// A placement warning must not recall another carrier before it can
-	// deploy its bomb. Real blast damage and player whistles are separate.
-	if (piki->hasBomb()) {
-		return false;
-	}
-#endif
-
 	if (piki->isKinoko() || !piki->mIsCallable || piki->mMode == 1) {
 		return false;
 	}
