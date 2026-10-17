@@ -7313,13 +7313,19 @@ static GLenum batch_mode_for(GXPrimitive prim) {
     }
 }
 
-// Mapeo sin sincronizar por defecto en GLES (el caso móvil); en escritorio se
-// conserva glBufferSubData, que es la ruta medida a 60 FPS. PIKMIN_VBO_MAP=0/1
-// fuerza una u otra para comparar.
+// Mapeo sin sincronizar por defecto en GLES (el caso móvil) y en macOS, donde
+// glBufferSubData sobre el GL de Metal costaba ~8,75 ms de CPU por frame
+// (medido en un M3 Max); en el resto de escritorio se conserva
+// glBufferSubData, que es la ruta medida a 60 FPS. PIKMIN_VBO_MAP=0/1 fuerza
+// una u otra para comparar.
 static bool vbo_upload_by_mapping() {
     static const bool enabled = [] {
         if (const char* v = std::getenv("PIKMIN_VBO_MAP")) return v[0] == '1';
+#if defined(__APPLE__)
+        return true;
+#else
         return PIKI_USE_GLES != 0;
+#endif
     }();
     return enabled;
 }
