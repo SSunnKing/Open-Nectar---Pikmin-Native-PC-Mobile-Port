@@ -5948,6 +5948,27 @@ int sVsRulesRow     = 0; // 0 = mapa, 1.. = reglas (vsRuleField(row - 1))
 int sVsRulesResult  = PC_DEVASSIGN_PENDING;
 constexpr int kVsMenuRows = kVsRuleRows + 1;
 
+// The rules panel. The draw and the mouse hit test both read this layout, so a click lands on
+// the row that is drawn.
+struct VsRulesLayout {
+    int panelX, panelY, panelW, panelH;
+    int rx, rowsY, colW, rowH;
+};
+
+VsRulesLayout vsRulesLayout(int screenW, int screenH)
+{
+    VsRulesLayout l;
+    l.panelW = std::min(800, screenW - 24);
+    l.panelH = 452;
+    l.panelX = screenW / 2 - l.panelW / 2;
+    l.panelY = screenH / 2 - l.panelH / 2;
+    l.colW   = (l.panelW - 72) / 2;
+    l.rx     = l.panelX + 24 + l.colW + 24;
+    l.rowsY  = l.panelY + 88;
+    l.rowH   = 34;
+    return l;
+}
+
 // Selector de mapa: posición en pc_vs_map_list y, si al pulsar A no se pudo
 // montar, por qué (se enseña en la tarjeta de abajo y no se empieza).
 int sVsMapIndex = 0;
@@ -5967,6 +5988,39 @@ bool vsEndScreenShown()
     // Netplay: the end screen is sim state (pc_vs_det_end_screen_shown).
     if (pc_netplay_deterministic()) return pc_vs_det_end_screen_shown();
     return pc_vs_active() && pc_vs_match_over() && sVsOverSince && SDL_GetTicks() - sVsOverSince >= kVsEndScreenDelayMs;
+}
+
+// Mouse on the rules panel. Motion over a row highlights it. A click highlights its row and
+// returns true, so the caller cycles that row forward, as Right does. The claim keeps a left
+// click in Mouse Cursor mode from also being A.
+bool pcVsRulesPointer()
+{
+    pc_menu_click_claim_pointer_menu();
+    DGXGraphics* gfx = (gsys && gsys->mDGXGfx) ? static_cast<DGXGraphics*>(gsys->mDGXGfx) : nullptr;
+    if (!gfx) return false;
+    const int screenW       = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
+    const int screenH       = gfx->mScreenHeight;
+    const VsRulesLayout lay = vsRulesLayout(screenW, screenH);
+    PcMenuClickRect rects[kVsMenuRows];
+    for (int row = 0; row < kVsMenuRows; row++) {
+        const int ry = lay.rowsY + row * lay.rowH;
+        rects[row]   = { lay.rx, ry, lay.rx + lay.colW, ry + lay.rowH };
+    }
+    float x = 0.0f, y = 0.0f;
+    if (pc_menu_click_read_pointer_graph(screenW, screenH, &x, &y)) {
+        const PcMenuClickResult hover
+            = pc_menu_click_hover(PC_MENU_CLICK_MAIN, x, y, rects, nullptr, kVsMenuRows, kPcMenuClickMargin);
+        if (hover.index >= 0) sVsRulesRow = hover.index;
+    }
+    if (pc_menu_click_take_graph(screenW, screenH, &x, &y)) {
+        const PcMenuClickResult hit
+            = pc_menu_click_resolve(PC_MENU_CLICK_MAIN, x, y, rects, nullptr, kVsMenuRows, kPcMenuClickMargin);
+        if (hit.action == PC_MENU_CLICK_ACTIVATE) {
+            sVsRulesRow = hit.index;
+            return true;
+        }
+    }
+    return false;
 }
 
 void pcVsRulesInput()
@@ -5995,6 +6049,7 @@ void pcVsRulesInput()
         if (promptPadA(ctl)) accept = true;
         if (promptPadB(ctl)) cancel = true;
     }
+    if (pcVsRulesPointer()) right = true; // a click cycles its row forward, as Right does
     if (up) sVsRulesRow = (sVsRulesRow + kVsMenuRows - 1) % kVsMenuRows;
     if (down) sVsRulesRow = (sVsRulesRow + 1) % kVsMenuRows;
     if ((left || right) && sVsRulesRow == 0) {
@@ -6181,14 +6236,15 @@ void pc_vsrules_prompt_draw(void) {
     gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
 
     const Colour title(255, 229, 120, 255), body(214, 224, 245, 255), dim(150, 165, 195, 255);
-    const int panelW = std::min(800, screenW - 24), panelH = 452;
-    const int panelX = screenW / 2 - panelW / 2, panelY = screenH / 2 - panelH / 2;
+    const VsRulesLayout lay = vsRulesLayout(screenW, screenH);
+    const int panelW = lay.panelW, panelH = lay.panelH;
+    const int panelX = lay.panelX, panelY = lay.panelY;
     drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
     drawPikminHeader(gfx, panelX, panelY, panelW, es ? "VS: Carrera de piezas" : "VS: Part Race");
 
-    const int colW = (panelW - 72) / 2;
+    const int colW = lay.colW;
     const int lx   = panelX + 24;
-    const int rx   = lx + colW + 24;
+    const int rx   = lay.rx;
 
     // ── Izquierda: cómo se juega, en tres tarjetas ─────────────────────────
     int y = panelY + 52;
@@ -6222,8 +6278,8 @@ void pc_vsrules_prompt_draw(void) {
 
     // ── Derecha: reglas ─────────────────────────────────────────────────────
     vsText(rx + 8, panelY + 56, es ? "REGLAS" : "RULES", title, 14, 21);
-    const int rowsY = panelY + 88;
-    constexpr int kRowH = 34;
+    const int rowsY = lay.rowsY;
+    const int kRowH = lay.rowH;
     const PcVsMapEntry& map = vsMapEntry();
     const bool mapBad       = !map.error.empty() || !sVsMapError.empty();
     for (int row = 0; row < kVsMenuRows; row++) {
