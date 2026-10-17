@@ -207,6 +207,8 @@ int pc_window_get_control_mode(void);
 void pc_window_set_mouse_sensitivity(float sensitivity);
 float pc_window_get_mouse_sensitivity(void);
 void pc_window_set_settings_menu_open(bool open);
+void pc_window_set_gameplay_active(bool active);  // pointer is captured only while a level runs
+void pc_window_set_menu_overlay(bool open);       // a pause or in-game menu releases the pointer
 
 // Virtual cursor (mouse-controlled cursor input)
 extern "C" s8 pc_window_get_virtual_cursor_x(void);
