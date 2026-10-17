@@ -3347,10 +3347,22 @@ bool drawGlassOption(int boxX, int boxY, int boxW, int boxH, const char* label, 
     return true;
 }
 
+// The button icons of the help line drawn last, and where each one starts. The VS lobby's
+// "A: play" hint takes a click over its span, so it reads these after the line is drawn.
+struct HelpLineIcon {
+    char letter;
+    int x;
+};
+constexpr int kHelpLineIcons = 8;
+HelpLineIcon sHelpIcons[kHelpLineIcons];
+int sHelpIconCount = 0;
+int sHelpLineY = 0, sHelpLineH = 0, sHelpLineEnd = 0;
+
 // Línea de ayuda centrada en cx. Con el marco P2D, cada letra de botón suelta
 // (A, B, X, Y, Z seguida de espacio, "/" o ":") se dibuja con el icono del
 // botón del juego; el resto del texto no cambia.
 void drawHelpLine(int cx, int y, const char* text, Colour c, int maxWidth = 570) {
+    sHelpIconCount = 0;
     if (!pc_settings_p2d_active()) {
         drawTextOutline(cx - menuTextWidth(text) / 2, y, "%s", c, Colour(8, 12, 28, 255), text);
         return;
@@ -3399,6 +3411,7 @@ void drawHelpLine(int cx, int y, const char* text, Colour c, int maxWidth = 570)
             }
             n = 0;
             if (*p == '\0') break;
+            if (sHelpIconCount < kHelpLineIcons) sHelpIcons[sHelpIconCount++] = HelpLineIcon{ *p, x };
             if (!pc_settings_p2d_button(x, y + (fh - icon) / 2 - 1, icon, *p)) {
                 const char letter[2] = { *p, '\0' };
                 pc_settings_p2d_text(x + (icon - pc_settings_p2d_text_width(letter, fw)) / 2, y, letter, c, fw, fh);
@@ -3408,6 +3421,24 @@ void drawHelpLine(int cx, int y, const char* text, Colour c, int maxWidth = 570)
         }
         if (n < int(sizeof(chunk)) - 1) chunk[n++] = *p;
     }
+    sHelpLineY = y;
+    sHelpLineH = fh;
+    sHelpLineEnd = x;
+}
+
+// Span of the button icon for letter in the help line drawn last: from its icon to the next
+// icon, or to the end of the line. False when that line drew no such icon.
+bool helpLineIconSpan(char letter, int* x0, int* x1, int* y0, int* y1)
+{
+    for (int i = 0; i < sHelpIconCount; i++) {
+        if (sHelpIcons[i].letter != letter) continue;
+        *x0 = sHelpIcons[i].x;
+        *x1 = i + 1 < sHelpIconCount ? sHelpIcons[i + 1].x : sHelpLineEnd;
+        *y0 = sHelpLineY;
+        *y1 = sHelpLineY + sHelpLineH;
+        return true;
+    }
+    return false;
 }
 
 void drawSubmenuSurface(DGXGraphics* gfx, int x, int y, int w, int h,
@@ -5945,6 +5976,9 @@ void vsRuleText(int row, const char** label, char* value, size_t n)
 
 bool sVsRulesOpen   = false;
 int sVsRulesRow     = 0; // 0 = mapa, 1.. = reglas (vsRuleField(row - 1))
+// The "A: play" span of the lobby's help line, from the last frame the lobby drew.
+bool sVsPlaySpanOk = false;
+int sVsPlayX0 = 0, sVsPlayX1 = 0, sVsPlayY0 = 0, sVsPlayY1 = 0;
 int sVsRulesResult  = PC_DEVASSIGN_PENDING;
 constexpr int kVsMenuRows = kVsRuleRows + 1;
 
@@ -5991,36 +6025,43 @@ bool vsEndScreenShown()
 }
 
 // Mouse on the rules panel. Motion over a row highlights it. A click highlights its row and
-// returns true, so the caller cycles that row forward, as Right does. The claim keeps a left
-// click in Mouse Cursor mode from also being A.
-bool pcVsRulesPointer()
+// returns 1, so the caller cycles that row forward, as Right does. A click on the drawn
+// "A: play" hint returns 2, which is A. The claim keeps a left click in Mouse Cursor mode
+// from also being A.
+int pcVsRulesPointer()
 {
     pc_menu_click_claim_pointer_menu();
     DGXGraphics* gfx = (gsys && gsys->mDGXGfx) ? static_cast<DGXGraphics*>(gsys->mDGXGfx) : nullptr;
-    if (!gfx) return false;
+    if (!gfx) return 0;
     const int screenW       = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
     const int screenH       = gfx->mScreenHeight;
     const VsRulesLayout lay = vsRulesLayout(screenW, screenH);
-    PcMenuClickRect rects[kVsMenuRows];
+    PcMenuClickRect rects[kVsMenuRows + 1];
     for (int row = 0; row < kVsMenuRows; row++) {
         const int ry = lay.rowsY + row * lay.rowH;
         rects[row]   = { lay.rx, ry, lay.rx + lay.colW, ry + lay.rowH };
     }
+    int count = kVsMenuRows;
+    if (sVsPlaySpanOk) {
+        rects[kVsMenuRows] = { sVsPlayX0, sVsPlayY0, sVsPlayX1, sVsPlayY1 };
+        count              = kVsMenuRows + 1;
+    }
     float x = 0.0f, y = 0.0f;
     if (pc_menu_click_read_pointer_graph(screenW, screenH, &x, &y)) {
         const PcMenuClickResult hover
-            = pc_menu_click_hover(PC_MENU_CLICK_MAIN, x, y, rects, nullptr, kVsMenuRows, kPcMenuClickMargin);
-        if (hover.index >= 0) sVsRulesRow = hover.index;
+            = pc_menu_click_hover(PC_MENU_CLICK_MAIN, x, y, rects, nullptr, count, kPcMenuClickMargin);
+        if (hover.index >= 0 && hover.index < kVsMenuRows) sVsRulesRow = hover.index;
     }
     if (pc_menu_click_take_graph(screenW, screenH, &x, &y)) {
         const PcMenuClickResult hit
-            = pc_menu_click_resolve(PC_MENU_CLICK_MAIN, x, y, rects, nullptr, kVsMenuRows, kPcMenuClickMargin);
+            = pc_menu_click_resolve(PC_MENU_CLICK_MAIN, x, y, rects, nullptr, count, kPcMenuClickMargin);
         if (hit.action == PC_MENU_CLICK_ACTIVATE) {
+            if (hit.index == kVsMenuRows) return 2;
             sVsRulesRow = hit.index;
-            return true;
+            return 1;
         }
     }
-    return false;
+    return 0;
 }
 
 void pcVsRulesInput()
@@ -6049,7 +6090,9 @@ void pcVsRulesInput()
         if (promptPadA(ctl)) accept = true;
         if (promptPadB(ctl)) cancel = true;
     }
-    if (pcVsRulesPointer()) right = true; // a click cycles its row forward, as Right does
+    const int pointer = pcVsRulesPointer();
+    if (pointer == 1) right = true; // a click cycles its row forward, as Right does
+    if (pointer == 2) accept = true; // a click on the drawn "A: play" hint is A
     if (up) sVsRulesRow = (sVsRulesRow + kVsMenuRows - 1) % kVsMenuRows;
     if (down) sVsRulesRow = (sVsRulesRow + 1) % kVsMenuRows;
     if ((left || right) && sVsRulesRow == 0) {
@@ -6353,6 +6396,7 @@ void pc_vsrules_prompt_draw(void) {
     const char* help = es ? "Arriba/Abajo: opción   Izq/Der: cambiar   A: jugar   B: salir"
                           : "Up/Down: option   Left/Right: change   A: play   B: back";
     drawHelpLine(panelX + panelW / 2, panelY + panelH - 38, help, dim);
+    sVsPlaySpanOk = helpLineIconSpan('A', &sVsPlayX0, &sVsPlayX1, &sVsPlayY0, &sVsPlayY1);
 }
 
 bool pc_vs_end_screen_active(void) { return vsEndScreenShown(); }
