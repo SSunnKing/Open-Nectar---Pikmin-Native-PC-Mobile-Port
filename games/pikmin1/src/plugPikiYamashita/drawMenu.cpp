@@ -634,6 +634,10 @@ bool zen::DrawMenu::update(Controller* controller)
 #if PIKI_PC_TOUCH
 	if (mState != STATUS_Inactive) pc_touch_claim_game_menu();
 #endif
+#if defined(PIKI_PC_PORT)
+	// Only the title's main menu opts in to pointer clicks. It holds the pointer while shown.
+	if (mPointerClicks && mState != STATUS_Inactive) pc_menu_click_claim_pointer_menu();
+#endif
 	if (mState != STATUS_Inactive) {
 		_104 += gsys->getFrameTime();
 		if (_104 > _108) {

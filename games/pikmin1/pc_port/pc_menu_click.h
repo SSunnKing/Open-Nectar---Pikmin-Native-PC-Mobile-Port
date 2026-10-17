@@ -74,6 +74,11 @@ void pc_menu_click_disarm_hover(void);
 // input for its idle timeout. Taking it clears it.
 bool pc_menu_click_take_activity(void);
 
+// The title screen and its main menu claim the pointer each frame they are shown. While the
+// claim holds, a left click is their click, not A, so empty space does not press Start.
+void pc_menu_click_claim_pointer_menu(void);
+bool pc_menu_click_pointer_menu_active(void);
+
 // One pending click. begin_tick() runs on the logical input sample (PADRead),
 // not on the extra poll at the end of the frame, so a click seen between those
 // two polls is still available to the next menu update. A click nobody takes

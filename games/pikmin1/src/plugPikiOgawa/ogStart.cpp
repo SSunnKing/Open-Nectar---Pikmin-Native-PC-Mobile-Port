@@ -138,6 +138,10 @@ zen::ogScrStartMgr::StartStatus zen::ogScrStartMgr::update(Controller* controlle
 	if (mState == START_NULL) {
 		return mState;
 	}
+#if defined(PIKI_PC_PORT)
+	// Press Start takes the click itself (pcPointerPressed), so a left click here is not A.
+	pc_menu_click_claim_pointer_menu();
+#endif
 
 	mPressStartScreen->update();
 	mFadeTimer += gsys->getFrameTime();

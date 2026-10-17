@@ -11,6 +11,7 @@ static float sPointerNy = 0.0f;
 static bool sSeenPointer = false;
 static bool sMouseDrives = false;
 static bool sActivity    = false;
+static int sClaimTick    = -100;
 
 bool pc_menu_click_is_button_rect(PcMenuClickRect pane, PcMenuClickRect root)
 {
@@ -113,6 +114,7 @@ void pc_menu_click_reset(void)
 	sSeenPointer = false;
 	sMouseDrives = false;
 	sActivity    = false;
+	sClaimTick   = -100;
 }
 
 void pc_menu_click_set_pointer(float nx, float ny)
@@ -144,6 +146,16 @@ bool pc_menu_click_take_activity(void)
 	const bool was = sActivity;
 	sActivity      = false;
 	return was;
+}
+
+void pc_menu_click_claim_pointer_menu(void)
+{
+	sClaimTick = sTick;
+}
+
+bool pc_menu_click_pointer_menu_active(void)
+{
+	return sTick - sClaimTick <= 2;
 }
 
 bool pc_menu_click_read_pointer_graph(int virtW, int virtH, float* x, float* y)

@@ -296,6 +296,18 @@ int main()
 	check(!pc_menu_click_take_activity(), "a click is taken once");
 	pc_menu_click_reset();
 
+	// The title and main menu hold the pointer while they keep claiming it. The claim lapses
+	// once the menu stops renewing it for a few ticks.
+	check(!pc_menu_click_pointer_menu_active(), "no claim means no pointer menu");
+	pc_menu_click_claim_pointer_menu();
+	check(pc_menu_click_pointer_menu_active(), "a claim holds the pointer menu");
+	pc_menu_click_begin_tick();
+	check(pc_menu_click_pointer_menu_active(), "a claim still holds one tick later");
+	pc_menu_click_begin_tick();
+	pc_menu_click_begin_tick();
+	check(!pc_menu_click_pointer_menu_active(), "a claim lapses when the menu stops renewing it");
+	pc_menu_click_reset();
+
 	if (sFailures == 0) {
 		std::printf("pc_menu_click_test: all checks passed\n");
 		return 0;
