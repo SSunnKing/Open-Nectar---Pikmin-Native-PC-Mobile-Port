@@ -43,6 +43,9 @@ zen::ogScrPauseMgr::ogScrPauseMgr()
 #else
 	mMainMenu = new DrawMenu("screen/blo/pause.blo", false, false);
 #endif
+#if defined(PIKI_PC_PORT)
+	mMainMenu->setPointerClicks(true); // mouse rows only; the keyboard and controller path is unchanged
+#endif
 	mMainMenuScreen           = mMainMenu->getScreenPtr();
 	mQuitChalModeMainTextBox  = static_cast<P2DTextBox*>(mMainMenuScreen->search('yame', true));
 	mContLastSaveMainTextBox1 = static_cast<P2DTextBox*>(mMainMenuScreen->search('he02', true));
@@ -57,6 +60,9 @@ zen::ogScrPauseMgr::ogScrPauseMgr()
 	mSubMenu = new DrawMenu("screen/blo/ot_pa_ok.blo", false, false);
 #else
 	mSubMenu = new DrawMenu("screen/blo/pause_ok.blo", false, false);
+#endif
+#if defined(PIKI_PC_PORT)
+	mSubMenu->setPointerClicks(true); // the quit and save confirmation rows, mouse only
 #endif
 	mSubMenuScreen          = mSubMenu->getScreenPtr();
 	mQuitChalModeSubTextBox = static_cast<P2DTextBox*>(mSubMenuScreen->search('yame', true));

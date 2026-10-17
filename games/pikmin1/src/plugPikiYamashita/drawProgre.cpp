@@ -21,6 +21,9 @@ DEFINE_PRINT("drawProgre")
 zen::DrawProgre::DrawProgre()
 {
 	mMenu = new DrawMenu("screen/blo/progre.blo", false, false);
+#if defined(PIKI_PC_PORT)
+	mMenu->setPointerClicks(true); // mouse rows only; cancel stays off, so right click does nothing here
+#endif
 	mMenu->setCancelSelectMenuNo(1);
 	mMenu->setCancelKeyAssign(KBBTN_NONE); // can't cancel the progressive mode screen!
 	mMenu->setDecideKeyAssign(KBBTN_START | KBBTN_A);
