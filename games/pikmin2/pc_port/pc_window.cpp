@@ -207,9 +207,22 @@ static bool sKeyBindingsInitialized = false;
 // Gamepad remapping state.
 static int sGamepadBindings[PC_KEY_ACT_COUNT];
 static bool sGamepadBindingsInitialized = false;
-static int sStickDeadZone = 8;
+// Dead zone a new configuration starts with, in 1/256ths of an SDL axis, so 16
+// is 12.5% of travel each way. Windows gets the wider one: Xbox pads are the
+// hardware there, and a stock pad at rest can sit at 2200 of 32767 (7%) -- over
+// the old default of 8 (2048), which made an untouched pad read as held down.
+// Microsoft's own XInput thumbstick dead zone is 7849 (24%), so this is still
+// well inside what the platform itself considers centred.
+#if defined(_WIN32)
+constexpr int kDefaultStickDeadZone = 16;
+#else
+constexpr int kDefaultStickDeadZone = 8;
+#endif
+static int sStickDeadZone = kDefaultStickDeadZone;
 static int sStickInvert = 0;
 static int sCStickInvert = 0;
+
+int pc_window_default_stick_dead_zone(void) { return kDefaultStickDeadZone; }
 
 // Mouse input state for cursor (C-stick) control
 static bool sMouseRelativeMode = false;
@@ -942,26 +955,33 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     if (boundButtonPressed(PC_KEY_ACT_DPAD_LEFT))  button |= PAD_BUTTON_LEFT;
     if (boundButtonPressed(PC_KEY_ACT_DPAD_RIGHT)) button |= PAD_BUTTON_RIGHT;
 
-    // Triggers
+    // Triggers. They are their own axis and rest at 0, so all they need is a
+    // noise floor: reusing the stick's dead zone here would swallow the first
+    // eighth of the travel now that a new configuration starts at 16.
     Sint16 axisL = SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_TRIGGERLEFT);
     Sint16 axisR = SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
-    const int axisDeadZone = sStickDeadZone * 256;
-    if (axisL > axisDeadZone) {
-        triggerL = (u8)(axisL / 128);
+    const int triggerDeadZone = 1024;
+    if (axisL > triggerDeadZone) {
+        triggerL = (u8)((axisL - triggerDeadZone) * 255 / (32767 - triggerDeadZone));
         if (axisL > 30000) button |= PAD_TRIGGER_L;
     }
-    if (axisR > axisDeadZone) {
-        triggerR = (u8)(axisR / 128);
+    if (axisR > triggerDeadZone) {
+        triggerR = (u8)((axisR - triggerDeadZone) * 255 / (32767 - triggerDeadZone));
         if (axisR > 30000) button |= PAD_TRIGGER_R;
     }
+
+    // Sticks. The conversion drops anything inside the dead zone and rescales
+    // the rest, so drift cannot reach the game and a wider dead zone does not
+    // cost any travel.
+    const int axisDeadZone = sStickDeadZone * 256;
 
     // Left Stick
     int lx = SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_LEFTX);
     int ly = SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_LEFTY);
     if (sStickInvert & 1) lx = -lx;
     if (sStickInvert & 2) ly = -ly;
-    if (abs(lx) > axisDeadZone) stickX = pc_pad_axis_from_sdl(lx);
-    if (abs(ly) > axisDeadZone) stickY = pc_pad_axis_from_sdl(-ly); // SDL Y-down to GC Y-up
+    stickX = pc_pad_axis_from_sdl_deadzoned(lx, axisDeadZone);
+    stickY = pc_pad_axis_from_sdl_deadzoned(-ly, axisDeadZone); // SDL Y-down to GC Y-up
 
     // Right Stick (C-Stick)
     int rx = SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_RIGHTX);
@@ -975,13 +995,13 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     // is left for the player to bind.
     sFreeCamSubY[sInputPlayer] = 0.0f;
     if (pc_settings_get_free_camera()) {
-        if (abs(ry) > axisDeadZone) sFreeCamSubY[sInputPlayer] = pc_pad_axis_from_sdl(-ry) / 72.0f;
+        sFreeCamSubY[sInputPlayer] = pc_pad_axis_from_sdl_deadzoned(-ry, axisDeadZone) / 72.0f;
         if (abs(rx) > axisDeadZone) {
             pc_window_add_camera_drag(-(float)rx / 32767.0f * 0.02f * pc_settings_get_free_camera_pad_scale());
         }
     } else {
-        if (abs(rx) > axisDeadZone) substickX = pc_pad_axis_from_sdl(rx);
-        if (abs(ry) > axisDeadZone) substickY = pc_pad_axis_from_sdl(-ry);
+        substickX = pc_pad_axis_from_sdl_deadzoned(rx, axisDeadZone);
+        substickY = pc_pad_axis_from_sdl_deadzoned(-ry, axisDeadZone);
     }
 
     // Optional digital bindings for stick directions are merged after the

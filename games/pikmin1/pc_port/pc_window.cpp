@@ -2,6 +2,7 @@
 #include "port/jaudio_host.h"
 #endif
 #include "pc_window.h"
+#include "pc_pad_trace.h"
 #include "pc_speedrun.h"
 #include "pc_gyro.h"
 #include "pc_icon.h"
@@ -172,7 +173,16 @@ static bool pc_controller_open_slot(int index)
 	sOpenPads.push_back({ ctl, id });
 	if (sOpenPads.size() == 1)
 		sLastInputIsGamepad = true;
-	printf("[PC Port] Opened Game Controller #%d (id %d): %s\n", (int)sOpenPads.size(), (int)id, SDL_GameControllerName(ctl));
+	{
+		// The GUID and the controller type are what decide whether SDL has a
+		// mapping for this pad, so a report about a stick going to a corner
+		// can tell a mapping fault from an axis fault.
+		char guid[64] = { 0 };
+		SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(SDL_GameControllerGetJoystick(ctl)), guid, (int)sizeof(guid));
+		printf("[PC Port] Opened Game Controller #%d (id %d): %s [type %d, guid %s, attached %d]\n", (int)sOpenPads.size(),
+		       (int)id, SDL_GameControllerName(ctl), (int)SDL_GameControllerGetType(ctl), guid,
+		       SDL_GameControllerGetAttached(ctl) ? 1 : 0);
+	}
 	fflush(stdout);
 	resolvePlayerPads();
 #if PIKI_NETPLAY_BUILD
@@ -263,9 +273,22 @@ static bool sKeyBindingsInitialized = false;
 static int sGamepadBindings[PC_KEY_ACT_COUNT];
 static int sGamepadBindingsP2[PC_KEY_ACT_COUNT]; // Coop: mando de J2
 static bool sGamepadBindingsInitialized = false;
-static int sStickDeadZone = 8;
+// Dead zone a new configuration starts with, in 1/256ths of an SDL axis, so 16
+// is 12.5% of travel each way. Windows gets the wider one: Xbox pads are the
+// hardware there, and a stock pad at rest can sit at 2200 of 32767 (7%) -- over
+// the old default of 8 (2048), which made an untouched pad read as held down.
+// Microsoft's own XInput thumbstick dead zone is 7849 (24%), so this is still
+// well inside what the platform itself considers centred.
+#if defined(_WIN32)
+constexpr int kDefaultStickDeadZone = 16;
+#else
+constexpr int kDefaultStickDeadZone = 8;
+#endif
+static int sStickDeadZone = kDefaultStickDeadZone;
 static int sStickInvert = 0;
 static int sCStickInvert = 0;
+
+int pc_window_default_stick_dead_zone(void) { return kDefaultStickDeadZone; }
 
 // Mouse input state for cursor (C-stick) control
 static bool sMouseRelativeMode = false;
@@ -811,6 +834,29 @@ bool pc_window_init(const char* title, int width, int height) {
         fflush(stdout);
         return false;
     }
+    {
+        // Which SDL and which joystick backends are in play. SDL 2.30 and later
+        // prefer Windows.Gaming.Input over XInput, and a wireless receiver is
+        // exactly the hardware where the two disagree, so a pad report has to
+        // say which one fed the axes. SDL_JOYSTICK_WGI / SDL_JOYSTICK_XINPUT /
+        // SDL_JOYSTICK_HIDAPI in the environment override them.
+        SDL_version linked {};
+        SDL_GetVersion(&linked);
+        auto hint = [](const char* name) {
+            const char* value = SDL_GetHint(name);
+            return (value && *value) ? value : "(default)";
+        };
+        printf("[PC Port] SDL %d.%d.%d rev %s; joystick backends WGI=%s XINPUT=%s HIDAPI=%s\n",
+               linked.major, linked.minor, linked.patch, SDL_GetRevision(), hint("SDL_JOYSTICK_WGI"),
+               hint("SDL_JOYSTICK_XINPUT"), hint("SDL_JOYSTICK_HIDAPI"));
+        fflush(stdout);
+        // Keep pad_trace.log beside the executable: the working directory can be
+        // the build tree, the install directory or anywhere a shortcut points.
+        if (const char* base = SDL_GetBasePath()) {
+            pc_pad_trace_set_dir(base);
+            SDL_free(const_cast<char*>(base));
+        }
+    }
     pc_gyro_init();
 
     // Linux and Windows request a GL 3.3 compatibility profile. macOS offers no
@@ -940,7 +986,19 @@ bool pc_window_init(const char* title, int width, int height) {
     }
     printf("[PC Port] Target refresh rate: %.2f Hz\n", sTargetRefreshRate);
 
-    // Check for connected controllers
+    // Check for connected controllers. List them first: Windows can expose one
+    // physical pad through more than one stack (Windows.Gaming.Input, XInput and
+    // raw HID all see a wireless receiver), and a duplicate that never gets
+    // updates is a classic source of input that looks stuck.
+    {
+        const int joysticks = SDL_NumJoysticks();
+        printf("[PC Port] %d joystick device(s) enumerated\n", joysticks);
+        for (int i = 0; i < joysticks; ++i) {
+            const char* name = SDL_JoystickNameForIndex(i);
+            printf("[PC Port]   #%d: %s (game controller: %d)\n", i, name ? name : "?", SDL_IsGameController(i));
+        }
+        fflush(stdout);
+    }
     for (int i = 0; i < SDL_NumJoysticks(); ++i) {
         pc_controller_open_slot(i);
     }
@@ -961,9 +1019,30 @@ bool pc_window_init(const char* title, int width, int height) {
 static float sFreeCamSubY[2] = { 0.0f, 0.0f };
 float pc_window_free_camera_sub_y(void) { return sFreeCamSubY[0]; }
 
+// One "detached" line per player and detach, not one per poll.
+static bool sPadDetachedReported[2] = { false, false };
+
 static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& stickX, s8& stickY,
                                    s8& substickX, s8& substickY, u8& triggerL, u8& triggerR, bool& swarmHeld, int player = 0)
 {
+    // SDL keeps regurgitating the axes and buttons of a controller's last
+    // packet after it is detached: the handle stays open (the wireless
+    // receiver's slot is still there) but nothing refreshes it. A stick that
+    // was deflected when the link hiccuped therefore stayed deflected for good,
+    // which is exactly "the input sits at a corner until the sticks are used
+    // again". An unattached pad must contribute nothing at all.
+    const int playerIndex = player == 1 ? 1 : 0;
+    if (!SDL_GameControllerGetAttached(ctl)) {
+        if (!sPadDetachedReported[playerIndex]) {
+            sPadDetachedReported[playerIndex] = true;
+            pc_pad_trace_note("detached", SDL_GameControllerName(ctl));
+        }
+        sFreeCamSubY[playerIndex]     = 0.0f;
+        sPadDpadDownHeld[playerIndex] = false;
+        return false;
+    }
+    sPadDetachedReported[playerIndex] = false;
+
     auto boundButtonPressed = [ctl, player](int action) {
         // Coop: J2 tiene sus propios bindings de mando.
         return pc_window_gamepad_bind_held(ctl, player == 1 ? pc_window_get_gamepad_binding_p2(action)
@@ -989,26 +1068,33 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     if (boundButtonPressed(PC_KEY_ACT_DPAD_LEFT))  button |= PAD_BUTTON_LEFT;
     if (boundButtonPressed(PC_KEY_ACT_DPAD_RIGHT)) button |= PAD_BUTTON_RIGHT;
 
-    // Triggers
+    // Triggers. They are their own axis and rest at 0, so all they need is a
+    // noise floor: reusing the stick's dead zone here would swallow the first
+    // eighth of the travel now that a new configuration starts at 16.
     Sint16 axisL = SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_TRIGGERLEFT);
     Sint16 axisR = SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
-    const int axisDeadZone = sStickDeadZone * 256;
-    if (axisL > axisDeadZone) {
-        triggerL = (u8)(axisL / 128);
+    const int triggerDeadZone = 1024;
+    if (axisL > triggerDeadZone) {
+        triggerL = (u8)((axisL - triggerDeadZone) * 255 / (32767 - triggerDeadZone));
         if (axisL > 30000) button |= PAD_TRIGGER_L;
     }
-    if (axisR > axisDeadZone) {
-        triggerR = (u8)(axisR / 128);
+    if (axisR > triggerDeadZone) {
+        triggerR = (u8)((axisR - triggerDeadZone) * 255 / (32767 - triggerDeadZone));
         if (axisR > 30000) button |= PAD_TRIGGER_R;
     }
+
+    // Sticks. The conversion drops anything inside the dead zone and rescales
+    // the rest, so drift cannot reach the game and a wider dead zone does not
+    // cost any travel.
+    const int axisDeadZone = sStickDeadZone * 256;
 
     // Left Stick
     int lx = SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_LEFTX);
     int ly = SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_LEFTY);
     if (sStickInvert & 1) lx = -lx;
     if (sStickInvert & 2) ly = -ly;
-    if (abs(lx) > axisDeadZone) stickX = pc_pad_axis_from_sdl(lx);
-    if (abs(ly) > axisDeadZone) stickY = pc_pad_axis_from_sdl(-ly); // SDL Y-down to GC Y-up
+    stickX = pc_pad_axis_from_sdl_deadzoned(lx, axisDeadZone);
+    stickY = pc_pad_axis_from_sdl_deadzoned(-ly, axisDeadZone); // SDL Y-down to GC Y-up
 
     // Right Stick (C-Stick)
     int rx = SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_RIGHTX);
@@ -1027,14 +1113,14 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     const bool kindChange = (button & PAD_BUTTON_A) && pc_settings_get_p2_selection();
     if (sPadDpadDownHeld[player & 1] && !kindChange) swarmHeld = true;
     if (pc_settings_get_free_camera()) {
-        if (abs(ry) > axisDeadZone) sFreeCamSubY[player & 1] = pc_pad_axis_from_sdl(-ry) / 74.0f;
+        sFreeCamSubY[player & 1] = pc_pad_axis_from_sdl_deadzoned(-ry, axisDeadZone) / 74.0f;
         if (abs(rx) > axisDeadZone) {
             // Cada mando gira la cámara de su jugador (en cooperativo, J2 la suya).
             pc_window_add_camera_drag_player(player, -(float)rx / 32767.0f * 0.02f * pc_settings_get_free_camera_pad_scale());
         }
     } else {
-        if (abs(rx) > axisDeadZone) substickX = pc_pad_axis_from_sdl(rx);
-        if (abs(ry) > axisDeadZone) substickY = pc_pad_axis_from_sdl(-ry);
+        substickX = pc_pad_axis_from_sdl_deadzoned(rx, axisDeadZone);
+        substickY = pc_pad_axis_from_sdl_deadzoned(-ry, axisDeadZone);
     }
 
     // Optional digital bindings for stick directions are merged after the
@@ -1063,6 +1149,13 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
         const bool lockDown = boundButtonPressed(PC_KEY_ACT_LOCKON);
         if (lockDown && !sLockPadWasDown[pi]) sLockOnPending[pi] = true;
         sLockPadWasDown[pi] = lockDown;
+    }
+
+    {
+        const int rawAxes[4] = { lx, ly, rx, ry };
+        const int padAxes[4] = { stickX, stickY, substickX, substickY };
+        pc_pad_trace_poll((int)SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(ctl)),
+                          SDL_GameControllerName(ctl), rawAxes, padAxes, axisDeadZone);
     }
 
     const int noticeZone = axisDeadZone < 16384 ? 16384 : axisDeadZone;
@@ -1240,6 +1333,12 @@ void pc_window_poll_events(PADStatus* pad) {
                     pc_window_set_control_mode((sControlMode + 1) % 2);
                     const char* modeNames[] = {"Classic", "Mouse Cursor"};
                     printf("[PC Port] Control mode: %s\n", modeNames[sControlMode]);
+                }
+                // F12 drops a marker into the pad trace: a report that "it just
+                // happened" is easier to match to samples when the moment is in
+                // the log.
+                if (event.key.keysym.scancode == SDL_SCANCODE_F12 && !event.key.repeat) {
+                    pc_pad_trace_note("marker", "F12 pressed");
                 }
                 break;
         }

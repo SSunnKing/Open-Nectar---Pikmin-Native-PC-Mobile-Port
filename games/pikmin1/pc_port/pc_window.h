@@ -252,4 +252,26 @@ int pc_window_take_wheel_steps(void);
  */
 s8 pc_pad_axis_from_sdl(int sdlAxisValue);
 
+/**
+ * @brief Same conversion, but with the rest position treated as centred.
+ *
+ * Returns 0 anywhere inside @p deadZone, and rescales what is left so the edge
+ * of the dead zone reads as 0 and full throw still reads as 127. A worn pad
+ * rests off centre (an Xbox pad can sit at 7% of travel), and passing that
+ * through makes the game believe the stick is held: the cursor then creeps to
+ * the edge of its range and stays there.
+ *
+ * @param sdlAxisValue Raw SDL axis value.
+ * @param deadZone     Raw magnitude to ignore, the same units as the axis.
+ */
+s8 pc_pad_axis_from_sdl_deadzoned(int sdlAxisValue, int deadZone);
+
+/**
+ * @brief Dead zone a fresh configuration starts with, in 1/256ths of an axis.
+ *
+ * Windows uses a wider one than the other platforms: Xbox pads are the default
+ * hardware there and their sticks drift enough to sit outside the old default.
+ */
+int pc_window_default_stick_dead_zone(void);
+
 #endif // PC_WINDOW_H

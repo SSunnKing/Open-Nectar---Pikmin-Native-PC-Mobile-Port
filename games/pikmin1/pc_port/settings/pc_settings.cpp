@@ -111,8 +111,10 @@ struct PcConfig {
     int gyroInvert = 0;           // bit 0 = horizontal, bit 1 = vertical
     float gyroBias[3] = { 0.0f, 0.0f, 0.0f }; // rad/s, measured by Calibrate
 
-    // Stick dead zone (0 - 127, default 8)
-    int stickDeadZone = 8;
+    // Stick dead zone (0 - 127). 16 = 12.5% of travel on Windows, where Xbox
+    // pads are the default hardware and their sticks drift; 8 elsewhere. See
+    // pc_window_default_stick_dead_zone for the reasoning.
+    int stickDeadZone = pc_window_default_stick_dead_zone();
 
     // Stick inversion flags (bitmask: bit 0=horizontal, bit 1=vertical)
     // 0 = normal, 1 = inverted
@@ -262,7 +264,7 @@ struct PcConfig {
         gyroSensitivity = 1.0f;
         gyroInvert = 0;
         gyroBias[0] = gyroBias[1] = gyroBias[2] = 0.0f;
-        stickDeadZone = 8;
+        stickDeadZone = pc_window_default_stick_dead_zone();
         stickInvert = 0;
         cStickInvert = 0;
         chainActions = 0;

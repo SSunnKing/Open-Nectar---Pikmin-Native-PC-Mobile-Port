@@ -266,6 +266,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_keycaps.cpp
     pc_port/pc_gyro.cpp
     pc_port/pc_pad_axis.cpp
+    pc_port/pc_pad_trace.cpp
     pc_port/pc_menu_repeat.cpp
     pc_port/pc_photo_mode.cpp
     pc_port/pc_record.cpp
