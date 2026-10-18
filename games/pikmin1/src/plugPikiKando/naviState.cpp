@@ -2341,24 +2341,13 @@ void NaviThrowWaitState::exec(Navi* navi)
 		transit(navi, NAVISTATE_Walk);
 		return;
 	}
-
-	// keyUp is level-triggered. A release while a nearby Pikmin is still
-	// waiting for the grab keyframe used to sit here until the ThrowWait
-	// animation reached KEY_Action0, which put a whole grab animation between
-	// every throw and capped the cadence (issues #37 / #40). Complete the grab
-	// on the spot instead: the Pikmin is in range and would have been attached
-	// a few frames later anyway.
-	if (navi->mKontroller->keyUp(KeyConfig::_instance->mThrowKey.mBind) && !mIsHoldingThrowPiki && mHeldThrowPiki
-	    && mHeldThrowPiki->getState() == PIKISTATE_Normal) {
-		mIsHoldingThrowPiki = true;
-		mHeldThrowPiki->mFSM->transit(mHeldThrowPiki, PIKISTATE_Hanged);
-		lockHangPiki(navi);
-	}
 #endif
 	if (navi->mKontroller->keyUp(KeyConfig::_instance->mThrowKey.mBind)
 #if defined(PIKI_PC_PORT)
-	    // A pending (far) Pikmin still walking over remains pending until it
-	    // is actually grabbed.
+	    // keyUp is level-triggered. A release during the grab wind-up stays up,
+	    // and the throw waits until KEY_Action0 sets mIsHoldingThrowPiki.
+	    // Forcing the hang on that release skipped the keyframe (issues #37 / #40).
+	    // A far Pikmin still walking over stays pending until the same grab.
 	    && mIsHoldingThrowPiki
 #endif
 	) {
