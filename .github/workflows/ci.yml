@@ -1,0 +1,141 @@
+# Build Pikmin 1 (game, launcher, tools and tests) and Pikmin 2 (game and
+# tests) on macOS, Linux and Windows, then run both ctest suites. Nothing here
+# needs a game disc or extracted game data: tests that do are excluded below.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same PR or branch cancels the run it replaces.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILD_TYPE: Release
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 500M
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_NOHASHDIR: "true"
+  # pc_jaudio_integration_test runs the game with --audio-self-test and needs
+  # the disc's sound banks (LABELS "game-assets"). CI never has a disc.
+  CTEST_EXCLUDE_LABELS: game-assets
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (arm64)
+            os: macos-latest
+            shell: bash
+          - name: Linux (x86-64)
+            os: ubuntu-latest
+            shell: bash
+          - name: Windows (x86-64, MinGW-w64)
+            os: windows-latest
+            shell: msys2 {0}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install sdl2 ninja ccache
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build ccache pkg-config libsdl2-dev libgl1-mesa-dev libx11-dev
+
+      # The release .exe files are built with MinGW-w64 GCC (cross-compiled
+      # from Linux), so Windows uses the same compiler natively through MSYS2
+      # and can run the tests. setup-msys2 caches the packages between runs.
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-ccache
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-SDL2
+
+      # MinGW predefines WIN32, which selects the original game's Win32/OpenGL
+      # code paths. cmake/toolchain-mingw64.cmake removes it for the release
+      # cross build; this does the same for the native MSYS2 build.
+      - name: Platform flags
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            echo 'PLATFORM_FLAGS=-DCMAKE_C_FLAGS=-UWIN32 -DCMAKE_CXX_FLAGS=-UWIN32' >> "$GITHUB_ENV"
+          fi
+
+      - name: Restore ccache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: ccache-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: ccache-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Configure Pikmin 1
+        run: |
+          cmake -S games/pikmin1 -B build/pikmin1 -G Ninja \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DPIKMIN_BUILD_LAUNCHER=ON -DPIKMIN_BUILD_TESTS=ON \
+            -DPIKMIN_NATIVE_JAUDIO=ON \
+            $PLATFORM_FLAGS
+
+      - name: Build Pikmin 1
+        run: cmake --build build/pikmin1 --parallel
+
+      - name: Configure Pikmin 2
+        run: |
+          cmake -S games/pikmin2 -B build/pikmin2 -G Ninja \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DBUILD_TESTING=ON \
+            $PLATFORM_FLAGS
+
+      - name: Build Pikmin 2
+        run: cmake --build build/pikmin2 --parallel
+
+      - name: Test Pikmin 1
+        run: ctest --test-dir build/pikmin1 --output-on-failure --timeout 300 -LE "$CTEST_EXCLUDE_LABELS"
+
+      - name: Test Pikmin 2
+        if: ${{ !cancelled() }}
+        run: ctest --test-dir build/pikmin2 --output-on-failure --timeout 300 -LE "$CTEST_EXCLUDE_LABELS"
+
+      - name: ccache stats
+        if: ${{ !cancelled() }}
+        run: ccache --show-stats
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-logs-${{ runner.os }}
+          path: |
+            build/*/Testing/Temporary/LastTest*.log
+            build/*/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: ignore
