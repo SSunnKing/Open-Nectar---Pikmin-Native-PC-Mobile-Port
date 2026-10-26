@@ -52,6 +52,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Use the newest Xcode on the runner, the one closest to what macOS
+      # builds and releases are made with. The older default (Xcode 26.x)
+      # fails Pikmin 2's fakePiki.cpp: the port's `#define nullptr 0` leaks
+      # into that SDK's <unordered_map>.
+      - name: Select newest Xcode (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install sdl2 ninja ccache
@@ -105,10 +116,13 @@ jobs:
             -DPIKMIN_NATIVE_JAUDIO=ON \
             $PLATFORM_FLAGS
 
+      # -k 0: report every compile error in one run, not only the first.
       - name: Build Pikmin 1
-        run: cmake --build build/pikmin1 --parallel
+        id: build-p1
+        run: cmake --build build/pikmin1 --parallel -- -k 0
 
       - name: Configure Pikmin 2
+        if: ${{ !cancelled() }}
         run: |
           cmake -S games/pikmin2 -B build/pikmin2 -G Ninja \
             -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
@@ -117,13 +131,16 @@ jobs:
             $PLATFORM_FLAGS
 
       - name: Build Pikmin 2
-        run: cmake --build build/pikmin2 --parallel
+        id: build-p2
+        if: ${{ !cancelled() }}
+        run: cmake --build build/pikmin2 --parallel -- -k 0
 
       - name: Test Pikmin 1
+        if: ${{ !cancelled() && steps.build-p1.outcome == 'success' }}
         run: ctest --test-dir build/pikmin1 --output-on-failure --timeout 300 -LE "$CTEST_EXCLUDE_LABELS"
 
       - name: Test Pikmin 2
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build-p2.outcome == 'success' }}
         run: ctest --test-dir build/pikmin2 --output-on-failure --timeout 300 -LE "$CTEST_EXCLUDE_LABELS"
 
       - name: ccache stats
