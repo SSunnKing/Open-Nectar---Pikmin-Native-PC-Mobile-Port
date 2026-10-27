@@ -37,19 +37,25 @@ struct PcMenuPadKeys {
 
 // menuMode false leaves the pad alone (free play). menuMode true makes Enter,
 // Space and left click accept, Escape, Backspace and right click cancel, and
-// arrows and WASD both move the cursor. Shift never cancels.
-// nonShiftB is a non-Shift keyboard binding for B that is held right now.
+// arrows and WASD both move the cursor. The Shift keys in PcMenuPadKeys are
+// not cancel by themselves.
+// nonShiftB is a held keyboard binding for B that should count. The name is
+// historical: Shift counts too while a text window is live, and the caller
+// decides that with pc_menu_pad_b_binding_counts. Pause and the other menus
+// pass false for Shift.
 // bindStart / bindStart2 are the Start bindings, so an accept key bound to
 // Start does not also open leave or close a pause menu.
 void pc_menu_pad_apply(const PcMenuPadKeys& keys, bool menuMode, bool nonShiftB,
                        int bindStart, int bindStart2,
                        std::uint16_t& button, std::int8_t& stickX, std::int8_t& stickY);
 
-// Text windows (tutorial notes, Olimar's log entries, the Voyage Log, result
-// messages) read B as "show the whole page" and "next page", as on the
-// GameCube. An open window notes the time on each frame it updates, and a
-// Shift binding for B counts as B while that note is this recent. Pause, the
-// world map and every other menu still never take Shift as B.
+// Tutorial notes, Olimar's part logs and result messages read B as "show the
+// whole page" and "next page", as on the GameCube. The Voyage Log is already
+// shown and reads B as close; its message window still notes itself, so a
+// Shift binding for B reaches that close. An open window notes the time on
+// each frame it updates, and a Shift binding for B counts as B while that
+// note is this recent. Pause, the world map and every other menu still never
+// take Shift as B.
 constexpr std::uint32_t PC_MENU_PAD_TEXT_WINDOW_MS = 100;
 bool pc_menu_pad_text_window_live(bool noted, std::uint32_t notedMs, std::uint32_t nowMs);
 

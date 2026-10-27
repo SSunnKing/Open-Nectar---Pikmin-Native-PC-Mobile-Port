@@ -1565,11 +1565,13 @@ void pc_window_poll_events(PADStatus* pad) {
         auto keyBindHeld = [&](int bind) {
             return pc_menu_pad_b_binding_counts(bind, textWindow) && state[bind] != 0;
         };
-        const bool nonShiftB = keyBindHeld(bindB1) || keyBindHeld(bindB2);
+        // Shift is included while a text window is live. Other menus pass a
+        // false binding check for it, so Shift still never cancels there.
+        const bool boundB = keyBindHeld(bindB1) || keyBindHeld(bindB2);
         std::uint16_t bits = button;
         std::int8_t sx = stickX;
         std::int8_t sy = stickY;
-        pc_menu_pad_apply(keys, true, nonShiftB, sKeyBindings[PC_KEY_ACT_START], sKeyBindings2[PC_KEY_ACT_START], bits, sx, sy);
+        pc_menu_pad_apply(keys, true, boundB, sKeyBindings[PC_KEY_ACT_START], sKeyBindings2[PC_KEY_ACT_START], bits, sx, sy);
         button = static_cast<u16>(bits);
         stickX = static_cast<s8>(sx);
         stickY = static_cast<s8>(sy);
