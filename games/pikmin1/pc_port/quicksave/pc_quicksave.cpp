@@ -1029,6 +1029,29 @@ bool pc_quicksave_toast(char* out, size_t n, bool* isError, float* age)
 	return true;
 }
 
+const char* pc_quicksave_save_unavailable(void)
+{
+	if (!sEnabled) return "Quick Save is off. Turn it on above, then restart the game.";
+	if (sPhase != kIdle) return "A quick load is under way.";
+	if (!sDay.valid) return "Only while a day is being played.";
+	if (!sDay.eligible) {
+		static char why[96];
+		std::snprintf(why, sizeof(why), "Quick Save does not work in %s.", sDay.why);
+		return why;
+	}
+	return "";
+}
+
+const char* pc_quicksave_load_unavailable(void)
+{
+	if (!sEnabled) return "Quick Save is off. Turn it on above, then restart the game.";
+	if (sPhase != kIdle) return "A quick load is under way.";
+	if (sDay.valid) {
+		return qs::existing_newest_first({ slotPath(sDay.slot) }).empty() ? "There is no quick save of this file yet." : "";
+	}
+	if (menuPlace() == 0) return "Only in a day, on the title screen or in the file select.";
+	return savesNewestFirst().empty() ? "There is no quick save yet." : "";
+}
 
 bool pc_quicksave_boot_pending(void) { return sEnabled && (sPhase == kTitle || (sPhase == kDay && sLoadMode.vs)); }
 

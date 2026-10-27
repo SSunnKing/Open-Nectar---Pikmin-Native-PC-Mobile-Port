@@ -9623,7 +9623,7 @@ namespace {
 // página de vídeo, de Advanced, de Graphics, de Mods...), así que reordenar
 // aquí no toca qué hace cada ajuste ni cómo se guarda: el .conf va por nombre.
 // ---------------------------------------------------------------------------
-enum RowSrc { SRC_MAIN, SRC_ADV, SRC_GFX, SRC_MODS, SRC_DATA, SRC_KEYS, SRC_PADS, SRC_RECENTER, SRC_ACH, SRC_PADGUIDE, SRC_AIMBTN };
+enum RowSrc { SRC_MAIN, SRC_ADV, SRC_GFX, SRC_MODS, SRC_DATA, SRC_KEYS, SRC_PADS, SRC_RECENTER, SRC_ACH, SRC_PADGUIDE, SRC_AIMBTN, SRC_QUICKSAVE };
 struct GroupRow {
     RowSrc src;
     int idx;
@@ -9751,6 +9751,11 @@ const GroupRow kDataRows[] = {
     { SRC_DATA, 3, "Online co-op: leave / rejoin", "As an online guest: stop playing and watch the host's captain while keeping your place. Choose it again, or press Start, to ask to rejoin; the host lets you back in outside menus and cutscenes." },
     { SRC_DATA, 4, "Online over the Internet", "On: when you create or join an online room, the game asks a free public server (Google or Cloudflare STUN) for this connection's Internet address, so a friend on another network can connect. Only that address is exchanged; the game itself goes directly between the two players. Some networks still block it (often mobile data on both sides). Off: no outside server is contacted, and only players on the same network or a VPN can connect." },
 #endif
+    // Quick Save (pc_quicksave.h). The F-keys need Fn on many laptops, so the
+    // two actions are rows too.
+    { SRC_QUICKSAVE, 0, "Quick Save (experimental)", "Save at any point of a day with Quick Save (F6) and go back to that point with Quick Load (F7). Loading replays the day, so it takes a minute or more. Not in Challenge Mode, Permadeath, Speedrun, the Randomizer or online play. Any update of the game makes older quick saves unloadable. Takes effect after a restart." },
+    { SRC_QUICKSAVE, 1, "Quick Save now", "Saves this point of the day, as the Quick Save key (F6) does." },
+    { SRC_QUICKSAVE, 2, "Quick Load now", "Goes back to this file's quick save, as the Quick Load key (F7) does. On the title screen or in the file select: the newest quick save. Escape cancels the load." },
 };
 
 template <size_t N> constexpr int countOf(const GroupRow (&)[N]) { return (int)N; }
@@ -9881,6 +9886,7 @@ const GroupSection kSections[] = {
 #endif
     { PC_SET_GROUP_DATA, 0, "SAVE FILE" },
     { PC_SET_GROUP_DATA, 2, "SETTINGS" },
+    { PC_SET_GROUP_DATA, countOf(kDataRows) - 3, "QUICK SAVE" },
 };
 
 const char* rowSection(int group, int row) {
@@ -9914,6 +9920,7 @@ bool rowProbeable(int group, int row) {
     case SRC_ADV: return r->idx != 7;
     case SRC_GFX: return r->idx != 10 && r->idx != 11;
     case SRC_MODS: return true;
+    case SRC_QUICKSAVE: return r->idx == 0;
     default: return false;
     }
 }
@@ -9983,6 +9990,11 @@ const char* disabledReason(const GroupRow& r) {
     case SRC_DATA:
         if (r.idx == 3 && !online_guest()) return "Only while you are the guest of an online co-op session.";
         break;
+    case SRC_QUICKSAVE: {
+        const char* why = r.idx == 1 ? pc_quicksave_save_unavailable() : r.idx == 2 ? pc_quicksave_load_unavailable() : "";
+        if (why[0] != '\0') return why;
+        break;
+    }
     default:
         break;
     }
@@ -10153,7 +10165,7 @@ bool pc_settings_row_enabled(int group, int row) {
 bool pc_settings_row_is_action(int group, int row) {
     if (group == PC_SET_PICKER_TEXPACKS || group == PC_SET_PICKER_HDMODELS) return true;
     const GroupRow* r = groupRow(group, row);
-    return r && ((r->src == SRC_DATA && r->idx != 4) || (r->src == SRC_ADV && r->idx == 7));
+    return r && ((r->src == SRC_DATA && r->idx != 4) || (r->src == SRC_ADV && r->idx == 7) || (r->src == SRC_QUICKSAVE && r->idx != 0));
 }
 
 const char* pc_settings_row_help(int group, int row) {
@@ -10254,6 +10266,16 @@ void pc_settings_row_value(int group, int row, char* out, unsigned long n) {
             else snprintf(out, n, "%s", online_guest() ? (online_spectating() ? "A: rejoin" : "A: leave") : "-");
             break;
         case SRC_ACH: break;
+        case SRC_QUICKSAVE:
+            if (r->idx == 0) {
+                // The game reads the setting at launch: say so while the
+                // running state is not the one chosen here.
+                const bool on = sPending.quickSave != 0;
+                snprintf(out, n, "%s%s", on ? "On" : "Off", on != pc_quicksave_enabled() ? "  (restart required)" : "");
+            } else {
+                snprintf(out, n, "%s", r->idx == 1 ? "A: save" : "A: load");
+            }
+            break;
         case SRC_KEYS:
         case SRC_PADS:
         case SRC_PADGUIDE: snprintf(out, n, "Open  >"); break;
@@ -10339,6 +10361,20 @@ void pc_settings_row_change(int group, int row, int dir, bool ok) {
             else if (online_guest()) {
                 if (online_spectating()) pc_netplay_online_request_rejoin();
                 else pc_netplay_online_request_leave();
+            }
+            break;
+        case SRC_QUICKSAVE:
+            if (r->idx == 0) {
+                if (ok || left || right) sPending.quickSave = sPending.quickSave ? 0 : 1;
+            } else if (ok && r->idx == 1) {
+                pc_quicksave_request_save(); // the result shows as the menu's notice
+            } else if (ok && r->idx == 2) {
+                pc_quicksave_request_load();
+                // A load under way: the menus get out of the load screen's way.
+                if (pc_quicksave_load_active()) {
+                    if (sMenuOpen) closeMenu();
+                    if (pc_glass_menu_active()) pc_glass_menu_close();
+                }
             }
             break;
         default: break; // selectores

@@ -504,6 +504,50 @@ time).
 - Speedrun has its own memory card and records in `save/speedrun/`, apart from
   your normal saves.
 
+### Quick Save (experimental)
+
+Save at any point of a day and come back to exactly that point later. It is
+off by default and experimental.
+
+| Action | Key | F1 menu (Data tab) |
+|--------|-----|--------------------|
+| Quick Save | F6 | Quick Save now |
+| Quick Load | F7 | Quick Load now |
+| Cancel a load | Esc (or B on a controller) | |
+
+Both keys can be changed in the Controls bindings. On a Mac laptop the F-keys
+usually need Fn; the two menu rows do the same without them.
+
+**Turning it on:** F1 → Data → **Quick Save (experimental)** → On, then
+restart the game (the row says "restart required" until you do). The setting
+is `quickSave = 1` in `pikmin_settings.conf`; `PIKMIN_QUICKSAVE=1` also turns
+it on for one launch.
+
+**How it works:** with the setting on, the game records every input from the
+start of each day. A quick save writes the day's start and those inputs to
+`save/quicksave/<file>.qsv` (one per card file; saving again replaces it). A
+quick load goes back to the start of that day and replays it, fast and muted,
+behind a load screen with a progress bar and the time left, then gives you
+control at the saved moment. So loading takes longer the further into the day
+the save was: about a minute or more for a save several minutes into a day.
+
+- **Where:** F6 and F7 work while a day is being played, not during a
+  cutscene or the day's start or end. Day 1 can be saved only after the intro
+  cutscene. F7 on the title screen or in the file select loads the newest quick
+  save. `--quick-load <file>` loads one at launch (a VS match also needs
+  `--vs-map` with the same map).
+- **Not available** in Challenge Mode, Permadeath, Speedrun, the Randomizer or
+  an online session.
+- **Updates:** a quick save only loads in the exact build of the game that
+  made it. Any rebuild or update of the game makes older quick saves
+  unloadable (the game says so and leaves your day alone). Your normal saves
+  are not affected.
+- **While it is on**, settings that change the game itself (day length,
+  health, Pikmin limit and the like) are fixed until the day ends, because the
+  day is being recorded.
+- **If a load cannot reproduce the day**, the game stops with a message rather
+  than continue a day that differs from the one you saved.
+
 ### Control modes
 
 **Classic Mode (GameCube):**
