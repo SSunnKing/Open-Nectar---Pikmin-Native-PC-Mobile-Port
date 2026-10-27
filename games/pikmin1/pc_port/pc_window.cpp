@@ -13,11 +13,13 @@ static_assert(PAD_BUTTON_LEFT == PC_MENU_PAD_LEFT && PAD_BUTTON_RIGHT == PC_MENU
 #include "pc_menu_click.h"
 #include "pc_button_prompt.h"
 #include "pc_hand_cursor.h"
+#include "pc_photo_mode.h"
 #include "pc_speedrun.h"
 #include "pc_gyro.h"
 #include "pc_xinput_usb.h"
 #include "pc_icon.h"
 #include "netplay/pc_netplay_det.h"
+#include "netplay/pc_input_log.h"
 #if PIKI_PC_TOUCH
 #include "gl/pc_gfx.h"
 #include "touch/pc_touch.h"
@@ -284,6 +286,7 @@ static SDL_Scancode sKeyBindings[PC_KEY_ACT_COUNT];
 static SDL_Scancode sKeyBindings2[PC_KEY_ACT_COUNT];
 static bool sSwarmHeld = false; // PC_KEY_ACT_SWARM sampled by the last poll
 // D-pad Down of each player's pad, which is also the swarm button.
+static bool sPadDpadDownHeld[2] = { false, false };
 
 // Lock-On y Charge se consumen como flanco: el bucle sondea el mando muchas
 // veces entre ticks lógicos, así que la pulsación se guarda hasta que alguien
@@ -299,6 +302,8 @@ static bool sBombPending[2]   = { false, false };
 static bool sSwarmPending[2]  = { false, false };
 
 bool pc_window_swarm_held(void) { return sSwarmHeld; }
+
+bool pc_window_pad_dpad_down_held(int player) { return sPadDpadDownHeld[player & 1]; }
 
 static bool sKeyBindingsInitialized = false;
 
@@ -1221,6 +1226,8 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     // por empujón). Mantener "Swarm with right stick" (L) lo devuelve al swarm
     // en cualquier esquema; con el mod Charge, un toque de ese botón sin mover
     // el stick lanza la carga.
+    // Record the physical Down independently of its action binding.
+    sPadDpadDownHeld[player & 1] = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_DOWN) != 0;
     const int pl = player == 1 ? 1 : 0;
     const bool switchScheme = sPadScheme == PC_PAD_SCHEME_SWITCH;
     const bool swarmStick = boundButtonPressed(PC_KEY_ACT_SWARM_STICK);
@@ -1989,6 +1996,61 @@ static int driver_swap_interval_for(int interval) {
     return 0;
 #endif
 }
+
+// Deterministic mode: the sim reads the Mouse Cursor path from the per-tick
+// input (pc_input_log.h, PKNI v4), never from here, so a replay feeds it the
+// same values from the same place. pc_input_log_tick runs this after PADRead:
+// it takes what the window gathered since the last tick and files it under the
+// keyboard owner's pad, whose captain the mouse drives (the same test
+// Navi::makeVelocity makes outside deterministic mode). Outside deterministic
+// mode it takes nothing, and the sim reads the window as before.
+static void pcWindowCaptureLocalInput(PcLocalInput out[4]) {
+    if (!pc_netplay_deterministic()) return;
+    for (int p = 0; p < 2; p++) {
+        if (pc_first_person_active_for(p)) out[p].flags |= pc_input_log::kLocalFirstPerson;
+        if (sPadDpadDownHeld[p]) out[p].flags |= pc_input_log::kLocalPadDpadDown;
+        // Each player's Bomb, Lock-On and Charge presses and held Swarm
+        // button, from the queues the sim drains outside deterministic mode
+        // (player 1's are captain 1's, as there).
+        uint8_t ext = 0;
+        if (pc_window_take_bomb_press(p)) ext |= pc_input_log::kExtBomb;
+        if (pc_window_take_lockon_press(p)) ext |= pc_input_log::kExtLockOn;
+        if (pc_window_take_swarm_press(p)) ext |= pc_input_log::kExtCharge;
+        if (p == 0 ? sSwarmHeld : sSwarmHeldP2) ext |= pc_input_log::kExtSwarm;
+        out[p].ext = ext;
+    }
+    const float dx = sMouseCursorDeltaX;
+    const float dy = sMouseCursorDeltaY;
+    sMouseCursorDeltaX = 0.0f;
+    sMouseCursorDeltaY = 0.0f;
+    const bool recenter = pc_gyro_take_recenter_cursor() != 0;
+    // Photo mode freezes the sim, so its toggle (F3 or the touch button) is
+    // input too: one flag for the whole game, on pad 0.
+    if (pc_photo_mode_poll_toggle()) out[0].flags |= pc_input_log::kLocalPhotoToggle;
+    const int owner = sKeyboardOwner;
+    if (owner < 0 || owner > 3) return;
+    PcLocalInput& in = out[owner];
+    if (effectiveControlMode() == PC_CONTROL_MOUSE_CURSOR || dx != 0.0f || dy != 0.0f) {
+        in.flags |= pc_input_log::kLocalMouseCursor;
+    }
+    // The gyro recenter brings the keyboard owner's cursor back in front of
+    // the captain, as Navi::makeVelocity does outside deterministic mode.
+    if (recenter) in.flags |= pc_input_log::kLocalGyroRecenter;
+    in.cursorDx = dx;
+    in.cursorDy = dy;
+    // The wheel picks the throw colour only when set to; otherwise the
+    // camera zooms with it (local view state) and takes the notches itself.
+    int steps = 0;
+    if (pc_settings_get_mouse_wheel_action() == 0) steps += pc_window_take_wheel_steps();
+#if PIKI_PC_TOUCH
+    // A tap on the HUD colour icon is one notch for the keyboard owner's
+    // captain whatever the wheel does, as the sim counts it outside
+    // deterministic mode.
+    steps += pc_touch_take_color_taps();
+#endif
+    in.wheelSteps = static_cast<int8_t>(std::clamp(steps, -127, 127));
+}
+static const bool sPcLocalCaptureRegistered = (pc_input_log_set_local_capture_fn(&pcWindowCaptureLocalInput), true);
 
 void pc_window_set_swap_interval(int interval) {
     // 0 is meaningful here: it is the port's 120 Hz mode. Only negatives are

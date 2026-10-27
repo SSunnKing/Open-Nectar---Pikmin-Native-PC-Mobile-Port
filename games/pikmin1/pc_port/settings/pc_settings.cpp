@@ -56,6 +56,7 @@
 #include "mods/pc_campaign.h"
 #include "nectar_mapcore/pack.h"
 #include "netplay/pc_netplay_det.h"
+#include "settings/pc_sim_settings_text.h"
 #include "pc_achievements.h"
 #include "pc_speedrun.h"
 #include "pc_livesplit.h"
@@ -1113,10 +1114,11 @@ void pc_settings_set_language(unsigned char language) {
 
 namespace {
 
-#if PIKI_NETPLAY_BUILD
-// Netplay: every setting that changes the simulation. Both peers hash these
-// in the handshake and they are locked for the session. Window, graphics,
-// audio, bindings, camera feel and other local-only rows are not here.
+// Every setting that changes the simulation. A netplay session hashes them in
+// the handshake and locks them for the session (netplay builds); a
+// deterministic recording locks them for the recorded day (below). Window,
+// graphics, audio, bindings, camera feel and other local-only rows are not
+// here: what they change reaches the sim, if at all, as recorded input.
 #define PC_NETPLAY_SESSION_FIELDS(X)                                                          \
     X(fpsMode) X(chainActions) X(holdToPluck) X(betterPathfinding) X(bluesOnlyWater)         \
     X(idleCounter) X(naviHealthPct) X(tekiHealthPct) X(infiniteDay) X(freeCamera)            \
@@ -1128,6 +1130,44 @@ namespace {
     X(vsPellets) X(lockOn) X(charge) X(throwWhileMoving) X(firstPerson) X(pikiLimit)         \
     X(dayMinutes) X(coopSplit) X(coopMergeCamera) X(debugKeys) X(gyroEnabled)
 
+// Deterministic recording (quick save): the settings a recorded day depends
+// on, fixed for the day and written into the recording's header text
+// (pc_settings_sim_config_text). The session list, plus the wheel's job
+// (colour or zoom). In deterministic mode the sim reads the wheel's notches
+// from the recorded input whatever the job, so this one is fixed for
+// clarity, not for the replay's sake.
+#define PC_SIM_RECORD_FIELDS(X) PC_NETPLAY_SESSION_FIELDS(X) X(mouseWheelAction)
+
+// From the start of a day in deterministic mode until the game leaves it,
+// the sim settings keep the values the day started with, so the day's input
+// replays against the same settings: the F1 rows that change them are greyed
+// (disabledReason) and any other change is undone when the settings save.
+// A netplay session has its own lock and never arms this one.
+bool sSimLockArmed = false;
+PcConfig sSimLockConfig;
+
+bool simLockStillInDay() {
+    return gameflow.mCurrGameSectionID == SECTION_OnePlayer
+        && gameflow.mNextOnePlayerSectionID == ONEPLAYER_NewPikiGame;
+}
+
+bool simLocked() {
+    if (!sSimLockArmed) return false;
+    if (simLockStillInDay()) return true;
+    sSimLockArmed = false;
+    printf("[PC Settings] deterministic recording: day over, sim-relevant settings unlocked\n");
+    fflush(stdout);
+    return false;
+}
+
+void simLockRelock() {
+    if (!simLocked()) return;
+#define PC_SIM_RELOCK(f) sConfig.f = sSimLockConfig.f; sPending.f = sSimLockConfig.f;
+    PC_SIM_RECORD_FIELDS(PC_SIM_RELOCK)
+#undef PC_SIM_RELOCK
+}
+
+#if PIKI_NETPLAY_BUILD
 bool sNetplaySessionLocked = false;
 PcConfig sNetplaySessionConfig;
 // The joiner of a launcher session adopted the host's values: the file keeps
@@ -1193,6 +1233,7 @@ int netplayApplyConfigText(const char* text) {
 #endif
 
 void saveConfig() {
+    simLockRelock();
 #if PIKI_NETPLAY_BUILD
     netplayRelockSessionFields();
     NetplayDiskValuesScope netplayDiskValues;
@@ -9175,6 +9216,36 @@ void pc_settings_record_original_look(int original) {
     fflush(stderr);
 }
 
+void pc_settings_sim_lock_day_begin(void) {
+#if PIKI_NETPLAY_BUILD
+    if (sNetplaySessionLocked) return; // the session's own lock holds
+#endif
+    sSimLockConfig = sConfig;
+    sSimLockArmed  = true;
+    printf("[PC Settings] deterministic recording: sim-relevant settings fixed for this day (hash %016llx)\n",
+           pc_settings_sim_config_hash());
+    fflush(stdout);
+}
+
+int pc_settings_sim_locked(void) { return simLocked() ? 1 : 0; }
+
+const char* pc_settings_sim_config_text(void) {
+    static std::string text;
+    pc_sim_settings_text::begin(text);
+#define PC_SIM_TEXT_FIELD(f) pc_sim_settings_text::add_int(text, #f, (long)sConfig.f);
+    PC_SIM_RECORD_FIELDS(PC_SIM_TEXT_FIELD)
+#undef PC_SIM_TEXT_FIELD
+    // Chosen before a day starts, outside the F1 rows; the day depends on them.
+    pc_sim_settings_text::add_int(text, "coopPlayers", sConfig.coopPlayers);
+    pc_sim_settings_text::add_int(text, "language", pc_settings_get_language());
+    pc_sim_settings_text::add_str(text, "vsMap", sConfig.vsMap);
+    return text.c_str();
+}
+
+unsigned long long pc_settings_sim_config_hash(void) {
+    return pc_sim_settings_text::hash(pc_settings_sim_config_text());
+}
+
 #if PIKI_NETPLAY_BUILD
 const char* pc_settings_netplay_config_text(void) {
     static std::string text;
@@ -9191,6 +9262,8 @@ const char* pc_settings_netplay_config_text(void) {
 
 void pc_settings_netplay_session_begin(const char* adoptConfigText) {
     if (sNetplaySessionLocked) return;
+    // The session's lock replaces a recorded day's (pc_settings_sim_lock_day_begin).
+    sSimLockArmed = false;
     if (adoptConfigText != nullptr) {
         sNetplayDiskConfig = sConfig;
         const std::string own = pc_settings_netplay_config_text();
@@ -9754,6 +9827,18 @@ bool hardLocked(const GroupRow& r) {
         && (r.idx == 4 || r.idx == 5 || r.idx == 11 || r.idx == 12 || r.idx == 13);
 }
 
+// Whether a row changes a setting of PC_SIM_RECORD_FIELDS. Every mods row does,
+// except the control scheme (0) and the free camera stick speed (38), which
+// only shape input that is recorded anyway.
+bool rowChangesSimSetting(const GroupRow& r) {
+    switch (r.src) {
+    case SRC_MAIN: return r.idx == ROW_FPS_MODE;
+    case SRC_ADV: return r.idx == 4; // Gyro Aiming (gyroEnabled)
+    case SRC_MODS: return r.idx != 0 && r.idx != 38;
+    default: return false;
+    }
+}
+
 // Motivo por el que una fila no se puede cambiar ahora, o nullptr si se puede.
 // Online co-op lives in the netplay session (netplay builds only): weak
 // references, so builds without it link and simply never enable the row.
@@ -9768,6 +9853,8 @@ bool online_spectating() { return pc_netplay_online_spectating != nullptr && pc_
 
 const char* disabledReason(const GroupRow& r) {
     if (hardLocked(r)) return "Locked by Hard mode for this save file.";
+    if (rowChangesSimSetting(r) && simLocked())
+        return "Fixed until this day ends: the day is being recorded, and this setting changes the game.";
     switch (r.src) {
     case SRC_MAIN:
         if (r.idx == ROW_RESOLUTION && sPending.displayMode == PC_WINDOW_FULLSCREEN_BORDERLESS)

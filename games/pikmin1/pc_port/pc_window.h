@@ -110,6 +110,7 @@ bool pc_window_swarm_held(void);
 bool pc_window_swarm_held_p2(void);
 /// D-pad Down on that player's pad: the pad's swarm button, so it must not
 /// also trigger the original D-pad Down action (Olimar lying down).
+bool pc_window_pad_dpad_down_held(int player);
 /// Eje vertical del stick derecho con Free Camera activo (zoom del radar).
 float pc_window_free_camera_sub_y(void);
 /// Flanco de subida del Lock-On de ese jugador (0/1): true una vez por

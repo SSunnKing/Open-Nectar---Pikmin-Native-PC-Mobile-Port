@@ -9,6 +9,7 @@
 #if defined(PIKI_PC_PORT)
 #include "settings/pc_settings.h"
 #include "netplay/pc_netplay_det.h"
+#include "netplay/pc_input_log.h"
 #include "netplay/pc_netplay_present.h"
 #include "netplay/pc_coop_switch.h"
 #include "netplay/pc_state_hash.h"
@@ -2741,6 +2742,11 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 	// unless deterministic mode is on.
 	pc_netplay_det_reseed_for_new_day(gameflow.mWorldClock.mCurrentDay,
 	    flowCont.mCurrentStage != nullptr ? static_cast<int>(flowCont.mCurrentStage->mStageID) : 0);
+	// Deterministic recording: the settings the sim reads stay as they are
+	// now until the day ends, so the day's input replays against them.
+	if (pc_netplay_deterministic()) {
+		pc_settings_sim_lock_day_begin();
+	}
 	// The state hash's mode column: the VS state (0 outside VS).
 	pc_state_hash_set_mode_fn(&pcVsHashMode);
 #endif
@@ -3547,7 +3553,18 @@ void GameCoreSection::updateAI()
 	// builds mLookAtMtx, and that matrix is what the renderer actually uses --
 	// setting mPosition after update() changes the reported position without
 	// moving the view at all.
-	if (!gameflow.mMoviePlayer->mIsActive && pc_photo_mode_poll_toggle()) {
+	//
+	// Netplay: the toggle freezes the sim, so offline deterministic mode takes
+	// it from pad 0's per-tick input (pc_input_log.h), where the window files
+	// F3 and the touch button, and a replay toggles on the same tick. A
+	// session and the default mode poll the key here.
+	bool photoToggle = false;
+	if (!gameflow.mMoviePlayer->mIsActive) {
+		photoToggle = (pc_netplay_deterministic() && pc_netplay_local_slots_filled())
+		                ? (pc_netplay_local_flags(0) & pc_input_log::kLocalPhotoToggle) != 0
+		                : pc_photo_mode_poll_toggle() != 0;
+	}
+	if (photoToggle) {
 		PcamCamera* pcam = cameraMgr->mCamera;
 		if (pc_photo_mode_active()) {
 			pc_photo_mode_exit();

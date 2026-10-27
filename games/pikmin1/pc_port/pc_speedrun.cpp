@@ -5,6 +5,7 @@
 #include "Dolphin/pad.h"
 #endif
 #include "pc_window.h"
+#include "netplay/pc_netplay_det.h"
 #include "settings/pc_settings_p2d.h"
 #include "settings/pc_settings.h"
 #include "Colour.h"
@@ -1123,7 +1124,9 @@ void pc_speedrun_draw(void)
     pc_livesplit_update(sActive && pc_settings_get_speedrun_livesplit(), sRunning, elapsedMs());
     if (!sActive) return;
     pollReset();
-    if (debugEnabled()) pollDebug();
+    // The test shortcuts change the sim from the live keyboard, which a
+    // replay cannot see: off in deterministic mode, like the F5-F8 keys.
+    if (debugEnabled() && !pc_netplay_deterministic()) pollDebug();
     if (!gsys || !gsys->mDGXGfx) return;
     // Solo con la run en marcha o terminada: los menús del modo van limpios.
     // 5 Parts espera jugando (día 1 del race file): HUD con el reloj a cero.

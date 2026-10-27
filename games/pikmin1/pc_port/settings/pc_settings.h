@@ -353,6 +353,21 @@ void pc_texpack_install_progress(int files);
 void pc_save_transfer_finished(bool ok, const char* message);
 
 #if defined(PIKI_PC_PORT)
+// Deterministic recording (quick save): the settings a recorded day depends
+// on, as canonical one-line text ("simcfg=1;key=value;...", see
+// pc_sim_settings_text.h) for a recording's header, and the text's FNV-1a 64
+// hash. The text is valid until the next call.
+const char* pc_settings_sim_config_text(void);
+unsigned long long pc_settings_sim_config_hash(void);
+// Deterministic recording: called when a day starts in deterministic mode.
+// Until the game leaves that day, those settings keep the values they have
+// now: their F1 rows are greyed with the reason, and any other change to
+// them is undone when the settings save. Does nothing while a netplay
+// session holds its own lock.
+void pc_settings_sim_lock_day_begin(void);
+// 1 while that lock holds.
+int pc_settings_sim_locked(void);
+
 // Netplay builds: the sim-relevant settings both peers must share, as
 // "key=value;" pairs (the session hashes it in the handshake). Valid until
 // the next call.
