@@ -137,7 +137,7 @@ Clock::time_point sLoadRequested;
 Clock::time_point sReplayStart;
 size_t sNextProgress = 0;
 bool sCancel         = false; // Escape: leave the load at the first chance
-bool sLoadFromCli    = false; // --quick-load: a failure exits with a code, for the QA tools
+bool sLoadFromCli    = false; // --quick-load: a failure exits with code 7
 std::string sFailWhy;
 
 // The last save or load result, shown for a few seconds (pc_quicksave_toast).
@@ -550,9 +550,9 @@ void notify(bool error, const char* fmt, ...);
 void endCatchup();
 
 // A load that cannot reproduce the recorded day. From --quick-load the game
-// exits with kLoadFailed (the QA tools read the code); an in-game load stops
-// the replay and leaves the day for the title at its first running tick, with
-// the reason on screen. The caller returns at once.
+// exits with code 7 (kLoadFailed); an in-game load stops the replay and leaves
+// the day for the title at its first running tick, with the reason on screen.
+// The caller returns at once.
 void failLoad(const char* what)
 {
 	if (sLoadFromCli) stopGame(what);

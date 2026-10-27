@@ -556,9 +556,9 @@ to load.
   day is being recorded. Quick Save also turns off monitor-rate interpolation
   for that launch, because the day has to be deterministic.
 - **If a load cannot reproduce the day**, an in-game load stops the replay,
-  shows the reason and returns to the title. `--quick-load` exits instead, so
-  the QA tools can read the code. A day that ends before the saved tick still
-  stops the game, because the end-of-day save would write the diverged replay.
+  shows the reason and returns to the title. `--quick-load` exits with code
+  7. A day that ends before the saved tick still stops the game, because the
+  end-of-day save would write the diverged replay.
 
 ### Control modes
 

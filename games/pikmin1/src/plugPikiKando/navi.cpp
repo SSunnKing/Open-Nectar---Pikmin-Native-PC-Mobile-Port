@@ -971,8 +971,17 @@ static bool pcUpdatePreferredThrowColor(Navi* navi, bool allowKind = false)
 	}
 
 	int steps = touchSteps + padSteps + inputWheelSteps;
-	if (!detMode && wheelOn && pc_settings_get_mouse_wheel_action() == 0) {
-		steps += pc_window_take_wheel_steps();
+	if (wheelOn && pc_settings_get_mouse_wheel_action() == 0) {
+		if (detMode) {
+			// The capture hook already filed this tick's notches into the local
+			// slots. A tick that never filled them (a netplay session does not
+			// run the hook) still has to drain the window, or the notches pile
+			// up and land on a later tick. This captain owns the keyboard; the
+			// result is discarded.
+			if (!pc_netplay_local_slots_filled()) (void)pc_window_take_wheel_steps();
+		} else {
+			steps += pc_window_take_wheel_steps();
+		}
 	}
 	// No colour chosen yet and no notch, tap or press now: stay at -1, the
 	// original choice of the nearest Pikmin of any colour. Taking present[0]

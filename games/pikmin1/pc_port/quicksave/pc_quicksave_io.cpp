@@ -57,7 +57,14 @@ bool sync_file(FILE* f)
 bool replace_file(const fs::path& from, const fs::path& to)
 {
 #if defined(_WIN32)
-	return MoveFileExW(from.wstring().c_str(), to.wstring().c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+	// POSIX rename() replaces an existing file. On Windows, ReplaceFileW does
+	// that, and MoveFileExW covers a target that is not there yet.
+	const std::wstring src = from.wstring();
+	const std::wstring dst = to.wstring();
+	if (fs::exists(to)) {
+		if (ReplaceFileW(dst.c_str(), src.c_str(), nullptr, REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr)) return true;
+	}
+	return MoveFileExW(src.c_str(), dst.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
 #else
 	// rename(2) replaces the target atomically on the same file system.
 	return std::rename(from.c_str(), to.c_str()) == 0;
