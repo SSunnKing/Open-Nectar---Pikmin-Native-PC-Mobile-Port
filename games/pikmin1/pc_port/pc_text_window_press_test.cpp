@@ -1,9 +1,12 @@
 /**
  * @file pc_text_window_press_test.cpp
- * @brief Space and left click show a typing page, then turn it on the next press.
+ * @brief Space, left click and a Shift binding for B show a typing page, then
+ * turn it on the next press.
  *
  * The keys go through the menu translator, as in a text window, and the window
- * sees fresh presses only, as Controller::keyClick does.
+ * sees fresh presses only, as Controller::keyClick does. Shift reaches that
+ * translator only while the text window is live, which is the same check
+ * pc_window.cpp uses.
  */
 
 #include "pc_menu_pad.h"
@@ -25,16 +28,20 @@ void expect(int actual, int expected, const char* what)
 
 // One text window fed one game tick at a time.
 struct Window {
-	bool pageShown      = false;
-	int page            = 0;
-	std::uint16_t prev  = 0;
+	bool pageShown         = false;
+	int page               = 0;
+	std::uint16_t prev     = 0;
+	bool textWindowLive    = true;
+	int bBind              = 0;
+	bool bBindHeld         = false;
 
 	PcTextWindowPress tick(const PcMenuPadKeys& keys)
 	{
 		std::uint16_t button = 0;
 		std::int8_t sx = 0;
 		std::int8_t sy = 0;
-		pc_menu_pad_apply(keys, true, false, SDL_SCANCODE_RETURN, 0, button, sx, sy);
+		const bool boundB = pc_menu_pad_b_binding_counts(bBind, textWindowLive) && bBindHeld;
+		pc_menu_pad_apply(keys, true, boundB, SDL_SCANCODE_RETURN, 0, button, sx, sy);
 		const std::uint16_t fresh = button & ~prev;
 		prev = button;
 		const PcTextWindowPress press
@@ -60,11 +67,13 @@ void testRules()
 	expect(pc_text_window_press(false, true, true), PC_TEXT_PRESS_SHOW_PAGE, "A and B together only show the page");
 }
 
-void testHeldKey(PcMenuPadKeys down, const char* name)
+void testHeldKey(PcMenuPadKeys down, const char* name, int bBind = 0)
 {
 	Window w;
+	w.bBind = bBind;
+	w.bBindHeld = bBind != 0;
 	PcMenuPadKeys up = {};
-	char what[128];
+	char what[160];
 	std::snprintf(what, sizeof what, "%s pressed while typing shows the page", name);
 	expect(w.tick(down), PC_TEXT_PRESS_SHOW_PAGE, what);
 	std::snprintf(what, sizeof what, "%s held does not also turn the page", name);
@@ -72,13 +81,35 @@ void testHeldKey(PcMenuPadKeys down, const char* name)
 		expect(w.tick(down), PC_TEXT_PRESS_NONE, what);
 	}
 	expect(w.page, 0, what);
+	w.bBindHeld = false;
 	w.tick(up);
+	w.bBindHeld = bBind != 0;
 	std::snprintf(what, sizeof what, "%s pressed again turns the page", name);
 	expect(w.tick(down), PC_TEXT_PRESS_NEXT_PAGE, what);
 	expect(w.page, 1, what);
 	std::snprintf(what, sizeof what, "%s held on the new page does nothing", name);
 	expect(w.tick(down), PC_TEXT_PRESS_NONE, what);
 	expect(w.pageShown ? 1 : 0, 0, what);
+	w.bBindHeld = false;
+	w.tick(up);
+	w.bBindHeld = bBind != 0;
+	std::snprintf(what, sizeof what, "%s pressed on the new page shows it", name);
+	expect(w.tick(down), PC_TEXT_PRESS_SHOW_PAGE, what);
+	expect(w.page, 1, what);
+}
+
+void testShiftIgnoredOnMenu()
+{
+	// Pause and the world map are menu mode with no live text window.
+	Window w;
+	w.textWindowLive = false;
+	w.bBind          = SDL_SCANCODE_LSHIFT;
+	w.bBindHeld      = true;
+	PcMenuPadKeys shift = {};
+	shift.shiftL = true;
+	expect(w.tick(shift), PC_TEXT_PRESS_NONE, "Shift on a menu does not show a page");
+	w.pageShown = true;
+	expect(w.tick(shift), PC_TEXT_PRESS_NONE, "Shift on a menu does not turn a page");
 }
 
 void testShownPageTurnsOnFirstPress()
@@ -106,6 +137,13 @@ int main()
 	PcMenuPadKeys enter = {};
 	enter.enter = true;
 	testHeldKey(enter, "Enter");
+	PcMenuPadKeys shiftL = {};
+	shiftL.shiftL = true;
+	testHeldKey(shiftL, "Left Shift bound to B", SDL_SCANCODE_LSHIFT);
+	PcMenuPadKeys shiftR = {};
+	shiftR.shiftR = true;
+	testHeldKey(shiftR, "Right Shift bound to B", SDL_SCANCODE_RSHIFT);
+	testShiftIgnoredOnMenu();
 	testShownPageTurnsOnFirstPress();
 	if (sFailures) {
 		std::printf("%d failure(s)\n", sFailures);

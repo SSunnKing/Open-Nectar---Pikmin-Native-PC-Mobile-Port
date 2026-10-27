@@ -8,8 +8,9 @@
  * faster typing still adds at most one character per game tick, and at the
  * default 30 Hz the normal speed already does that, so holding A barely
  * changes anything. On PC, A (Space, Enter, left click) shows the whole page
- * as well. A press shows the page or turns it, never both: the press that
- * shows the page is used up, and the page turns on the next press.
+ * as well, and so does a Shift binding for B while the window is live. A
+ * press shows the page or turns it, never both: the press that shows the page
+ * is used up, and the page turns on the next press.
  */
 
 enum PcTextWindowPress {
