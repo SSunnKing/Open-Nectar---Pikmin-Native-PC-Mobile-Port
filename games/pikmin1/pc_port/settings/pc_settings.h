@@ -140,6 +140,9 @@ void pc_settings_draw_achievement_toast(void);
 void pc_settings_draw_quick_load(void);
 /// A short result for the menus' notice line (F1 and the title's menu).
 void pc_settings_post_notice(int isError, const char* message);
+/// Quick Load (F7): opens the menu on Data > Quick Load now with the load
+/// armed, showing what it replaces; a second A loads.
+void pc_settings_request_quick_load_confirm(void);
 /// VS: pasa las reglas guardadas (menú previo) a la partida.
 void pc_settings_apply_vs_rules(void);
 #if defined(PIKI_PC_PORT)

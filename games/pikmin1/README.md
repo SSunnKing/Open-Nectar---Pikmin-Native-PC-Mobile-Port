@@ -526,27 +526,39 @@ it on for one launch.
 **How it works:** with the setting on, the game records every input from the
 start of each day. A quick save writes the day's start and those inputs to
 `save/quicksave/<file>.qsv` (one per card file; saving again replaces it). A
-quick load goes back to the start of that day and replays it, fast and muted,
-behind a load screen with a progress bar and the time left, then gives you
-control at the saved moment. So loading takes longer the further into the day
-the save was: about a minute or more for a save several minutes into a day.
+quick load goes back to the start of that day and replays it, muted, behind a
+load screen with a progress bar and the time left. The world is not drawn
+during that catch-up; the load screen stays at the game's resolution. At the
+saved moment you get control again. A save further into the day takes longer
+to load.
 
 - **Where:** F6 and F7 work while a day is being played, not during a
   cutscene or the day's start or end. Day 1 can be saved only after the intro
-  cutscene. F7 on the title screen or in the file select loads the newest quick
-  save. `--quick-load <file>` loads one at launch (a VS match also needs
-  `--vs-map` with the same map).
+  cutscene. F7 opens the menu on **Quick Load now** and says what the load
+  replaces; press A again to load, or move away to cancel. On the title screen
+  or in the file select it loads the newest quick save, with the same
+  confirmation. `--quick-load <file>` loads one at launch without that prompt
+  (a VS match also needs `--vs-map` with the same map). Escape, or B on player
+  1's controller, cancels a load that is already running.
+- **What a load replaces:** a save from earlier in the same day drops only the
+  play since then. A save from an earlier day warns that, when that day ends,
+  its end-of-day save replaces the later days. A save from a later day than
+  the file is refused. Erasing a file, copying another file over it, or
+  starting a new run in that slot deletes its quick save.
 - **Not available** in Challenge Mode, Permadeath, Speedrun, the Randomizer or
-  an online session.
+  an online session. An in-day load is refused in those runs as well.
 - **Updates:** a quick save only loads in the exact build of the game that
   made it. Any rebuild or update of the game makes older quick saves
   unloadable (the game says so and leaves your day alone). Your normal saves
   are not affected.
 - **While it is on**, settings that change the game itself (day length,
   health, Pikmin limit and the like) are fixed until the day ends, because the
-  day is being recorded.
-- **If a load cannot reproduce the day**, the game stops with a message rather
-  than continue a day that differs from the one you saved.
+  day is being recorded. Quick Save also turns off monitor-rate interpolation
+  for that launch, because the day has to be deterministic.
+- **If a load cannot reproduce the day**, an in-game load stops the replay,
+  shows the reason and returns to the title. `--quick-load` exits instead, so
+  the QA tools can read the code. A day that ends before the saved tick still
+  stops the game, because the end-of-day save would write the diverged replay.
 
 ### Control modes
 

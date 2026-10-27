@@ -14,12 +14,16 @@ namespace pc_quicksave {
 // the parent folder. False with *err set on failure (path untouched).
 bool write_file_atomic(const std::string& path, const std::vector<uint8_t>& data, std::string* err);
 
-// Reads a whole file. False with *err set on failure.
-bool read_file(const std::string& path, std::vector<uint8_t>& out, std::string* err);
+// Reads a whole file. False with *err set on failure, or when the file is
+// larger than maxBytes (checked before reading).
+bool read_file(const std::string& path, std::vector<uint8_t>& out, std::string* err, uint64_t maxBytes = UINT64_MAX);
 
 // The paths among `paths` that name an existing file, newest first by
 // modification time (equal times keep the order given).
 std::vector<std::string> existing_newest_first(const std::vector<std::string>& paths);
+
+// Deletes path if it exists. False only when it exists and cannot be deleted.
+bool remove_file(const std::string& path);
 
 // The running executable's path ("" when the platform cannot tell).
 std::string executable_path();

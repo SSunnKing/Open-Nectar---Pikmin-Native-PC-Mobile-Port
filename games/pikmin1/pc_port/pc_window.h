@@ -111,8 +111,9 @@ static inline bool pc_bind_is_valid(int binding) { return binding >= 0 && bindin
 // Whether the swarm binding (keyboard, mouse or gamepad) is held right now.
 bool pc_window_swarm_held(void);
 bool pc_window_swarm_held_p2(void);
-/// D-pad Down on that player's pad: the pad's swarm button, so it must not
-/// also trigger the original D-pad Down action (Olimar lying down).
+/// Physical D-pad Down on that player's gamepad. Recorded while deterministic
+/// mode runs. It is not the swarm button: D-pad Down keeps the original lie
+/// down (issue #138).
 bool pc_window_pad_dpad_down_held(int player);
 /// Eje vertical del stick derecho con Free Camera activo (zoom del radar).
 float pc_window_free_camera_sub_y(void);

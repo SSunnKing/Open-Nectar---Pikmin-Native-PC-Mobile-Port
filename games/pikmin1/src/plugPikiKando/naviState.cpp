@@ -3,8 +3,6 @@
 #include "pc_coop.h"
 #include "pc_whistle_pluck.h"
 #include "pc_window.h"
-#include "netplay/pc_input_log.h"
-#include "netplay/pc_netplay_det.h"
 #endif
 #include <cstdlib>
 #include <cstdio>
@@ -699,19 +697,10 @@ void NaviWalkState::exec(Navi* navi)
 	STACK_PAD_VAR(1);
 	navi->makeVelocity(false);
 
-#if defined(PIKI_PC_PORT)
-	// En el mando la cruceta abajo es el swarm: tumbarse queda en el teclado.
-	// Netplay: offline, deterministic mode reads whether that Down came from
-	// the gamepad from this captain's per-tick input (pc_input_log.h), so a
-	// replay sees what the live run saw; a session keeps the window read.
-	const bool padDownHeld = (pc_netplay_deterministic() && pc_netplay_local_slots_filled())
-	                           ? (pc_netplay_local_flags(navi->mNaviID) & pc_input_log::kLocalPadDpadDown) != 0
-	                           : pc_window_pad_dpad_down_held(navi->mNaviID);
-	if (!playerState->isTutorial() && navi->mGroundTriangle && navi->mKontroller->keyClick(KBBTN_DPAD_DOWN)
-	    && !padDownHeld) {
-#else
+	// D-pad Down lies the captain down, including from a gamepad (issue #138).
+	// The physical button is still recorded for the input log; the sim does
+	// not treat it as the swarm button.
 	if (!playerState->isTutorial() && navi->mGroundTriangle && navi->mKontroller->keyClick(KBBTN_DPAD_DOWN)) {
-#endif
 		navi->mStateMachine->transit(navi, NAVISTATE_Pellet);
 		return;
 	}

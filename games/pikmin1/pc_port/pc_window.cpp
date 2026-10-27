@@ -286,7 +286,8 @@ static SDL_Scancode sKeyBindings[PC_KEY_ACT_COUNT];
 // el código (izquierdo = A, derecho = B, central = Z) son sus valores por defecto.
 static SDL_Scancode sKeyBindings2[PC_KEY_ACT_COUNT];
 static bool sSwarmHeld = false; // PC_KEY_ACT_SWARM sampled by the last poll
-// D-pad Down of each player's pad, which is also the swarm button.
+// Physical D-pad Down of each player's pad. Filed into the deterministic
+// input record. Not the swarm button (issue #138): lie down stays on D-pad Down.
 static bool sPadDpadDownHeld[2] = { false, false };
 
 // Lock-On y Charge se consumen como flanco: el bucle sondea el mando muchas
@@ -1632,7 +1633,7 @@ void pc_window_poll_events(PADStatus* pad) {
         const bool saveDown = quickHeld(PC_KEY_ACT_QUICKSAVE);
         const bool loadDown = quickHeld(PC_KEY_ACT_QUICKLOAD);
         if (saveDown && !sQuickSaveWasDown) pc_quicksave_request_save();
-        if (loadDown && !sQuickLoadWasDown) pc_quicksave_request_load();
+        if (loadDown && !sQuickLoadWasDown) pc_settings_request_quick_load_confirm();
         sQuickSaveWasDown = saveDown;
         sQuickLoadWasDown = loadDown;
         // Escape (or player 1's B) cancels a load under way: a fresh press

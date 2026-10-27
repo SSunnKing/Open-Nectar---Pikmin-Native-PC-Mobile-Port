@@ -23,4 +23,10 @@ LoadProgress load_progress(uint64_t fed, uint64_t total, double secs);
 // not over never shows 0:00. Negative times show as 0:00.
 void format_clock(double secs, char* out, size_t n);
 
+// The Quick Load confirm text: what loading a day-`saved` quick save
+// replaces on a file now on day `fileDay` (-1: not known, a generic warning).
+// inDay: the load leaves a day being played. False (with the refusal in out)
+// when the save is from a later day than the file, so not this file's.
+bool describe_load(int saved, int fileDay, bool inDay, char* out, size_t n);
+
 } // namespace pc_quicksave

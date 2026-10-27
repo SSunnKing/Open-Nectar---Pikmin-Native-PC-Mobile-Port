@@ -303,6 +303,9 @@ void test_io()
 	check(q::read_file(path, back, &err) && back == b, "read back the second write");
 	check(!fs::exists(fs::path(path + ".tmp"), ec), "no temporary file left behind");
 	check(!q::read_file((dir / "missing.qsv").string(), back, &err) && !err.empty(), "a missing file fails with a reason");
+	err.clear();
+	check(!q::read_file(path, back, &err, b.size() - 1) && back.empty() && !err.empty(), "a file over the size cap is refused unread");
+	check(q::read_file(path, back, &err, b.size()) && back == b, "a file at the size cap is read");
 
 	// The newest of the slot files that exist, as a load from the title picks.
 	const std::string s0 = (dir / "quicksave" / "0.qsv").string();
@@ -319,6 +322,8 @@ void test_io()
 	const std::vector<std::string> tie = q::existing_newest_first({ s2, path });
 	check(tie.size() == 2 && tie[0] == s2 && tie[1] == path, "equal times keep the given order");
 	check(q::existing_newest_first({ s3 }).empty(), "none exists");
+	check(q::remove_file(s2) && q::existing_newest_first({ s2 }).empty(), "remove_file deletes an existing file");
+	check(q::remove_file(s3), "remove_file on a missing file is not an error");
 	fs::remove_all(dir, ec);
 
 	uint8_t d1[32], d2[32];
