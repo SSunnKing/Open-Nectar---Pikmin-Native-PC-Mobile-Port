@@ -1,5 +1,8 @@
 #include "DebugLog.h"
 #include "Demo.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_onion_skip.h"
+#endif
 #include "GameStat.h"
 #include "GoalItem.h"
 #include "SimpleAI.h"
@@ -418,10 +421,11 @@ void DemoEventMgr::finishOnionBootAfterSkip(Creature* target)
 	}
 
 	GoalItem* goal = static_cast<GoalItem*>(target);
-	if (!goal->mSAICtx.mStateMachine || !playerState->hasBootContainer(goal->mOnionColour)) {
+	if (!goal->mSAICtx.mStateMachine) {
 		return;
 	}
-	if (C_SAI(goal)->getCurrID(goal) == GoalAI::GOAL_BootInit) {
+	if (pc_onion_skip_needs_first_seed(playerState->hasBootContainer(goal->mOnionColour), C_SAI(goal)->getCurrID(goal),
+	                                   GoalAI::GOAL_BootInit)) {
 		C_SAI(goal)->start(goal, GoalAI::GOAL_BootEmit);
 	}
 }
