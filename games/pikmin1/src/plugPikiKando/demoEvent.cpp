@@ -322,6 +322,11 @@ void DemoEventMgr::act(int sender, int event)
 				if (playerState->hasBootContainer(goalID)) {
 #if defined(PIKI_PC_PORT)
 					if (mPcSkipping) {
+						// A skip between Boot and the boot animation's action key
+						// leaves the Onion in BootInit. Fire the first seed now:
+						// pcSnapLanded() moves it to Wait, and the recovery after
+						// the replay only acts in BootInit.
+						finishOnionBootAfterSkip(goal);
 						goal->pcSnapLanded();
 						break;
 					}
@@ -402,6 +407,9 @@ void DemoEventMgr::act(int sender, int event)
  * Boot events dispatched by the skip path already enter GOAL_BootEmit, and a
  * normally completed boot has moved on again, so limiting this recovery to
  * GOAL_BootInit also prevents a second seed from being created.
+ *
+ * Called from the replayed EmitCone (before it snaps the Onion to Wait) and
+ * once more after the replay, for movies with no EmitCone left to replay.
  */
 void DemoEventMgr::finishOnionBootAfterSkip(Creature* target)
 {
