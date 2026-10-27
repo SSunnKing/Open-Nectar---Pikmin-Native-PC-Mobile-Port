@@ -57,7 +57,7 @@ constexpr int kLoadFailed = 7; // a load did not reproduce the recorded day
 void pc_quicksave_init(int argc, char** argv);
 bool pc_quicksave_enabled(void);
 
-// The bound actions (pc_window). A save request acts
+// The bound actions (pc_window) and the F1 menu's rows. A save request acts
 // at the end of the tick. The result (or why nothing happened) goes to the
 // console, the menus' notice line and pc_quicksave_toast.
 void pc_quicksave_request_save(void);
@@ -82,6 +82,10 @@ struct PcQuickLoadStatus {
 bool pc_quicksave_load_status(PcQuickLoadStatus* out); // false when no load is under way
 // The last result for a few seconds after it: false when there is none.
 bool pc_quicksave_toast(char* out, size_t n, bool* isError, float* age);
+// Why the save or load action does nothing now ("" when it works), for the
+// F1 rows.
+const char* pc_quicksave_save_unavailable(void);
+const char* pc_quicksave_load_unavailable(void);
 
 // Game flow hooks. Each one does nothing with the feature off.
 void pc_quicksave_day_prepare(void);  // NewPikiGameSection: before the day is built
