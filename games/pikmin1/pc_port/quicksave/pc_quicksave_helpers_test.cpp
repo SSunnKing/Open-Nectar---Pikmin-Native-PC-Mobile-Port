@@ -1,7 +1,8 @@
 // Host-run test of the quick save's pure helpers: the day-start precision
-// block (pc_quicksave_carry.h).
+// block (pc_quicksave_carry.h) and the load progress (pc_quicksave_progress.h).
 
 #include "quicksave/pc_quicksave_carry.h"
+#include "quicksave/pc_quicksave_progress.h"
 
 #include <cstdio>
 #include <cstring>
@@ -130,6 +131,40 @@ void test_card_unit()
 	check(!q::carry_matches_card(s, card, 1, 1), "another growth stage");
 }
 
+void test_progress()
+{
+	q::LoadProgress p = q::load_progress(0, 27000, 0.0);
+	check(p.percent == 0 && !p.remainingKnown, "nothing replayed");
+	p = q::load_progress(500, 27000, 1.0);
+	check(p.percent == 1 && !p.remainingKnown, "under 2%: no estimate yet");
+	p = q::load_progress(2700, 27000, 9.0);
+	check(p.percent == 10 && p.remainingKnown && p.remaining > 80.99 && p.remaining < 81.01, "10% in 9 s: 81 s left");
+	p = q::load_progress(13499, 27000, 40.0);
+	check(p.percent == 49, "percent rounds down");
+	p = q::load_progress(27000, 27000, 70.0);
+	check(p.percent == 100 && p.remainingKnown && p.remaining == 0.0, "done");
+	p = q::load_progress(0, 0, 0.0);
+	check(p.percent == 100, "an empty replay is done");
+	p = q::load_progress(100, 120, 0.2);
+	check(!p.remainingKnown, "under half a second: no estimate yet");
+	p = q::load_progress(60, 120, 0.6);
+	check(p.percent == 50 && p.remainingKnown, "a short day estimates after 60 ticks");
+
+	char s[16];
+	q::format_clock(0.0, s, sizeof(s));
+	check(std::string(s) == "0:00", "zero");
+	q::format_clock(0.2, s, sizeof(s));
+	check(std::string(s) == "0:01", "a fraction of a second rounds up");
+	q::format_clock(69.0, s, sizeof(s));
+	check(std::string(s) == "1:09", "minutes and seconds");
+	q::format_clock(3725.0, s, sizeof(s));
+	check(std::string(s) == "1:02:05", "hours");
+	q::format_clock(-3.0, s, sizeof(s));
+	check(std::string(s) == "0:00", "negative");
+	char tiny[3] = { 'x', 'x', 'x' };
+	q::format_clock(69.0, tiny, sizeof(tiny));
+	check(tiny[2] == '\0', "a short buffer stays terminated");
+}
 } // namespace
 
 int main()
@@ -137,6 +172,7 @@ int main()
 	test_carry_round_trip();
 	test_carry_refuses();
 	test_card_unit();
+	test_progress();
 	if (sFailures == 0) std::printf("pc_quicksave_helpers_test: all passed\n");
 	return sFailures == 0 ? 0 : 1;
 }

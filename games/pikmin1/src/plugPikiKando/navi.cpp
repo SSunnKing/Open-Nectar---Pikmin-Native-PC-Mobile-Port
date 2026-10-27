@@ -782,6 +782,34 @@ static int sPreferredThrowKind[2] = { -1, -1 };
 static bool sPreferredFromPad[2]   = { false, false };
 static int sPreferredBeforePad[2]  = { -1, -1 };
 
+// Quick save: the throw preferences above are sim state that carries over
+// from one day (or VS match) to the next, so a day's start holds them and a
+// load puts them back before the recorded day starts again.
+int pc_navi_throw_prefs_save(int out[8])
+{
+	out[0] = sPreferredThrowColor;
+	out[1] = sPreferredThrowColorP2;
+	out[2] = sPreferredThrowKind[0];
+	out[3] = sPreferredThrowKind[1];
+	out[4] = sPreferredFromPad[0] ? 1 : 0;
+	out[5] = sPreferredFromPad[1] ? 1 : 0;
+	out[6] = sPreferredBeforePad[0];
+	out[7] = sPreferredBeforePad[1];
+	return 8;
+}
+
+void pc_navi_throw_prefs_restore(const int in[8])
+{
+	sPreferredThrowColor   = in[0];
+	sPreferredThrowColorP2 = in[1];
+	sPreferredThrowKind[0] = in[2];
+	sPreferredThrowKind[1] = in[3];
+	sPreferredFromPad[0]   = in[4] != 0;
+	sPreferredFromPad[1]   = in[5] != 0;
+	sPreferredBeforePad[0] = in[6];
+	sPreferredBeforePad[1] = in[7];
+}
+
 static int pcThrowSlot(Navi* navi) { return navi && navi->mNaviID == pcThrowKeyboardOwner() ? 0 : 1; }
 
 static bool pcKindMatches(Piki* piki, int kind)

@@ -303,6 +303,22 @@ void test_io()
 	check(q::read_file(path, back, &err) && back == b, "read back the second write");
 	check(!fs::exists(fs::path(path + ".tmp"), ec), "no temporary file left behind");
 	check(!q::read_file((dir / "missing.qsv").string(), back, &err) && !err.empty(), "a missing file fails with a reason");
+
+	// The newest of the slot files that exist, as a load from the title picks.
+	const std::string s0 = (dir / "quicksave" / "0.qsv").string();
+	const std::string s2 = (dir / "quicksave" / "2.qsv").string();
+	const std::string s3 = (dir / "quicksave" / "3.qsv").string();
+	check(q::write_file_atomic(s0, a, &err) && q::write_file_atomic(s2, a, &err), "two more slot files");
+	const auto now = fs::file_time_type::clock::now();
+	fs::last_write_time(fs::path(s0), now - std::chrono::hours(2), ec);
+	fs::last_write_time(fs::path(path), now - std::chrono::hours(1), ec);
+	fs::last_write_time(fs::path(s2), now - std::chrono::hours(3), ec);
+	const std::vector<std::string> order = q::existing_newest_first({ s0, path, s2, s3 });
+	check(order.size() == 3 && order[0] == path && order[1] == s0 && order[2] == s2, "newest first, missing ones left out");
+	fs::last_write_time(fs::path(s2), now - std::chrono::hours(1), ec);
+	const std::vector<std::string> tie = q::existing_newest_first({ s2, path });
+	check(tie.size() == 2 && tie[0] == s2 && tie[1] == path, "equal times keep the given order");
+	check(q::existing_newest_first({ s3 }).empty(), "none exists");
 	fs::remove_all(dir, ec);
 
 	uint8_t d1[32], d2[32];

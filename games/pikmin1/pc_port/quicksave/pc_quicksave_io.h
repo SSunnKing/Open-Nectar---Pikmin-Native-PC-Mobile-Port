@@ -17,6 +17,10 @@ bool write_file_atomic(const std::string& path, const std::vector<uint8_t>& data
 // Reads a whole file. False with *err set on failure.
 bool read_file(const std::string& path, std::vector<uint8_t>& out, std::string* err);
 
+// The paths among `paths` that name an existing file, newest first by
+// modification time (equal times keep the order given).
+std::vector<std::string> existing_newest_first(const std::vector<std::string>& paths);
+
 // The running executable's path ("" when the platform cannot tell).
 std::string executable_path();
 

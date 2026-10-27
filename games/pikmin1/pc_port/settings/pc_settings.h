@@ -124,6 +124,8 @@ void pc_first_person_toggle(void);
 /// Coop/VS: primera persona de cada jugador (las de arriba son las de J1).
 int pc_first_person_active_for(int player);
 void pc_first_person_toggle_for(int player);
+/// Quick save load: puts back the state the recorded run had.
+void pc_first_person_set_active_for(int player, int on);
 /// Daño a un enemigo, ya escalado por "Enemy Health".
 float pc_mods_teki_damage(float damage);
 /// Contador de Pikmin ociosos sobre el juego. Lo llama vi_stubs en el retrace,
@@ -133,6 +135,11 @@ void pc_settings_draw_idle_counter(void);
 void pc_settings_draw_vs_hud(void);
 /// Aviso de logro desbloqueado (pc_achievements).
 void pc_settings_draw_achievement_toast(void);
+/// Quick Save (pc_quicksave.h): the load screen while a quick load runs, else
+/// the last save or load result for a few seconds (not over the menus).
+void pc_settings_draw_quick_load(void);
+/// A short result for the menus' notice line (F1 and the title's menu).
+void pc_settings_post_notice(int isError, const char* message);
 /// VS: pasa las reglas guardadas (menú previo) a la partida.
 void pc_settings_apply_vs_rules(void);
 #if defined(PIKI_PC_PORT)
@@ -314,6 +321,9 @@ unsigned char pcOsLanguageFromGame(int gameLanguage);
 int pc_settings_get_coop_split(void);
 // Cámara coop dinámica (una cámara con los Olimar cerca); 0 = partida fija.
 int pc_settings_get_coop_merge_camera(void);
+/// Quick Save (experimental), 0 = off (the default). The game reads it once at
+/// launch (pc_quicksave_init); a change takes effect at the next launch.
+int pc_settings_get_quick_save(void);
 
 /**
  * @brief The language the PAL disc should be played in, as an OS_LANG_* value.

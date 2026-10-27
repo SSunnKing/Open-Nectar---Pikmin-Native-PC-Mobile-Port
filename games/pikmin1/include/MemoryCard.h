@@ -75,6 +75,12 @@ public:
 	// ranura, y su carga en la tarjeta como un guardado más.
 	bool pcDayQuickInfo(int slot, int day, CardQuickInfo& out);
 	bool pcRestoreDay(int slot, int day);
+	// Quick save (pc_quicksave.h): the game file of the game in memory, as
+	// saveCurrentGame writes it (0x8000 bytes, card untouched, game state
+	// unchanged), and the reverse: the game reloaded from such a file as the
+	// file select loads a save, after the same reset of the game state.
+	void pcWriteQuickSaveBlock(u8* out);
+	void pcLoadQuickSaveBlock(const u8* data);
 #endif
 
 protected:
