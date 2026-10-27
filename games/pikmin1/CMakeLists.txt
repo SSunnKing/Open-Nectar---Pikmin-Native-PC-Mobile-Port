@@ -1614,6 +1614,21 @@ if(PIKMIN_BUILD_TESTS)
         pc_port/settings/pc_sim_settings_text.cpp)
     target_compile_options(pc_sim_settings_text_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_sim_settings_text_test COMMAND pc_sim_settings_text_test)
+
+    # Quick save file: format, CRC, truncation, header checks and atomic writes.
+    add_executable(pc_quicksave_file_test
+        pc_port/quicksave/pc_quicksave_file_test.cpp
+        pc_port/quicksave/pc_quicksave_file.cpp
+        pc_port/quicksave/pc_quicksave_io.cpp)
+    target_compile_options(pc_quicksave_file_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_quicksave_file_test COMMAND pc_quicksave_file_test)
+
+    # Day-start precision block carried beside the card block.
+    add_executable(pc_quicksave_helpers_test
+        pc_port/quicksave/pc_quicksave_helpers_test.cpp
+        pc_port/quicksave/pc_quicksave_carry.cpp)
+    target_compile_options(pc_quicksave_helpers_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_quicksave_helpers_test COMMAND pc_quicksave_helpers_test)
 endif()
 
 # Netplay-only checks. The libm test compares against the platform libm
