@@ -110,6 +110,9 @@ static constexpr u8 kEnvelopeControlPeriod = 32;
 static SampleVoice sSampleVoices[kSampleVoiceCount];
 static u16 sVoiceGenerations[kSampleVoiceCount] = {};
 static float sBusVolumes[PC_AUDIO_BUS_COUNT] = { 1.0f, 1.0f, 1.0f, 1.0f };
+// Quick save load (pc_audio_set_output_muted): the mixer keeps running, so
+// every voice advances as usual, and the device gets silence.
+static std::atomic<bool> sOutputMuted { false };
 
 // Loudness of each path as actually mixed, not as configured. Gameplay music is
 // sequenced (BGM bus) and cinematic music is streamed (STREAM bus), and the two
@@ -478,6 +481,7 @@ static void audio_callback(void*, Uint8* output, int byteCount) {
         dst[frame * 2] = clamp_s16(mixedLeft);
         dst[frame * 2 + 1] = clamp_s16(mixedRight);
     }
+    if (sOutputMuted.load(std::memory_order_relaxed)) std::memset(output, 0, static_cast<size_t>(byteCount));
 
     if (sDMAReadCursor >= sDMAQueue.size()) {
         sDMAQueue.clear();
@@ -1546,6 +1550,10 @@ void pc_audio_report_levels(void) {
             sBusVolumes[PC_AUDIO_BUS_STREAM], sBusVolumes[PC_AUDIO_BUS_BGM],
             sBusVolumes[PC_AUDIO_BUS_SE], sBgmTrackGain, sStreamVolume / 255.0f);
 }
+
+void pc_audio_set_output_muted(bool muted) { sOutputMuted.store(muted, std::memory_order_relaxed); }
+
+bool pc_audio_output_muted(void) { return sOutputMuted.load(std::memory_order_relaxed); }
 
 void pc_audio_set_bus_volume(PCAudioBus bus, float volume) {
     if (!sAudioDevice || bus < 0 || bus >= PC_AUDIO_BUS_COUNT) return;

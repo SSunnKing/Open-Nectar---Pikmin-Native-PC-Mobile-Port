@@ -3,6 +3,9 @@
 #include <SDL.h>
 #include <limits>
 #include <cstdio>
+#include <vector>
+
+extern "C" bool pc_audio_output_muted(void); // pc_audio.cpp (pc_audio.h)
 
 namespace {
 SDL_AudioDeviceID device = 0;
@@ -52,6 +55,13 @@ int PikiAudioSinkOpen(int rate) { return PikiAudioSinkTryOpen(rate); }
 int PikiAudioSinkQueue(const int16_t* pcm, size_t frames)
 {
     if (!device || !pcm || !frames || frames > std::numeric_limits<Uint32>::max() / 4) return 0;
+    // A quick save load mutes the output: the same amount of silence keeps
+    // the queue's timing.
+    if (pc_audio_output_muted()) {
+        static std::vector<int16_t> silence;
+        silence.assign(frames * 2, 0);
+        pcm = silence.data();
+    }
     if (SDL_QueueAudio(device, pcm, static_cast<Uint32>(frames * 4)) != 0) return 0;
     submitted += frames;
     return 1;

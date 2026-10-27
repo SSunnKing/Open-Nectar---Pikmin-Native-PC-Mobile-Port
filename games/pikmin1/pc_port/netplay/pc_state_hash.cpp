@@ -352,6 +352,21 @@ uint64_t pc_state_hash_tick(void) { return sTick; }
 
 void pc_state_hash_set_netplay_capture(bool on) { sNetplayCapture = on; }
 
+uint64_t pc_state_hash_compute_total(void)
+{
+	uint64_t total = kFnvOffset;
+	mixU64(total, hashNavi());
+	mixU64(total, hashPiki());
+	mixU64(total, hashTeki());
+	mixU64(total, hashItem());
+	mixU64(total, hashWorld());
+	mixU64(total, hashRng());
+	mixU64(total, hashMode());
+	return total;
+}
+
+void pc_state_hash_set_tick(uint64_t tick) { sTick = tick; }
+
 void pc_state_hash_set_mode_fn(PcStateHashModeFn fn) { sModeFn = fn; }
 
 void pc_state_hash_print_navi_positions(uint64_t tick)

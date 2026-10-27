@@ -8,6 +8,8 @@
 //   record-nondet <file>      deterministic mode off -> v2 file, as before
 //   replay-v3 <file> <record> deterministic mode, a v3 replay records v3 and
 //                             keeps the local slots empty despite live input
+//   memory                    deterministic mode, no file: the record sink and
+//                             an in-memory replay that hands back to live input
 // Engine-free: links pc_input_log.cpp and the deterministic-mode switch.
 
 #include "netplay/pc_input_log.h"
@@ -319,12 +321,129 @@ int runReplayV3(const char* file, const char* record)
 	check(out == src, "v3 replay: re-record is v3 and reproduces the file byte for byte");
 	return 0;
 }
+std::vector<uint8_t> sSunk;
+int sSinkCalls = 0;
+
+void sink(const uint8_t record[104])
+{
+	++sSinkCalls;
+	sSunk.insert(sSunk.end(), record, record + 104);
+}
+
+int runMemory()
+{
+	std::vector<std::string> args = { "test", "--netplay-deterministic" };
+	start(args);
+	pc_input_log_set_record_sink(&sink);
+	pc_input_log_set_local_capture_fn(&scriptedHook);
+	// Live: the sink receives exactly what the sim was fed.
+	for (sTick = 0; sTick < kTicks; ++sTick) {
+		scriptedPads(sTick);
+		pc_input_log_tick();
+		pc_input_log_tick_end();
+	}
+	check(!pc_input_log_is_record_active() && !pc_input_log_is_replay_active(), "memory: no file involved");
+	check(sSinkCalls == kTicks && sSunk.size() == (size_t)kTicks * 104, "memory: one sunk record per live tick");
+	for (int t = 0; t < kTicks && sSunk.size() >= (size_t)(t + 1) * 104; ++t) {
+		PcInputPad decoded[4];
+		pc_input_log_decode_tick_v4(sSunk.data() + (size_t)t * 104, 104, decoded);
+		scriptedPads(t);
+		check(decoded[0].button == sStubPads[0].button, "memory: sunk pads");
+		for (int p = 0; p < 4; ++p) {
+			PcLocalInput got;
+			got.flags      = decoded[p].local;
+			got.wheelSteps = decoded[p].wheelSteps;
+			got.cursorDx   = decoded[p].cursorDx;
+			got.cursorDy   = decoded[p].cursorDy;
+			got.ext        = decoded[p].flags;
+			check(sameLocal(got, scriptedLocal(t, p)), "memory: sunk local input bit for bit");
+		}
+	}
+
+	// Replay the first K ticks from memory while the live input is junk. The
+	// replay begins in the middle of a tick, as the day start that begins it
+	// runs inside the sim: that tick keeps its live input and the next tick
+	// takes the first record.
+	const int K                     = 40;
+	const std::vector<uint8_t> live = sSunk;
+	scriptedPads(kTicks);
+	pc_input_log_tick();
+	check(pc_input_log_replay_memory_begin(live.data(), K), "memory: replay begins");
+	pc_input_log_tick_end();
+	sSunk.clear();
+	sSinkCalls = 0;
+	check(pc_input_log_replay_memory_active() && pc_input_log_replay_memory_fed() == 0,
+	      "memory: a replay begun mid-tick has fed nothing at that tick's end");
+	pc_input_log_set_local_capture_fn(&junkHook);
+	for (sTick = 0; sTick < K; ++sTick) {
+		for (int p = 0; p < 4; ++p) std::memset(&sStubPads[p], 0x11, sizeof(PADStatus));
+		pc_input_log_tick();
+		check(pc_netplay_pad_status()[0].button == (uint16_t)(sTick * 37), "memory replay: pads from memory");
+		for (int p = 0; p < 4; ++p) {
+			PcLocalInput got;
+			readSlots(p, got);
+			check(sameLocal(got, scriptedLocal(sTick, p)), "memory replay: the recorded input reaches the sim");
+		}
+		pc_input_log_tick_end();
+		check(pc_input_log_replay_memory_fed() == (size_t)sTick + 1, "memory replay: one record consumed per tick");
+	}
+	check(sSunk.size() == (size_t)K * 104 && std::memcmp(sSunk.data(), live.data(), sSunk.size()) == 0,
+	      "memory replay: the sink re-records the replayed ticks byte for byte");
+	// Past the last record and before the handoff: neutral, never live.
+	for (int p = 0; p < 4; ++p) std::memset(&sStubPads[p], 0x11, sizeof(PADStatus));
+	pc_input_log_tick();
+	check(pc_netplay_pad_status()[0].button == 0 && pc_netplay_pad_status()[1].err == -1,
+	      "memory replay: past its end the pads are neutral");
+	for (int p = 0; p < 4; ++p) {
+		PcLocalInput got, zero;
+		std::memset(&zero, 0, sizeof(zero));
+		readSlots(p, got);
+		check(sameLocal(got, zero), "memory replay: past its end the local slots are neutral");
+	}
+	pc_input_log_tick_end();
+	check(pc_input_log_replay_memory_fed() == (size_t)K, "memory replay: the count stops at the last record");
+
+	// The handoff: the next tick is live again and recorded.
+	pc_input_log_replay_memory_end();
+	check(!pc_input_log_replay_memory_active(), "memory: replay over");
+	pc_input_log_set_local_capture_fn(&scriptedHook);
+	sSunk.clear();
+	for (sTick = K; sTick < K + 5; ++sTick) {
+		scriptedPads(sTick);
+		pc_input_log_tick();
+		for (int p = 0; p < 4; ++p) {
+			PcLocalInput got;
+			readSlots(p, got);
+			check(sameLocal(got, scriptedLocal(sTick, p)), "memory handoff: live input reaches the sim again");
+		}
+		check(pc_netplay_pad_status()[0].button == (uint16_t)(sTick * 37), "memory handoff: live pads");
+		pc_input_log_tick_end();
+	}
+	check(sSunk.size() == 5 * 104, "memory handoff: live ticks are recorded again");
+
+	// The camera rotation remainder can be read and handed over.
+	float rem[4] = { 0.25f, -0.5f, 0.0f, 0.125f };
+	pc_input_log_pad_rotate_set(rem);
+	float back[4] = {};
+	pc_input_log_pad_rotate_get(back);
+	check(std::memcmp(rem, back, sizeof(rem)) == 0, "memory: rotate remainder round trip");
+	return 0;
+}
 } // namespace
 
 int main(int argc, char** argv)
 {
+	if (argc == 2 && std::string(argv[1]) == "memory") {
+		runMemory();
+		if (sFailures == 0) {
+			std::printf("pc_input_log_runtime_test memory: all checks passed\n");
+			return 0;
+		}
+		std::printf("pc_input_log_runtime_test memory: %d failure(s)\n", sFailures);
+		return 1;
+	}
 	if (argc < 3) {
-		std::printf("usage: %s record|replay|record-nondet|replay-v3 <file> [<record>]\n", argv[0]);
+		std::printf("usage: %s record|replay|record-nondet|replay-v3 <file> [<record>] | memory\n", argv[0]);
 		return 2;
 	}
 	const std::string mode = argv[1];

@@ -72,6 +72,9 @@ enum {
     PC_KEY_ACT_LIEDOWN        = 27,
     // Mantener: el stick derecho mueve el cursor (como el ratón) en vez de la cámara o el swarm.
     PC_KEY_ACT_AIM_STICK      = 28,
+    // Quick Save (experimental, pc_quicksave.h): save the day here, load it back.
+    PC_KEY_ACT_QUICKSAVE = 29,
+    PC_KEY_ACT_QUICKLOAD = 30,
     PC_KEY_ACT_COUNT
 };
 

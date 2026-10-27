@@ -4,6 +4,7 @@
 
 #include "netplay/pc_netplay_sha256.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -147,6 +148,28 @@ bool read_file(const std::string& path, std::vector<uint8_t>& out, std::string* 
 		return false;
 	}
 	return true;
+}
+
+std::vector<std::string> existing_newest_first(const std::vector<std::string>& paths)
+{
+	struct Entry {
+		std::string path;
+		fs::file_time_type time;
+		size_t order;
+	};
+	std::vector<Entry> found;
+	for (size_t i = 0; i < paths.size(); ++i) {
+		std::error_code ec;
+		const fs::path p(paths[i]);
+		if (!fs::is_regular_file(p, ec) || ec) continue;
+		const fs::file_time_type t = fs::last_write_time(p, ec);
+		if (ec) continue;
+		found.push_back({ paths[i], t, i });
+	}
+	std::stable_sort(found.begin(), found.end(), [](const Entry& a, const Entry& b) { return a.time > b.time; });
+	std::vector<std::string> out;
+	for (const Entry& e : found) out.push_back(e.path);
+	return out;
 }
 
 std::string executable_path()

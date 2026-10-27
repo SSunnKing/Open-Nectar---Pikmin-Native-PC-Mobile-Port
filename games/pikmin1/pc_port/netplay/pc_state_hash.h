@@ -66,6 +66,13 @@ uint64_t pc_state_hash_tick(void);
 void pc_state_hash_set_netplay_capture(bool on);
 bool pc_state_hash_current(uint64_t* total, uint64_t subs[7], uint64_t* tick);
 
+// Quick save: the total hash of the sim as it is now (the same value the log
+// writes for a tick's end), without counting a tick or writing the log.
+uint64_t pc_state_hash_compute_total(void);
+// Quick save load: sets the tick counter, so the log and the exit-after switch
+// count a re-entered day's ticks with the recorded day's numbers.
+void pc_state_hash_set_tick(uint64_t tick);
+
 // Source for the mode column. Null (the default) hashes 0.
 typedef uint64_t (*PcStateHashModeFn)(void);
 void pc_state_hash_set_mode_fn(PcStateHashModeFn fn);

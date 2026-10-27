@@ -6,6 +6,8 @@
 #include "Stream.h"
 #include "gameflow.h"
 #if defined(PIKI_PC_PORT)
+#include "FlowController.h"
+#include "Generator.h"
 #include "pc_permadeath.h"
 #include "pc_day_history.h"
 #include "randomizer/pc_randomizer.h"
@@ -1276,6 +1278,49 @@ bool MemoryCard::pcRestoreDay(int slot, int day)
 	gsys->mIsCardSaving = FALSE;
 	gameflow.mGamePrefs.mMostRecentSaveIndex++;
 	return true;
+}
+
+// Quick save: the bytes saveCurrentGame would write for the game in memory,
+// up to the checksum, without touching the card. writeCurrentGame fills the
+// play state's counts (a copy here) and saveCard clears the tutorial flag,
+// which is put back so the game itself is unchanged. Between days no ship
+// part is registered (exitCourse), so saveCard would write no part states:
+// every part's state is written, as the day's-end save writes them.
+void MemoryCard::pcWriteQuickSaveBlock(u8* out)
+{
+	memset(out, 0, 0x8000);
+	RamStream stream(out, 0x8000);
+	PlayState state     = gameflow.mPlayState;
+	const bool tutorial = playerState != nullptr && playerState->mIsTutorialMode;
+	const int registered = playerState != nullptr ? playerState->mTotalRegisteredParts : 0;
+	if (playerState != nullptr) playerState->mTotalRegisteredParts = playerState->mTotalParts;
+	writeCurrentGame(&stream, state);
+	if (playerState != nullptr) {
+		playerState->mIsTutorialMode       = tutorial;
+		playerState->mTotalRegisteredParts = registered;
+	}
+	stream.padFileTo(0x8000, 8);
+	pc_permadeath_write_block(stream, pc_permadeath_active(), pc_hardmode_active(), pc_randomizer_rules());
+}
+
+// Quick save: the game reloaded from such a block, with the reset
+// CardSelectSection does before the file select loads a save (the stage
+// being entered is kept). The caller restores what the file does not decide:
+// the world clock (readCurrentGame takes the day from the play state) and
+// the tutorial flag (saveCard always writes it cleared).
+void MemoryCard::pcLoadQuickSaveBlock(const u8* data)
+{
+	playerState->initGame();
+	generatorCache->initGame();
+	pikiInfMgr.initGame();
+	FOREACH_NODE(StageInfo, flowCont.mStageList.mChild, stage)
+	{
+		stage->mHasInitialised = FALSE;
+		stage->mStageInf.initGame();
+	}
+	memcpy(sPcDayFile, data, sizeof(sPcDayFile));
+	RamStream stream(sPcDayFile, sizeof(sPcDayFile));
+	readCurrentGame(&stream);
 }
 #endif
 

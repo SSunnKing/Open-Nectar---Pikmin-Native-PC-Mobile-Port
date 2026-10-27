@@ -359,6 +359,16 @@ int8_t sWheel[4]       = { 0, 0, 0, 0 };
 float sCursorDx[4]     = { 0.0f, 0.0f, 0.0f, 0.0f };
 float sCursorDy[4]     = { 0.0f, 0.0f, 0.0f, 0.0f };
 PcLocalCaptureFn sLocalCaptureFn = nullptr;
+// Quick save: the sink that receives every tick's v4 record, and the
+// in-memory replay of a recorded day (pc_input_log_replay_memory_begin).
+PcInputRecordSinkFn sRecordSink = nullptr;
+bool sMemActive = false;
+std::vector<uint8_t> sMemRecords;
+size_t sMemTicks = 0;
+size_t sMemIndex = 0;
+// This tick took a record from the memory replay. A replay begun in the
+// middle of a tick (the sim starts it) begins with the next tick's input.
+bool sMemFed = false;
 
 void clear_local_slots()
 {
@@ -570,6 +580,151 @@ void pc_input_log_close(void)
 	}
 }
 
+namespace {
+// Overwrites the polled pads and fills the slots from one recorded tick.
+void apply_record(uint16_t version, const uint8_t* rec, size_t recSize)
+{
+	PADStatus* pads = pc_netplay_pad_status();
+	PcInputPad decoded[4];
+	if (version == pc_input_log::kVersionV1) {
+		if (!pc_input_log_decode_tick_v1(rec, recSize, decoded)) return;
+		for (int p = 0; p < 4; ++p) {
+			pads[p].button       = decoded[p].button;
+			pads[p].stickX       = decoded[p].stickX;
+			pads[p].stickY       = decoded[p].stickY;
+			pads[p].substickX    = decoded[p].substickX;
+			pads[p].substickY    = decoded[p].substickY;
+			pads[p].triggerLeft  = decoded[p].triggerLeft;
+			pads[p].triggerRight = decoded[p].triggerRight;
+			pads[p].analogA      = decoded[p].analogA;
+			pads[p].analogB      = decoded[p].analogB;
+			pads[p].err          = decoded[p].err;
+		}
+		// v1 carries no yaw: left invalid so the pre-sim capture
+		// hook fills it live from the camera, as today.
+		return;
+	}
+	const bool v4 = version == pc_input_log::kVersionV4;
+	const bool v3 = version == pc_input_log::kVersionV3 || v4;
+	bool ok       = false;
+	if (v4) ok = pc_input_log_decode_tick_v4(rec, recSize, decoded);
+	else if (v3) ok = pc_input_log_decode_tick_v3(rec, recSize, decoded);
+	else ok = pc_input_log_decode_tick(rec, recSize, decoded);
+	if (!ok) return;
+	for (int p = 0; p < 4; ++p) {
+		pads[p].button       = decoded[p].button;
+		pads[p].stickX       = decoded[p].stickX;
+		pads[p].stickY       = decoded[p].stickY;
+		pads[p].substickX    = decoded[p].substickX;
+		pads[p].substickY    = decoded[p].substickY;
+		pads[p].triggerLeft  = decoded[p].triggerLeft;
+		pads[p].triggerRight = decoded[p].triggerRight;
+		pads[p].analogA      = decoded[p].analogA;
+		pads[p].analogB      = decoded[p].analogB;
+		pads[p].err          = decoded[p].err;
+		sYawRaw[p]           = decoded[p].controlYaw;
+		sYawFlags[p]         = v3 ? pc_input_log::kFlagsNone : decoded[p].flags;
+		sYawValid[p]         = true;
+		if (v3) {
+			sExt[p]    = decoded[p].flags;
+			sRotate[p] = decoded[p].cursorRotate;
+		}
+		if (v4) {
+			sLocalFlags[p] = decoded[p].local & pc_input_log::kLocalKnown;
+			sWheel[p]      = decoded[p].wheelSteps;
+			sCursorDx[p]   = decoded[p].cursorDx;
+			sCursorDy[p]   = decoded[p].cursorDy;
+		}
+	}
+}
+
+// Past the end of a replay: neutral pads. Pad 0 stays connected; the other
+// channels report no controller.
+void apply_neutral()
+{
+	PADStatus* pads = pc_netplay_pad_status();
+	for (int p = 0; p < 4; ++p) {
+		pads[p].button       = 0;
+		pads[p].stickX       = 0;
+		pads[p].stickY       = 0;
+		pads[p].substickX    = 0;
+		pads[p].substickY    = 0;
+		pads[p].triggerLeft  = 0;
+		pads[p].triggerRight = 0;
+		pads[p].analogA      = 0;
+		pads[p].analogB      = 0;
+		pads[p].err          = (p == 0) ? pc_input_log::kErrConnected : pc_input_log::kErrNoController;
+	}
+}
+
+// The pads plus every slot the sim will read this tick, as one record.
+void current_record(PcInputPad cur[4], bool v3plus)
+{
+	PADStatus* pads = pc_netplay_pad_status();
+	for (int p = 0; p < 4; ++p) {
+		cur[p].button       = pads[p].button;
+		cur[p].stickX       = pads[p].stickX;
+		cur[p].stickY       = pads[p].stickY;
+		cur[p].substickX    = pads[p].substickX;
+		cur[p].substickY    = pads[p].substickY;
+		cur[p].triggerLeft  = pads[p].triggerLeft;
+		cur[p].triggerRight = pads[p].triggerRight;
+		cur[p].analogA      = pads[p].analogA;
+		cur[p].analogB      = pads[p].analogB;
+		cur[p].err          = pads[p].err;
+		cur[p].controlYaw   = sYawValid[p] ? sYawRaw[p] : (uint16_t)0;
+		cur[p].flags        = sYawValid[p] ? sYawFlags[p] : (uint8_t)0;
+		cur[p].cursorRotate = 0;
+		if (v3plus) {
+			cur[p].flags        = sExt[p];
+			cur[p].cursorRotate = sRotate[p];
+		}
+		cur[p].local      = sLocalFlags[p];
+		cur[p].wheelSteps = sWheel[p];
+		cur[p].cursorDx   = sCursorDx[p];
+		cur[p].cursorDy   = sCursorDy[p];
+	}
+}
+} // namespace
+
+void pc_input_log_set_record_sink(PcInputRecordSinkFn fn) { sRecordSink = fn; }
+
+bool pc_input_log_replay_memory_begin(const uint8_t* records, size_t count)
+{
+	if (sReplayActive) return false;
+	if (records == nullptr && count > 0) return false;
+	if (count > 0) sMemRecords.assign(records, records + count * pc_input_log::kRecordBytesV4);
+	else sMemRecords.clear();
+	sMemTicks  = count;
+	sMemIndex  = 0;
+	sMemFed    = false;
+	sMemActive = true;
+	return true;
+}
+
+bool pc_input_log_replay_memory_active(void) { return sMemActive; }
+
+size_t pc_input_log_replay_memory_fed(void) { return sMemIndex; }
+
+void pc_input_log_replay_memory_end(void)
+{
+	sMemActive = false;
+	sMemTicks  = 0;
+	sMemIndex  = 0;
+	sMemFed    = false;
+	std::vector<uint8_t>().swap(sMemRecords);
+}
+
+void pc_input_log_pad_rotate_get(float out[4])
+{
+	for (int p = 0; p < 4; ++p) out[p] = sPadRotate[p];
+}
+
+void pc_input_log_pad_rotate_set(const float in[4])
+{
+	for (int p = 0; p < 4; ++p) sPadRotate[p] = in[p];
+}
+
 void pc_input_log_tick(void)
 {
 	sSlotsFilled = true;
@@ -654,106 +809,32 @@ void pc_input_log_tick(void)
 		}
 		// Optional RNG pre-roll (test knob), before the first tick's sim.
 		pc_state_hash_before_first_tick();
-		if (!sRecordActive && !sReplayActive) {
-			// Det mode without a record or replay file still needs fresh
-			// input every tick, so clear the slots and run the pre-sim
-			// captures before returning. The hooks themselves check det/record,
-			// so the switch-off path stays untouched.
-			clear_tick_slots();
-			if (sYawCaptureFn != nullptr) sYawCaptureFn();
-			capture_local(true);
-			return;
-		}
 	}
 
-	if (!sRecordActive && !sReplayActive) {
-		clear_tick_slots();
-		if (sYawCaptureFn != nullptr) sYawCaptureFn();
-		capture_local(true);
-		return;
-	}
-
-	// Fresh yaw every tick: replayed v2 refills it below; the pre-sim
+	// Fresh slots every tick: a replay refills them below; the pre-sim
 	// capture hook fills the rest (live camera, quantised). The sim never
 	// reads the camera, so the input for tick N is complete before the sim
-	// for tick N runs.
+	// for tick N runs. With no record, replay or sink this is all a tick
+	// does, so deterministic mode still gets fresh input every tick.
 	clear_tick_slots();
 
-	PADStatus* pads = pc_netplay_pad_status();
-
+	const bool replaying = sReplayActive || sMemActive;
 	if (sReplayActive) {
 		if (sTickIndex < sReplayTicks) {
-			const uint8_t* rec = sReplayBytes.data() + pc_input_log::kHeaderBytes + sTickIndex * sReplayRec;
-			if (sReplayVersion == pc_input_log::kVersionV1) {
-				PcInputPad decoded[4];
-				if (pc_input_log_decode_tick_v1(rec, sReplayRec, decoded)) {
-					for (int p = 0; p < 4; ++p) {
-						pads[p].button       = decoded[p].button;
-						pads[p].stickX       = decoded[p].stickX;
-						pads[p].stickY       = decoded[p].stickY;
-						pads[p].substickX    = decoded[p].substickX;
-						pads[p].substickY    = decoded[p].substickY;
-						pads[p].triggerLeft  = decoded[p].triggerLeft;
-						pads[p].triggerRight = decoded[p].triggerRight;
-						pads[p].analogA      = decoded[p].analogA;
-						pads[p].analogB      = decoded[p].analogB;
-						pads[p].err          = decoded[p].err;
-					}
-					// v1 carries no yaw: left invalid so the pre-sim capture
-					// hook fills it live from the camera, as today.
-				}
-			} else {
-				PcInputPad decoded[4];
-				const bool v4 = sReplayVersion == pc_input_log::kVersionV4;
-				const bool v3 = sReplayVersion == pc_input_log::kVersionV3 || v4;
-				bool ok       = false;
-				if (v4) ok = pc_input_log_decode_tick_v4(rec, sReplayRec, decoded);
-				else if (v3) ok = pc_input_log_decode_tick_v3(rec, sReplayRec, decoded);
-				else ok = pc_input_log_decode_tick(rec, sReplayRec, decoded);
-				if (ok) {
-					for (int p = 0; p < 4; ++p) {
-						pads[p].button       = decoded[p].button;
-						pads[p].stickX       = decoded[p].stickX;
-						pads[p].stickY       = decoded[p].stickY;
-						pads[p].substickX    = decoded[p].substickX;
-						pads[p].substickY    = decoded[p].substickY;
-						pads[p].triggerLeft  = decoded[p].triggerLeft;
-						pads[p].triggerRight = decoded[p].triggerRight;
-						pads[p].analogA      = decoded[p].analogA;
-						pads[p].analogB      = decoded[p].analogB;
-						pads[p].err          = decoded[p].err;
-						sYawRaw[p]           = decoded[p].controlYaw;
-						sYawFlags[p]         = v3 ? pc_input_log::kFlagsNone : decoded[p].flags;
-						sYawValid[p]         = true;
-						if (v3) {
-							sExt[p]    = decoded[p].flags;
-							sRotate[p] = decoded[p].cursorRotate;
-						}
-						if (v4) {
-							sLocalFlags[p] = decoded[p].local & pc_input_log::kLocalKnown;
-							sWheel[p]      = decoded[p].wheelSteps;
-							sCursorDx[p]   = decoded[p].cursorDx;
-							sCursorDy[p]   = decoded[p].cursorDy;
-						}
-					}
-				}
-			}
+			apply_record(sReplayVersion, sReplayBytes.data() + pc_input_log::kHeaderBytes + sTickIndex * sReplayRec,
+			             sReplayRec);
 		} else {
-			// Past the end of the file: neutral pads. Pad 0 stays
-			// connected; the other channels report no controller.
-			for (int p = 0; p < 4; ++p) {
-				pads[p].button       = 0;
-				pads[p].stickX       = 0;
-				pads[p].stickY       = 0;
-				pads[p].substickX    = 0;
-				pads[p].substickY    = 0;
-				pads[p].triggerLeft  = 0;
-				pads[p].triggerRight = 0;
-				pads[p].analogA      = 0;
-				pads[p].analogB      = 0;
-				pads[p].err          = (p == 0) ? pc_input_log::kErrConnected
-				                                : pc_input_log::kErrNoController;
-			}
+			apply_neutral();
+		}
+	} else if (sMemActive) {
+		// A quick save load: the recorded day's records, then neutral input
+		// until the load hands control back (pc_input_log_replay_memory_end).
+		if (sMemIndex < sMemTicks) {
+			apply_record(pc_input_log::kVersionV4, sMemRecords.data() + sMemIndex * pc_input_log::kRecordBytesV4,
+			             pc_input_log::kRecordBytesV4);
+			sMemFed = true;
+		} else {
+			apply_neutral();
 		}
 	}
 
@@ -763,38 +844,15 @@ void pc_input_log_tick(void)
 	if (sYawCaptureFn != nullptr) sYawCaptureFn();
 	// Local inputs: live only without a replay (past its end they stay
 	// neutral, like the pads).
-	capture_local(!sReplayActive);
+	capture_local(!replaying);
 
 	// Pre-sim record write: file the pads plus the yaw the sim will use, so
 	// the filed input is exactly what was fed (in-tick pad writers cannot
 	// skew it).
 	if (sRecordActive) {
-		PADStatus* pads = pc_netplay_pad_status();
 		PcInputPad cur[4];
 		const bool v3plus = sRecordVersion == pc_input_log::kVersionV3 || sRecordVersion == pc_input_log::kVersionV4;
-		for (int p = 0; p < 4; ++p) {
-			cur[p].button       = pads[p].button;
-			cur[p].stickX       = pads[p].stickX;
-			cur[p].stickY       = pads[p].stickY;
-			cur[p].substickX    = pads[p].substickX;
-			cur[p].substickY    = pads[p].substickY;
-			cur[p].triggerLeft  = pads[p].triggerLeft;
-			cur[p].triggerRight = pads[p].triggerRight;
-			cur[p].analogA      = pads[p].analogA;
-			cur[p].analogB      = pads[p].analogB;
-			cur[p].err          = pads[p].err;
-			cur[p].controlYaw   = sYawValid[p] ? sYawRaw[p] : (uint16_t)0;
-			cur[p].flags        = sYawValid[p] ? sYawFlags[p] : (uint8_t)0;
-			cur[p].cursorRotate = 0;
-			if (v3plus) {
-				cur[p].flags        = sExt[p];
-				cur[p].cursorRotate = sRotate[p];
-			}
-			cur[p].local      = sLocalFlags[p];
-			cur[p].wheelSteps = sWheel[p];
-			cur[p].cursorDx   = sCursorDx[p];
-			cur[p].cursorDy   = sCursorDy[p];
-		}
+		current_record(cur, v3plus);
 		uint8_t out[pc_input_log::kRecordBytesV4];
 		size_t n = 0;
 		if (sRecordVersion == pc_input_log::kVersionV4) n = pc_input_log_encode_tick_v4(cur, out);
@@ -802,6 +860,13 @@ void pc_input_log_tick(void)
 		else n = pc_input_log_encode_tick(cur, out);
 		std::fwrite(out, 1, n, sRecordFile);
 		if ((sTickIndex + 1) % 300 == 0) std::fflush(sRecordFile);
+	}
+	if (sRecordSink != nullptr) {
+		PcInputPad cur[4];
+		current_record(cur, true);
+		uint8_t out[pc_input_log::kRecordBytesV4];
+		pc_input_log_encode_tick_v4(cur, out);
+		sRecordSink(out);
 	}
 }
 
@@ -811,6 +876,10 @@ void pc_input_log_tick_end(void)
 	// a tick that never ran pc_input_log_tick (a netplay session's) sees none.
 	clear_local_slots();
 	sSlotsFilled = false;
+	if (sMemFed) {
+		++sMemIndex;
+		sMemFed = false;
+	}
 	if (!sInitialised) return;
 	if (!sRecordActive && !sReplayActive) return;
 

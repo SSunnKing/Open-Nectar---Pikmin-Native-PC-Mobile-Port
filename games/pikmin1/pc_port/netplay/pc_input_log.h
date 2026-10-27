@@ -275,6 +275,28 @@ void pc_input_log_pad_rotate_add(int pad, float angleRad);
 bool pc_input_log_is_record_active(void);
 bool pc_input_log_is_replay_active(void);
 
+// Quick save (pc_quicksave.h). A sink, registered once, receives every
+// tick's input as a v4 record once it is final (after the replay and the
+// capture hooks, as a record file would file it), live or replayed.
+typedef void (*PcInputRecordSinkFn)(const uint8_t record[104]);
+void pc_input_log_set_record_sink(PcInputRecordSinkFn fn);
+// An in-memory replay of a recorded day: from the next tick, one v4 record
+// (104 bytes each, copied) per tick feeds the pads and the slots, as a file
+// replay does, and the live input is drained unused. Past the last record
+// the input is neutral until pc_input_log_replay_memory_end(), which hands
+// the next tick back to live capture (a file replay never goes live again).
+// False while a file replay runs.
+bool pc_input_log_replay_memory_begin(const uint8_t* records, size_t count);
+bool pc_input_log_replay_memory_active(void);
+// Records the sim has consumed so far (counted at each tick's end).
+size_t pc_input_log_replay_memory_fed(void);
+void pc_input_log_replay_memory_end(void);
+// The free-camera rotation each pad has queued but not yet quantised (the
+// remainder pc_input_log_pad_rotate_add keeps), in 1/65536 turns, so a load
+// can hand over exactly the remainder the recorded run had.
+void pc_input_log_pad_rotate_get(float out[4]);
+void pc_input_log_pad_rotate_set(const float in[4]);
+
 // Flush (every 300 ticks and on exit) / close the record file, if any.
 void pc_input_log_flush(void);
 void pc_input_log_close(void);

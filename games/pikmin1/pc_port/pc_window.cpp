@@ -20,6 +20,7 @@ static_assert(PAD_BUTTON_LEFT == PC_MENU_PAD_LEFT && PAD_BUTTON_RIGHT == PC_MENU
 #include "pc_icon.h"
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_input_log.h"
+#include "quicksave/pc_quicksave.h"
 #if PIKI_PC_TOUCH
 #include "gl/pc_gfx.h"
 #include "touch/pc_touch.h"
@@ -433,6 +434,10 @@ const SDL_Scancode kDefaultKeyBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_SWARM_STICK */ SDL_SCANCODE_UNKNOWN, // el teclado ya tiene Swarm y TFGH
     /* PC_KEY_ACT_LIEDOWN     */ SDL_SCANCODE_UNKNOWN, // la cruceta abajo (flecha abajo) ya lo hace
     /* PC_KEY_ACT_AIM_STICK  */ SDL_SCANCODE_UNKNOWN, // el ratón ya apunta
+    // Quick Save: F6/F7 are debug keys only outside deterministic mode, which
+    // the feature always runs in, and F5 stays the speedrun reset.
+    /* PC_KEY_ACT_QUICKSAVE    */ SDL_SCANCODE_F6,
+    /* PC_KEY_ACT_QUICKLOAD    */ SDL_SCANCODE_F7,
 };
 
 SDL_Scancode pc_window_default_key_binding2(int action) {
@@ -475,6 +480,8 @@ const int kDefaultGamepadBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_SWARM_STICK */ -1, // con Free Camera se asigna en Controls
     /* PC_KEY_ACT_LIEDOWN     */ -1, // la cruceta abajo, como en GameCube
     /* PC_KEY_ACT_AIM_STICK  */ -1, // se asigna en Controls
+    /* PC_KEY_ACT_QUICKSAVE    */ -1,
+    /* PC_KEY_ACT_QUICKLOAD    */ -1,
 };
 
 // Esquema Switch (Pikmin 1 de Switch): B silba, X retira, ZL mira al frente
@@ -511,6 +518,8 @@ static const int kSwitchGamepadBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_SWARM_STICK */ SDL_CONTROLLER_BUTTON_LEFTSHOULDER,
     /* PC_KEY_ACT_LIEDOWN     */ SDL_CONTROLLER_BUTTON_RIGHTSTICK,
     /* PC_KEY_ACT_AIM_STICK  */ -1, // se asigna en Controls
+    /* PC_KEY_ACT_QUICKSAVE    */ -1,
+    /* PC_KEY_ACT_QUICKLOAD    */ -1,
 };
 static int sPadScheme = PC_PAD_SCHEME_GAMECUBE;
 static int sRsAimMode = PC_RS_AIM_OFF;
@@ -540,6 +549,7 @@ static const char* kKeyActionNames[PC_KEY_ACT_COUNT] = {
     "Speedrun Reset",
     "Swarm with right stick (hold)", "Lie down",
     "Aim cursor with right stick (hold)",
+    "Quick Save", "Quick Load",
 };
 
 static void initKeyBindings() {
@@ -1605,6 +1615,39 @@ void pc_window_poll_events(PADStatus* pad) {
         if (pc_bind_is_mouse(second) && !mouseSecondOk) return false;
         return pc_window_binding_held(second, state, boundMouse);
     };
+
+    // Quick Save (pc_quicksave.h): the save and load actions, from the
+    // keyboard or player 1's pad when a button is bound. Not game input: a
+    // request acts at the end of the tick, outside the sim, and is never
+    // recorded. With the feature off they do nothing.
+    if (pc_quicksave_enabled()) {
+        static bool sQuickSaveWasDown = false;
+        static bool sQuickLoadWasDown = false;
+        auto quickHeld = [&](int action) {
+            if (sSettingsMenuOpen) return false;
+            if (held(action)) return true;
+            const int bind = sGamepadBindings[action];
+            return sControllers[0] != nullptr && bind >= 0 && pc_window_gamepad_bind_held(sControllers[0], bind);
+        };
+        const bool saveDown = quickHeld(PC_KEY_ACT_QUICKSAVE);
+        const bool loadDown = quickHeld(PC_KEY_ACT_QUICKLOAD);
+        if (saveDown && !sQuickSaveWasDown) pc_quicksave_request_save();
+        if (loadDown && !sQuickLoadWasDown) pc_quicksave_request_load();
+        sQuickSaveWasDown = saveDown;
+        sQuickLoadWasDown = loadDown;
+        // Escape (or player 1's B) cancels a load under way: a fresh press
+        // after the load began, so a key held from before does not.
+        static bool sCancelWasDown = false;
+        static bool sLoadWasActive = false;
+        const bool loadActive = pc_quicksave_load_active();
+        const bool cancelDown = !sSettingsMenuOpen
+            && (state[SDL_SCANCODE_ESCAPE] != 0
+                || (sControllers[0] != nullptr
+                    && SDL_GameControllerGetButton(sControllers[0], SDL_CONTROLLER_BUTTON_B) != 0));
+        if (loadActive && sLoadWasActive && cancelDown && !sCancelWasDown) pc_quicksave_request_cancel();
+        sCancelWasDown = cancelDown;
+        sLoadWasActive = loadActive;
+    }
 
     u16 button = 0;
     s8  stickX = 0;
