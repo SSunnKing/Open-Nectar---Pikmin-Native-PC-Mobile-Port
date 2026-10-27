@@ -60,6 +60,9 @@ constexpr size_t kMaxRegionBytes   = 64;
 constexpr size_t kMaxTextBytes     = 64 * 1024;
 constexpr size_t kMaxBlockBytes    = 1024 * 1024;
 constexpr uint32_t kMaxTicks       = 16u * 1024u * 1024u; // ~6 days of play at 30 Hz
+// Upper bound for a whole file before it is read: every record at the largest
+// record size, every block and text at its cap, plus the fixed fields.
+constexpr uint64_t kMaxFileBytes = (uint64_t)kMaxTicks * 128u + 16u * kMaxBlockBytes + 8u * kMaxTextBytes + 4096u;
 
 struct File {
 	uint8_t buildId[kBuildIdBytes] = {};

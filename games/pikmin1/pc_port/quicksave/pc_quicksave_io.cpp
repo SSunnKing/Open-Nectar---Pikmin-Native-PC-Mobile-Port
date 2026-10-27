@@ -129,9 +129,15 @@ bool write_file_atomic(const std::string& path, const std::vector<uint8_t>& data
 	return true;
 }
 
-bool read_file(const std::string& path, std::vector<uint8_t>& out, std::string* err)
+bool read_file(const std::string& path, std::vector<uint8_t>& out, std::string* err, uint64_t maxBytes)
 {
 	out.clear();
+	std::error_code sizeEc;
+	const uintmax_t size = fs::file_size(fs::path(path), sizeEc);
+	if (!sizeEc && (uint64_t)size > maxBytes) {
+		if (err != nullptr) *err = std::string("the file is too large (") + std::to_string((unsigned long long)size) + " bytes)";
+		return false;
+	}
 	FILE* f = open_file(fs::path(path), "rb");
 	if (f == nullptr) {
 		if (err != nullptr) *err = std::string("cannot open ") + path + ": " + std::strerror(errno);
@@ -148,6 +154,13 @@ bool read_file(const std::string& path, std::vector<uint8_t>& out, std::string* 
 		return false;
 	}
 	return true;
+}
+
+bool remove_file(const std::string& path)
+{
+	std::error_code ec;
+	fs::remove(fs::path(path), ec);
+	return !ec;
 }
 
 std::vector<std::string> existing_newest_first(const std::vector<std::string>& paths)

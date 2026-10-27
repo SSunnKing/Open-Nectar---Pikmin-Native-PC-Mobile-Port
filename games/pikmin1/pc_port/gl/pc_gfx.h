@@ -22,8 +22,6 @@ void pc_gfx_set_render_scale(float scale);
 // Resolución base del render interno (0,0 = la del área de salida). Se encaja
 // en la relación de aspecto de salida y se multiplica por el render scale.
 void pc_gfx_set_render_resolution(int width, int height);
-/// The base set by pc_gfx_set_render_resolution (0,0 = the output area).
-void pc_gfx_get_render_resolution(int* width, int* height);
 float pc_gfx_get_render_scale(void);
 
 // Aspect ratio support.

@@ -10,6 +10,7 @@
 #include "Generator.h"
 #include "pc_permadeath.h"
 #include "pc_day_history.h"
+#include "quicksave/pc_quicksave.h"
 #include "randomizer/pc_randomizer.h"
 #include "netplay/pc_netplay_loadguard.h"
 // Netplay keep-alive (pc_netplay_loadguard.h): a save waits here for the card
@@ -1208,6 +1209,7 @@ void MemoryCard::copyFile(CardQuickInfo& from, CardQuickInfo& to)
 	gsys->mIsCardSaving = FALSE;
 #if defined(PIKI_PC_PORT)
 	pc_days_copy_slot(from.mGameSaveSlot, to.mGameSaveSlot);
+	pc_quicksave_forget_slot(to.mGameSaveSlot);
 #endif
 
 	STACK_PAD_VAR(10);
@@ -1240,6 +1242,7 @@ void MemoryCard::delFile(CardQuickInfo& target)
 	gsys->mIsCardSaving = FALSE;
 #if defined(PIKI_PC_PORT)
 	pc_days_delete_slot(target.mGameSaveSlot);
+	pc_quicksave_forget_slot(target.mGameSaveSlot);
 #endif
 
 	STACK_PAD_VAR(7);

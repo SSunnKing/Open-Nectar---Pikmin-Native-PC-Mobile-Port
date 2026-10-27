@@ -19,13 +19,15 @@
 // game (CRC, build, region, sim settings, test switches, mode) before
 // anything changes. The running day is left, the recorded day is entered
 // through the normal day start (so the RNG reseeds), its input is replayed
-// unthrottled with the audio muted, behind a load screen and at a lower
-// render resolution, and at the saved tick the state hash is compared. On a
-// match the view, the window state and the resolution come back and the next
-// tick is live input; recording carries on, so the day can be saved again. On
-// a mismatch the game stops with a message: the day is not the recorded one.
-// Escape cancels a load: the day is left for the file select (VS: the
-// title), as after "Continue from last save".
+// unthrottled with the audio muted and the world graphics suppressed, behind
+// a load screen at the game's own resolution. At the saved tick the state
+// hash is compared. On a match the view and the window state come back and
+// the next tick is live input; recording carries on, so the day can be saved
+// again. An in-game load that cannot reproduce the day stops the replay and
+// returns to the title. --quick-load exits with a code instead. Escape, or B
+// on player 1's controller, cancels a load. A day that ends before the saved
+// tick still stops the game, because the end-of-day save would write the
+// diverged replay.
 //
 // A load re-enters a story day from its card block, as the file select loads
 // a save. A day the game reached by continuing the previous one in memory,
@@ -102,6 +104,14 @@ bool pc_quicksave_boot_pending(void); // logo: a --quick-load is waiting (no log
 bool pc_quicksave_take_title(void);   // title: a story load starts its run
 bool pc_quicksave_take_setup(void);   // CardSelect: skip the menus for a story load
 int pc_quicksave_setup_slot(void);    // ...and the card file to commit (1-3, 0 none)
+// A card file (game slot 0-2) was erased, overwritten by a copy or started over
+// as a new run: its quick save belongs to a game that no longer exists, so it
+// is deleted. Runs whether or not Quick Save is on.
+void pc_quicksave_forget_slot(int gameSlot);
+// The text to confirm a Quick Load with: what will be loaded and what it
+// replaces (in a day, the exact days this file rolls back). False with the
+// reason when the load would be refused. Does not start anything.
+bool pc_quicksave_load_confirm_text(char* out, size_t n);
 // CardSelect exit: puts the recorded day's start back (the card block, the
 // clock, the stage). True when it did; the next section is the day.
 bool pc_quicksave_take_enter(void);

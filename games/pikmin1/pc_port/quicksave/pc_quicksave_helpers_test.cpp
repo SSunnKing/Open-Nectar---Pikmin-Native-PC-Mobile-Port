@@ -165,6 +165,26 @@ void test_progress()
 	q::format_clock(69.0, tiny, sizeof(tiny));
 	check(tiny[2] == '\0', "a short buffer stays terminated");
 }
+
+void test_describe_load()
+{
+	char t[400];
+	// Same day: only the play since the save is lost.
+	check(q::describe_load(4, 4, true, t, sizeof(t)) && std::strstr(t, "earlier in day 4") && !std::strstr(t, "replaces"),
+	      "same day: no rollback named");
+	// Kyle's redo case: saved on day 3, now playing day 4. Allowed, and the
+	// warning names the day-3 save it replaces.
+	check(q::describe_load(3, 4, true, t, sizeof(t)) && std::strstr(t, "replaces your saved day 3,") &&
+	          std::strstr(t, "today's play is lost"),
+	      "one day ahead: warns about the day-3 save");
+	check(q::describe_load(5, 9, true, t, sizeof(t)) && std::strstr(t, "days 5 to 8"), "several days ahead: names the range");
+	check(!q::describe_load(6, 5, true, t, sizeof(t)) && std::strstr(t, "refused"), "a save from a later day is refused");
+	check(q::describe_load(2, -1, false, t, sizeof(t)) && std::strstr(t, "saved past day 2") && !std::strstr(t, "today"),
+	      "unknown file day: generic warning");
+	char tiny[8];
+	q::describe_load(5, 9, true, tiny, sizeof(tiny));
+	check(tiny[7] == '\0', "a short buffer stays terminated");
+}
 } // namespace
 
 int main()
@@ -173,6 +193,7 @@ int main()
 	test_carry_refuses();
 	test_card_unit();
 	test_progress();
+	test_describe_load();
 	if (sFailures == 0) std::printf("pc_quicksave_helpers_test: all passed\n");
 	return sFailures == 0 ? 0 : 1;
 }

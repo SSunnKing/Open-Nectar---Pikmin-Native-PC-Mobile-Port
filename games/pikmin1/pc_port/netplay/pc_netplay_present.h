@@ -8,7 +8,8 @@
 //
 // PlugPikiApp::idle in deterministic mode:
 //   - authoritative pass: SimCamera installed, null GX, sim blocks run;
-//   - presentation pass: real camera and GL, sim blocks skipped.
+//   - presentation pass: real camera, sim blocks skipped; GL submission is
+//     suppressed during deterministic catch-up, otherwise normal.
 // pc_netplay_present_set_skip_presentation(1) runs the authoritative pass
 // only (for resimulation).
 
@@ -38,11 +39,12 @@ int pc_netplay_present_sim_side(void);
 // True only inside the authoritative pass of a two-pass tick.
 int pc_netplay_present_sim_pass(void);
 
-// Null-GX flag for the authoritative pass: GL-issuing submission is skipped.
+// Null-GX flag for the authoritative pass and catch-up presentation:
+// GL-issuing submission is skipped.
 // "attempted" counts skipped submissions; "gl calls" counts real GL issued
 // while the flag was on, measured at the counting choke points in
 // pc_gfx.cpp and pc_texpack.cpp, and must stay 0. Uploads happen in the
-// presentation pass only.
+// presentation pass outside catch-up only.
 void pc_netplay_present_set_null_gx(int on);
 int pc_netplay_present_null_active(void);
 unsigned long long pc_netplay_present_null_gl_calls(void);

@@ -35,4 +35,33 @@ void format_clock(double secs, char* out, size_t n)
 	}
 }
 
+// What a load of a day-`saved` quick save replaces, on a file now on day
+// `fileDay` (-1: not known here). False when it cannot be this file's.
+bool describe_load(int saved, int fileDay, bool inDay, char* out, size_t n)
+{
+	if (fileDay >= 0 && saved > fileDay) {
+		std::snprintf(out, n, "Quick Load refused: the quick save is from day %d, later than this file (day %d).", saved, fileDay);
+		return false;
+	}
+	if (fileDay < 0) {
+		std::snprintf(out, n,
+		              "Load the quick save from day %d? If its file was saved past day %d, that later progress is replaced "
+		              "when day %d ends. Press A again to load.",
+		              saved, saved, saved);
+	} else if (saved == fileDay) {
+		std::snprintf(out, n, "Load the quick save from earlier in day %d? Play since then is lost. Press A again to load.", saved);
+	} else if (saved + 1 == fileDay) {
+		std::snprintf(out, n,
+		              "Load the quick save from day %d? This file is on day %d. When day %d ends, its save replaces your saved "
+		              "day %d%s. Press A again to load.",
+		              saved, fileDay, saved, saved, inDay ? ", and today's play is lost" : "");
+	} else {
+		std::snprintf(out, n,
+		              "Load the quick save from day %d? This file is on day %d. When day %d ends, its save replaces your saved "
+		              "days %d to %d%s. Press A again to load.",
+		              saved, fileDay, saved, saved, fileDay - 1, inDay ? ", and today's play is lost" : "");
+	}
+	return true;
+}
+
 } // namespace pc_quicksave

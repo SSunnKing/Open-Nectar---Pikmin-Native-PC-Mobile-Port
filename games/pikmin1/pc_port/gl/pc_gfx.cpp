@@ -2515,14 +2515,8 @@ void pc_gfx_set_render_resolution(int width, int height) {
     printf("[PC Port] Internal render resolution requested: %dx%d\n", sRenderResolutionW, sRenderResolutionH);
 }
 
-// Escala 0 (o menos) = resolución original de GameCube: 480 líneas, con el
-// ancho que pida la relación de aspecto, sea cual sea la ventana.
+// Scale zero uses the original GameCube resolution.
 static bool sRenderOriginal = false;
-void pc_gfx_get_render_resolution(int* width, int* height) {
-    if (width) *width = sRenderResolutionW;
-    if (height) *height = sRenderResolutionH;
-}
-
 void pc_gfx_set_render_scale(float scale) {
     sRenderOriginal = scale <= 0.0f;
     sRenderScale = sRenderOriginal ? 1.0f : std::clamp(scale, 0.25f, 4.0f);
