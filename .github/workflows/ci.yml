@@ -51,6 +51,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install sdl2 ninja ccache
