@@ -14,6 +14,12 @@
 #if defined(__APPLE__)
 #include <iconv.h>
 #endif
+#if defined(__ANDROID__)
+#include "cp932_table.h"
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -21,7 +27,7 @@ namespace pikmin {
 namespace launcher {
 namespace {
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(__ANDROID__)
 /// True when the bytes are well-formed UTF-8 (RFC 3629). APFS refuses names that
 /// are not. The allowed second byte depends on the lead byte, which rejects
 /// overlong forms, surrogates and code points above U+10FFFF.
@@ -53,6 +59,9 @@ bool isValidUtf8(const std::string& text)
 	return true;
 }
 
+#endif
+
+#if defined(__APPLE__)
 /// Converts Shift-JIS to UTF-8 with iconv. False when the input is not valid
 /// Shift-JIS. Uses CP932, the code page the Windows branch below uses: plain
 /// SHIFT_JIS maps some characters differently (0x8160 is U+301C there and U+FF5E
@@ -72,6 +81,51 @@ bool shiftJisToUtf8(const std::string& input, std::string& output)
 	iconv_close(converter);
 	if (result == static_cast<std::size_t>(-1) || inLeft != 0) return false;
 	output.assign(out.data(), out.size() - outLeft);
+	return true;
+}
+#endif
+
+#if defined(__ANDROID__)
+void appendUtf8(std::string& out, unsigned code)
+{
+	if (code < 0x80) {
+		out += static_cast<char>(code);
+	} else if (code < 0x800) {
+		out += static_cast<char>(0xC0 | (code >> 6));
+		out += static_cast<char>(0x80 | (code & 0x3F));
+	} else {
+		out += static_cast<char>(0xE0 | (code >> 12));
+		out += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+		out += static_cast<char>(0x80 | (code & 0x3F));
+	}
+}
+
+/// Shift-JIS (CP932, the same mapping as Windows and macOS above) to UTF-8.
+/// Bionic's iconv has no Shift-JIS, so this uses a generated table
+/// (cp932_table.h). False when the input is not valid CP932.
+bool shiftJisToUtf8(const std::string& input, std::string& output)
+{
+	output.clear();
+	for (std::size_t i = 0; i < input.size(); ++i) {
+		const auto lead = static_cast<unsigned char>(input[i]);
+		if (lead < 0x80) {
+			output += static_cast<char>(lead);
+			continue;
+		}
+		if (lead >= 0xA1 && lead <= 0xDF) { // half-width katakana
+			appendUtf8(output, 0xFF61 + (lead - 0xA1));
+			continue;
+		}
+		int row = -1;
+		if (lead >= 0x81 && lead <= 0x9F) row = lead - 0x81;
+		else if (lead >= 0xE0 && lead <= 0xFC) row = 31 + (lead - 0xE0);
+		if (row < 0 || i + 1 >= input.size()) return false;
+		const auto trail = static_cast<unsigned char>(input[++i]);
+		if (trail < 0x40 || trail > 0xFC || trail == 0x7F) return false;
+		const unsigned code = kCp932Table[row * 188 + (trail - 0x40) - (trail > 0x7F ? 1 : 0)];
+		if (code == 0) return false;
+		appendUtf8(output, code);
+	}
 	return true;
 }
 #endif
@@ -122,7 +176,10 @@ fs::path discNameToPath(const std::string& name)
 	}
 	return fs::path(wide);
 #else
-#if defined(__APPLE__)
+#if defined(__ANDROID__)
+	// The data folder is on shared storage, which takes only UTF-8 names.
+	return fs::path(discNameToUtf8(name));
+#elif defined(__APPLE__)
 	// APFS takes only UTF-8 names. Convert Shift-JIS names the way Windows does.
 	if (!isValidUtf8(name)) {
 		std::string utf8;
@@ -532,6 +589,62 @@ bool extractGameCubeImage(std::istream& input, std::uint64_t imageSize,
     }
     return true;
 }
+
+#if defined(__ANDROID__)
+std::string discNameToUtf8(const std::string& name)
+{
+	if (isValidUtf8(name)) return name;
+	std::string utf8;
+	if (shiftJisToUtf8(name, utf8)) return utf8;
+	// Neither UTF-8 nor Shift-JIS: keep every byte, escaped, so the file
+	// still gets a name the storage accepts.
+	static const char hex[] = "0123456789ABCDEF";
+	std::string escaped;
+	for (unsigned char c : name) {
+		if (c < 0x80 && c != '%') {
+			escaped += static_cast<char>(c);
+		} else {
+			escaped += '%';
+			escaped += hex[c >> 4];
+			escaped += hex[c & 15];
+		}
+	}
+	return escaped;
+}
+
+int renameNonUtf8Entries(const std::string& directory)
+{
+	DIR* dir = opendir(directory.c_str());
+	if (!dir) return 0;
+	int renamed = 0;
+	std::vector<std::string> names;
+	while (dirent* entry = readdir(dir)) {
+		const std::string name = entry->d_name;
+		if (name != "." && name != "..") names.push_back(name);
+	}
+	closedir(dir);
+	for (const std::string& name : names) {
+		std::string path = directory + "/" + name;
+		const std::string fixed = discNameToUtf8(name);
+		if (fixed != name) {
+			const std::string target = directory + "/" + fixed;
+			struct stat st;
+			if (lstat(target.c_str(), &st) == 0) {
+				// Already there under its UTF-8 name (a newer install): the
+				// raw-named copy is a duplicate of the same disc file.
+				if (!S_ISDIR(st.st_mode) && unlink(path.c_str()) == 0) ++renamed;
+				continue;
+			}
+			if (rename(path.c_str(), target.c_str()) != 0) continue;
+			path = target;
+			++renamed;
+		}
+		struct stat st;
+		if (lstat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) renamed += renameNonUtf8Entries(path);
+	}
+	return renamed;
+}
+#endif
 
 } // namespace launcher
 } // namespace pikmin

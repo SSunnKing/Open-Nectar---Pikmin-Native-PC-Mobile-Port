@@ -1237,6 +1237,13 @@ void Onyon::onKeyEvent_Onyon(SysShape::KeyEvent const& event)
 								arg.mOrigin = getPosition();
 								arg.mAngle  = getFaceDir();
 								movie_begin(0);
+#ifdef PIKI_PC_PORT
+								if (mPcExitNavi && mPcExitNavi->isAlive()) {
+									pc_p2_coop_tag_movie_protagonist(mPcExitNavi);
+								} else {
+									pc_p2_coop_tag_movie_from_position(getPosition());
+								}
+#endif
 								moviePlayer->play(arg);
 							}
 

@@ -43,8 +43,8 @@ public class LauncherActivity extends SDLActivity {
 
     @Override
     protected String[] getArguments() {
-        // argv[1] de SDL_main: la carpeta interna de la app.
-        return new String[] { getFilesDir().getAbsolutePath() };
+        // argv[1] de SDL_main: la carpeta de datos (DataFolder, issue #176).
+        return new String[] { DataFolder.current(this).getAbsolutePath() };
     }
 
     @Override
@@ -162,6 +162,15 @@ public class LauncherActivity extends SDLActivity {
             } catch (Exception ignored) {
             }
         });
+    }
+
+    /** Botón Change folder: StartActivity elige la carpeta nueva, traslada
+     *  todo y vuelve a abrir el launcher. Llamado desde el hilo de SDL antes
+     *  de que el launcher termine. */
+    public void changeDataFolder() {
+        Intent intent = new Intent(this, StartActivity.class);
+        intent.putExtra(StartActivity.EXTRA_CHANGE, true);
+        startActivity(intent);
     }
 
     /** Llamado desde el hilo de SDL antes de que el launcher termine. */

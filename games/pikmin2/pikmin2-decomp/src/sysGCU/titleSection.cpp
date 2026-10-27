@@ -380,6 +380,15 @@ void Section::updateMenu()
  */
 void Section::doUpdateMainTitle()
 {
+#ifdef PIKI_PC_PORT
+	// One line, once per run, for smoke tests and scripted runs to wait on.
+	static bool sTitleReachedLogged = false;
+	if (!sTitleReachedLogged) {
+		sTitleReachedLogged = true;
+		printf("[PC Port] Title screen reached\n");
+		fflush(stdout);
+	}
+#endif
 	mGoToDemoTimer += sys->mDeltaTime;
 	updateMenu();
 	mMainTitleMgr.update();

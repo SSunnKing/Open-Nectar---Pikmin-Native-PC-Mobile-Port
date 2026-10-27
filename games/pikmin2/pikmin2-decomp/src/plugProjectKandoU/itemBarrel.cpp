@@ -4,6 +4,7 @@
 #include "Game/Interaction.h"
 #include "Game/MapMgr.h"
 #include "Game/MoviePlayer.h"
+#include "Game/pcCoop.h"
 #include "Game/itemMgr.h"
 #include "efx/TBarrel.h"
 #include "JSystem/JKernel/JKRArchive.h"
@@ -141,6 +142,7 @@ void DeadState::onKeyEvent(Item* item, SysShape::KeyEvent const& event)
 		MoviePlayArg movieArg("x12_drain_water", nullptr, nullptr, 0);
 		movieArg.setTarget(item);
 		moviePlayer->mTargetObject = item;
+		pc_p2_coop_tag_movie_from_position(item->getPosition());
 		moviePlayer->play(movieArg);
 		item->mSoundObj->startSound(PSSE_EV_WATER_OUT, 0);
 		waterbox->startDown(-100.0f);

@@ -3,6 +3,7 @@
 #include "Game/generalEnemyMgr.h"
 #include "Game/gamePlayData.h"
 #include "Game/MoviePlayer.h"
+#include "Game/pcCoop.h"
 #include "nans.h"
 
 namespace Game {
@@ -153,6 +154,7 @@ void Obj::update()
 					playArg.mOrigin            = mEnemy->getPosition();
 					playArg.mAngle             = mEnemy->getFaceDir();
 					moviePlayer->mTargetObject = mEnemy;
+					pc_p2_coop_tag_movie_from_position(mEnemy->getPosition());
 					moviePlayer->play(playArg);
 					playData->setDemoFlag(DEMO_First_Bitter_Use);
 				}

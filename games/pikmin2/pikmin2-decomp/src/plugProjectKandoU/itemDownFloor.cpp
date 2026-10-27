@@ -5,6 +5,7 @@
 #include "Game/routeMgr.h"
 #include "Game/Navi.h"
 #include "Game/MoviePlayer.h"
+#include "Game/pcCoop.h"
 #include "Game/SingleGame.h"
 #include "efx/TDownf.h"
 #include "efx/TPbag.h"
@@ -842,6 +843,7 @@ void DownState::onKeyEvent(Item* item, SysShape::KeyEvent const&)
 			playArg.mOrigin            = navi->getPosition();
 			playArg.mAngle             = navi->getFaceDir();
 			moviePlayer->mTargetObject = navi;
+			pc_p2_coop_tag_movie_protagonist(navi);
 
 			moviePlayer->play(playArg);
 

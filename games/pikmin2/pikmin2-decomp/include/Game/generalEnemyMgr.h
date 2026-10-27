@@ -129,6 +129,11 @@ struct GeneralEnemyMgr : public GenericObjectMgr, public CNode {
 	void allocateEnemys(u8 playerMode, int enemyID);
 	void resetEnemyNum();
 	void addEnemyNum(int enemyID, u8 count, GenObjectEnemy* genEnemy);
+#ifdef PIKI_PC_PORT
+	// Reserva para `count` nacimientos desde un generador (superficie o
+	// TekiInfo de cueva): una nube de Spectralids ocupa su grupo entero.
+	void addGeneratedEnemyNum(int enemyID, int count, GenObjectEnemy* genEnemy);
+#endif
 	u8 getEnemyNum(int enemyID, bool doCheckOriginal);
 	JKRHeap* useHeap();
 	EnemyMgrBase* getEnemyMgr(int enemyID);

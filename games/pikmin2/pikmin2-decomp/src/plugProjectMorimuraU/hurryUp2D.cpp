@@ -509,6 +509,7 @@ void THurryUp2D::scaleUp2()
 				Game::playData->setDemoFlag(Game::DEMO_First_Sunset_Warning);
 				Game::moviePlayer->mTargetNavi   = navi;
 				Game::moviePlayer->mActingCamera = navi->mCamera;
+				pc_p2_coop_tag_movie_protagonist(navi);
 				Game::moviePlayer->play(arg);
 			}
 		}

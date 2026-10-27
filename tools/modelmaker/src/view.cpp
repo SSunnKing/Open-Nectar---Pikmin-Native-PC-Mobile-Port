@@ -168,7 +168,9 @@ void View::begin(const nm::M4& viewProj)
 	viewProj_ = viewProj;
 	glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
 	glViewport(0, 0, width_, height_);
-	glClearColor(0.16f, 0.21f, 0.15f, 1);
+	// Fondo neutro como el de los editores 3D: permite juzgar colores y
+	// transparencias sin que el verde de la interfaz contamine el modelo.
+	glClearColor(0.105f, 0.12f, 0.125f, 1);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LEQUAL);

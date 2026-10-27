@@ -10,6 +10,7 @@
 #include "Game/rumble.h"
 #include "Game/Navi.h"
 #include "Game/MoviePlayer.h"
+#include "Game/pcCoop.h"
 #include "Game/gamePlayData.h"
 #include "Game/Stickers.h"
 #include "PSSystem/PSMainSide_ObjSound.h"
@@ -2175,6 +2176,7 @@ bool Obj::startBigTreasureBootUpDemo()
 		moviePlayer->mTargetObject = this;
 
 		movie_begin(false);
+		pc_p2_coop_tag_movie_from_position(mPosition);
 		moviePlayer->play(movieArg);
 
 		return true;

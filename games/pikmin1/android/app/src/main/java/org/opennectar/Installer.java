@@ -16,12 +16,15 @@ public final class Installer {
     public static native String nativeRequiredBuild(int fd);
     /** chdir del proceso a la carpeta del juego (ver pc_installer_jni.cpp). */
     public static native boolean nativeChdir(String dir);
+    /** Renombra a UTF-8 los nombres que no lo son bajo dir (Shift-JIS de
+     *  instalaciones anteriores). Devuelve cuántos cambió. */
+    public static native int nativeFixNames(String dir);
     /** null si fue bien, o el mensaje de error. Bloquea: llamar desde un hilo. */
     public static native String nativeInstall(int fd, String gameDir, Listener listener);
 
-    /** Carpeta del juego: la misma que elige pc_android_init() en el juego. */
+    /** Carpeta de Pikmin 1: la de datos elegida por el usuario (DataFolder). */
     public static File gameDir(android.content.Context context) {
-        return context.getFilesDir();
+        return DataFolder.current(context);
     }
 
     public static boolean assetsInstalled(android.content.Context context) {

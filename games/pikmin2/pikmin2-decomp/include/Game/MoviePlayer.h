@@ -190,6 +190,9 @@ struct MovieContext : public CNode {
 	Navi* mNavi;             // _50
 	Creature* mTargetObject; // _54
 	PlayCamera* mCamera;     // _58
+#ifdef PIKI_PC_PORT
+	Navi* mPcCoopProtagonist; // co-op captain for this queued movie
+#endif
 };
 
 struct MovieList : public CNode {
@@ -317,6 +320,12 @@ struct MoviePlayer : public JKRDisposer {
 	const void* mStbFile;                                          // _1EC
 	BitFlag<u32> mFlags;                                           // _1F0, see MoviePlayerFlags enum
 	JPAResourceManager* mEfxManager;                               // _1F4
+#ifdef PIKI_PC_PORT
+	Navi* mPcPendingProtagonist; // captain bound to the current play() call
+	// True when mPcPendingProtagonist came from a queued MovieContext, including
+	// when that pointer is null (this demo had no tag and must not borrow one).
+	bool mPcPendingProtagonistSet;
+#endif
 
 	static JKRArchive* mArchive;
 };

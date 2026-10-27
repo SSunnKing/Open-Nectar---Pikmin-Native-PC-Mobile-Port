@@ -73,5 +73,18 @@ bool hashImage(const std::filesystem::path& image, std::string& hexDigest,
                std::string& error,
                const std::function<void(std::uint32_t percent)>& progress = {});
 
+#if defined(__ANDROID__)
+/// A disc name as a UTF-8 file name: unchanged if it already is, converted
+/// from Shift-JIS (CP932, as on Windows and macOS) if not, otherwise with the
+/// odd bytes escaped as %XX. Android's shared storage takes only UTF-8 names.
+std::string discNameToUtf8(const std::string& name);
+
+/// Renames, under `directory` and recursively, every entry whose name is not
+/// UTF-8 to discNameToUtf8(name). Installs made before the data folder moved
+/// to shared storage have such names (Pikmin 2's leftover Japanese files).
+/// Returns how many entries changed.
+int renameNonUtf8Entries(const std::string& directory);
+#endif
+
 } // namespace launcher
 } // namespace pikmin

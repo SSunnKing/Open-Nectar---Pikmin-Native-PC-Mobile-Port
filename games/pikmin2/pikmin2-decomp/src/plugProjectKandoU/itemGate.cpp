@@ -10,6 +10,7 @@
 #include "PSM/CreatureObj.h"
 #include "Game/gamePlayData.h"
 #include "Game/MoviePlayer.h"
+#include "Game/pcCoop.h"
 #include "PSSystem/PSSystemIF.h"
 #include "nans.h"
 
@@ -733,6 +734,7 @@ void GateDownState::init(Game::ItemGate* gate, Game::StateArg* arg)
 			MoviePlayArg gateMovie("g18_find_gate", nullptr, nullptr, 0);
 			gateMovie.setTarget(gate);
 			moviePlayer->mTargetObject = gate;
+			pc_p2_coop_tag_movie_from_position(gate->getPosition());
 			moviePlayer->play(gateMovie);
 			playData->setDemoFlag(DEMO_First_Gate_Down);
 		}

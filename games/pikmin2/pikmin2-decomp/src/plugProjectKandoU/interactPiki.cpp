@@ -141,6 +141,9 @@ bool InteractFue::actPiki(Game::Piki* piki)
 
 				moviePlayer->mTargetObject = piki;
 				if (piki->getKind() != Red) {
+					if (mCreature->isNavi()) {
+						pc_p2_coop_tag_movie_protagonist(static_cast<Navi*>(mCreature));
+					}
 					moviePlayer->play(movieArg);
 					playData->setMeetPikmin(piki->getKind());
 				}
@@ -155,6 +158,9 @@ bool InteractFue::actPiki(Game::Piki* piki)
 				MoviePlayArg bulbminArg("X13_exp_leafchappy", nullptr, nullptr, 0);
 				bulbminArg.setTarget(piki);
 				moviePlayer->mTargetObject = piki;
+				if (mCreature->isNavi()) {
+					pc_p2_coop_tag_movie_protagonist(static_cast<Navi*>(mCreature));
+				}
 				moviePlayer->play(bulbminArg);
 			}
 
@@ -222,6 +228,9 @@ bool InteractFue::actPiki(Game::Piki* piki)
 				MoviePlayArg bulbminArg("x13_exp_leafchappy", nullptr, nullptr, 0);
 				bulbminArg.setTarget(piki);
 				moviePlayer->mTargetObject = piki;
+				if (mCreature->isNavi()) {
+					pc_p2_coop_tag_movie_protagonist(static_cast<Navi*>(mCreature));
+				}
 				moviePlayer->play(bulbminArg);
 			}
 			return true;

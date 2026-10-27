@@ -3,6 +3,7 @@
 #include "Game/PikiMgr.h"
 #include "Game/Stickers.h"
 #include "Game/MoviePlayer.h"
+#include "Game/pcCoop.h"
 #include "stl/float.h"
 #include "Dolphin/rand.h"
 #include "nans.h"
@@ -280,6 +281,7 @@ void swallowPikmin(Creature* creature, f32 poisonDamage, Condition<Piki>* condit
 						MoviePlayArg movie("g2B_white_poison", nullptr, nullptr, 0);
 						movie.setTarget(creature);
 						moviePlayer->mTargetObject = creature;
+						pc_p2_coop_tag_movie_from_position(creature->getPosition());
 						moviePlayer->play(movie);
 						playData->setDemoFlag(DEMO_Eat_White_Pikmin);
 					}

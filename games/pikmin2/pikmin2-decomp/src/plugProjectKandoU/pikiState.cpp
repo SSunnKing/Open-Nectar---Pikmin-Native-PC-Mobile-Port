@@ -12,6 +12,7 @@ extern "C" int pc_settings_get_better_pathfinding(void);
 #include "Game/MapMgr.h"
 #include "Game/rumble.h"
 #include "Game/MoviePlayer.h"
+#include "Game/pcCoop.h"
 #include "Game/DeathMgr.h"
 #include "Game/CameraMgr.h"
 #include "Game/Interaction.h"
@@ -917,6 +918,7 @@ inline void PikiPanicState::checkDemo(Piki* piki)
 			playArg.mOrigin            = piki->getPosition();
 			playArg.mAngle             = piki->getFaceDir();
 			moviePlayer->mTargetObject = piki;
+			pc_p2_coop_tag_movie_from_piki(piki);
 			moviePlayer->play(playArg);
 		}
 	}
@@ -3525,6 +3527,7 @@ void PikiGrowupState::onKeyEvent(Piki* piki, SysShape::KeyEvent const& event)
 					MoviePlayArg movieArg("g34_yellow_extract", nullptr, nullptr, 0);
 					movieArg.setTarget(piki);
 					moviePlayer->mTargetObject = piki;
+					pc_p2_coop_tag_movie_from_piki(piki);
 					moviePlayer->play(movieArg);
 				}
 

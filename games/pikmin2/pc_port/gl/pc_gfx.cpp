@@ -6741,14 +6741,44 @@ void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height, 
 extern "C" size_t pc_host_readable_bytes(const void* p, size_t want);
 extern "C" const void* pc_host_readable_end(const void* p);
 
+// A short read is either harmless (the GC GPU read garbage past the end too)
+// or a host bounds bug, as with macOS lacking /proc. Say so, but only a few
+// times per bucket (guest-byte copies share one counter; display lists another).
+// A bad bound can hit every frame. Wording follows Pikmin 1.
+static bool short_read_warning_allowed(std::atomic<int>& count) {
+    constexpr int kMaxShortReadWarnings = 8;
+    int n = count.load(std::memory_order_relaxed);
+    if (n >= kMaxShortReadWarnings) return false;
+    n = count.fetch_add(1, std::memory_order_relaxed);
+    if (n >= kMaxShortReadWarnings) return false;
+    if (n == kMaxShortReadWarnings - 1)
+        fprintf(stderr, "[PC GX] (further warnings of this kind suppressed)\n");
+    return true;
+}
+
 // Copia `bytes` de memoria del juego sin leer más allá de la arena; lo que
 // falte (el GPU de la GC habría leído basura) queda a cero. Issue #166.
 template <typename Vec>
-static void assign_guest_bytes(Vec& dst, const void* src, size_t bytes) {
+static void assign_guest_bytes(Vec& dst, const void* src, size_t bytes, const char* what) {
+    static std::atomic<int> sWarnings{0};
     const u8* p = static_cast<const u8*>(src);
     const size_t readable = pc_host_readable_bytes(p, bytes);
+    if (readable < bytes && short_read_warning_allowed(sWarnings))
+        fprintf(stderr, "[PC GX] %s %p: %zu bytes wanted, %zu readable, zero-padded\n",
+                what, src, bytes, readable);
     dst.assign(p, p + readable);
     dst.resize(bytes, 0);
+}
+
+// A nested display list's size clipped to readable memory, with a warning
+// when that cuts it short.
+static u32 readable_display_list_bytes(const void* list, u32 declared) {
+    static std::atomic<int> sWarnings{0};
+    const size_t readable = pc_host_readable_bytes(list, declared);
+    if (readable < declared && short_read_warning_allowed(sWarnings))
+        fprintf(stderr, "[PC GX] display list %p: %u bytes declared, %zu readable\n",
+                list, declared, readable);
+    return u32(readable);
 }
 
 void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, GXTexFmt format,
@@ -6760,7 +6790,7 @@ void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, G
     const uintptr_t key = reinterpret_cast<uintptr_t>(obj);
     std::lock_guard<std::mutex> lock(sTextureRegistryMutex);
     PcTextureSource& sourceRecord = sTextureSources[key];
-    assign_guest_bytes(sourceRecord.image, imagePtr, sourceBytes);
+    assign_guest_bytes(sourceRecord.image, imagePtr, sourceBytes, "texture");
     sourceRecord.width = width;
     sourceRecord.height = height;
     sourceRecord.format = static_cast<u32>(format);
@@ -7032,7 +7062,7 @@ void pc_gfx_init_tlut_obj(GXTlutObj* obj, void* lut, GXTlutFmt format, u16 numEn
     std::vector<u8> padded;
     const u8* source = static_cast<const u8*>(lut);
     if (pc_host_readable_bytes(source, size_t(numEntries) * 2) < size_t(numEntries) * 2) {
-        assign_guest_bytes(padded, source, size_t(numEntries) * 2);
+        assign_guest_bytes(padded, source, size_t(numEntries) * 2, "tlut");
         source = padded.data();
     }
     auto expand5 = [](u16 value) -> u8 { return (value << 3) | (value >> 2); };
@@ -7178,7 +7208,7 @@ void pc_gfx_init_tex_obj_ci(GXTexObj* obj, void* imagePtr, u16 width, u16 height
     if (sourceBytes == 0) return;
     std::lock_guard<std::mutex> lock(sTextureRegistryMutex);
     PcTextureSource& ci = sTextureSources[key];
-    assign_guest_bytes(ci.image, imagePtr, sourceBytes);
+    assign_guest_bytes(ci.image, imagePtr, sourceBytes, "ci texture");
     ci.width = width;
     ci.height = height;
     ci.format = static_cast<u32>(format);
@@ -11143,7 +11173,7 @@ static void fifo_cmd_byte(u8 val) {
         handle_bp_reg(be32(p));
     } else if (cmd == GX_CMD_CALL_DL) {
         void* list = pc_host_from_gc_phys(be32(p));
-        if (list) pc_gfx_call_display_list(list, u32(pc_host_readable_bytes(list, be32(p + 4))));
+        if (list) pc_gfx_call_display_list(list, readable_display_list_bytes(list, be32(p + 4)));
     } else {
         handle_indexed_xf_load(cmd, be32(p));
     }
@@ -11430,7 +11460,7 @@ static void pc_gfx_call_display_list_impl(const void* list, u32 nbytes) {
             u32 addr, size;
             if (!read_be_u32(cursor, end, addr) || !read_be_u32(cursor, end, size)) break;
             if (void* nested = pc_host_from_gc_phys(addr))
-                pc_gfx_call_display_list(nested, u32(pc_host_readable_bytes(nested, size)));
+                pc_gfx_call_display_list(nested, readable_display_list_bytes(nested, size));
             continue;
         }
         if (command == GX_CMD_INVL_VC) continue;

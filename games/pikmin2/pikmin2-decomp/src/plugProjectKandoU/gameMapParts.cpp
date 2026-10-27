@@ -433,7 +433,11 @@ void MapRoom::countEnemys()
 
 		num = node->getBirthCount();
 
+#ifdef PIKI_PC_PORT
+		generalEnemyMgr->addGeneratedEnemyNum(node->getObjectId(), num, nullptr);
+#else
 		generalEnemyMgr->addEnemyNum(node->getObjectId(), num, nullptr);
+#endif
 	}
 }
 

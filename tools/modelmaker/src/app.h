@@ -68,6 +68,7 @@ private:
 	ImVec2 viewOrigin_, viewSize_;
 	DynamicMesh modelMesh_, olimarMesh_;
 	std::vector<GLuint> modelTex_, olimarTex_;
+	GLuint startPortrait_[4] = {}; ///< Olimar y los tres Pikmin, renderizados desde los assets del juego
 	int anim_      = -1; ///< -1: pose de reposo, con los puntos para editar
 	float frame_   = 0;
 	bool playing_  = true;
@@ -76,6 +77,8 @@ private:
 	bool showSkeleton_ = true, showWeights_ = false;
 	int dragMarker_ = -1, hoverMarker_ = -1;
 	bool orbiting_  = false, panning_ = false;
+	bool showStart_ = true;
+	int editorStep_ = 0; ///< modelo, colocar, esqueleto, animar, comprobar, publicar
 
 	// A quién reemplaza el modelo: un capitán (Olimar o un personaje propio)
 	// o los Pikmin de un color (o los tres, teñidos por el juego).
@@ -92,6 +95,7 @@ private:
 	void ensureStemMaterial();
 	void speciesColour(float out[3]) const;
 	void appendLeaf(DynamicMesh& mesh, const Mat34& world, float offsetX, const float tint[3]);
+	bool buildStartPortraits(std::string& error);
 	void useNowInGame(const nectar::CharacterInfo& info);
 
 	// Personaje propio: su nombre en el selector de capitán, el autor y los
@@ -122,8 +126,11 @@ private:
 	void fillModelMesh(DynamicMesh& mesh, const std::vector<Mat34>* skin, bool unbent, bool weights);
 	void resetCamera();
 
-	void drawPanel(float width, float height);
-	void drawView(float x, float width, float height);
+	void drawStartScreen(float width, float height);
+	void drawTopBar(float width);
+	void drawWorkflow(float x, float y, float width, float height);
+	void drawPanel(float x, float y, float width, float height);
+	void drawView(float x, float y, float width, float height);
 	void drawOverlay(const std::vector<Mat34>& skin);
 	bool project(const Vec3& p, ImVec2& out) const;
 	void dragMarker(const ImVec2& mouse);

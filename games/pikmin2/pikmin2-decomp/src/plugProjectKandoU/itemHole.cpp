@@ -4,6 +4,7 @@
 #include "Game/Entities/ItemBarrel.h"
 #include "Game/MapMgr.h"
 #include "Game/MoviePlayer.h"
+#include "Game/pcCoop.h"
 #include "Game/PlatInstance.h"
 #include "Game/pelletMgr.h"
 #include "Game/itemMgr.h"
@@ -190,6 +191,7 @@ bool Item::interactGotKey(Game::InteractGotKey& interaction)
 		arg.mDelegateStart         = gameSystem->mSection->mMovieStartCallback;
 		arg.mDelegateEnd           = gameSystem->mSection->mMovieFinishCallback;
 		moviePlayer->mTargetObject = this;
+		pc_p2_coop_tag_movie_from_position(getPosition());
 		moviePlayer->play(arg);
 		return true;
 	}

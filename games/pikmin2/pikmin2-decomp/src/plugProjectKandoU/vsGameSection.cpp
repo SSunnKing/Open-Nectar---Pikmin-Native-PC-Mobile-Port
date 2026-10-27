@@ -88,6 +88,11 @@ VsGameSection::VsGameSection(JKRHeap* heap, bool gameMode)
     : BaseGameSection(heap)
 {
 	mIsVersusMode          = gameMode;
+#ifdef PIKI_PC_PORT
+	// Ver SingleGameSection: el estado se lee antes de que init() lo ponga.
+	mFsm          = nullptr;
+	mCurrentState = nullptr;
+#endif
 	mIsChallengePerfect    = true;
 	mChallengeStageNum     = 0;
 	mVsStageNum            = 0;

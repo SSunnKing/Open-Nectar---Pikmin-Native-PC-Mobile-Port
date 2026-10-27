@@ -2,6 +2,7 @@
 #include "Game/GameSystem.h"
 #include "Game/gamePlayData.h"
 #include "Game/MoviePlayer.h"
+#include "Game/pcCoop.h"
 #include "Game/PikiMgr.h"
 #include "efx/TOtakara.h"
 #include "Dolphin/rand.h"
@@ -84,6 +85,7 @@ void NormalState::onDamage(Item* item, f32 damage)
 			arg.mOrigin                = item->mPellet->getPosition();
 			arg.mAngle                 = item->mPellet->getFaceDir();
 			moviePlayer->mTargetObject = item->mPellet;
+			pc_p2_coop_tag_movie_from_position(item->mPellet->getPosition());
 			moviePlayer->play(arg);
 		}
 	}

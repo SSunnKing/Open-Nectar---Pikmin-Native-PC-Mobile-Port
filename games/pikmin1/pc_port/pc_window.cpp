@@ -840,6 +840,13 @@ bool pc_window_init(const char* title, int width, int height) {
     // pixelados hasta que un cambio de monitor recalculaba el DPI.
     SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
 #endif
+#ifdef __ANDROID__
+    // Android: los mandos por la entrada del sistema, no por HIDAPI. HIDAPI
+    // reclama el DualShock 4 (USB) y, sin permiso USB, no lo abre; el
+    // joystick de Android lo da por suyo y no lo crea: el mando no se abría
+    // y solo llegaban A/B/Start/Back como teclas (issue #177).
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "0");
+#endif
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) < 0) {
         printf("[PC Port Error] SDL_Init failed: %s\n", SDL_GetError());

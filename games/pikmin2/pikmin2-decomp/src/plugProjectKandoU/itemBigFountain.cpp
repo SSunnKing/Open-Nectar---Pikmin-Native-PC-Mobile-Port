@@ -1,5 +1,6 @@
 #include "Game/Entities/ItemBigFountain.h"
 #include "Game/MoviePlayer.h"
+#include "Game/pcCoop.h"
 #include "Game/MapMgr.h"
 #include "Platform.h"
 #include "JSystem/JKernel/JKRDvdRipper.h"
@@ -239,6 +240,7 @@ bool Item::interactGotKey(InteractGotKey& gotKey)
 		playArg.mDelegateStart     = gameSystem->mSection->mMovieStartCallback;
 		playArg.mDelegateEnd       = gameSystem->mSection->mMovieFinishCallback;
 		moviePlayer->mTargetObject = this;
+		pc_p2_coop_tag_movie_from_position(getPosition());
 		moviePlayer->play(playArg);
 		return true;
 	}

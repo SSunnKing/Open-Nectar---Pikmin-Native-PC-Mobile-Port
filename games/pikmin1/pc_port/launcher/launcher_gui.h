@@ -20,6 +20,7 @@ enum class HubAction {
     ModelMaker, // botón del creador de modelos (Olimar propio, Pikmin 1)
     InstallCharacter, // botón Characters: instala un personaje (.nectarchar)
     TexturePack, // botón HD textures: descarga e instala el pack de ese juego
+    DataFolder, // botón Change folder (Android): elegir otra carpeta de datos
 };
 
 // Juegos que muestra la pantalla principal; los dos se instalan desde su disco.
@@ -54,6 +55,9 @@ struct HubState {
     // que decoran la ventana. Vacío = decoración dibujada.
     std::string gameDataDirectory;
     GameInstall games[kHubGameCount]; // índice = HubGame
+    // Android: carpeta de datos de la app (juegos, partidas, mods). Se
+    // muestra abajo con un botón para cambiarla. Vacío = sin botón.
+    std::string dataFolder;
     // Editor de mapas VS (nectar-mapmaker) junto al launcher o en la
     // instalación de Pikmin 1. Vacío = no hay: sin botón.
     std::string mapEditor;

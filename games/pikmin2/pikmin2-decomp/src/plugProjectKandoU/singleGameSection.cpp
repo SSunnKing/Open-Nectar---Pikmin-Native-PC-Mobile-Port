@@ -255,6 +255,12 @@ SingleGameSection::SingleGameSection(JKRHeap* heap)
     , mOpenMenuFlags(0)
 {
 	mPlayerMode       = 2;
+#ifdef PIKI_PC_PORT
+	// El FSM arranca en init(); mientras tanto pc_window_poll_events consulta
+	// el estado (pc_menu_mode_active) y leía basura del heap.
+	mFsm          = nullptr;
+	mCurrentState = nullptr;
+#endif
 	mCaveSaveCallback = new Delegate<Game::SingleGameSection>(this, &SingleGameSection::saveCaveMore);
 	newCaveOtakaraEarningsAndDrops();
 }

@@ -174,6 +174,7 @@ void ActFormation::setFormed()
 		Game::MoviePlayArg playArg("x02_watch_red_pikmin", nullptr, nullptr, 0);
 		playArg.setTarget(navi);
 		Game::moviePlayer->mTargetObject = navi;
+		pc_p2_coop_tag_movie_protagonist(navi);
 
 		Game::moviePlayer->play(playArg);
 

@@ -10,6 +10,7 @@ extern "C" int pc_settings_get_blues_only_water(void);
 #include "Game/StateMachine.h"
 #include "Game/gameStat.h"
 #include "Game/MoviePlayer.h"
+#include "Game/pcCoop.h"
 #include "Game/GameSystem.h"
 #include "Game/Entities/ItemOnyon.h"
 #include "Game/DeathMgr.h"
@@ -1245,6 +1246,7 @@ bool Piki::startDope(int isDoped)
 				MoviePlayArg movieArg("g1A_red_doping", nullptr, nullptr, 0);
 				movieArg.setTarget(this);
 				moviePlayer->mTargetObject = this;
+				pc_p2_coop_tag_movie_from_piki(this);
 				moviePlayer->play(movieArg);
 			}
 			playData->setDemoFlag(DEMO_First_Spicy_Use);

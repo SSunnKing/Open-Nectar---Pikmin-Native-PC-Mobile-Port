@@ -9,6 +9,7 @@
 // otras cosas (puntuación, tiempo, resultado).
 #ifdef PIKI_PC_PORT
 #include "pc_p2_coop.h"
+#include "pc_p2_coop_movie.h"
 // Lo que cambia en cada frame: con Louie ya disponible.
 #define PC_TWO_CAPTAIN_PLAY() (Game::gameSystem->isMultiplayerMode() || pc_p2_coop_active())
 // Lo que se decide al cargar (recursos): basta con la sesión co-op.

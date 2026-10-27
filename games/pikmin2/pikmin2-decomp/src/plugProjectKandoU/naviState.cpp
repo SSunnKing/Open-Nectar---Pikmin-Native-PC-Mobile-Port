@@ -3079,6 +3079,9 @@ void NaviGatherState::exec(Navi* navi)
 		navi->mSoundObj->playShugoSE();
 		navi->control();
 		navi->callPikis();
+		if (!navi->mController1) {
+			return;
+		}
 		if (navi->mController1->getButtonUp() & Controller::PRESS_B) {
 			navi->mWhistle->stop();
 			transit(navi, NSID_Walk, nullptr);

@@ -18,11 +18,27 @@
 #include "Game/Entities/ItemHoney.h"
 #include "Radar.h"
 #include "nans.h"
+#ifdef PIKI_PC_PORT
+#include "pc_p2_coop_movie.h"
+#endif
 
 static const int padding[]    = { 0, 0, 0 };
 static const char className[] = "naviDemoCheck";
 
 namespace Game {
+
+#ifdef PIKI_PC_PORT
+static void playCoopDemoMovie(MoviePlayArg& arg, Navi* navi)
+{
+	pc_p2_coop_tag_movie_protagonist(navi);
+	moviePlayer->play(arg);
+}
+#else
+static void playCoopDemoMovie(MoviePlayArg& arg, Navi*)
+{
+	moviePlayer->play(arg);
+}
+#endif
 // Trigger Sizes for Onion Detection
 const static f32 sRedOnionTriggerSize    = 125.0f;
 const static f32 sYellowOnionTriggerSize = 1600.0f;
@@ -104,7 +120,7 @@ bool Navi::demoCheck()
 							arg.mAngle                 = currentBud->getFaceDir();
 							moviePlayer->mTargetObject = currentBud;
 							currentBud->movie_begin(false);
-							moviePlayer->play(arg);
+							playCoopDemoMovie(arg, this);
 							playData->setDemoFlag(DEMO_White_Candypop);
 							return true;
 						} else {
@@ -114,7 +130,7 @@ bool Navi::demoCheck()
 							arg.mAngle                 = currentBud->getFaceDir();
 							moviePlayer->mTargetObject = currentBud;
 							currentBud->movie_begin(false);
-							moviePlayer->play(arg);
+							playCoopDemoMovie(arg, this);
 							playData->setDemoFlag(DEMO_Purple_Candypop);
 							return true;
 						}
@@ -142,7 +158,7 @@ bool Navi::demoCheck()
 						arg.mOrigin                = onionPosition;
 						arg.mAngle                 = redOnion->getFaceDir();
 						moviePlayer->mTargetObject = redOnion;
-						moviePlayer->play(arg);
+						playCoopDemoMovie(arg, this);
 					}
 				}
 			}
@@ -183,14 +199,14 @@ bool Navi::demoCheck()
 							arg.mOrigin                = onionPosition;
 							arg.mAngle                 = yellowOnion->getFaceDir();
 							moviePlayer->mTargetObject = yellowOnion;
-							moviePlayer->play(arg);
+							playCoopDemoMovie(arg, this);
 						} else
 #endif
 						{
 						arg.mOrigin                = targetPiki->getPosition();
 						arg.mAngle                 = targetPiki->getFaceDir();
 						moviePlayer->mTargetObject = targetPiki;
-						moviePlayer->play(arg);
+						playCoopDemoMovie(arg, this);
 						}
 					}
 				}
@@ -242,7 +258,7 @@ bool Navi::demoCheck()
 							arg.mOrigin                = onionPosition;
 							arg.mAngle                 = blueOnion->getFaceDir();
 							moviePlayer->mTargetObject = blueOnion;
-							moviePlayer->play(arg);
+							playCoopDemoMovie(arg, this);
 						} else
 #endif
 						{
@@ -251,7 +267,7 @@ bool Navi::demoCheck()
 						arg.mSoundPosition = targetPiki->getSound_PosPtr();
 
 						moviePlayer->mTargetObject = targetPiki;
-						moviePlayer->play(arg);
+						playCoopDemoMovie(arg, this);
 						}
 					}
 				}
@@ -281,7 +297,7 @@ bool Navi::demoCheck()
 						currentPellet->mBaseTrMatrix.getBasis(2, forwardVec);
 						arg.mAngle                 = JMAAtan2Radian(forwardVec.x, forwardVec.z);
 						moviePlayer->mTargetObject = currentPellet;
-						moviePlayer->play(arg);
+						playCoopDemoMovie(arg, this);
 						playData->setDemoFlag(DEMO_Discover_Treasure);
 						return true;
 					}
@@ -327,7 +343,7 @@ bool Navi::demoCheck()
 						currentItem->mBaseTrMatrix.getBasis(2, forwardVec);
 						arg.mAngle                 = JMAAtan2Radian(forwardVec.x, forwardVec.z);
 						moviePlayer->mTargetObject = currentItem;
-						moviePlayer->play(arg);
+						playCoopDemoMovie(arg, this);
 						playData->setFindItemDemoFlag(itemIndex);
 						return true;
 					}
@@ -360,7 +376,7 @@ bool Navi::demoCheck()
 						currentObject->mBaseTrMatrix.getBasis(2, forwardVec);
 						arg.mAngle                 = JMAAtan2Radian(forwardVec.x, forwardVec.z);
 						moviePlayer->mTargetObject = currentObject;
-						moviePlayer->play(arg);
+						playCoopDemoMovie(arg, this);
 						playData->setDemoFlag(DEMO_Find_Loozy_Treasure);
 						return true;
 					}
@@ -415,7 +431,7 @@ bool Navi::demoCheck()
 				arg.mOrigin                = targetCave->getPosition();
 				arg.mAngle                 = targetCave->getFaceDir();
 				moviePlayer->mTargetObject = targetCave;
-				moviePlayer->play(arg);
+				playCoopDemoMovie(arg, this);
 				return true;
 			}
 		}
@@ -450,7 +466,7 @@ bool Navi::demoCheck()
 				arg.mOrigin                = targetHole->getPosition();
 				arg.mAngle                 = targetHole->getFaceDir();
 				moviePlayer->mTargetObject = targetHole;
-				moviePlayer->play(arg);
+				playCoopDemoMovie(arg, this);
 				playData->setDemoFlag(DEMO_Find_Cave_Deeper_Hole);
 				return true;
 			}
@@ -487,7 +503,7 @@ bool Navi::demoCheck()
 				arg.mOrigin                = targetGeyser->getPosition();
 				arg.mAngle                 = targetGeyser->getFaceDir();
 				moviePlayer->mTargetObject = targetGeyser;
-				moviePlayer->play(arg);
+				playCoopDemoMovie(arg, this);
 				playData->setDemoFlag(DEMO_Find_Cave_Geyser);
 				return true;
 			}
@@ -515,7 +531,7 @@ bool Navi::demoCheck()
 					arg.mOrigin                = targetMold->getPosition();
 					arg.mAngle                 = targetMold->getFaceDir();
 					moviePlayer->mTargetObject = targetMold;
-					moviePlayer->play(arg);
+					playCoopDemoMovie(arg, this);
 					playData->setDemoFlag(DEMO_Find_Spiderwort_Mold);
 					return true;
 				}
@@ -555,7 +571,7 @@ bool Navi::demoCheck()
 				arg.mOrigin                = targetSpicyDrop->getPosition();
 				arg.mAngle                 = targetSpicyDrop->getFaceDir();
 				moviePlayer->mTargetObject = targetSpicyDrop;
-				moviePlayer->play(arg);
+				playCoopDemoMovie(arg, this);
 				playData->setDemoFlag(DEMO_Find_Spicy_Drop);
 				return true;
 			}
@@ -594,7 +610,7 @@ bool Navi::demoCheck()
 				arg.mOrigin                = targetBitterDrop->getPosition();
 				arg.mAngle                 = targetBitterDrop->getFaceDir();
 				moviePlayer->mTargetObject = targetBitterDrop;
-				moviePlayer->play(arg);
+				playCoopDemoMovie(arg, this);
 				playData->setDemoFlag(DEMO_Find_Bitter_Drop);
 				return true;
 			}

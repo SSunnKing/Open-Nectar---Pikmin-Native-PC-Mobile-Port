@@ -145,7 +145,14 @@ void EnemyNumInfo::addEnemyNum(int enemyID, u8 num)
 	if (enemyNumList) {
 		for (int i = 0; i < gEnemyInfoNum; i++) {
 			if (enemyID == mEnemyNumList[i].mEnemyID) {
+#ifdef PIKI_PC_PORT
+				// u8: con el Randomizer una especie puede pasar de 255 en un
+				// mapa; sin tope daba la vuelta y el pool quedaba casi vacío.
+				const int sum             = mEnemyNumList[i].mCount + num;
+				mEnemyNumList[i].mCount = (u8)(sum > 0xFF ? 0xFF : sum);
+#else
 				mEnemyNumList[i].mCount += num;
+#endif
 				return;
 			}
 		}
@@ -857,6 +864,24 @@ void GeneralEnemyMgr::addEnemyNum(int enemyID, u8 max, GenObjectEnemy* genObj)
 	}
 }
 #pragma dont_inline reset
+
+#ifdef PIKI_PC_PORT
+void GeneralEnemyMgr::addGeneratedEnemyNum(int enemyID, int count, GenObjectEnemy* genObj)
+{
+	// ShijimiChou::Mgr::birth crea al líder y, del mismo pool, el resto de su
+	// grupo (createGroup, mGroupCount = SHIJIMICHOU_GROUP_COUNT). El juego
+	// original nunca la pone en un generador (solo como hija de plantas o de
+	// Damagumo, cuyo mChildNum ya cuenta el grupo); el Randomizer sí, y con
+	// un hueco por unidad el segundo birth devolvía nullptr.
+	if (enemyID == EnemyTypeID::EnemyID_ShijimiChou) {
+		count *= SHIJIMICHOU_GROUP_COUNT;
+	}
+	if (count > 0xFF) {
+		count = 0xFF;
+	}
+	addEnemyNum(enemyID, (u8)count, genObj);
+}
+#endif
 
 /**
  * @note Address: 0x8010DA80

@@ -1722,7 +1722,19 @@ void Navi::update()
 		if (PC_ORIG_TICK()) mInvincibleTimer--;
 	}
 	mSoundObj->exec();
+#ifdef PIKI_PC_PORT
+	// Onion discoveries start a movie and then fall through, so demoCheck's
+	// return value is not "a cutscene started". Stop this update once it has:
+	// setPlayerMode inside the movie may have cleared a controller.
+	const int pcDemoStateBefore = moviePlayer ? moviePlayer->mDemoState : DEMOSTATE_Inactive;
+#endif
 	demoCheck();
+#ifdef PIKI_PC_PORT
+	if (pc_p2_coop_active() && moviePlayer && pcDemoStateBefore == DEMOSTATE_Inactive
+	    && moviePlayer->mDemoState != DEMOSTATE_Inactive) {
+		return;
+	}
+#endif
 	updateLook();
 	updateLookCreature();
 	updateKaisanDisable();

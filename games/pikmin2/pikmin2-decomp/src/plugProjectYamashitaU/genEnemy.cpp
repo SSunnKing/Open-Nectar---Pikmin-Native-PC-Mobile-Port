@@ -215,7 +215,14 @@ Creature* GenObjectEnemy::generate(Game::Generator* gen)
 		}
 
 		GenArg initVars(posVector[i]);
+#ifdef PIKI_PC_PORT
+		// birth devuelve nullptr con el pool lleno (EnemyMgrBase::birth).
+		if (Creature* teki = birth(&initVars)) {
+			teki->mGenerator = gen;
+		}
+#else
 		birth(&initVars)->mGenerator = gen; // spawn teki
+#endif
 	}
 	return nullptr;
 }
@@ -639,7 +646,11 @@ J3DModelData* GenObjectEnemy::getShape()
 void GenObjectEnemy::updateUseList(Game::Generator* gen, int listIdx)
 {
 	if (generalEnemyMgr) {
+#ifdef PIKI_PC_PORT
+		generalEnemyMgr->addGeneratedEnemyNum((int)mEnemyID, mTekiNum, this);
+#else
 		generalEnemyMgr->addEnemyNum((int)mEnemyID, (u8)mTekiNum, this);
+#endif
 	}
 }
 

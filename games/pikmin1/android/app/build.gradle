@@ -37,8 +37,8 @@ android {
         applicationId 'org.opennectar'
         minSdk 29
         targetSdk 35
-        versionCode 20
-        versionName '1.0.9'
+        versionCode 21
+        versionName '1.1'
         externalNativeBuild {
             cmake {
                 // libc++ estática, no compartida: el juego sustituye los

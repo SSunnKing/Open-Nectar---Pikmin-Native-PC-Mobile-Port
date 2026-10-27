@@ -28,6 +28,7 @@
 #include "pc_speedrun.h"
 #include "pc_vs.h"
 #include "netplay/pc_coop_switch.h"
+#include <cstdio>
 #endif
 
 class TitleSetupSection;
@@ -379,6 +380,13 @@ public:
 
 			if (mState == STATE_Active) {
 #if defined(PIKI_PC_PORT)
+				// One line, once per run, for smoke tests and scripted runs to wait on.
+				static bool sTitleReachedLogged = false;
+				if (!sTitleReachedLogged) {
+					sTitleReachedLogged = true;
+					printf("[PC Port] Title screen reached\n");
+					fflush(stdout);
+				}
 				// Editor de mapas (--vs-map): directo al VS, como si se hubiera
 				// elegido en el menú (ogTitle) y sin pasar por él.
 				// Editor de mapas (--mission-map, --campaign): directo a la misión

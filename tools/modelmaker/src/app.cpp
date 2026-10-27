@@ -98,6 +98,8 @@ App::~App()
 		if (t) glDeleteTextures(1, &t);
 	for (GLuint t : olimarTex_)
 		if (t) glDeleteTextures(1, &t);
+	for (GLuint& t : startPortrait_)
+		if (t) glDeleteTextures(1, &t);
 }
 
 bool App::init(const std::string& openPath, std::string& error)
@@ -111,14 +113,8 @@ bool App::init(const std::string& openPath, std::string& error)
 		say(why, true);
 	}
 	if (!openPath.empty()) {
+		showStart_ = false;
 		loadModel(openPath, false);
-	} else if (gameReady_) {
-		std::string source;
-		int target = T_CAPTAIN;
-		if (loadProject(source, target)) {
-			setTarget(target);
-			loadModel(source, true);
-		}
 	}
 	return true;
 }
@@ -150,6 +146,10 @@ bool App::setupGame(std::string& error)
 		leafTex_[i].clear();
 		for (const nectar::Image& img : leaves_[i].materialTex) leafTex_[i].push_back(uploadTexture(img, false));
 	}
+	// Las tarjetas de inicio son retratos de los modelos reales, no dibujos
+	// aproximados. Si faltase un asset, la pantalla conserva su fallback.
+	std::string portraitError;
+	buildStartPortraits(portraitError);
 	if (cfg_.assetsDir != assets) {
 		cfg_.assetsDir = assets;
 		cfg_.save();
@@ -167,12 +167,16 @@ bool App::setupGame(std::string& error)
 	return true;
 }
 
-// El modelo del juego que se reemplaza: Olimar o un Pikmin (los tres colores
-// comparten esqueleto y pose; se usa el rojo).
+// El modelo del juego que se reemplaza. Los tres Pikmin comparten esqueleto,
+// pero no geometría: rojo tiene nariz, amarillo orejas y azul branquias.
 bool App::loadReference(std::string& error)
 {
 	OlimarRig rig;
-	if (!rig.load(assetsDir_ + "/dataDir", isPikmin() ? "pikis/redModel.mod" : "pikis/nv3Model.mod", error)) return false;
+	const char* model = "pikis/nv3Model.mod";
+	if (target_ == T_RED || target_ == T_ALL) model = "pikis/redModel.mod";
+	else if (target_ == T_YELLOW) model = "pikis/yelModel.mod";
+	else if (target_ == T_BLUE) model = "pikis/bluModel.mod";
+	if (!rig.load(assetsDir_ + "/dataDir", model, error)) return false;
 	olimar_ = std::move(rig);
 	for (GLuint t : olimarTex_)
 		if (t) glDeleteTextures(1, &t);
@@ -389,6 +393,8 @@ void App::finishLoad()
 	uploadTextures();
 	rebuild();
 	resetCamera();
+	// Tras importar, el siguiente trabajo útil es revisar escala y orientación.
+	editorStep_ = 1;
 }
 
 void App::uploadTextures()
@@ -533,6 +539,83 @@ void App::appendLeaf(DynamicMesh& mesh, const Mat34& world, float offsetX, const
 	}
 }
 
+bool App::buildStartPortraits(std::string& error)
+{
+	for (GLuint& portrait : startPortrait_) {
+		if (portrait) glDeleteTextures(1, &portrait);
+		portrait = 0;
+	}
+	OlimarRig captain, redPikmin, yellowPikmin, bluePikmin;
+	if (!captain.load(assetsDir_ + "/dataDir", "pikis/nv3Model.mod", error)
+	    || !redPikmin.load(assetsDir_ + "/dataDir", "pikis/redModel.mod", error)
+	    || !yellowPikmin.load(assetsDir_ + "/dataDir", "pikis/yelModel.mod", error)
+	    || !bluePikmin.load(assetsDir_ + "/dataDir", "pikis/bluModel.mod", error))
+		return false;
+
+	auto portrait = [&](int slot, const OlimarRig& source, const float tint[3], bool addLeaf) {
+		std::vector<GLuint> textures;
+		for (const nectar::Image& img : source.materialTex) textures.push_back(uploadTexture(img, true));
+		DynamicMesh mesh;
+		int lastMat = -2;
+		for (std::size_t tri = 0; tri < source.triMaterial.size(); ++tri) {
+			const int mat = source.triMaterial[tri];
+			if (mat != lastMat) {
+				DynamicMesh::Range range;
+				range.first   = int(mesh.data.size());
+				range.texture = mat >= 0 && std::size_t(mat) < textures.size() ? textures[std::size_t(mat)] : 0;
+				mesh.ranges.push_back(range);
+				lastMat = mat;
+			}
+			const nectar::Rgba8 mc = mat >= 0 && std::size_t(mat) < source.materialColour.size() ? source.materialColour[std::size_t(mat)] : nectar::Rgba8 {};
+			for (int k = 0; k < 3; ++k) {
+				const SkinVertex& v = source.verts[tri * 3 + std::size_t(k)];
+				GpuVertex g {};
+				g.p[0] = v.p.x, g.p[1] = v.p.y, g.p[2] = v.p.z;
+				g.n[0] = v.n.x, g.n[1] = v.n.y, g.n[2] = v.n.z;
+				g.uv[0] = v.uv.x, g.uv[1] = v.uv.y;
+				g.c[0] = v.col[0] * mc.r / 255.0f * tint[0];
+				g.c[1] = v.col[1] * mc.g / 255.0f * tint[1];
+				g.c[2] = v.col[2] * mc.b / 255.0f * tint[2];
+				g.c[3] = v.col[3];
+				mesh.data.push_back(g);
+			}
+			mesh.ranges.back().count = int(mesh.data.size()) - mesh.ranges.back().first;
+		}
+		if (addLeaf && source.bind.size() > J_ANT3) {
+			const float white[3] = { 1, 1, 1 };
+			appendLeaf(mesh, source.bind[J_ANT3], 0.0f, white);
+		}
+		mesh.upload();
+
+		Vec3 mn { 1e9f, 1e9f, 1e9f }, mx { -1e9f, -1e9f, -1e9f };
+		for (const GpuVertex& v : mesh.data) {
+			mn.x = std::min(mn.x, v.p[0]), mn.y = std::min(mn.y, v.p[1]), mn.z = std::min(mn.z, v.p[2]);
+			mx.x = std::max(mx.x, v.p[0]), mx.y = std::max(mx.y, v.p[1]), mx.z = std::max(mx.z, v.p[2]);
+		}
+		const float h = std::max(mx.y - mn.y, 1.0f);
+		const float w = std::max({ mx.x - mn.x, mx.z - mn.z, 1.0f });
+		OrbitCamera camera;
+		camera.target   = (mn + mx) * 0.5f;
+		camera.yaw      = 0.20f;
+		camera.pitch    = 0.04f;
+		camera.fovY     = 0.58f;
+		camera.distance = std::max(h, w) * 0.58f / std::tan(camera.fovY * 0.5f) + std::max(h, w) * 0.12f;
+		nectar::Image image;
+		if (view_.renderImage(384, 384, camera.projection(1.0f) * camera.view(), mesh, image)) startPortrait_[slot] = uploadTexture(image, false);
+		for (GLuint texture : textures)
+			if (texture) glDeleteTextures(1, &texture);
+	};
+	const float white[3]  = { 1, 1, 1 };
+	const float red[3]    = { 1.0f, 0.12f, 0.0f };
+	const float yellow[3] = { 1.0f, 0.82f, 0.0f };
+	const float blue[3]   = { 0.0f, 0.2f, 1.0f };
+	portrait(0, captain, white, false);
+	portrait(1, redPikmin, red, false);
+	portrait(2, yellowPikmin, yellow, false);
+	portrait(3, bluePikmin, blue, false);
+	return startPortrait_[0] && startPortrait_[1] && startPortrait_[2] && startPortrait_[3];
+}
+
 // `skin` nulo: en reposo (enderezado o, con `unbent`, como se importó).
 void App::fillModelMesh(DynamicMesh& mesh, const std::vector<Mat34>* skin, bool unbent, bool weights)
 {
@@ -604,11 +687,17 @@ void App::frame()
 	}
 
 	const ImGuiViewport* vp = ImGui::GetMainViewport();
-	const float panelW      = std::clamp(vp->WorkSize.x * 0.27f, 330.0f, 470.0f);
-	ImGui::SetNextWindowPos(vp->WorkPos);
-	ImGui::SetNextWindowSize(ImVec2(panelW, vp->WorkSize.y));
-	drawPanel(panelW, vp->WorkSize.y);
-	drawView(vp->WorkPos.x + panelW, vp->WorkSize.x - panelW, vp->WorkSize.y);
+	if (showStart_) {
+		drawStartScreen(vp->WorkSize.x, vp->WorkSize.y);
+	} else {
+		const float topH       = 64.0f;
+		const float workflowW  = std::clamp(vp->WorkSize.x * 0.13f, 205.0f, 250.0f);
+		const float inspectorW = std::clamp(vp->WorkSize.x * 0.22f, 350.0f, 430.0f);
+		drawTopBar(vp->WorkSize.x);
+		drawWorkflow(vp->WorkPos.x, vp->WorkPos.y + topH, workflowW, vp->WorkSize.y - topH);
+		drawPanel(vp->WorkPos.x + vp->WorkSize.x - inspectorW, vp->WorkPos.y + topH, inspectorW, vp->WorkSize.y - topH);
+		drawView(vp->WorkPos.x + workflowW, vp->WorkPos.y + topH, vp->WorkSize.x - workflowW - inspectorW, vp->WorkSize.y - topH);
+	}
 
 	if (working_) {
 		ImGui::OpenPopup("##working");
@@ -658,45 +747,214 @@ void App::frame()
 	}
 }
 
-void App::drawPanel(float width, float height)
+void App::drawStartScreen(float width, float height)
 {
-	(void)width;
-	(void)height;
-	ImGui::Begin("##panel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
-	ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(250, 220, 120, 255));
-	ImGui::SetWindowFontScale(1.35f);
-	ImGui::TextUnformatted(L("Creador de modelos", "Model Maker"));
+	const ImGuiViewport* vp = ImGui::GetMainViewport();
+	ImGui::SetNextWindowPos(vp->WorkPos);
+	ImGui::SetNextWindowSize(ImVec2(width, height));
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+	ImGui::Begin("##start", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+	ImGui::PopStyleVar();
+	ImDrawList* dl = ImGui::GetWindowDrawList();
+	const ImVec2 origin = ImGui::GetWindowPos();
+	dl->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + height), IM_COL32(24, 29, 27, 255));
+	// Una mancha suave separa el contenido del fondo sin competir con las tarjetas.
+	dl->AddCircleFilled(ImVec2(origin.x + width * 0.5f, origin.y + height * 0.43f), std::min(width, height) * 0.48f, IM_COL32(42, 56, 42, 150), 96);
+
+	const float contentW = std::min(width - 80.0f, 1120.0f);
+	ImGui::SetCursorPos(ImVec2((width - contentW) * 0.5f, std::max(42.0f, height * 0.08f)));
+	ImGui::BeginGroup();
+	ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(181, 222, 92, 255));
+	ImGui::SetWindowFontScale(1.65f);
+	ImGui::TextUnformatted("NECTAR  /  MODEL MAKER");
 	ImGui::SetWindowFontScale(1.0f);
 	ImGui::PopStyleColor();
-	ImGui::SameLine(ImGui::GetContentRegionAvail().x - 60);
-	if (ImGui::SmallButton(spanish() ? "EN" : "ES")) {
+	ImGui::Spacing();
+	ImGui::SetWindowFontScale(2.05f);
+	ImGui::TextUnformatted(L("¿Qué personaje quieres crear?", "Which character do you want to create?"));
+	ImGui::SetWindowFontScale(1.0f);
+	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+	ImGui::TextUnformatted(L("Elige una base. Podrás importar tu modelo y probar todas sus animaciones.",
+	                          "Choose a base. You can import your model and test all of its animations."));
+	ImGui::PopStyleColor();
+	ImGui::Dummy(ImVec2(0, 26));
+
+	const char* names[4] = { "Olimar", L("Pikmin rojo", "Red Pikmin"), L("Pikmin amarillo", "Yellow Pikmin"), L("Pikmin azul", "Blue Pikmin") };
+	const char* desc[4] = { L("Capitán", "Captain"), L("Fuego", "Fire"), L("Electricidad", "Electricity"), L("Agua", "Water") };
+	const ImU32 colours[4] = { IM_COL32(222, 217, 174, 255), IM_COL32(225, 75, 62, 255), IM_COL32(242, 202, 70, 255), IM_COL32(67, 132, 230, 255) };
+	const int targets[4] = { T_CAPTAIN, T_RED, T_YELLOW, T_BLUE };
+	const float gap = 16.0f;
+	const float cardW = (contentW - gap * 3.0f) * 0.25f;
+	const float cardH = std::clamp(height * 0.32f, 230.0f, 300.0f);
+	for (int i = 0; i < 4; ++i) {
+		ImGui::PushID(i);
+		const ImVec2 p = ImGui::GetCursorScreenPos();
+		ImGui::InvisibleButton("card", ImVec2(cardW, cardH));
+		const bool hot = ImGui::IsItemHovered();
+		const bool pressed = ImGui::IsItemClicked();
+		dl->AddRectFilled(p, ImVec2(p.x + cardW, p.y + cardH), hot ? IM_COL32(61, 72, 61, 255) : IM_COL32(45, 53, 47, 255), 16);
+		dl->AddRect(p, ImVec2(p.x + cardW, p.y + cardH), hot ? colours[i] : IM_COL32(83, 98, 84, 255), 16, 0, hot ? 2.5f : 1.0f);
+		const ImVec2 c(p.x + cardW * 0.5f, p.y + cardH * 0.40f);
+		if (startPortrait_[i]) {
+			const float portraitSize = std::min(cardW - 28.0f, cardH - 82.0f);
+			const ImVec2 a(p.x + (cardW - portraitSize) * 0.5f, p.y + 10.0f);
+			dl->AddImage(ImTextureID(std::intptr_t(startPortrait_[i])), a, ImVec2(a.x + portraitSize, a.y + portraitSize));
+		} else if (i == 0) {
+			// Fallback por si la instalación del juego está incompleta.
+			dl->AddCircleFilled(ImVec2(c.x, c.y - 20), 43, colours[i], 48);
+			dl->AddRectFilled(ImVec2(c.x - 48, c.y - 35), ImVec2(c.x + 48, c.y - 5), IM_COL32(184, 208, 219, 255), 18);
+			dl->AddCircleFilled(ImVec2(c.x - 17, c.y - 20), 7, IM_COL32(37, 45, 42, 255));
+			dl->AddCircleFilled(ImVec2(c.x + 17, c.y - 20), 7, IM_COL32(37, 45, 42, 255));
+			dl->AddRectFilled(ImVec2(c.x - 30, c.y + 25), ImVec2(c.x + 30, c.y + 78), colours[i], 24);
+		} else {
+			dl->AddCircleFilled(ImVec2(c.x, c.y), 42, colours[i], 48);
+			dl->AddTriangleFilled(ImVec2(c.x, c.y - 91), ImVec2(c.x - 13, c.y - 36), ImVec2(c.x + 13, c.y - 36), colours[i]);
+			dl->AddCircleFilled(ImVec2(c.x - 15, c.y - 3), 6, IM_COL32(28, 32, 31, 255));
+			dl->AddCircleFilled(ImVec2(c.x + 15, c.y - 3), 6, IM_COL32(28, 32, 31, 255));
+			dl->AddRectFilled(ImVec2(c.x - 23, c.y + 34), ImVec2(c.x + 23, c.y + 88), colours[i], 20);
+		}
+		const ImVec2 titleSize = ImGui::CalcTextSize(names[i]);
+		dl->AddText(ImVec2(p.x + (cardW - titleSize.x) * 0.5f, p.y + cardH - 61), IM_COL32(245, 244, 232, 255), names[i]);
+		const ImVec2 descSize = ImGui::CalcTextSize(desc[i]);
+		dl->AddText(ImVec2(p.x + (cardW - descSize.x) * 0.5f, p.y + cardH - 33), IM_COL32(158, 166, 158, 255), desc[i]);
+		if (pressed && gameReady_) {
+			setTarget(targets[i]);
+			editorStep_ = 0;
+			showStart_ = false;
+			resetCamera();
+		}
+		if (i != 3) ImGui::SameLine(0, gap);
+		ImGui::PopID();
+	}
+	ImGui::Dummy(ImVec2(0, 22));
+	std::string lastSource;
+	int lastTarget = T_CAPTAIN;
+	const bool hasRecent = gameReady_ && loadProject(lastSource, lastTarget);
+	ImGui::BeginDisabled(!hasRecent);
+	if (ImGui::Button(L("Continuar el último proyecto", "Continue last project"), ImVec2(contentW * 0.58f, 48))) {
+		setTarget(lastTarget);
+		showStart_ = false;
+		editorStep_ = 0;
+		loadModel(lastSource, true);
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	if (ImGui::Button(spanish() ? "English" : "Español", ImVec2(contentW * 0.18f, 48))) {
 		setSpanish(!spanish());
 		cfg_.language = spanish() ? "es" : "en";
 		cfg_.save();
-		exportDirty_ = true;
 	}
-	hint(L("Tu propio Olimar: abre un modelo 3D y el creador lo pone sobre su esqueleto.", "Your own Olimar: open a 3D model and it is fitted onto his skeleton."));
+	ImGui::SameLine();
+	if (ImGui::Button(L("Salir", "Quit"), ImVec2(-1, 48))) quit_ = true;
+	if (!gameReady_) {
+		ImGui::Spacing();
+		ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.35f, 1), "%s", L("Selecciona primero la carpeta del juego.", "Select the game folder first."));
+	}
+	ImGui::EndGroup();
+	ImGui::End();
+}
 
-	// 1 · Modelo.
-	// ¿A quién reemplaza? Olimar (o un personaje propio) o los Pikmin.
-	{
-		ImGui::TextUnformatted(L("¿Qué quieres cambiar?", "What do you want to replace?"));
-		const char* targets[] = { L("Un capitán (con su propio hueco)", "A captain (its own slot)"), L("Pikmin rojos", "Red Pikmin"), L("Pikmin amarillos", "Yellow Pikmin"),
-			                      L("Pikmin azules", "Blue Pikmin"), L("Los tres Pikmin (se tiñe)", "All three Pikmin (tinted)") };
-		int t = target_;
-		ImGui::SetNextItemWidth(-1);
-		ImGui::BeginDisabled(working_);
-		if (ImGui::Combo("##target", &t, targets, 5)) setTarget(t);
+void App::drawTopBar(float width)
+{
+	const ImGuiViewport* vp = ImGui::GetMainViewport();
+	ImGui::SetNextWindowPos(vp->WorkPos);
+	ImGui::SetNextWindowSize(ImVec2(width, 64));
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14, 10));
+	ImGui::Begin("##topbar", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+	ImGui::PopStyleVar();
+	if (ImGui::Button(L("Inicio", "Home"), ImVec2(82, 42))) showStart_ = true;
+	ImGui::SameLine();
+	if (ImGui::Button(L("Abrir modelo…", "Open model…"), ImVec2(142, 42))) {
+		const fs::path p = pikmin::launcher::platform::askForFile(L("Abrir modelo", "Open model"), L("Modelo 3D", "3D model"), "*.glb *.gltf *.vrm *.fbx *.obj");
+		if (!p.empty()) {
+			editingId_.clear();
+			editingOlimar_ = false;
+			editorStep_ = 0;
+			loadModel(p.u8string(), false);
+		}
+	}
+	ImGui::SameLine();
+	ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10);
+	ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(181, 222, 92, 255));
+	ImGui::TextUnformatted("NECTAR MODEL MAKER");
+	ImGui::PopStyleColor();
+	ImGui::SameLine();
+	ImGui::TextDisabled("  /  %s", hasModel_ ? fs::u8path(model_.path).filename().u8string().c_str() : L("Sin modelo", "No model"));
+	const float right = spanish() ? 132.0f : 124.0f;
+	ImGui::SameLine(std::max(ImGui::GetCursorPosX() + 12.0f, width - right));
+	if (ImGui::Button(spanish() ? "EN" : "ES", ImVec2(48, 42))) {
+		setSpanish(!spanish());
+		cfg_.language = spanish() ? "es" : "en";
+		cfg_.save();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("?", ImVec2(48, 42))) ImGui::OpenPopup("##help");
+	if (ImGui::BeginPopup("##help")) {
+		ImGui::TextUnformatted(L("Navegación 3D", "3D navigation"));
+		ImGui::Separator();
+		ImGui::TextUnformatted(L("Arrastrar: orbitar", "Drag: orbit"));
+		ImGui::TextUnformatted(L("Mayús o botón central: desplazar", "Shift or middle button: pan"));
+		ImGui::TextUnformatted(L("Rueda: zoom", "Wheel: zoom"));
+		ImGui::EndPopup();
+	}
+	ImGui::End();
+}
+
+void App::drawWorkflow(float x, float y, float width, float height)
+{
+	ImGui::SetNextWindowPos(ImVec2(x, y));
+	ImGui::SetNextWindowSize(ImVec2(width, height));
+	ImGui::Begin("##workflow", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+	ImGui::TextDisabled("%s", L("FLUJO DE TRABAJO", "WORKFLOW"));
+	ImGui::Dummy(ImVec2(0, 8));
+	const char* targetNames[] = { "Olimar", L("Pikmin rojo", "Red Pikmin"), L("Pikmin amarillo", "Yellow Pikmin"), L("Pikmin azul", "Blue Pikmin"), L("Los tres Pikmin", "All Pikmin") };
+	ImGui::SetWindowFontScale(1.18f);
+	ImGui::TextUnformatted(targetNames[target_]);
+	ImGui::SetWindowFontScale(1.0f);
+	ImGui::TextDisabled("%s", isPikmin() ? L("Esqueleto Pikmin", "Pikmin skeleton") : L("Esqueleto de capitán", "Captain skeleton"));
+	ImGui::Dummy(ImVec2(0, 14));
+	const char* steps[6] = { L("1  Modelo", "1  Model"), L("2  Colocación", "2  Placement"), L("3  Esqueleto", "3  Skeleton"),
+	                         L("4  Animación", "4  Animation"), L("5  Comprobar", "5  Validate"), L("6  Publicar", "6  Publish") };
+	for (int i = 0; i < 6; ++i) {
+		ImGui::PushID(i);
+		if (i == editorStep_) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.43f, 0.57f, 0.19f, 1.0f));
+		ImGui::BeginDisabled(i > 0 && !hasModel_);
+		if (ImGui::Button(steps[i], ImVec2(-1, 46))) editorStep_ = i;
 		ImGui::EndDisabled();
-		if (target_ == T_ALL)
-			hint(L("Un solo modelo para los tres: hazlo claro o gris, el juego lo pinta de rojo, amarillo o azul.",
-			       "One model for all three: make it light or grey, the game paints it red, yellow or blue."));
-		else if (isPikmin())
-			hint(L("Solo cambia el cuerpo: la hoja, el capullo y la flor los sigue poniendo el juego en la punta del tallo.",
-			       "Only the body changes: the game still puts the leaf, bud and flower on the tip of the stem."));
+		if (i == editorStep_) ImGui::PopStyleColor();
+		ImGui::PopID();
 	}
+	ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY() + 12.0f, height - 152.0f));
+	ImGui::Separator();
+	ImGui::TextDisabled("%s", L("OBJETIVO", "TARGET"));
+	ImGui::SetNextItemWidth(-1);
+	int t = target_;
+	ImGui::BeginDisabled(working_);
+	if (ImGui::Combo("##workflowtarget", &t, targetNames, 5)) setTarget(t);
+	ImGui::EndDisabled();
+	if (hasModel_) {
+		const ImU32 col = exportDirty_ ? IM_COL32(232, 188, 72, 255) : export_.ok() ? IM_COL32(125, 211, 99, 255) : IM_COL32(231, 91, 75, 255);
+		ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(col), "%s", exportDirty_ ? L("Analizando cambios…", "Analysing changes…") : export_.ok() ? L("Listo para publicar", "Ready to publish") : L("Requiere atención", "Needs attention"));
+	}
+	ImGui::End();
+}
 
-	stepHeader(1, L("Tu modelo", "Your model"));
+void App::drawPanel(float x, float y, float width, float height)
+{
+	ImGui::SetNextWindowPos(ImVec2(x, y));
+	ImGui::SetNextWindowSize(ImVec2(width, height));
+	ImGui::Begin("##panel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+	const char* panelTitles[6] = { L("Modelo de origen", "Source model"), L("Colocación", "Placement"), L("Esqueleto y pesos", "Skeleton & weights"),
+	                               L("Vista de animación", "Animation preview"), L("Comprobación", "Validation"), L("Publicar en el juego", "Publish to game") };
+	ImGui::SetWindowFontScale(1.35f);
+	ImGui::TextUnformatted(panelTitles[editorStep_]);
+	ImGui::SetWindowFontScale(1.0f);
+	ImGui::Separator();
+	ImGui::Dummy(ImVec2(0, 5));
+
+	if (editorStep_ == 0) {
+	hint(L("Importa el personaje que se adaptará automáticamente al esqueleto elegido.",
+	       "Import the character that will be fitted automatically to the selected skeleton."));
 	if (bigButton(L("Abrir modelo 3D…", "Open 3D model…"), -1, 46)) {
 		const fs::path p = pikmin::launcher::platform::askForFile(L("Abrir modelo", "Open model"), L("Modelo 3D", "3D model"), "*.glb *.gltf *.vrm *.fbx *.obj");
 		if (!p.empty()) {
@@ -726,13 +984,24 @@ void App::drawPanel(float width, float height)
 			if (ImGui::Button(L("Aplicar", "Apply"), ImVec2(-1, 0))) resimplify();
 		}
 	}
+	if (target_ == T_ALL)
+		hint(L("El juego teñirá este modelo de rojo, amarillo y azul. Usa colores claros o neutros.",
+		       "The game will tint this model red, yellow and blue. Use light or neutral colours."));
+	else if (isPikmin())
+		hint(L("La hoja, el capullo y la flor se añaden automáticamente en la punta del tallo.",
+		       "The leaf, bud and flower are added automatically at the tip of the stem."));
+	}
 	if (!hasModel_) {
+		ImGui::Dummy(ImVec2(0, 18));
+		ImGui::TextDisabled("%s", L("Importa un modelo para desbloquear los siguientes pasos.", "Import a model to unlock the next steps."));
 		ImGui::End();
 		return;
 	}
 
 	// 2 · Colocar.
-	stepHeader(2, L("Colocar", "Place"));
+	if (editorStep_ == 1) {
+	hint(L("Alinea el modelo con la referencia. Empieza con Ajuste automático y corrige solo lo necesario.",
+	       "Align the model with the reference. Start with Auto-fit and correct only what is needed."));
 	if (bigButton(L("Ajustar solo", "Auto-fit"))) {
 		autoFit(model_, olimar_, fit_);
 		rigDirty_ = true;
@@ -778,9 +1047,10 @@ void App::drawPanel(float width, float height)
 		fit_.offsetZ = oz;
 		rigDirty_    = true;
 	}
+	}
 
 	// 3 · Esqueleto.
-	stepHeader(3, L("Esqueleto", "Skeleton"));
+	if (editorStep_ == 2) {
 	const bool editing = anim_ < 0;
 	if (bigButton(editing ? L("Ver cómo se mueve", "See it move") : L("Mover los puntos del esqueleto", "Move the skeleton dots"))) {
 		if (editing) {
@@ -824,9 +1094,12 @@ void App::drawPanel(float width, float height)
 			hint(L("Tallo original añadido: va de la coronilla a la punta del tallo (puntos amarillos).",
 			       "Original stem added: it goes from the head top to the stem tip (yellow dots)."));
 	}
+	}
 
 	// 4 · Animaciones.
-	stepHeader(4, L("Animaciones", "Animations"));
+	if (editorStep_ == 3) {
+	hint(L("Prueba movimientos reales del juego y compara la silueta con el personaje original.",
+	       "Test real in-game motions and compare the silhouette with the original character."));
 	ImGui::SetNextItemWidth(-1);
 	const char* current = anim_ >= 0 ? animLabel(anims_[std::size_t(anim_)]) : L("Pose de reposo (editar puntos)", "Rest pose (edit dots)");
 	if (ImGui::BeginCombo("##anim", current, ImGuiComboFlags_HeightLarge)) {
@@ -856,9 +1129,12 @@ void App::drawPanel(float width, float height)
 	ImGui::SetNextItemWidth(-1);
 	if (ImGui::Combo("##olimar", &olimarMode_, modes, 3)) resetCamera();
 	ImGui::Checkbox(L("Ver esqueleto", "Show skeleton"), &showSkeleton_);
+	}
 
 	// 5 · Guardar.
-	stepHeader(5, L("Comprobar", "Check"));
+	if (editorStep_ == 4) {
+	hint(L("Estos controles detectan problemas antes de instalar el personaje.",
+	       "These checks detect problems before the character is installed."));
 	if (exportDirty_) hint(L("Comprobando…", "Checking…"));
 	for (const Check& c : export_.checks) {
 		ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -889,13 +1165,25 @@ void App::drawPanel(float width, float height)
 		}
 		ImGui::TreePop();
 	}
-	drawCharacters();
+	}
+	if (editorStep_ == 5) drawCharacters();
 	if (!status_.empty()) {
 		ImGui::Spacing();
 		ImGui::PushStyleColor(ImGuiCol_Text, statusError_ ? IM_COL32(240, 110, 90, 255) : IM_COL32(150, 220, 120, 255));
 		ImGui::TextWrapped("%s", status_.c_str());
 		ImGui::PopStyleColor();
 	}
+	ImGui::Dummy(ImVec2(0, 10));
+	ImGui::Separator();
+	ImGui::Dummy(ImVec2(0, 4));
+	const float navW = (ImGui::GetContentRegionAvail().x - 8.0f) * 0.5f;
+	ImGui::BeginDisabled(editorStep_ == 0);
+	if (ImGui::Button(L("Anterior", "Previous"), ImVec2(navW, 40))) --editorStep_;
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(editorStep_ == 5 || !hasModel_);
+	if (ImGui::Button(editorStep_ == 4 ? L("Ir a publicar", "Go to publish") : L("Siguiente", "Next"), ImVec2(-1, 40))) ++editorStep_;
+	ImGui::EndDisabled();
 	ImGui::End();
 }
 
@@ -933,10 +1221,9 @@ void App::dragMarker(const ImVec2& mouse)
 	rigDirty_          = true;
 }
 
-void App::drawView(float x, float width, float height)
+void App::drawView(float x, float y, float width, float height)
 {
-	const ImGuiViewport* vp = ImGui::GetMainViewport();
-	ImGui::SetNextWindowPos(ImVec2(x, vp->WorkPos.y));
+	ImGui::SetNextWindowPos(ImVec2(x, y));
 	ImGui::SetNextWindowSize(ImVec2(width, height));
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
 	ImGui::Begin("##view", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
@@ -960,7 +1247,7 @@ void App::drawView(float x, float width, float height)
 			grid.push_back({ -ext, olimar_.min.y, g });
 			grid.push_back({ ext, olimar_.min.y, g });
 		}
-		const float gridColour[4] = { 0.30f, 0.38f, 0.24f, 1 };
+		const float gridColour[4] = { 0.25f, 0.30f, 0.28f, 1 };
 		view_.drawLines(grid, gridColour);
 		if (olimarMode_ == 1 || (olimarMode_ == 2 && !hasModel_)) view_.drawMesh(olimarMesh_, true);
 		view_.drawMesh(modelMesh_, !showWeights_);
@@ -1112,6 +1399,8 @@ void App::dropFile(const std::string& path)
 	}
 	editingId_.clear();
 	editingOlimar_ = false;
+	showStart_ = false;
+	editorStep_ = 0;
 	loadModel(path, false);
 }
 

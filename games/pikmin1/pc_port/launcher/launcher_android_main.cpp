@@ -77,6 +77,20 @@ void openUrl(const std::string& url)
     env->DeleteLocalRef(activity);
 }
 
+// Abre la pantalla de la carpeta de datos (StartActivity) para elegir otra;
+// el launcher se cierra y StartActivity lo vuelve a abrir al terminar.
+void changeDataFolder()
+{
+    JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
+    jobject activity = (jobject)SDL_AndroidGetActivity();
+    if (!env || !activity) return;
+    jclass cls = env->GetObjectClass(activity);
+    jmethodID change = env->GetMethodID(cls, "changeDataFolder", "()V");
+    if (change) env->CallVoidMethod(activity, change);
+    env->DeleteLocalRef(cls);
+    env->DeleteLocalRef(activity);
+}
+
 void startGame(const std::string& library, const fs::path& directory)
 {
     JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
@@ -253,6 +267,7 @@ int main(int argc, char** argv)
     HubState state;
     state.installerOnly = true; // sin ajustes, mover ni actualizar en Android
     state.launcherName = "nectar-launcher";
+    state.dataFolder = files.string();
     state.games[0] = pikmin1Install(pikmin1Dir);
     state.games[1] = pikmin2Install(pikmin2Dir);
     if (state.games[0].installed) state.gameDataDirectory = (pikmin1Dir / "assets/dataDir").string();
@@ -274,6 +289,10 @@ int main(int argc, char** argv)
         const HubResult choice = hub.runHome();
         const int index = int(choice.game);
         if (choice.action == HubAction::Quit) return 0;
+        if (choice.action == HubAction::DataFolder) {
+            changeDataFolder();
+            return 0;
+        }
         if (choice.action == HubAction::Play) {
             if (!state.games[index].installed) continue;
             startGame(state.games[index].executable, state.games[index].directory);

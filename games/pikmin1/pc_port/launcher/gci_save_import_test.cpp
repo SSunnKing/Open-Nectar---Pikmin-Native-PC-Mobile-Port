@@ -432,6 +432,8 @@ int main()
 
     // Legacy card present, no install/save yet: resolving the card path must
     // migrate first, then GCI import must land beside the migrated save.
+    // The legacy ~/.local/share save folder (and setenv) only exist off Windows.
+#if !defined(_WIN32)
     {
         const fs::path scenario = fs::temp_directory_path() / "gci_legacy_migration_test";
         fs::remove_all(scenario, ec);
@@ -464,6 +466,7 @@ int main()
         }
         fs::remove_all(scenario, ec);
     }
+#endif
 
     failures += backupTests(parsed);
     failures += nativeTests(makeSyntheticGci());

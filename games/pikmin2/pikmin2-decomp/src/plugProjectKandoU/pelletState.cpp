@@ -1,5 +1,8 @@
 #include "Game/pelletMgr.h"
 #include "Game/MoviePlayer.h"
+#ifdef PIKI_PC_PORT
+#include "pc_p2_coop_movie.h"
+#endif
 #include "Game/gamePlayData.h"
 #include "Game/Entities/ItemOnyon.h"
 #include "Game/Entities/ItemHoney.h"
@@ -23,6 +26,16 @@ namespace Game {
 
 static const u32 padding[]    = { 0, 0, 0 };
 static const char className[] = "pelletState";
+
+#ifdef PIKI_PC_PORT
+static void playPelletGoalMovie(Pellet* pelt, MoviePlayArg& arg)
+{
+	pc_p2_coop_tag_movie_from_pellet(pelt);
+	moviePlayer->play(arg);
+}
+#else
+static void playPelletGoalMovie(Pellet* pelt, MoviePlayArg& arg) { moviePlayer->play(arg); }
+#endif
 
 /**
  * @note Address: 0x801A4310
@@ -299,7 +312,7 @@ bool PelletGoalState::checkMovie(Pellet* pelt)
 							BaseGameSection* section = gameSystem->mSection;
 							MoviePlayArg arg("s11_dope_first_r", const_cast<char*>(section->getCurrentCourseInfo()->mName),
 							                 section->mMovieFinishCallback, 0);
-							moviePlayer->play(arg);
+							playPelletGoalMovie(pelt, arg);
 							doPlay = true;
 
 						} else if (!playData->isDemoFlag(DEMO_First_Spicy_Spray_Made)) {
@@ -320,7 +333,7 @@ bool PelletGoalState::checkMovie(Pellet* pelt)
 								BaseGameSection* section = gameSystem->mSection;
 								MoviePlayArg moviearg("s11_dopebin_first_r", const_cast<char*>(section->getCurrentCourseInfo()->mName),
 								                      section->mMovieFinishCallback, 0);
-								moviePlayer->play(moviearg);
+								playPelletGoalMovie(pelt, moviearg);
 								doPlay = true;
 							}
 						}
@@ -342,7 +355,7 @@ bool PelletGoalState::checkMovie(Pellet* pelt)
 							BaseGameSection* section = gameSystem->mSection;
 							MoviePlayArg arg("s11_dope_first_b", const_cast<char*>(section->getCurrentCourseInfo()->mName),
 							                 section->mMovieFinishCallback, 0);
-							moviePlayer->play(arg);
+							playPelletGoalMovie(pelt, arg);
 							doPlay = true;
 						} else if (!playData->isDemoFlag(DEMO_First_Bitter_Spray_Made)) {
 							// if enough berries are collected to make a spray, play the spray cutscene
@@ -362,7 +375,7 @@ bool PelletGoalState::checkMovie(Pellet* pelt)
 								BaseGameSection* section = gameSystem->mSection;
 								MoviePlayArg moviearg("s11_dopebin_first_b", const_cast<char*>(section->getCurrentCourseInfo()->mName),
 								                      section->mMovieFinishCallback, 0);
-								moviePlayer->play(moviearg);
+								playPelletGoalMovie(pelt, moviearg);
 								doPlay = true;
 							}
 						}
@@ -376,7 +389,7 @@ bool PelletGoalState::checkMovie(Pellet* pelt)
 					MoviePlayArg moviearg("s10_suck_treasure", const_cast<char*>(section->getCurrentCourseInfo()->mName),
 					                      section->mMovieFinishCallback, 0);
 					moviearg.mPelletName = pelt->mConfig->mParams.mName.mData;
-					moviePlayer->play(moviearg);
+					playPelletGoalMovie(pelt, moviearg);
 					doPlay = true;
 
 				} else if (pelt->getKind() == PelletType::Upgrade) {
@@ -391,7 +404,7 @@ bool PelletGoalState::checkMovie(Pellet* pelt)
 					if (pelt->mConfig->mParams.mIndex >= 8) {
 						moviearg.mStreamID = P2_STREAM_SOUND_ID(PSSTR_POWERUP_GET);
 					}
-					moviePlayer->play(moviearg);
+					playPelletGoalMovie(pelt, moviearg);
 					doPlay = true;
 				} else {
 					// A completely unused cutscene, in theory this would play if you carried a corpse or number pellet to the ship
@@ -399,7 +412,7 @@ bool PelletGoalState::checkMovie(Pellet* pelt)
 					BaseGameSection* section = gameSystem->mSection;
 					MoviePlayArg moviearg("suck_ufo", const_cast<char*>(section->getCurrentCourseInfo()->mName),
 					                      section->mMovieFinishCallback, 0);
-					moviePlayer->play(moviearg);
+					playPelletGoalMovie(pelt, moviearg);
 					doPlay = true;
 				}
 			}
@@ -414,7 +427,7 @@ bool PelletGoalState::checkMovie(Pellet* pelt)
 				moviearg.mDelegateStart = gameSystem->mSection->mMovieStartCallback;
 				moviearg.mDelegateEnd   = gameSystem->mSection->mMovieFinishCallback;
 				moviearg.mPelletName    = pelt->mConfig->mParams.mName.mData;
-				moviePlayer->play(moviearg);
+				playPelletGoalMovie(pelt, moviearg);
 				doPlay = true;
 
 			} else if (pelt->getKind() == PelletType::Upgrade) {
@@ -432,7 +445,7 @@ bool PelletGoalState::checkMovie(Pellet* pelt)
 				if (pelt->mConfig->mParams.mIndex >= 8) {
 					moviearg.mStreamID = P2_STREAM_SOUND_ID(PSSTR_POWERUP_GET);
 				}
-				moviePlayer->play(moviearg);
+				playPelletGoalMovie(pelt, moviearg);
 				doPlay = true;
 
 			} else if (pelt->getKind() == PelletType::Carcass && pelt->mPelletFlag != Pellet::FLAG_NAVI_NAPSACK
@@ -447,7 +460,7 @@ bool PelletGoalState::checkMovie(Pellet* pelt)
 				moviearg.mDelegateStart = section->mMovieStartCallback;
 				moviearg.mOrigin        = mOnyon->getPosition();
 				moviearg.mAngle         = mOnyon->getFaceDir();
-				moviePlayer->play(moviearg);
+				playPelletGoalMovie(pelt, moviearg);
 				doPlay = true;
 			}
 		} else if (onyon && onyon->mOnyonType <= ONYON_TYPE_YELLOW) {
@@ -460,7 +473,7 @@ bool PelletGoalState::checkMovie(Pellet* pelt)
 				moviearg.mDelegateStart = section->mMovieStartCallback;
 				moviearg.mOrigin        = mOnyon->getPosition();
 				moviearg.mAngle         = mOnyon->getFaceDir();
-				moviePlayer->play(moviearg);
+				playPelletGoalMovie(pelt, moviearg);
 				doPlay = true;
 			}
 		}

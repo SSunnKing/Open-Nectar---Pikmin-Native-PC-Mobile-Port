@@ -397,6 +397,7 @@ set(PC_PORT_SOURCES
     src/jaudio/pikiseq.c
     pc_port/dolphin_stubs/os_stubs.cpp
     pc_port/dolphin_stubs/pc_host_readable.cpp
+    pc_port/dolphin_stubs/pc_host_readable_os.cpp
     pc_port/dolphin_stubs/gx_stubs.cpp
     pc_port/dolphin_stubs/dvd_stubs.cpp
     pc_port/dolphin_stubs/pad_stubs.cpp
@@ -916,6 +917,16 @@ if (NOT ANDROID AND NOT WIN32)
         COMMAND /bin/chmod 775 "$<TARGET_FILE:${NECTAR_GAME}>"
         COMMENT "Ensuring the native Pikmin executable is runnable")
 endif()
+# El launcher de escritorio busca la build europea como nectar-pal a su lado
+# (gameSource/gameBinaryFor). Una build PAL hecha a mano solo dejaba `nectar`
+# y el launcher pedía nectar-pal (issue #214). La copia va junto al original:
+# los scripts de release siguen cogiendo bin/nectar.
+if (NOT ANDROID AND PIKMIN_GAME_VERSION STREQUAL "VERSION_GPIP01_00")
+    add_custom_command(TARGET ${NECTAR_GAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${NECTAR_GAME}>"
+                "$<TARGET_FILE_DIR:${NECTAR_GAME}>/nectar-pal$<TARGET_FILE_SUFFIX:${NECTAR_GAME}>"
+        COMMENT "Copying the PAL game as nectar-pal for the launcher")
+endif()
 
 # Standalone first-run launcher. It accepts an original, uncompressed
 # GameCube ISO/GCM supplied by the user, extracts its FST into the per-user
@@ -1140,6 +1151,14 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
     target_compile_options(installer_ui_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME installer_ui_test COMMAND installer_ui_test)
 
+    add_executable(launcher_sidebar_layout_test pc_port/launcher/launcher_sidebar_layout_test.cpp)
+    target_compile_options(launcher_sidebar_layout_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME launcher_sidebar_layout_test COMMAND launcher_sidebar_layout_test)
+
+    add_executable(launcher_page_layout_test pc_port/launcher/launcher_page_layout_test.cpp)
+    target_compile_options(launcher_page_layout_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME launcher_page_layout_test COMMAND launcher_page_layout_test)
+
     add_executable(asset_finalize_test pc_port/launcher/asset_finalize_test.cpp)
     target_link_libraries(asset_finalize_test PRIVATE Threads::Threads)
     target_compile_options(asset_finalize_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
@@ -1170,10 +1189,14 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
         add_test(NAME pc_file_dialog_test COMMAND pc_file_dialog_test)
     endif()
 
-    add_executable(nectar_paths_test "${NECTAR_LIBS_DIR}/nectar_paths/tests/paths_test.cpp")
-    target_link_libraries(nectar_paths_test PRIVATE nectar_paths)
-    target_compile_options(nectar_paths_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
-    add_test(NAME nectar_paths_test COMMAND nectar_paths_test)
+    # POSIX-only: it drives the XDG folders, setenv and chmod'ed read-only
+    # installs, while Windows keeps settings under %LOCALAPPDATA%.
+    if(NOT WIN32)
+        add_executable(nectar_paths_test "${NECTAR_LIBS_DIR}/nectar_paths/tests/paths_test.cpp")
+        target_link_libraries(nectar_paths_test PRIVATE nectar_paths)
+        target_compile_options(nectar_paths_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+        add_test(NAME nectar_paths_test COMMAND nectar_paths_test)
+    endif()
 
     add_executable(button_style_test
         pc_port/launcher/button_style_test.cpp
@@ -1193,6 +1216,20 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
     target_link_libraries(button_layout_test PRIVATE launcher_imgui)
     target_compile_options(button_layout_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME button_layout_test COMMAND button_layout_test)
+
+    if(TARGET launcher_imgui)
+        # Mano sobre desplegables, entradas y botones de opción (ImGui sin ventana).
+        add_executable(launcher_cursor_test pc_port/launcher/launcher_cursor_test.cpp)
+        # Sin las cabeceras del juego, igual que launcher_imgui.
+        set_property(TARGET launcher_cursor_test PROPERTY INCLUDE_DIRECTORIES "")
+        target_compile_options(launcher_cursor_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+        target_link_libraries(launcher_cursor_test PRIVATE launcher_imgui)
+        add_test(NAME launcher_cursor_test COMMAND launcher_cursor_test)
+    endif()
+
+    add_executable(launcher_scroll_test pc_port/launcher/launcher_scroll_test.cpp)
+    target_compile_options(launcher_scroll_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME launcher_scroll_test COMMAND launcher_scroll_test)
 
     if(PIKMIN_NETPLAY_BUILD)
         # Host Co-op / Join Co-op flow with a fake game.
@@ -1266,6 +1303,15 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_menu_repeat_test PRIVATE pc_port)
     target_compile_options(pc_menu_repeat_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_menu_repeat_test COMMAND pc_menu_repeat_test)
+
+    # Readable host memory for the GX bounds (issue #45: macOS has no /proc)
+    add_executable(pc_host_readable_test
+        pc_port/dolphin_stubs/pc_host_readable_test.cpp
+        pc_port/dolphin_stubs/pc_host_readable.cpp
+        pc_port/dolphin_stubs/pc_host_readable_os.cpp)
+    target_compile_definitions(pc_host_readable_test PRIVATE PC_HOST_READABLE_TEST_P1)
+    target_compile_options(pc_host_readable_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_host_readable_test COMMAND pc_host_readable_test)
 
     # Throw grab: an early release waits for KEY_Action0 (no window needed).
     add_executable(pc_throw_release_test pc_port/pc_throw_release_test.cpp)
@@ -1511,7 +1557,10 @@ message(STATUS "")
 message(STATUS "╔══════════════════════════════════════════╗")
 message(STATUS "║   Pikmin PC Port - Build Configuration   ║")
 message(STATUS "╠══════════════════════════════════════════╣")
-message(STATUS "║   Version:  USA Rev 1 (GPIE01_01)       ║")
+# La versión real: antes estaba fija en "USA Rev 1" y una build PAL parecía
+# no haber cogido -DPIKMIN_GAME_VERSION (issue #214).
+string(REPLACE "VERSION_" "" _nectar_version_label "${PIKMIN_GAME_VERSION}")
+message(STATUS "║   Version:  ${_nectar_version_label}")
 if(PIKMIN_GLES)
     message(STATUS "║   Graphics: Native GX → OpenGL ES 3.0   ║")
 else()

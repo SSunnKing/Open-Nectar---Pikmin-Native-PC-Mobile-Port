@@ -411,6 +411,7 @@ void Obj::doUpdate()
 					wraithMovieArg.mAngle  = getFaceDir();
 
 					moviePlayer->mTargetObject = this;
+					pc_p2_coop_tag_movie_from_position(getPosition());
 
 					moviePlayer->play(wraithMovieArg);
 					mTyre->movie_begin(false);

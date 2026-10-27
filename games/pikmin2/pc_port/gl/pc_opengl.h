@@ -77,6 +77,17 @@ static inline void glGetTexLevelParameteriv(GLenum, GLint, GLenum, GLint* p) { i
 #  ifndef GL_STACK_UNDERFLOW
 #    define GL_STACK_UNDERFLOW 0x0504
 #  endif
+#elif defined(_WIN32)
+// Windows filesystems ignore case, so <GL/gl.h> and <GL/glext.h> would find
+// this project's pc_port/gl stubs instead of the system headers and leave the
+// GL types undeclared. SDL's header pulls in the real ones. Same fix as
+// Pikmin 1's pc_opengl.h. A target without SDL's include path falls back
+// to the SDL2/ prefix that MinGW's default include path has.
+#  if __has_include(<SDL_opengl.h>)
+#    include <SDL_opengl.h>
+#  else
+#    include <SDL2/SDL_opengl.h>
+#  endif
 #else
 #  include <GL/gl.h>
 #  include <GL/glext.h>

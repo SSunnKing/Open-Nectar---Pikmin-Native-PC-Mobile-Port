@@ -87,6 +87,21 @@ Java_org_opennectar_Installer_nativeChdir(JNIEnv* env, jclass, jstring jDir)
 }
 
 /**
+ * Renombra a UTF-8 los nombres que no lo son bajo `dir` (los japoneses de
+ * Pikmin 2 en Shift-JIS, de instalaciones anteriores): la carpeta de datos
+ * compartida solo admite UTF-8 y Java no puede ni abrirlos. Devuelve cuántos.
+ */
+extern "C" JNIEXPORT jint JNICALL
+Java_org_opennectar_Installer_nativeFixNames(JNIEnv* env, jclass, jstring jDir)
+{
+	const char* dir = env->GetStringUTFChars(jDir, nullptr);
+	const int renamed = pikmin::launcher::renameNonUtf8Entries(dir);
+	if (renamed > 0) __android_log_print(ANDROID_LOG_INFO, kTag, "[installer] %s: %d names made UTF-8", dir, renamed);
+	env->ReleaseStringUTFChars(jDir, dir);
+	return renamed;
+}
+
+/**
  * Inspecciona la imagen y devuelve su descripción ("Pikmin USA Rev. 1"), o
  * null si no es un disco de Pikmin admitido; en ese caso `error[0]` recibe el
  * motivo.
