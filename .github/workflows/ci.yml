@@ -51,18 +51,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
-
-      # Use the newest Xcode on the runner, the one closest to what macOS
-      # builds and releases are made with. The older default (Xcode 26.x)
-      # fails Pikmin 2's fakePiki.cpp: the port's `#define nullptr 0` leaks
-      # into that SDK's <unordered_map>.
-      - name: Select newest Xcode (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
-          sudo xcode-select -s "$xcode"
-          xcodebuild -version
-
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install sdl2 ninja ccache
