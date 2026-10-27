@@ -1313,6 +1313,12 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_host_readable_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_host_readable_test COMMAND pc_host_readable_test)
 
+    # Throw grab: an early release waits for KEY_Action0 (no window needed).
+    add_executable(pc_throw_release_test pc_port/pc_throw_release_test.cpp)
+    target_include_directories(pc_throw_release_test PRIVATE pc_port)
+    target_compile_options(pc_throw_release_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_throw_release_test COMMAND pc_throw_release_test)
+
     # Host software DSP test (not linked into main game)
     add_executable(pc_dsp_host_test
         pc_port/audio/pc_dsp_host_test.cpp

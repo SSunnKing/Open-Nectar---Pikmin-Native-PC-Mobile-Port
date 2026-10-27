@@ -1,6 +1,7 @@
 #include "NaviState.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
+#include "pc_throw_release.h"
 #include "pc_whistle_pluck.h"
 #include "pc_window.h"
 #endif
@@ -2313,10 +2314,10 @@ void NaviThrowWaitState::exec(Navi* navi)
 	if (mHeldThrowPiki) {
 		int state = mHeldThrowPiki->getState();
 #if defined(PIKI_PC_PORT)
-		// A nearby selection remains Normal until KEY_Action0 completes the
-		// grab. Rejecting it here loses taps before the animation can attach it.
-		const bool awaitingGrab = !mIsHoldingThrowPiki && state == PIKISTATE_Normal;
-		if (!mHeldThrowPiki->isAlive() || (!awaitingGrab && state != PIKISTATE_Hanged && state != PIKISTATE_GoHang)) {
+		// A nearby selection remains Normal until KEY_Action0. pc_throw_wait_lost_piki
+		// keeps that wind-up in ThrowWait so a tap is still attached.
+		if (pc_throw_wait_lost_piki(mHeldThrowPiki->isAlive(), mIsHoldingThrowPiki, state == PIKISTATE_Normal,
+		                            state == PIKISTATE_Hanged, state == PIKISTATE_GoHang)) {
 #else
 		if (state != PIKISTATE_Hanged && state != PIKISTATE_GoHang) {
 #endif
@@ -2341,27 +2342,17 @@ void NaviThrowWaitState::exec(Navi* navi)
 		transit(navi, NAVISTATE_Walk);
 		return;
 	}
-
-	// keyUp is level-triggered. A release while a nearby Pikmin is still
-	// waiting for the grab keyframe used to sit here until the ThrowWait
-	// animation reached KEY_Action0, which put a whole grab animation between
-	// every throw and capped the cadence (issues #37 / #40). Complete the grab
-	// on the spot instead: the Pikmin is in range and would have been attached
-	// a few frames later anyway.
-	if (navi->mKontroller->keyUp(KeyConfig::_instance->mThrowKey.mBind) && !mIsHoldingThrowPiki && mHeldThrowPiki
-	    && mHeldThrowPiki->getState() == PIKISTATE_Normal) {
-		mIsHoldingThrowPiki = true;
-		mHeldThrowPiki->mFSM->transit(mHeldThrowPiki, PIKISTATE_Hanged);
-		lockHangPiki(navi);
-	}
 #endif
-	if (navi->mKontroller->keyUp(KeyConfig::_instance->mThrowKey.mBind)
 #if defined(PIKI_PC_PORT)
-	    // A pending (far) Pikmin still walking over remains pending until it
-	    // is actually grabbed.
-	    && mIsHoldingThrowPiki
+	// keyUp stays true after an early release. The throw waits until KEY_Action0
+	// sets mIsHoldingThrowPiki; hanging the Pikmin on the release skipped that
+	// keyframe. A far Pikmin still walking over stays pending until the same grab.
+	if (pc_throw_release_starts_throw(navi->mKontroller->keyUp(KeyConfig::_instance->mThrowKey.mBind),
+	                                  mIsHoldingThrowPiki))
+#else
+	if (navi->mKontroller->keyUp(KeyConfig::_instance->mThrowKey.mBind))
 #endif
-	) {
+	{
 		sortPikis(navi);
 		navi->mThrowHoldTime = mThrowChargeLevel / 3.0f * C_NAVI_PARM(navi, mThrowHoldMaxTime);
 		transit(navi, NAVISTATE_Throw);
@@ -2503,19 +2494,15 @@ void NaviThrowState::exec(Navi* navi)
 	navi->findNextThrowPiki();
 
 #if defined(PIKI_PC_PORT)
-	// keyClick is a one-tick edge. While mashing, the next press usually
-	// lands during the wind-up and was ignored, so every other throw was
-	// lost and the cadence felt capped (issues #37 / #40). Remember it and
-	// act on it the tick the Pikmin leaves the hand.
+	// keyClick is a one-tick edge. A press during the throw wind-up is kept
+	// and starts the next grab on the tick the Pikmin leaves the hand. The
+	// grab that follows still waits for ThrowWait's KEY_Action0.
 	const bool throwClick = navi->mKontroller->keyClick(KeyConfig::_instance->mThrowKey.mBind);
-	if (!mHasThrownPiki && throwClick) {
-		mQueuedThrowPress = true;
-	}
-	if (mHasThrownPiki && (throwClick || mQueuedThrowPress)) {
-		mQueuedThrowPress = false;
+	if (pc_throw_consume_queued_press(mHasThrownPiki, throwClick, &mQueuedThrowPress))
 #else
-	if (mHasThrownPiki && navi->mKontroller->keyClick(KeyConfig::_instance->mThrowKey.mBind)) {
+	if (mHasThrownPiki && navi->mKontroller->keyClick(KeyConfig::_instance->mThrowKey.mBind))
 #endif
+	{
 		if (navi->procActionButton()) {
 			return;
 		}
