@@ -625,6 +625,14 @@ zen::ogScrMessageMgr::MessageStatus zen::ogScrMessageMgr::update(Controller* inp
 		return mState;
 	}
 
+#if defined(PIKI_PC_PORT)
+	// B shows the whole page and turns it (below). Menu mode drops a Shift
+	// binding for B on other screens, so say that a text window is open. This
+	// starts before the fade-in, so a Shift already held for the whistle stays
+	// held instead of reading as a fresh press when the page starts typing.
+	pc_window_note_text_window_input();
+#endif
+
 	if (mState == STATE_Exiting) {
 		mState = STATE_Inactive;
 		return mState;
