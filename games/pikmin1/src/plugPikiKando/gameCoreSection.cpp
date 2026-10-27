@@ -2750,9 +2750,9 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 	// unless deterministic mode is on.
 	pc_netplay_det_reseed_for_new_day(gameflow.mWorldClock.mCurrentDay,
 	    flowCont.mCurrentStage != nullptr ? static_cast<int>(flowCont.mCurrentStage->mStageID) : 0);
-	// Deterministic recording: the settings the sim reads stay as they are
-	// now until the day ends, so the day's input replays against them.
-	if (pc_netplay_deterministic()) {
+	// Quick Save: the settings the sim reads stay as they are now until the
+	// day ends, so the day's input replays against them.
+	if (pc_quicksave_enabled()) {
 		pc_settings_sim_lock_day_begin();
 	}
 	// The state hash's mode column: the VS state (0 outside VS).

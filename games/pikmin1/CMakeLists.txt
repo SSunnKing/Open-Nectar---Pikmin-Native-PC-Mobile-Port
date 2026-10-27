@@ -404,8 +404,8 @@ set(PC_PORT_SOURCES
     pc_port/audio/pc_dsp_host.cpp
     pc_port/settings/pc_settings.cpp
     pc_port/settings/pc_settings_p2d.cpp
-    pc_port/settings/pc_prompt_pointer.cpp
     pc_port/settings/pc_sim_settings_text.cpp
+    pc_port/settings/pc_prompt_pointer.cpp
     src/jaudio/pikiseq.c
     pc_port/dolphin_stubs/os_stubs.cpp
     pc_port/dolphin_stubs/pc_host_readable.cpp

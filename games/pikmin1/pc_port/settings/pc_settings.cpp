@@ -245,7 +245,8 @@ struct PcConfig {
     int coopMergeCamera = 0;
     // Quick Save (experimental): deterministic mode from launch and a
     // recording of each day, so a day can be saved mid-way and loaded again
-    // (pc_quicksave.h). Read once at launch; no F1 row yet.
+    // (pc_quicksave.h). The Data page has the row. Read once at launch; a
+    // change takes effect at the next launch.
     int quickSave = 0;
     // Colour grading. Neutral by default: the port should look like the game
     // until someone asks otherwise.
@@ -8536,8 +8537,8 @@ static void pollFilePicker()
 }
 #endif
 
-// Quick Save (pc_quicksave.h). While a quick load runs: a plain load screen
-// over the replay (whose world graphics are suppressed), with
+// Quick Save (pc_quicksave.h). While a quick load runs: the same panel as the
+// other menus, over the replay (whose world graphics are suppressed), with
 // the progress, the time so far and an estimate of the time left. Otherwise
 // the last save or load result for a few seconds, unless a menu (which shows
 // it as its notice) is open.
@@ -8555,18 +8556,8 @@ void pc_settings_draw_quick_load(void) {
     ensureFont();
     if (!sFont) return;
     const int screenW = gfx->mScreenWidth, screenH = gfx->mScreenHeight;
-    PcSettingsP2DFrame nativeFrame(screenW, screenH);
     Matrix4f ortho;
     gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
-    // Laid out on a 480-high canvas, scaled to the window.
-    const float s = screenH / 480.0f;
-    auto px = [s](float v) { return int(v * s + 0.5f); };
-    const bool p2d = pc_settings_p2d_active();
-    auto textW = [&](const char* t, float fw) { return p2d ? pc_settings_p2d_text_width(t, px(fw)) : menuTextWidth(t); };
-    auto text = [&](int x, int y, const char* t, Colour c, float fw, float fh) {
-        if (p2d) pc_settings_p2d_text(x, y, t, c, std::max(1, px(fw)), std::max(1, px(fh)));
-        else drawTextOutline(x, y, "%s", c, Colour(0, 0, 0, c.a), t);
-    };
     auto fill = [&](int x, int y, int w, int h, Colour c) {
         gfx->setColour(c, true);
         gfx->setAuxColour(c);
@@ -8575,6 +8566,16 @@ void pc_settings_draw_quick_load(void) {
     const int cx = screenW / 2;
 
     if (showToast) {
+        PcSettingsP2DFrame nativeFrame(screenW, screenH);
+        // Laid out on a 480-high canvas, scaled to the window.
+        const float s = screenH / 480.0f;
+        auto px = [s](float v) { return int(v * s + 0.5f); };
+        const bool p2d = pc_settings_p2d_active();
+        auto textW = [&](const char* t, float fw) { return p2d ? pc_settings_p2d_text_width(t, px(fw)) : menuTextWidth(t); };
+        auto text = [&](int x, int y, const char* t, Colour c, float fw, float fh) {
+            if (p2d) pc_settings_p2d_text(x, y, t, c, std::max(1, px(fw)), std::max(1, px(fh)));
+            else drawTextOutline(x, y, "%s", c, Colour(0, 0, 0, c.a), t);
+        };
         const float fade = std::min(1.0f, std::min(toastAge / 0.2f, (4.0f - toastAge) / 0.5f));
         const u8 a       = u8(255.0f * std::max(0.0f, fade));
         const int tw = textW(toast, 9), w = tw + px(28), h = px(26);
@@ -8584,34 +8585,45 @@ void pc_settings_draw_quick_load(void) {
         return;
     }
 
-    // Opaque: catch-up runs without submitting the world's graphics.
-    fill(0, 0, screenW, screenH, Colour(6, 9, 20, 255));
-    const Colour kText(225, 240, 255, 255), kDim(150, 170, 200, 255), kGold(255, 200, 60, 255);
-    const char* title = "Loading quick save";
-    text(cx - textW(title, 16) / 2, px(170), title, kText, 16, 24);
-    char line[160];
-    std::snprintf(line, sizeof(line), "Day %d", st.day);
-    text(cx - textW(line, 9) / 2, px(202), line, kDim, 9, 14);
-
+    // Catch-up does not submit the world's graphics, so the frame behind the
+    // panel is covered. The panel is the one the other menus use.
+    fill(0, 0, screenW, screenH, Colour(0, 0, 0, 255));
+    const int panelW = std::min(560, std::max(280, screenW - 48));
+    const int panelH = std::min(220, std::max(200, screenH - 96));
+    const int panelX = cx - panelW / 2;
+    const int panelY = std::max(40, screenH / 2 - panelH / 2);
+    const Colour kBody(214, 224, 245, 255), kDim(150, 165, 195, 255), kGold(255, 205, 60, 255);
+    char dayLine[32], status[160];
+    std::snprintf(dayLine, sizeof(dayLine), "Day %d", st.day);
     const pc_quicksave::LoadProgress p = pc_quicksave::load_progress(st.fed, st.total, st.replaySecs);
-    const int barW = px(320), barH = px(14), barX = cx - barW / 2, barY = px(228);
-    fill(barX - px(2), barY - px(2), barW + px(4), barH + px(4), Colour(70, 85, 120, 255));
-    fill(barX, barY, barW, barH, Colour(16, 22, 44, 255));
-    if (st.replaying) fill(barX, barY, int(barW * (p.percent / 100.0f)), barH, kGold);
-
     char elapsed[16], left[16];
     pc_quicksave::format_clock(st.secs, elapsed, sizeof(elapsed));
     if (!st.replaying) {
-        std::snprintf(line, sizeof(line), "Preparing the day...   %s", elapsed);
+        std::snprintf(status, sizeof(status), "Preparing the day...   %s", elapsed);
     } else if (p.remainingKnown) {
         pc_quicksave::format_clock(p.remaining, left, sizeof(left));
-        std::snprintf(line, sizeof(line), "%d%%   Elapsed %s   About %s left", p.percent, elapsed, left);
+        std::snprintf(status, sizeof(status), "%d%%   Elapsed %s   About %s left", p.percent, elapsed, left);
     } else {
-        std::snprintf(line, sizeof(line), "%d%%   Elapsed %s   Estimating the time left...", p.percent, elapsed);
+        std::snprintf(status, sizeof(status), "%d%%   Elapsed %s   Estimating the time left...", p.percent, elapsed);
     }
-    text(cx - textW(line, 9) / 2, px(254), line, kText, 9, 14);
-    const char* hint = st.cancelling ? "Cancelling..." : "Esc / B: cancel";
-    text(cx - textW(hint, 8) / 2, px(300), hint, kDim, 8, 12);
+    {
+        PcSettingsP2DFrame nativeFrame(screenW, screenH);
+        GlassTextScope glassText;
+        drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
+        drawPikminHeader(gfx, panelX, panelY, panelW, "Loading quick save");
+        drawTextOutline(cx - menuTextWidth(dayLine) / 2, panelY + 40, "%s", kDim, Colour(8, 12, 28, 255), dayLine);
+        drawTextOutline(cx - menuTextWidth(status) / 2, panelY + 108, "%s", kBody, Colour(8, 12, 28, 255), status);
+        const char* hint = st.cancelling ? "Cancelling..." : "Esc / B: cancel";
+        drawHelpLine(cx, panelY + panelH - 36, hint, kDim, panelW - 48);
+    }
+    // After the glass plate, so the bar stays visible on top of it.
+    const int barW = panelW - 80, barH = 14, barX = panelX + 40, barY = panelY + 74;
+    fill(barX - 2, barY - 2, barW + 4, barH + 4, Colour(70, 85, 120, 255));
+    fill(barX, barY, barW, barH, Colour(8, 10, 16, 255));
+    if (st.replaying) {
+        const int filled = int(barW * (p.percent / 100.0f));
+        if (filled > 0) fill(barX, barY, filled, barH, kGold);
+    }
 }
 
 void pc_settings_draw(void) {
@@ -9757,7 +9769,8 @@ const GroupRow kCheatsRows[] = {
       "F5: add up to 20 red leaf Pikmin to the red Onion (requires an Onion and respects the Pikmin limit).\n"
       "F6: advance the clock by one in-game hour, capped just before sunset (with Infinite Day it only moves the lighting, except on the last day).\n"
       "F7: grant the Main Engine, top red Onion stock up to 20, and trigger the normal end-of-day sequence.\n"
-      "F8 (VS only): append both captains' XYZ coordinates to vs_positions.txt." },
+      "F8 (VS only): append both captains' XYZ coordinates to vs_positions.txt.\n"
+      "With Quick Save on, F6 is Quick Save and F7 is Quick Load." },
 #endif
 };
 

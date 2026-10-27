@@ -10,10 +10,10 @@ static_assert(PAD_BUTTON_LEFT == PC_MENU_PAD_LEFT && PAD_BUTTON_RIGHT == PC_MENU
                   && PAD_BUTTON_START == PC_MENU_PAD_START,
               "menu pad bits must match the GameCube pad");
 #include "timing/pc_frame_scheduler.h"
+#include "pc_photo_mode.h"
 #include "pc_menu_click.h"
 #include "pc_button_prompt.h"
 #include "pc_hand_cursor.h"
-#include "pc_photo_mode.h"
 #include "pc_speedrun.h"
 #include "pc_gyro.h"
 #include "pc_xinput_usb.h"
@@ -304,8 +304,6 @@ static bool sBombPending[2]   = { false, false };
 static bool sSwarmPending[2]  = { false, false };
 
 bool pc_window_swarm_held(void) { return sSwarmHeld; }
-
-bool pc_window_pad_dpad_down_held(int player) { return sPadDpadDownHeld[player & 1]; }
 
 static bool sKeyBindingsInitialized = false;
 
@@ -1237,8 +1235,6 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     // por empujón). Mantener "Swarm with right stick" (L) lo devuelve al swarm
     // en cualquier esquema; con el mod Charge, un toque de ese botón sin mover
     // el stick lanza la carga.
-    // Record the physical Down independently of its action binding.
-    sPadDpadDownHeld[player & 1] = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_DOWN) != 0;
     const int pl = player == 1 ? 1 : 0;
     const bool switchScheme = sPadScheme == PC_PAD_SCHEME_SWITCH;
     const bool swarmStick = boundButtonPressed(PC_KEY_ACT_SWARM_STICK);
@@ -1250,6 +1246,10 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     static bool sCamHeightArmed[2]    = { true, true };
     if (swarmStick && !sSwarmStickWasDown[pl]) sSwarmStickMoved[pl] = false;
     sFreeCamSubY[pl] = 0.0f;
+    // Record the physical button for the input log. Swarm is only the Swarm
+    // binding: D-pad Down keeps the original lie down (issue #138), including
+    // while A is held to change Pikmin kind.
+    sPadDpadDownHeld[pl] = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_DOWN) != 0;
     if (aimStick) {
         // Unos 12 px por muestra a fondo por la sensibilidad propia (Right
         // Stick Aim Sensitivity), como si fuera el ratón: el juego lo suma al cursor.
@@ -1633,7 +1633,9 @@ void pc_window_poll_events(PADStatus* pad) {
         const bool saveDown = quickHeld(PC_KEY_ACT_QUICKSAVE);
         const bool loadDown = quickHeld(PC_KEY_ACT_QUICKLOAD);
         if (saveDown && !sQuickSaveWasDown) pc_quicksave_request_save();
-        if (loadDown && !sQuickLoadWasDown) pc_settings_request_quick_load_confirm();
+        // F7 opens the F1 menu on Quick Load. While a load is already running,
+        // ignore it: Escape must cancel the load, not close that menu.
+        if (loadDown && !sQuickLoadWasDown && !pc_quicksave_load_active()) pc_settings_request_quick_load_confirm();
         sQuickSaveWasDown = saveDown;
         sQuickLoadWasDown = loadDown;
         // Escape (or player 1's B) cancels a load under way: a fresh press

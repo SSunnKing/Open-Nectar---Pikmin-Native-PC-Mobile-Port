@@ -46,13 +46,14 @@
 // Local inputs (v4): in deterministic mode the sim reads the Mouse Cursor
 // path from these per-pad slots only: whether the pad's cursor follows the
 // mouse this tick, the cursor delta, the wheel's colour-pick notches and
-// whether First Person pins the cursor. It also reads from them whether the
-// D-pad Down in the pad came from a gamepad, the Gyro Recenter press and
-// (pad 0) the photo mode toggle (kLocal* bits). A live tick fills them through the
-// local capture hook (the engine takes what the window gathered since the
-// last tick); a v4 replay fills them from the file. Either way the sim
-// runs the same code on the same values. The sim takes the delta and the
-// notches once per tick; what no reader takes is dropped at the tick's end.
+// whether First Person pins the cursor, plus the Gyro Recenter press and
+// (pad 0) the photo mode toggle (kLocal* bits). The physical D-pad Down bit
+// is recorded only. Lie down reads the pad's Down button, and the sim does
+// not branch on that flag. A live tick fills the slots through the local
+// capture hook (the engine takes what the window gathered since the last
+// tick); a v4 replay fills them from the file. Either way the sim runs the
+// same code on the same values. The sim takes the delta and the notches
+// once per tick; what no reader takes is dropped at the tick's end.
 // Outside deterministic mode the hook takes nothing and the sim never reads
 // the slots.
 //
