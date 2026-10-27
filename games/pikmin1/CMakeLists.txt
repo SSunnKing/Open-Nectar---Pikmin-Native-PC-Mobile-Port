@@ -1331,6 +1331,12 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_pad_clamp_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_pad_clamp_test COMMAND pc_pad_clamp_test)
 
+    # Text window presses through the menu translator (no game needed)
+    add_executable(pc_text_window_press_test pc_port/pc_text_window_press_test.cpp pc_port/pc_menu_pad.cpp)
+    target_include_directories(pc_text_window_press_test PRIVATE ${SDL2_INCLUDE_DIRS} pc_port)
+    target_compile_options(pc_text_window_press_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_text_window_press_test COMMAND pc_text_window_press_test)
+
     # Permadeath save block (no game needed)
     add_executable(pc_permadeath_test pc_port/pc_permadeath_test.cpp pc_port/pc_permadeath.cpp src/sysCommon/stream.cpp src/sysCommon/string.cpp)
     target_include_directories(pc_permadeath_test PRIVATE pc_port include)
