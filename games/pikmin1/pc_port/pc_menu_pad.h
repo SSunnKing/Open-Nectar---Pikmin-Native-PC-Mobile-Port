@@ -45,6 +45,18 @@ void pc_menu_pad_apply(const PcMenuPadKeys& keys, bool menuMode, bool nonShiftB,
                        int bindStart, int bindStart2,
                        std::uint16_t& button, std::int8_t& stickX, std::int8_t& stickY);
 
+// Text windows (tutorial notes, Olimar's log entries, the Voyage Log, result
+// messages) read B as "show the whole page" and "next page", as on the
+// GameCube. An open window notes the time on each frame it updates, and a
+// Shift binding for B counts as B while that note is this recent. Pause, the
+// world map and every other menu still never take Shift as B.
+constexpr std::uint32_t PC_MENU_PAD_TEXT_WINDOW_MS = 100;
+bool pc_menu_pad_text_window_live(bool noted, std::uint32_t notedMs, std::uint32_t nowMs);
+
+// Whether a held keyboard binding for B produces B in menu mode. Shift only
+// does while a text window is live. Invalid bindings never do.
+bool pc_menu_pad_b_binding_counts(int bind, bool textWindowLive);
+
 // A click that went down and up before the sample is absent from the held
 // mask and present only in the press mask. Either one is a click.
 bool pc_menu_pad_click(std::uint32_t held, std::uint32_t pressed, int sdlButton);
