@@ -303,6 +303,51 @@ int ResultFlags::getDocument(int& pageCount)
 	STACK_PAD_VAR(2);
 }
 
+#if defined(PIKI_PC_PORT)
+/**
+ * @brief Record the day-1 voyage log on the tutorial-skip day end.
+ *
+ * A normal day end increments the clock and then calls `getDocument`, which
+ * stores the entry in `mDaysSeen[getCurrDay()]`. `getCurrDay()` is the clock
+ * minus one, and the log opens day 1 as index 1, so the clock has to already
+ * read 2. Calling `getDocument` earlier writes slot 0 and day 1 stays blank.
+ * A second call would overwrite slot 1 with whatever log is pending now.
+ */
+int ResultFlags::commitTutorialSkipDocument(int clockDay, int& pageCount)
+{
+	pageCount = 0;
+	if (clockDay != 2 || !playerState || playerState->getCurrDay() != 1) {
+		return -1;
+	}
+	if (mDaysSeen[1] != -1) {
+		return getDayDocument(1, pageCount);
+	}
+	return getDocument(pageCount);
+}
+
+/**
+ * @brief Fill day 1 on a save that skipped the tutorial before the log was recorded.
+ *
+ * Only when that entry is still missing and `RESFLAG_EndFirstDay` is still
+ * pending. `getDocument` would also mark every other pending log seen or off,
+ * which drops entries earned on a later day that has not ended yet. A later
+ * day that already absorbed the crash-landing entry is left as it was: the
+ * log that day should have shown was discarded at the time and cannot be rebuilt.
+ */
+bool ResultFlags::repairUnrecordedDayOne(int savedDay)
+{
+	if (savedDay < 2 || mDaysSeen[1] != -1) {
+		return false;
+	}
+	if (getFlag(zen::RESFLAG_EndFirstDay) != 1) {
+		return false;
+	}
+	setSeen(zen::RESFLAG_EndFirstDay);
+	mDaysSeen[1] = zen::RESFLAG_EndFirstDay;
+	return true;
+}
+#endif
+
 /**
  * @todo: Documentation
  * @note UNUSED Size: 00003C

@@ -1355,6 +1355,22 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_button_prompt_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_button_prompt_test COMMAND pc_button_prompt_test)
 
+    # Day-1 voyage log after Skip tutorial (no disc or save)
+    add_executable(pc_voyage_log_test
+        pc_port/pc_voyage_log_test.cpp
+        src/plugPikiKando/resultFlag.cpp)
+    target_compile_options(pc_voyage_log_test BEFORE PRIVATE
+        -I${CMAKE_CURRENT_SOURCE_DIR}/pc_port/voyage_log_stubs)
+    target_include_directories(pc_voyage_log_test BEFORE PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/pc_port/voyage_log_stubs)
+    target_include_directories(pc_voyage_log_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Dolphin
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Dolphin/OS
+        ${PC_PORT_DIR})
+    target_compile_options(pc_voyage_log_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_voyage_log_test COMMAND pc_voyage_log_test)
+
     # Host software DSP test (not linked into main game)
     add_executable(pc_dsp_host_test
         pc_port/audio/pc_dsp_host_test.cpp

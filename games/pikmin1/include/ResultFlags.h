@@ -43,6 +43,12 @@ public:
 	int getDayDocument(int, int&);
 	int getDocument(int& pageCount);
 	void dump();
+#if defined(PIKI_PC_PORT)
+	// Skip-tutorial day end. `clockDay` is the clock after it has moved to day 2.
+	int commitTutorialSkipDocument(int clockDay, int& pageCount);
+	// A save whose day-1 entry was never recorded. Leaves every other log alone.
+	bool repairUnrecordedDayOne(int savedDay);
+#endif
 
 protected:
 	u8 getFlag(int);
