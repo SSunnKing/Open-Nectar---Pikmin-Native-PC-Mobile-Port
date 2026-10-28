@@ -355,7 +355,17 @@ bool TAIAapproachTargetPriorityFaceDir::act(Teki& teki)
  */
 void TAIAlookAround::setTargetDirection(Teki& teki, f32 angle)
 {
+#if defined(PIKI_PC_PORT)
+	// Operands of one multiplication have no defined order (clang left to right,
+	// GCC right to left): draw the spread before the sign.
+	{
+		const f32 spread = angle + zen::Rand(angle);
+		const f32 sign   = (zen::Rand(10.0f) > 5.0f) ? 1.0f : -1.0f;
+		teki.mTargetAngle = spread * sign + teki.mFaceDirection;
+	}
+#else
 	teki.mTargetAngle = (angle + zen::Rand(angle)) * ((zen::Rand(10.0f) > 5.0f) ? 1.0f : -1.0f) + teki.mFaceDirection;
+#endif
 	teki.mTargetAngle = roundAng(teki.mTargetAngle);
 }
 
@@ -877,7 +887,17 @@ bool TAIAflyingBase::act(Teki& teki)
 void TAIAflyingInTerritory::setTargetPosition(Teki& teki)
 {
 	Vector3f offset;
+#if defined(PIKI_PC_PORT)
+	// Draw x before z. Two arguments of one call have no defined order: clang
+	// draws x first, GCC (Linux, MinGW) z first.
+	{
+		const f32 x = zen::Rand(2.0f) - 1.0f;
+		const f32 z = zen::Rand(2.0f) - 1.0f;
+		offset.set(x, 0.0f, z);
+	}
+#else
 	offset.set(zen::Rand(2.0f) - 1.0f, 0.0f, zen::Rand(2.0f) - 1.0f);
+#endif
 	offset.normalize();
 	offset.multiply(teki.getParameterF(TPF_SafetyTerritoryRange));
 	teki.mTargetPosition.set(offset.x + teki.mPersonality->mNestPosition.x, teki.getParameterF(TPF_FlightHeight),
