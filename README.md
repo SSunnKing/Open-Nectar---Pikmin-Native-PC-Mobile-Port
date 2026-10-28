@@ -313,6 +313,11 @@ cmake --build build/pikmin2 --target pikmin2_pc -j"$(sysctl -n hw.ncpu)"
 
 There are no ready-made macOS packages: macOS players build from source.
 
+The commands above build the USA game only, so the launcher will ask for
+`nectar-pal` when you install a European (PAL) Pikmin disc. To get both next
+to the launcher, run `scripts/build-macos.sh` instead: it also builds the PAL
+game and places it as `build/pikmin1/bin/nectar-pal`.
+
 The compiler comes from the Xcode command-line tools (`xcode-select --install`). The port requests an OpenGL 4.1 core context, the newest core profile macOS provides.
 
 ### Choosing which release to build
