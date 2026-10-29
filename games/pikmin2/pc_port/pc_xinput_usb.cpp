@@ -70,7 +70,14 @@ int rumble(void*, Uint16 low, Uint16 high)
     if (!sHandle || !sOutEp) return -1;
     unsigned char packet[8] = { 0x00, 0x08, 0x00, static_cast<unsigned char>(low >> 8), static_cast<unsigned char>(high >> 8), 0, 0, 0 };
     int sent = 0;
-    return libusb_interrupt_transfer(sHandle, sOutEp, packet, sizeof packet, &sent, 30) == 0 ? 0 : -1;
+    const int r = libusb_interrupt_transfer(sHandle, sOutEp, packet, sizeof packet, &sent, 30);
+    static int logged = 0;
+    if ((low || high) && logged < 5) {
+        logged++;
+        printf("[PC Port] USB rumble %u/%u on endpoint 0x%02x: %s\n", low, high, sOutEp, r == 0 ? "sent" : libusb_error_name(r));
+        fflush(stdout);
+    }
+    return r == 0 ? 0 : -1;
 }
 
 int16_t flipY(int16_t v) { return v == -32768 ? 32767 : static_cast<int16_t>(-v); }
@@ -232,8 +239,8 @@ void pc_xinput_usb_init(void)
     sJoyId = SDL_JoystickGetDeviceInstanceID(index);
     sJoy   = SDL_JoystickOpen(index);
     if (!sJoy) return;
-    printf("[PC Port] USB XInput controller %04x:%04x attached as a virtual SDL controller\n", chosen.idVendor,
-           chosen.idProduct);
+    printf("[PC Port] USB XInput controller %04x:%04x attached as a virtual SDL controller (in 0x%02x, out %s0x%02x)\n",
+           chosen.idVendor, chosen.idProduct, sEp, sOutEp ? "" : "none ", sOutEp);
     fflush(stdout);
     sRun    = true;
     sThread = SDL_CreateThread(readLoop, "usb-xinput", nullptr);
