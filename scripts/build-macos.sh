@@ -44,7 +44,7 @@ cmake --build "${pal_dir}" --target pikmin_pc -j"${jobs}"
 cp "${pal_dir}/bin/nectar" "${usa_dir}/bin/nectar-pal"
 chmod 755 "${usa_dir}/bin/nectar-pal"
 
-cmake -S "${root}/games/pikmin2" -B "${root}/build/pikmin2" -DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_JAUDIO=ON "${sdl_args[@]}"
+cmake -S "${root}/games/pikmin2" -B "${root}/build/pikmin2" -DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_JAUDIO=ON "${sdl_args[@]}" -DPIKMIN_XINPUT_USB=ON
 cmake --build "${root}/build/pikmin2" --target pikmin2_pc -j"${jobs}"
 
 printf 'Listo: %s/bin (nectar, nectar-pal, nectar-launcher)\n' "${usa_dir}"

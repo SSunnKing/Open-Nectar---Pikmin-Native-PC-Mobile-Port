@@ -8,7 +8,6 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
-#include <thread>
 
 namespace {
 constexpr uint16_t kNaconVendor = 0x146b;
@@ -20,7 +19,7 @@ uint8_t               sEp     = 0;
 SDL_Joystick*         sJoy    = nullptr;
 SDL_JoystickID        sJoyId  = -1;
 std::atomic<bool>     sRun { false };
-std::thread           sThread;
+SDL_Thread*           sThread = nullptr; // SDL_CreateThread: sin operator new (P2 lo redirige al heap del juego)
 
 // Interfaz Xbox 360 (clase 0xFF, subclase 0x5D, protocolo 0x01) y su
 // endpoint de interrupción de entrada. Los mandos de Nacon/Bigben se aceptan
@@ -89,7 +88,7 @@ void apply(const unsigned char* b)
     SDL_JoystickSetVirtualAxis(sJoy, 5, trigger(b[5]));
 }
 
-void readLoop()
+int readLoop(void*)
 {
     unsigned char buf[64];
     while (sRun) {
@@ -110,6 +109,7 @@ void readLoop()
             break;
         }
     }
+    return 0;
 }
 } // namespace
 
@@ -216,12 +216,15 @@ void pc_xinput_usb_init(void)
            chosen.idProduct);
     fflush(stdout);
     sRun    = true;
-    sThread = std::thread(readLoop);
+    sThread = SDL_CreateThread(readLoop, "usb-xinput", nullptr);
 }
 
 void pc_xinput_usb_shutdown(void)
 {
-    if (sRun.exchange(false) && sThread.joinable()) sThread.join();
+    if (sRun.exchange(false) && sThread) {
+        SDL_WaitThread(sThread, nullptr);
+        sThread = nullptr;
+    }
     if (sHandle) {
         libusb_release_interface(sHandle, sIface);
         libusb_close(sHandle);
