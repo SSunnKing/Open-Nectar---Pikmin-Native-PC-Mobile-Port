@@ -1020,6 +1020,14 @@ void MemoryCard::readCurrentGame(RandomAccessStream* data)
 		playerState->loadCard(*data);
 	}
 	gameflow.mWorldClock.mCurrentDay = gameflow.mPlayState.mSavedDay;
+#if defined(PIKI_PC_PORT)
+	// Saves started with Skip tutorial before the day-1 log was recorded open
+	// a blank page. Repair that one entry after the clock is in place. A save
+	// that played day 1 normally does not match and is left untouched.
+	if (gameflow.mPlayState.mSaveStatus == PlayState::ReadyToSave && playerState) {
+		playerState->mResultFlags.repairUnrecordedDayOne(gameflow.mWorldClock.mCurrentDay);
+	}
+#endif
 }
 
 static const char* errCodes[] = {

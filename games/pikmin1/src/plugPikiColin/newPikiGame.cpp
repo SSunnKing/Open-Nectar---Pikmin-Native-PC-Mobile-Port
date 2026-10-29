@@ -562,6 +562,11 @@ struct DayOverModeState : public ModeState {
 			gamecore->exitDayEnd();
 			if (gameflow.mWorldClock.mCurrentDay < 2) {
 				gameflow.mWorldClock.mCurrentDay = 2;
+				// The results screen is not shown, but the voyage log still
+				// needs the day-1 entry. Record it only after the clock moves:
+				// getDocument stores mDaysSeen[getCurrDay()], and day 1 is slot 1.
+				int pageCount = 0;
+				playerState->mResultFlags.commitTutorialSkipDocument(gameflow.mWorldClock.mCurrentDay, pageCount);
 			}
 			pc_tutorial_skip_clear_pending();
 			mState = STATE_PcTutorialSkip;
