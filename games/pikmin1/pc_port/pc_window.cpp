@@ -1057,7 +1057,8 @@ bool pc_window_init(const char* title, int width, int height) {
     printf("[PC Port] Target refresh rate: %.2f Hz\n", sTargetRefreshRate);
 
     // Check for connected controllers
-    printf("[PC Port] SDL sees %d joystick(s)\n", SDL_NumJoysticks());
+    printf("[PC Port] SDL %d.%d.%d, sees %d joystick(s) at startup\n", SDL_MAJOR_VERSION, SDL_MINOR_VERSION,
+           SDL_PATCHLEVEL, SDL_NumJoysticks());
     for (int i = 0; i < SDL_NumJoysticks(); ++i) {
         pc_controller_open_slot(i);
     }
@@ -1342,6 +1343,17 @@ void pc_window_poll_events(PADStatus* pad) {
             case SDL_TEXTINPUT:
                 pc_settings_text_input(event.text.text);
                 break;
+            case SDL_JOYDEVICEADDED: {
+                // Sale aunque SDL no tenga mapa de GameController para el mando:
+                // sirve para saber si macOS lo entrega o no.
+                const int jidx = event.jdevice.which;
+                const char* jname = SDL_JoystickNameForIndex(jidx);
+                printf("[PC Port] Joystick connected #%d \"%s\" (vid %04x pid %04x, game controller: %s)\n", jidx,
+                       jname ? jname : "?", SDL_JoystickGetDeviceVendor(jidx), SDL_JoystickGetDeviceProduct(jidx),
+                       SDL_IsGameController(jidx) ? "yes" : "no");
+                fflush(stdout);
+                break;
+            }
             case SDL_CONTROLLERDEVICEADDED:
                 pc_controller_open_slot(event.cdevice.which);
                 break;
