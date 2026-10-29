@@ -90,6 +90,10 @@ static void netplayResolvePendingPad();
 #define PC_NETPLAY_IGNORE_GAMEPADS false
 #endif
 
+// Last time a text window read the pad (pc_window_note_text_window_input).
+static bool   sTextWindowNoted = false;
+static Uint32 sTextWindowMs    = 0;
+
 // Última pulsación vista en el bucle de eventos, para el menú "pulsa un botón".
 static int            sLastPressKind   = PC_INPUT_DEV_NONE;
 static SDL_JoystickID sLastPressId     = -1;
@@ -558,6 +562,12 @@ int pc_window_get_gamepad_binding_p2(int action) {
     initGamepadBindings();
     if (sGamepadBindingsP2[action] >= 0) return sGamepadBindingsP2[action];
     return kDefaultGamepadBindings[action];
+}
+
+void pc_window_note_text_window_input(void)
+{
+    sTextWindowNoted = true;
+    sTextWindowMs    = SDL_GetTicks();
 }
 
 bool pc_window_last_input_is_gamepad(void)
@@ -1519,7 +1529,8 @@ void pc_window_poll_events(PADStatus* pad) {
 
     // Menus share one mapping. Enter, Space and left click accept. Escape,
     // Backspace and right click cancel. Arrows and WASD both move the cursor.
-    // Shift never cancels here. Free play keeps the bindings filled in above.
+    // Shift never cancels here, except that a text window still takes a Shift
+    // binding for B to show the whole page. Free play keeps the bindings above.
     if (pc_menu_mode_active()) {
         PcMenuPadKeys keys = {};
         auto down = [&](SDL_Scancode sc) { return state[sc] != 0; };
@@ -1550,18 +1561,17 @@ void pc_window_poll_events(PADStatus* pad) {
             keys.clickLeft  = false;
             keys.clickRight = false;
         }
+        const bool textWindow = pc_menu_pad_text_window_live(sTextWindowNoted, sTextWindowMs, SDL_GetTicks());
         auto keyBindHeld = [&](int bind) {
-            if (bind <= 0 || bind >= SDL_NUM_SCANCODES)
-                return false;
-            if (bind == SDL_SCANCODE_LSHIFT || bind == SDL_SCANCODE_RSHIFT)
-                return false;
-            return state[bind] != 0;
+            return pc_menu_pad_b_binding_counts(bind, textWindow) && state[bind] != 0;
         };
-        const bool nonShiftB = keyBindHeld(bindB1) || keyBindHeld(bindB2);
+        // Shift is included while a text window is live. Other menus pass a
+        // false binding check for it, so Shift still never cancels there.
+        const bool boundB = keyBindHeld(bindB1) || keyBindHeld(bindB2);
         std::uint16_t bits = button;
         std::int8_t sx = stickX;
         std::int8_t sy = stickY;
-        pc_menu_pad_apply(keys, true, nonShiftB, sKeyBindings[PC_KEY_ACT_START], sKeyBindings2[PC_KEY_ACT_START], bits, sx, sy);
+        pc_menu_pad_apply(keys, true, boundB, sKeyBindings[PC_KEY_ACT_START], sKeyBindings2[PC_KEY_ACT_START], bits, sx, sy);
         button = static_cast<u16>(bits);
         stickX = static_cast<s8>(sx);
         stickY = static_cast<s8>(sy);

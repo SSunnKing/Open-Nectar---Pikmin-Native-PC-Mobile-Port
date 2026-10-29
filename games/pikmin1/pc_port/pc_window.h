@@ -169,6 +169,11 @@ void pc_window_discard_button_presses(void);
 // prompts match the F1 bindings the player is actually using.
 bool pc_window_last_input_is_gamepad(void);
 
+// Called by a text window on each frame it reads the pad. While it keeps
+// calling, a Shift binding for B reaches it as B in menu mode, so Shift shows
+// the whole page and turns it again. See pc_menu_pad_text_window_live().
+void pc_window_note_text_window_input(void);
+
 // Writes the F1 name for a message-box button tag (a/b/c/x/y/z/l/r) into buf.
 // Keyboard vs gamepad follows pc_window_last_input_is_gamepad(). In mouse
 // cursor mode, A/B/Z also list the matching mouse button.
