@@ -112,7 +112,13 @@ void readLoop()
 
 void pc_xinput_usb_init(void)
 {
-    if (libusb_init(&sCtx) != 0) return;
+    if (libusb_init(&sCtx) != 0) {
+        printf("[PC Port] USB XInput: libusb_init failed\n");
+        fflush(stdout);
+        return;
+    }
+    printf("[PC Port] USB XInput: scanning for Xbox 360-protocol controllers\n");
+    fflush(stdout);
     libusb_device** list = nullptr;
     const ssize_t count = libusb_get_device_list(sCtx, &list);
     libusb_device_descriptor chosen = {};
@@ -121,7 +127,28 @@ void pc_xinput_usb_init(void)
         if (libusb_get_device_descriptor(list[i], &dd) != 0) continue;
         int iface;
         uint8_t ep;
-        if (!findInterface(list[i], dd, iface, ep)) continue;
+        if (!findInterface(list[i], dd, iface, ep)) {
+            if (dd.idVendor == kNaconVendor) {
+                // El mando de Nacon está, pero ninguna interfaz encaja: volcar
+                // las que tiene para poder ajustar la detección.
+                libusb_config_descriptor* cfg = nullptr;
+                const int cr = libusb_get_active_config_descriptor(list[i], &cfg);
+                printf("[PC Port] USB %04x:%04x: no usable XInput interface (config: %s)\n", dd.idVendor, dd.idProduct,
+                       cr == 0 ? "ok" : libusb_error_name(cr));
+                if (cr == 0 && cfg) {
+                    for (int k = 0; k < cfg->bNumInterfaces; k++)
+                        for (int a = 0; a < cfg->interface[k].num_altsetting; a++) {
+                            const libusb_interface_descriptor& d = cfg->interface[k].altsetting[a];
+                            printf("[PC Port]   interface %d: class %02x subclass %02x protocol %02x endpoints %d\n",
+                                   d.bInterfaceNumber, d.bInterfaceClass, d.bInterfaceSubClass, d.bInterfaceProtocol,
+                                   d.bNumEndpoints);
+                        }
+                    libusb_free_config_descriptor(cfg);
+                }
+                fflush(stdout);
+            }
+            continue;
+        }
         libusb_device_handle* h = nullptr;
         int r = libusb_open(list[i], &h);
         if (r == 0) r = libusb_claim_interface(h, iface);
@@ -138,7 +165,11 @@ void pc_xinput_usb_init(void)
         chosen  = dd;
     }
     libusb_free_device_list(list, 1);
-    if (!sHandle) return;
+    if (!sHandle) {
+        printf("[PC Port] USB XInput: no controller attached\n");
+        fflush(stdout);
+        return;
+    }
 
     SDL_VirtualJoystickDesc desc;
     SDL_zero(desc);
@@ -192,6 +223,11 @@ void pc_xinput_usb_shutdown(void)
 }
 
 #else
-void pc_xinput_usb_init(void) {}
+#include <cstdio>
+void pc_xinput_usb_init(void)
+{
+    printf("[PC Port] USB XInput: not compiled in (build with -DPIKMIN_XINPUT_USB=ON and libusb)\n");
+    fflush(stdout);
+}
 void pc_xinput_usb_shutdown(void) {}
 #endif
