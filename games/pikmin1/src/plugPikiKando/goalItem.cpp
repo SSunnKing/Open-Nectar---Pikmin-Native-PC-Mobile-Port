@@ -1,5 +1,6 @@
 #include "GoalItem.h"
 #if defined(PIKI_PC_PORT)
+#include "pc_onion_skip.h"
 #include "pc_coop.h"
 #include "mods/pc_mission.h"
 #include "netplay/pc_netplay_policy.h"
@@ -560,6 +561,11 @@ void GoalItem::startLand()
  * saltar no la adelantaba y se seguía viendo caer hasta que el cono terminaba
  * de salir y WaitInit la cortaba. Aquí se apagan los efectos de vuelo, el cono
  * vuelve a su tamaño y pasa directamente a esperar en el suelo.
+ *
+ * Discovery uses the same snap. The boot animation, not a movie key, opens
+ * the route to the Onion and finishes its colour, and EmitCone grows the
+ * coloured cone back from the buried size. Skipping cuts that animation off,
+ * so those are put back here. An Onion that is already open is left as it is.
  */
 void GoalItem::pcSnapLanded()
 {
@@ -567,10 +573,18 @@ void GoalItem::pcSnapLanded()
 	if (anim >= 9 && anim <= 11) {
 		setFlowEffect(false);
 		setFlightLight(false);
+	}
+	if (mSpotModelEff && pc_onion_skip_restores_cone(mIsClosing, mIsConeEmit, mSpotModelEff->mSRT.s.x)) {
 		mSpotModelEff->mSRT.s = _3FC;
 	}
 	mIsClosing  = false;
 	mIsConeEmit = false;
+	disableColorAnim();
+	if (routeMgr) {
+		if (WayPoint* wp = routeMgr->getWayPoint('test', mWaypointIdx)) {
+			wp->setFlag(true);
+		}
+	}
 	C_SAI(this)->start(this, GoalAI::GOAL_Wait);
 }
 #endif

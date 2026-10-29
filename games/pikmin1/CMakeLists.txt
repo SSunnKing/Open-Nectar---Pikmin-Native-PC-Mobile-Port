@@ -1283,6 +1283,12 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_menu_pad_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_menu_pad_test COMMAND pc_menu_pad_test)
 
+    # Cutscene skip replays its keys by frame (header only)
+    add_executable(pc_cine_skip_order_test pc_port/pc_cine_skip_order_test.cpp)
+    target_include_directories(pc_cine_skip_order_test PRIVATE pc_port)
+    target_compile_options(pc_cine_skip_order_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_cine_skip_order_test COMMAND pc_cine_skip_order_test)
+
     # Permadeath save block (no game needed)
     add_executable(pc_permadeath_test pc_port/pc_permadeath_test.cpp pc_port/pc_permadeath.cpp src/sysCommon/stream.cpp src/sysCommon/string.cpp)
     target_include_directories(pc_permadeath_test PRIVATE pc_port include)
