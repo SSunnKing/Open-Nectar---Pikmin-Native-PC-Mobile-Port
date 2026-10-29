@@ -16,6 +16,7 @@ libusb_context*       sCtx    = nullptr;
 libusb_device_handle* sHandle = nullptr;
 int                   sIface  = -1;
 uint8_t               sEp     = 0;
+uint8_t               sOutEp  = 0; // endpoint de salida (vibración); 0 si no tiene
 SDL_Joystick*         sJoy    = nullptr;
 SDL_JoystickID        sJoyId  = -1;
 std::atomic<bool>     sRun { false };
@@ -24,7 +25,7 @@ SDL_Thread*           sThread = nullptr; // SDL_CreateThread: sin operator new (
 // Interfaz Xbox 360 (clase 0xFF, subclase 0x5D, protocolo 0x01) y su
 // endpoint de interrupción de entrada. Los mandos de Nacon/Bigben se aceptan
 // con cualquier interfaz de clase 0xFF por si no declaran la subclase.
-bool findInterface(libusb_device* dev, const libusb_device_descriptor& dd, int& iface, uint8_t& ep, int& configValue)
+bool findInterface(libusb_device* dev, const libusb_device_descriptor& dd, int& iface, uint8_t& ep, uint8_t& outEp, int& configValue)
 {
     libusb_config_descriptor* cfg = nullptr;
     // Sin driver, macOS deja el mando sin configurar y la configuración activa
@@ -40,13 +41,18 @@ bool findInterface(libusb_device* dev, const libusb_device_descriptor& dd, int& 
                 const bool exact = d.bInterfaceClass == 0xFF && d.bInterfaceSubClass == 0x5D && d.bInterfaceProtocol == 0x01;
                 const bool loose = d.bInterfaceClass == 0xFF && dd.idVendor == kNaconVendor;
                 if (!(round == 0 ? exact : loose)) continue;
+                outEp = 0;
                 for (int e = 0; e < d.bNumEndpoints; e++) {
                     const libusb_endpoint_descriptor& ed = d.endpoint[e];
-                    if ((ed.bEndpointAddress & 0x80) && (ed.bmAttributes & 3) == LIBUSB_TRANSFER_TYPE_INTERRUPT) {
-                        iface = d.bInterfaceNumber;
-                        ep    = ed.bEndpointAddress;
-                        found = true;
-                        break;
+                    if ((ed.bmAttributes & 3) != LIBUSB_TRANSFER_TYPE_INTERRUPT) continue;
+                    if (ed.bEndpointAddress & 0x80) {
+                        if (!found) {
+                            iface = d.bInterfaceNumber;
+                            ep    = ed.bEndpointAddress;
+                            found = true;
+                        }
+                    } else if (!outEp) {
+                        outEp = ed.bEndpointAddress;
                     }
                 }
             }
@@ -54,6 +60,17 @@ bool findInterface(libusb_device* dev, const libusb_device_descriptor& dd, int& 
     }
     libusb_free_config_descriptor(cfg);
     return found;
+}
+
+// Vibración: paquete Xbox 360 {0x00, 0x08, 0x00, motor grande, motor pequeño,
+// 0, 0, 0} al endpoint de salida. SDL llama aquí desde SDL_GameControllerRumble
+// y la apaga solo al cumplirse la duración.
+int rumble(void*, Uint16 low, Uint16 high)
+{
+    if (!sHandle || !sOutEp) return -1;
+    unsigned char packet[8] = { 0x00, 0x08, 0x00, static_cast<unsigned char>(low >> 8), static_cast<unsigned char>(high >> 8), 0, 0, 0 };
+    int sent = 0;
+    return libusb_interrupt_transfer(sHandle, sOutEp, packet, sizeof packet, &sent, 30) == 0 ? 0 : -1;
 }
 
 int16_t flipY(int16_t v) { return v == -32768 ? 32767 : static_cast<int16_t>(-v); }
@@ -130,8 +147,9 @@ void pc_xinput_usb_init(void)
         if (libusb_get_device_descriptor(list[i], &dd) != 0) continue;
         int iface;
         uint8_t ep;
+        uint8_t outEp = 0;
         int configValue = 1;
-        if (!findInterface(list[i], dd, iface, ep, configValue)) {
+        if (!findInterface(list[i], dd, iface, ep, outEp, configValue)) {
             if (dd.idVendor == kNaconVendor) {
                 // El mando de Nacon está, pero ninguna interfaz encaja: volcar
                 // las que tiene para poder ajustar la detección.
@@ -173,6 +191,7 @@ void pc_xinput_usb_init(void)
         sHandle = h;
         sIface  = iface;
         sEp     = ep;
+        sOutEp  = outEp;
         chosen  = dd;
     }
     libusb_free_device_list(list, 1);
@@ -191,6 +210,7 @@ void pc_xinput_usb_init(void)
     desc.vendor_id  = chosen.idVendor;
     desc.product_id = chosen.idProduct;
     desc.name       = "USB XInput Controller";
+    desc.Rumble     = rumble;
     const int index = SDL_JoystickAttachVirtualEx(&desc);
     if (index < 0) {
         printf("[PC Port] Could not create the virtual controller: %s\n", SDL_GetError());
@@ -221,6 +241,7 @@ void pc_xinput_usb_init(void)
 
 void pc_xinput_usb_shutdown(void)
 {
+    if (sHandle && sOutEp) rumble(nullptr, 0, 0);
     if (sRun.exchange(false) && sThread) {
         SDL_WaitThread(sThread, nullptr);
         sThread = nullptr;
