@@ -11,20 +11,40 @@ set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 jobs="${NECTAR_BUILD_JOBS:-$(sysctl -n hw.ncpu)}"
+sdl_version="${SDL_VERSION:-2.32.10}"
+sdl_dir="${root}/build/sdl2-${sdl_version}"
+archs="$(uname -m)"
 usa_dir="${root}/build/pikmin1"
 pal_dir="${root}/build/pikmin1-pal"
 
-cmake -S "${root}/games/pikmin1" -B "${usa_dir}" -DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_JAUDIO=ON
+# SDL2 de verdad, estática (como en scripts/release-macos.sh). El sdl2-compat de
+# Homebrew corre sobre SDL3 y en algunos Mac no entrega ningún mando al juego.
+if [[ ! -f "${sdl_dir}/install/lib/libSDL2.a" ]]; then
+    mkdir -p "${sdl_dir}"
+    if [[ ! -d "${sdl_dir}/src" ]]; then
+        mkdir -p "${sdl_dir}/src"
+        curl -fsSL "https://github.com/libsdl-org/SDL/releases/download/release-${sdl_version}/SDL2-${sdl_version}.tar.gz" \
+            | tar -xz -C "${sdl_dir}/src" --strip-components=1
+    fi
+    cmake -S "${sdl_dir}/src" -B "${sdl_dir}/build" -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_OSX_ARCHITECTURES="${archs}" -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF \
+        -DCMAKE_INSTALL_PREFIX="${sdl_dir}/install"
+    cmake --build "${sdl_dir}/build" -j"${jobs}"
+    cmake --install "${sdl_dir}/build"
+fi
+sdl_args=(-DCMAKE_PREFIX_PATH="${sdl_dir}/install" -DPIKMIN_STATIC_RUNTIME=ON)
+
+cmake -S "${root}/games/pikmin1" -B "${usa_dir}" -DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_JAUDIO=ON "${sdl_args[@]}"
 cmake --build "${usa_dir}" --target pikmin_pc pikmin_launcher -j"${jobs}"
 
-cmake -S "${root}/games/pikmin1" -B "${pal_dir}" -DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_JAUDIO=ON \
+cmake -S "${root}/games/pikmin1" -B "${pal_dir}" -DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_JAUDIO=ON "${sdl_args[@]}" \
     -DPIKMIN_GAME_VERSION=VERSION_GPIP01_00
 cmake --build "${pal_dir}" --target pikmin_pc -j"${jobs}"
 
 cp "${pal_dir}/bin/nectar" "${usa_dir}/bin/nectar-pal"
 chmod 755 "${usa_dir}/bin/nectar-pal"
 
-cmake -S "${root}/games/pikmin2" -B "${root}/build/pikmin2" -DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_JAUDIO=ON
+cmake -S "${root}/games/pikmin2" -B "${root}/build/pikmin2" -DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_JAUDIO=ON "${sdl_args[@]}"
 cmake --build "${root}/build/pikmin2" --target pikmin2_pc -j"${jobs}"
 
 printf 'Listo: %s/bin (nectar, nectar-pal, nectar-launcher)\n' "${usa_dir}"
