@@ -15,6 +15,7 @@ static_assert(PAD_BUTTON_LEFT == PC_MENU_PAD_LEFT && PAD_BUTTON_RIGHT == PC_MENU
 #include "pc_hand_cursor.h"
 #include "pc_speedrun.h"
 #include "pc_gyro.h"
+#include "pc_xinput_usb.h"
 #include "pc_icon.h"
 #include "netplay/pc_netplay_det.h"
 #if PIKI_PC_TOUCH
@@ -1056,6 +1057,9 @@ bool pc_window_init(const char* title, int width, int height) {
     }
     printf("[PC Port] Target refresh rate: %.2f Hz\n", sTargetRefreshRate);
 
+    // Mandos Xbox 360 por USB, que macOS no expone como HID (solo con libusb).
+    pc_xinput_usb_init();
+
     // Check for connected controllers
     printf("[PC Port] SDL %d.%d.%d, sees %d joystick(s) at startup\n", SDL_MAJOR_VERSION, SDL_MINOR_VERSION,
            SDL_PATCHLEVEL, SDL_NumJoysticks());
@@ -1893,6 +1897,7 @@ void pc_window_set_swap_interval(int interval) {
 }
 
 void pc_window_shutdown(void) {
+    pc_xinput_usb_shutdown();
 #if PIKI_USE_JAUDIO
     StopAudioThread();
 #endif
