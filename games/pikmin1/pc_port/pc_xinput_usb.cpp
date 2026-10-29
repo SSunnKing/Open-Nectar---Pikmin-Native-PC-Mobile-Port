@@ -25,10 +25,13 @@ std::thread           sThread;
 // Interfaz Xbox 360 (clase 0xFF, subclase 0x5D, protocolo 0x01) y su
 // endpoint de interrupción de entrada. Los mandos de Nacon/Bigben se aceptan
 // con cualquier interfaz de clase 0xFF por si no declaran la subclase.
-bool findInterface(libusb_device* dev, const libusb_device_descriptor& dd, int& iface, uint8_t& ep)
+bool findInterface(libusb_device* dev, const libusb_device_descriptor& dd, int& iface, uint8_t& ep, int& configValue)
 {
     libusb_config_descriptor* cfg = nullptr;
-    if (libusb_get_active_config_descriptor(dev, &cfg) != 0 || !cfg) return false;
+    // Sin driver, macOS deja el mando sin configurar y la configuración activa
+    // no existe (LIBUSB_ERROR_NOT_FOUND): se lee la primera y se activa al abrir.
+    if (libusb_get_config_descriptor(dev, 0, &cfg) != 0 || !cfg) return false;
+    configValue = cfg->bConfigurationValue;
     bool found = false;
     for (int round = 0; round < 2 && !found; round++) {
         for (int i = 0; i < cfg->bNumInterfaces && !found; i++) {
@@ -127,12 +130,13 @@ void pc_xinput_usb_init(void)
         if (libusb_get_device_descriptor(list[i], &dd) != 0) continue;
         int iface;
         uint8_t ep;
-        if (!findInterface(list[i], dd, iface, ep)) {
+        int configValue = 1;
+        if (!findInterface(list[i], dd, iface, ep, configValue)) {
             if (dd.idVendor == kNaconVendor) {
                 // El mando de Nacon está, pero ninguna interfaz encaja: volcar
                 // las que tiene para poder ajustar la detección.
                 libusb_config_descriptor* cfg = nullptr;
-                const int cr = libusb_get_active_config_descriptor(list[i], &cfg);
+                const int cr = libusb_get_config_descriptor(list[i], 0, &cfg);
                 printf("[PC Port] USB %04x:%04x: no usable XInput interface (config: %s)\n", dd.idVendor, dd.idProduct,
                        cr == 0 ? "ok" : libusb_error_name(cr));
                 if (cr == 0 && cfg) {
@@ -151,6 +155,13 @@ void pc_xinput_usb_init(void)
         }
         libusb_device_handle* h = nullptr;
         int r = libusb_open(list[i], &h);
+        if (r == 0) {
+            int current = -1;
+            if (libusb_get_configuration(h, &current) != 0 || current != configValue) {
+                r = libusb_set_configuration(h, configValue);
+                if (r != 0) printf("[PC Port] USB set_configuration failed: %s\n", libusb_error_name(r));
+            }
+        }
         if (r == 0) r = libusb_claim_interface(h, iface);
         if (r != 0) {
             printf("[PC Port] USB controller %04x:%04x found but not usable: %s\n", dd.idVendor, dd.idProduct,
