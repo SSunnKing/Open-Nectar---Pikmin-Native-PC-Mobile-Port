@@ -68,10 +68,9 @@ RenderModeInfo gPcRenderInfoStore = {};
 #include "touch/pc_touch.h"
 #endif
 
-#if defined(__APPLE__)
-// pc_gfx.cpp. macOS (OpenGL 4.1 core) shows a black window if the swap runs
-// while the renderer's own framebuffer is bound; Pikmin 1 and
-// pc_window_swap_buffers bind the default one around the swap the same way.
+#if defined(__APPLE__) || defined(_WIN32)
+// pc_gfx.cpp: bind the default framebuffer around presentation, then restore
+// the renderer's framebuffer, as in pc_window_swap_buffers.
 unsigned int pc_gfx_begin_swap_framebuffer(void);
 void pc_gfx_end_swap_framebuffer(unsigned int bound);
 #endif
@@ -1429,11 +1428,11 @@ void VIWaitForRetrace()
 			// El swap puede esperar al refresco: es la espera del vsync de la
 			// consola, sin turno, para que corran los demás hilos.
 			pc_sched_host_begin();
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
 			const unsigned int renderTarget = pc_gfx_begin_swap_framebuffer();
 #endif
 			SDL_GL_SwapWindow(window);
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
 			pc_gfx_end_swap_framebuffer(renderTarget);
 #endif
 			pc_sched_host_end();
