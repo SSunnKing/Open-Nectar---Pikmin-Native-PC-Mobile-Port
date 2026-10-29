@@ -189,8 +189,18 @@ static void pc_auto_promote_pad(SDL_JoystickID id)
 
 static bool pc_controller_open_slot(int index)
 {
-	if (!SDL_IsGameController(index) || pc_joystick_is_secondary(index))
+	if (!SDL_IsGameController(index) || pc_joystick_is_secondary(index)) {
+		// Dejar rastro: un mando que SDL ve como joystick pero sin mapa de
+		// GameController se descartaba sin decir nada.
+		char guid[40] = {};
+		SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(index), guid, sizeof guid);
+		const char* jname = SDL_JoystickNameForIndex(index);
+		printf("[PC Port] Ignored joystick #%d \"%s\" (vid %04x pid %04x, guid %s): %s\n", index, jname ? jname : "?",
+		       SDL_JoystickGetDeviceVendor(index), SDL_JoystickGetDeviceProduct(index), guid,
+		       SDL_IsGameController(index) ? "motion/touchpad sub-device" : "no GameController mapping");
+		fflush(stdout);
 		return false;
+	}
 	SDL_GameController* ctl = SDL_GameControllerOpen(index);
 	if (!ctl)
 		return false;
@@ -907,6 +917,9 @@ bool pc_window_init(const char* title, int width, int height) {
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "0");
 #endif
 
+    // Que el mando siga llegando aunque el terminal o el launcher sean la app
+    // en primer plano al arrancar.
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) < 0) {
         printf("[PC Port Error] SDL_Init failed: %s\n", SDL_GetError());
         fflush(stdout);
@@ -1044,6 +1057,7 @@ bool pc_window_init(const char* title, int width, int height) {
     printf("[PC Port] Target refresh rate: %.2f Hz\n", sTargetRefreshRate);
 
     // Check for connected controllers
+    printf("[PC Port] SDL sees %d joystick(s)\n", SDL_NumJoysticks());
     for (int i = 0; i < SDL_NumJoysticks(); ++i) {
         pc_controller_open_slot(i);
     }
