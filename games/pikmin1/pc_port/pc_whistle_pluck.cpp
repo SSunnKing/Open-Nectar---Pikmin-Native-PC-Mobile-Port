@@ -55,6 +55,9 @@ bool pc_whistle_pluck(Navi* navi, float radius)
     piki->resetPosition(nearest->mSRT.t);
     piki->mPcWhistleNuki = true;
     piki->mFSM->transit(piki, PIKISTATE_AutoNuki);
+    // Count it like a hand pluck (NaviNukuState::cleanup): the pluck camera stops
+    // zooming in after 100 plucks (NaviNukuState::init).
+    playerState->mTotalPluckedPikiCount++;
     nearest->finishWaterEffect();
     nearest->kill(false);
     return true;
