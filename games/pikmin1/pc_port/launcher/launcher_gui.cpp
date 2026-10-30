@@ -2059,7 +2059,7 @@ struct Hub {
             } else {
                 // Sin lista: se enseña el valor y, si hace falta, dónde cambiarlo.
                 std::string shown = row.value;
-                if (row.enabled && (row.picker || row.action)) shown += "   (in game: F1)";
+                if (row.enabled && (row.picker || row.action)) shown += "   (in game: F1 or backtick)";
                 const std::string fitted = ellipsizeEnd(shown, controlW, measure);
                 ImGui::AlignTextToFramePadding();
                 ImGui::TextColored(ImVec4(0.62f, 0.58f, 0.44f, 1.0f), "%s", fitted.c_str());
@@ -3307,7 +3307,7 @@ bool HubWindow::showComplete(const std::string& installDirectory, bool willLaunc
     m.state.games[0].installed = true;
     m.state.games[0].directory = installDirectory;
     const std::string text = "Pikmin is installed in:\n" + installDirectory
-                           + "\n\nIn game, F1 opens graphics, controls and gameplay settings."
+                           + "\n\nIn game, F1 or backtick opens graphics, controls and gameplay settings."
                              "\nOpen nectar-launcher from that folder to play again.";
     const int answer = m.message("Installation complete", text, willLaunch ? "Play now" : "OK", willLaunch ? "Back" : "", false);
     m.quitRequested = false;
