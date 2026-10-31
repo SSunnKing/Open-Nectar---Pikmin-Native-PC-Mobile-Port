@@ -35,6 +35,21 @@ static void pc_photo_mode_add_touch_look(float, float) { }
 #define STBI_NO_STDIO
 #include "stb_image.h"
 
+bool pc_host_alloc_active();
+void pc_host_alloc_set(bool active);
+
+namespace {
+// Los vectores globales de este archivo crecen desde menús de secciones
+// distintas: su memoria no puede salir del heap JKR de una sección (al crecer
+// liberaban un bloque de una sección ya destruida: cuelgue al ir al
+// atardecer, #238).
+struct TouchHostAlloc {
+	bool prev = pc_host_alloc_active();
+	TouchHostAlloc() { pc_host_alloc_set(true); }
+	~TouchHostAlloc() { pc_host_alloc_set(prev); }
+};
+} // namespace
+
 namespace {
 
 // ── Disposición ──────────────────────────────────────────────────────────────
@@ -1125,7 +1140,10 @@ void pc_touch_mark_inline_icon(char tag, float x, float y, float size)
 	// El texto se dibuja a veces dos veces (sombra + relleno): un solo icono.
 	for (const InlineIcon& other : sInlineIcons)
 		if (other.button == icon.button && std::fabs(other.cx - icon.cx) < icon.size * 0.5f && std::fabs(other.cy - icon.cy) < icon.size * 0.5f) return;
-	if (sInlineIcons.size() < 64) sInlineIcons.push_back(icon);
+	if (sInlineIcons.size() < 64) {
+		TouchHostAlloc hostAlloc;
+		sInlineIcons.push_back(icon);
+	}
 }
 
 static void push_help_icon(char tag, float cx, float cy, float diam, float alpha)
@@ -1141,6 +1159,7 @@ static void push_help_icon(char tag, float cx, float cy, float diam, float alpha
 	icon.cy = cy;
 	icon.diam = diam;
 	icon.alpha = alpha;
+	TouchHostAlloc hostAlloc;
 	sHelpIcons.push_back(icon);
 }
 
@@ -1249,6 +1268,7 @@ bool pc_touch_pane_rect(const void* pane, float* x0, float* y0, float* x1, float
 	if (!pane) return false;
 	TrackedPane* t = find_tracked(pane);
 	if (!t) {
+		TouchHostAlloc hostAlloc;
 		sTrackedPanes.push_back({ pane, 0, 0, 0, 0, -100, sTouchFrame });
 		return false;
 	}
@@ -1267,6 +1287,7 @@ bool pc_touch_pane_hit(const void* pane, float nx, float ny, float margin)
 	TrackedPane* t = find_tracked(pane);
 	if (!t) {
 		// Primera pregunta: aún no se sabe dónde está; se sabrá al dibujarlo.
+		TouchHostAlloc hostAlloc;
 		sTrackedPanes.push_back({ pane, 0, 0, 0, 0, -100, sTouchFrame });
 		return false;
 	}
