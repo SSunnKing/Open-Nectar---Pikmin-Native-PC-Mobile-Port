@@ -1175,6 +1175,11 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
     target_compile_options(asset_finalize_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME asset_finalize_test COMMAND asset_finalize_test)
 
+    # La comprobacion de instalacion del launcher: paquetes obligatorios por region.
+    add_executable(asset_check_test pc_port/launcher/asset_check_test.cpp)
+    target_compile_options(asset_check_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME asset_check_test COMMAND asset_check_test)
+
     add_executable(prepared_image_test pc_port/launcher/prepared_image_test.cpp ${LAUNCHER_PLATFORM_SOURCE})
     target_compile_options(prepared_image_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     if (WIN32)
