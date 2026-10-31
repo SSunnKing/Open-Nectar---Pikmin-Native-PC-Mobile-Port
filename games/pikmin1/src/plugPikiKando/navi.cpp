@@ -782,6 +782,34 @@ static int sPreferredThrowKind[2] = { -1, -1 };
 static bool sPreferredFromPad[2]   = { false, false };
 static int sPreferredBeforePad[2]  = { -1, -1 };
 
+// Quick save: the throw preferences above are sim state that carries over
+// from one day (or VS match) to the next, so a day's start holds them and a
+// load puts them back before the recorded day starts again.
+int pc_navi_throw_prefs_save(int out[8])
+{
+	out[0] = sPreferredThrowColor;
+	out[1] = sPreferredThrowColorP2;
+	out[2] = sPreferredThrowKind[0];
+	out[3] = sPreferredThrowKind[1];
+	out[4] = sPreferredFromPad[0] ? 1 : 0;
+	out[5] = sPreferredFromPad[1] ? 1 : 0;
+	out[6] = sPreferredBeforePad[0];
+	out[7] = sPreferredBeforePad[1];
+	return 8;
+}
+
+void pc_navi_throw_prefs_restore(const int in[8])
+{
+	sPreferredThrowColor   = in[0];
+	sPreferredThrowColorP2 = in[1];
+	sPreferredThrowKind[0] = in[2];
+	sPreferredThrowKind[1] = in[3];
+	sPreferredFromPad[0]   = in[4] != 0;
+	sPreferredFromPad[1]   = in[5] != 0;
+	sPreferredBeforePad[0] = in[6];
+	sPreferredBeforePad[1] = in[7];
+}
+
 static int pcThrowSlot(Navi* navi) { return navi && navi->mNaviID == pcThrowKeyboardOwner() ? 0 : 1; }
 
 static bool pcKindMatches(Piki* piki, int kind)
@@ -883,13 +911,17 @@ static bool pcUpdatePreferredThrowColor(Navi* navi, bool allowKind = false)
 #if PIKI_PC_TOUCH
 	if (keyboardOwner) touchSteps = pc_touch_take_color_taps();
 #endif
-	// Netplay: the wheel and the touch icon live outside PADStatus, so
-	// deterministic mode drains and ignores them (the D-pad still steps). The
-	// wheel's job is a local control setting, so on every peer the sim acts as
-	// if it was never turned: no colour until the D-pad picks one.
+	// Netplay: the wheel and the touch icon live outside PADStatus. In
+	// deterministic mode their notches come from this captain's per-tick
+	// input (pc_input_log.h): the wheel's filed only while it picks colours,
+	// the icon's taps always (offline; a session carries neither, and the
+	// icon is drained here). Captain 0 always takes the wheel path, so the
+	// sim takes the setting's default (the colour), as every peer's does.
 	const bool detMode = pc_netplay_deterministic();
+	int inputWheelSteps = 0;
 	if (detMode) {
-		touchSteps = 0;
+		touchSteps      = 0;
+		inputWheelSteps = pc_netplay_take_wheel_steps(navi->mNaviID);
 	}
 	// Cruceta izquierda/derecha como en Pikmin 2 (issue #43): vale para
 	// mando y teclado, con o sin A pulsado. Abajo sigue siendo el original.
@@ -913,7 +945,7 @@ static bool pcUpdatePreferredThrowColor(Navi* navi, bool allowKind = false)
 	}
 
 	const bool wheelOn = keyboardOwner && (detMode || pc_settings_get_mouse_wheel_action() == 0);
-	if (!wheelOn && touchSteps == 0 && padSteps == 0 && preferred < 0) {
+	if (!wheelOn && touchSteps == 0 && padSteps == 0 && inputWheelSteps == 0 && preferred < 0) {
 		return kindChanged;
 	}
 
@@ -938,10 +970,18 @@ static bool pcUpdatePreferredThrowColor(Navi* navi, bool allowKind = false)
 		}
 	}
 
-	int steps = touchSteps + padSteps;
+	int steps = touchSteps + padSteps + inputWheelSteps;
 	if (wheelOn && pc_settings_get_mouse_wheel_action() == 0) {
-		const int wheelSteps = pc_window_take_wheel_steps();
-		if (!detMode) steps += wheelSteps;
+		if (detMode) {
+			// The capture hook already filed this tick's notches into the local
+			// slots. A tick that never filled them (a netplay session does not
+			// run the hook) still has to drain the window, or the notches pile
+			// up and land on a later tick. This captain owns the keyboard; the
+			// result is discarded.
+			if (!pc_netplay_local_slots_filled()) (void)pc_window_take_wheel_steps();
+		} else {
+			steps += pc_window_take_wheel_steps();
+		}
 	}
 	// No colour chosen yet and no notch, tap or press now: stay at -1, the
 	// original choice of the nearest Pikmin of any colour. Taking present[0]
@@ -1187,7 +1227,8 @@ void Navi::pcUpdateBombCommand()
 {
 	// Se consume siempre, como Lock-On, para que no salte sola al activarlo.
 	// Netplay: deterministic mode takes the press from this captain's synced
-	// input instead (the session drains the local queue into it).
+	// input instead (the session, or offline the per-tick input capture,
+	// drains the local queue into it).
 	const bool detMode = pc_netplay_deterministic();
 	const bool pressed = detMode ? (pc_netplay_ext_bits(mNaviID) & pc_input_log::kExtBomb) != 0
 	                             : pc_window_take_bomb_press(mNaviID == 1 ? 1 : 0);
@@ -2192,9 +2233,25 @@ void Navi::pcPinCursorToLock()
 void Navi::pcPinCursorFirstPerson()
 {
 #if defined(PIKI_PC_PORT)
-	// Netplay: the pin reads the local view matrix, so deterministic mode
-	// keeps the classic stick cursor.
+	// Netplay: the pin reads local state (the First Person toggle and the
+	// view matrix). In deterministic mode both come from this captain's
+	// per-tick input instead: the First Person flag (pc_input_log.h) and the
+	// view's direction from the quantised control yaw the stick basis uses.
+	// The view's ground forward is the stick's forward, (sin, 0, -cos).
 	if (pc_netplay_deterministic()) {
+		if ((pc_netplay_local_flags(mNaviID) & pc_input_log::kLocalFirstPerson) == 0) {
+			return;
+		}
+		f32 yawSin = 0.0f, yawCos = 1.0f;
+		if (!pc_netplay_control_yaw(mNaviID, &yawSin, &yawCos)) {
+			yawSin = 0.0f;
+			yawCos = 1.0f;
+		}
+		const f32 detReach = NAVI_PARM(mCursorMaxRadius) * 0.8f;
+		Vector3f detOffset(yawSin * detReach, 0.0f, -yawCos * detReach);
+		mCursorPosition       = detOffset;
+		mCursorTargetPosition = detOffset;
+		mCursorNaviDist       = detReach;
 		return;
 	}
 #endif
@@ -3397,15 +3454,34 @@ void Navi::makeVelocity(bool isSunset)
 	// El ratón y el cursor virtual van con el jugador que tiene el teclado;
 	// el otro usa siempre el modo clásico.
 	// Netplay: mouse deltas, the virtual cursor and the gyro recenter are
-	// local state outside PADStatus, so in deterministic mode every captain
-	// takes the classic stick path; the edges are drained.
+	// local state outside PADStatus. In deterministic mode the Mouse Cursor
+	// path reads this captain's per-tick input instead (pc_input_log.h):
+	// whether the mouse drives its cursor this tick, the delta and the gyro
+	// recenter press. The virtual cursor stays off.
 	const bool detMode     = pc_netplay_deterministic();
-	const bool mouseIsMine = !detMode && mNaviID == pc_window_get_keyboard_owner();
+	const bool mouseIsMine = detMode ? (pc_netplay_local_flags(mNaviID) & pc_input_log::kLocalMouseCursor) != 0
+	                                 : mNaviID == pc_window_get_keyboard_owner();
 	// "Gyro Recenter": el cursor vuelve delante del capitán, en la dirección
 	// de la cámara, para corregir la deriva acumulada del giroscopio.
 	if (detMode) {
+		// The press is in the input (offline, filed by the window's capture;
+		// a session never carries it). The view's ground forward comes from
+		// the quantised control yaw, (sin, 0, -cos), as the First Person pin
+		// takes it, and this tick's mouse motion is dropped as below.
 		pc_gyro_take_recenter_cursor();
 		pc_window_clear_mouse_cursor_delta();
+		if ((pc_netplay_local_flags(mNaviID) & pc_input_log::kLocalGyroRecenter) != 0) {
+			f32 yawSin = 0.0f, yawCos = 1.0f;
+			if (!pc_netplay_control_yaw(mNaviID, &yawSin, &yawCos)) {
+				yawSin = 0.0f;
+				yawCos = 1.0f;
+			}
+			const f32 reach = NAVI_PARM(mCursorMaxRadius) * 0.5f;
+			mCursorPosition.set(yawSin * reach, 0.0f, -yawCos * reach);
+			mCursorTargetPosition = mCursorPosition;
+			mCursorNaviDist       = reach;
+			pc_netplay_take_cursor_delta(mNaviID, nullptr, nullptr);
+		}
 	} else if (mouseIsMine && pc_gyro_take_recenter_cursor()) {
 		Vector3f fwd(-ctrlCam->mLookAtMtx.mMtx[2][0], 0.0f, -ctrlCam->mLookAtMtx.mMtx[2][2]);
 		const f32 len = speedy_sqrtf(fwd.x * fwd.x + fwd.z * fwd.z);
@@ -3417,30 +3493,49 @@ void Navi::makeVelocity(bool isSunset)
 		}
 		pc_window_clear_mouse_cursor_delta();
 	}
+	// In deterministic mode the flag already holds the mode test below.
 	if (mouseIsMine
-	    && (pc_window_get_control_mode() == PC_CONTROL_MOUSE_CURSOR
+	    && (detMode || pc_window_get_control_mode() == PC_CONTROL_MOUSE_CURSOR
 	        || pc_window_get_mouse_cursor_delta_x() != 0.0f
 	        || pc_window_get_mouse_cursor_delta_y() != 0.0f)) {
 		// Direct mouse delta mode: use raw deltas, no normalization or frame time scaling
 		// SDL already provides distance since last poll
 		static const float kMouseCursorWorldScale = 0.5f; // Convert SDL counts to world units
 
-		const float mouseX = pc_window_get_mouse_cursor_delta_x();
-		const float mouseY = pc_window_get_mouse_cursor_delta_y();
-		pc_window_clear_mouse_cursor_delta();
+		float mouseX = 0.0f;
+		float mouseY = 0.0f;
+		if (detMode) {
+			pc_netplay_take_cursor_delta(mNaviID, &mouseX, &mouseY);
+		} else {
+			mouseX = pc_window_get_mouse_cursor_delta_x();
+			mouseY = pc_window_get_mouse_cursor_delta_y();
+			pc_window_clear_mouse_cursor_delta();
+		}
 
 		// mCursorPosition is a world-space offset from Olimar.  SDL deltas are
 		// screen-space, so fixed world X/Z axes make the cursor rotate or invert
 		// as the camera turns.  Project the camera basis onto the ground instead.
-		Vector3f screenRight(ctrlCam->mViewXAxis.x, 0.0f, ctrlCam->mViewXAxis.z);
-		// SDL Y grows downwards, whereas the gameplay cursor's positive screen
-		// vertical direction is camera-forward on the ground plane.
-		Vector3f screenDown(-ctrlCam->mViewZAxis.x, 0.0f, -ctrlCam->mViewZAxis.z);
-		if (screenRight.length() > 0.0001f) {
-			screenRight.normalise();
-		}
-		if (screenDown.length() > 0.0001f) {
-			screenDown.normalise();
+		Vector3f screenRight;
+		Vector3f screenDown;
+		f32 basisSin, basisCos;
+		if (pcNaviControlSincos(mNaviID, &basisSin, &basisCos)) {
+			// Netplay: the same ground basis from the quantised control yaw
+			// the stick uses, never the camera, so record and replay match.
+			// yaw = atan2(viewX.z, viewX.x): right is (cos, 0, sin) and the
+			// view's ground forward is (sin, 0, -cos); screenDown points back.
+			screenRight.set(basisCos, 0.0f, basisSin);
+			screenDown.set(-basisSin, 0.0f, basisCos);
+		} else {
+			screenRight.set(ctrlCam->mViewXAxis.x, 0.0f, ctrlCam->mViewXAxis.z);
+			// SDL Y grows downwards, whereas the gameplay cursor's positive screen
+			// vertical direction is camera-forward on the ground plane.
+			screenDown.set(-ctrlCam->mViewZAxis.x, 0.0f, -ctrlCam->mViewZAxis.z);
+			if (screenRight.length() > 0.0001f) {
+				screenRight.normalise();
+			}
+			if (screenDown.length() > 0.0001f) {
+				screenDown.normalise();
+			}
 		}
 		Vector3f mouseDelta = (screenRight * mouseX + screenDown * mouseY) * kMouseCursorWorldScale;
 

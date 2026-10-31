@@ -1,7 +1,7 @@
-// Host-run unit test for the PKNI v1/v2 encode/decode API.
-// Round-trip (v2 and v1), v1 back-compat, truncated file, bad magic.
-// Engine-free: links only pc_input_log.cpp's pure functions (no PADStatus,
-// no globals).
+// Host-run unit test for the PKNI v1-v4 encode/decode API.
+// Round-trip (v4, v3, v2 and v1), back-compat, float bit patterns, truncated
+// records, bad magic, and the per-tick yaw and local slots.
+// Engine-free: links pc_input_log.cpp and the deterministic-mode switch.
 
 #include "netplay/pc_input_log.h"
 
@@ -38,6 +38,37 @@ static void sTestCaptureHookChecked(void)
 	pc_input_log_yaw_set(0, 0x1234, 0);
 }
 
+// Local capture probe: reports a fixed Mouse Cursor input on pad 1, plus a
+// bit no version knows yet.
+static int sLocalHookCalls = 0;
+static void sTestLocalHook(PcLocalInput out[4])
+{
+	++sLocalHookCalls;
+	for (int p = 0; p < 4; ++p) {
+		if (out[p].flags != 0 || out[p].wheelSteps != 0 || out[p].cursorDx != 0.0f || out[p].cursorDy != 0.0f) {
+			std::printf("FAIL: local hook out[] not zeroed\n");
+		}
+	}
+	out[1].flags      = pc_input_log::kLocalMouseCursor | 0x80;
+	out[1].wheelSteps = -3;
+	out[1].cursorDx   = 12.5f;
+	out[1].cursorDy   = -0.75f;
+}
+
+static uint32_t bitsOf(float f)
+{
+	uint32_t u;
+	std::memcpy(&u, &f, sizeof(u));
+	return u;
+}
+
+static float floatOf(uint32_t u)
+{
+	float f;
+	std::memcpy(&f, &u, sizeof(f));
+	return f;
+}
+
 namespace {
 int sFailures = 0;
 
@@ -70,6 +101,10 @@ void fillPads(PcInputPad pads[4])
 		pads[p].controlYaw   = yaws[p];
 		pads[p].flags        = (uint8_t)(p & 1);
 		pads[p].cursorRotate = (int16_t)(p * 1000 - 1500);
+		pads[p].local        = (uint8_t)(p == 3 ? 0xFF : p);
+		pads[p].wheelSteps   = (int8_t)(p == 2 ? -128 : p * 40 - 1);
+		pads[p].cursorDx     = 1.5f * (float)p - 2.0f;
+		pads[p].cursorDy     = -1000.25f + (float)p;
 	}
 }
 
@@ -165,6 +200,135 @@ int main()
 	          && v3p == 4 && v3r == 64,
 	      "v3 header reads back v3/4/64");
 
+	// v4: the v3 16 bytes per pad, then local u8, wheel s8, dx and dy as
+	// binary32 bits u32 LE (26 bytes per pad).
+	{
+		uint8_t recV4[104];
+		std::memset(recV4, 0xCC, sizeof(recV4));
+		check(pc_input_log_encode_tick_v4(pads, recV4) == 104, "v4 encode returns 104 bytes");
+		for (int p = 0; p < 4; ++p) {
+			check(std::memcmp(recV4 + p * 26, recV3 + p * 16, 16) == 0, "v4 pad starts with the v3 pad bytes");
+			const uint8_t* tail = recV4 + p * 26 + 16;
+			check(tail[0] == pads[p].local, "v4 local byte");
+			check(tail[1] == (uint8_t)pads[p].wheelSteps, "v4 wheel byte");
+			const uint32_t dx = bitsOf(pads[p].cursorDx);
+			const uint32_t dy = bitsOf(pads[p].cursorDy);
+			check(tail[2] == (dx & 0xFF) && tail[3] == ((dx >> 8) & 0xFF) && tail[4] == ((dx >> 16) & 0xFF)
+			          && tail[5] == (dx >> 24),
+			      "v4 dx bits LE");
+			check(tail[6] == (dy & 0xFF) && tail[7] == ((dy >> 8) & 0xFF) && tail[8] == ((dy >> 16) & 0xFF)
+			          && tail[9] == (dy >> 24),
+			      "v4 dy bits LE");
+		}
+		// A known value pins the byte order: 1.0f is 0x3F800000.
+		PcInputPad one[4];
+		std::memset(one, 0, sizeof(one));
+		one[0].cursorDx = 1.0f;
+		uint8_t recOne[104];
+		pc_input_log_encode_tick_v4(one, recOne);
+		check(recOne[18] == 0x00 && recOne[19] == 0x00 && recOne[20] == 0x80 && recOne[21] == 0x3F,
+		      "v4 1.0f serialises as 00 00 80 3F");
+
+		PcInputPad backV4[4];
+		std::memset(backV4, 0xAA, sizeof(backV4));
+		check(pc_input_log_decode_tick_v4(recV4, sizeof(recV4), backV4), "v4 decode succeeds");
+		check(padsEqual(pads, backV4, true), "v4 round-trip preserves the v2 fields");
+		for (int p = 0; p < 4; ++p) {
+			check(backV4[p].cursorRotate == pads[p].cursorRotate, "v4 round-trip keeps the rotate");
+			check(backV4[p].local == pads[p].local && backV4[p].wheelSteps == pads[p].wheelSteps,
+			      "v4 round-trip keeps local and wheel");
+			check(bitsOf(backV4[p].cursorDx) == bitsOf(pads[p].cursorDx)
+			          && bitsOf(backV4[p].cursorDy) == bitsOf(pads[p].cursorDy),
+			      "v4 round-trip keeps the delta bits");
+		}
+
+		// Exact bit patterns: signed zero, subnormals, extremes, infinities
+		// and NaNs with payloads all come back bit for bit.
+		const uint32_t patterns[] = { 0x00000000u, 0x80000000u, 0x00000001u, 0x807FFFFFu, 0x00800000u,
+			                          0x7F7FFFFFu, 0xFF7FFFFFu, 0x7F800000u, 0xFF800000u, 0x7FC00000u,
+			                          0x7FA12345u, 0xFFC0BEEFu, 0x3EAAAAABu, 0xC5800000u, 0x45800000u };
+		const size_t count = sizeof(patterns) / sizeof(patterns[0]);
+		for (size_t i = 0; i < count; ++i) {
+			PcInputPad in[4];
+			std::memset(in, 0, sizeof(in));
+			for (int p = 0; p < 4; ++p) {
+				in[p].cursorDx = floatOf(patterns[(i + (size_t)p) % count]);
+				in[p].cursorDy = floatOf(patterns[(i + 7 + (size_t)p) % count]);
+			}
+			uint8_t buf[104];
+			pc_input_log_encode_tick_v4(in, buf);
+			PcInputPad out[4];
+			pc_input_log_decode_tick_v4(buf, sizeof(buf), out);
+			bool same = true;
+			for (int p = 0; p < 4; ++p) {
+				same = same && bitsOf(out[p].cursorDx) == patterns[(i + (size_t)p) % count]
+				    && bitsOf(out[p].cursorDy) == patterns[(i + 7 + (size_t)p) % count];
+				const uint8_t* tail = buf + p * 26 + 16;
+				const uint32_t onDisk = (uint32_t)tail[2] | ((uint32_t)tail[3] << 8) | ((uint32_t)tail[4] << 16)
+				                      | ((uint32_t)tail[5] << 24);
+				same = same && onDisk == patterns[(i + (size_t)p) % count];
+			}
+			char what[64];
+			std::snprintf(what, sizeof(what), "v4 float bit pattern set %u round-trips exactly", (unsigned)i);
+			check(same, what);
+		}
+
+		// Truncated: every length short of a full record is rejected.
+		for (size_t len = 0; len < 104; ++len) {
+			PcInputPad tmp[4];
+			char what[64];
+			std::snprintf(what, sizeof(what), "v4 decode rejects %llu bytes", (unsigned long long)len);
+			check(!pc_input_log_decode_tick_v4(recV4, len, tmp), what);
+		}
+		check(!pc_input_log_decode_tick_v4(nullptr, 104, backV4), "v4 decode rejects null data");
+		check(!pc_input_log_decode_tick_v4(recV4, 104, nullptr), "v4 decode rejects null pads");
+
+		// The older decoders zero the v4 fields.
+		PcInputPad old[4];
+		std::memset(old, 0x5A, sizeof(old));
+		pc_input_log_decode_tick(rec, sizeof(rec), old);
+		bool zeroed = true;
+		for (int p = 0; p < 4; ++p) {
+			zeroed = zeroed && old[p].local == 0 && old[p].wheelSteps == 0 && bitsOf(old[p].cursorDx) == 0
+			      && bitsOf(old[p].cursorDy) == 0;
+		}
+		check(zeroed, "v2 decode zeroes the v4 fields");
+		std::memset(old, 0x5A, sizeof(old));
+		pc_input_log_decode_tick_v1(recV1, sizeof(recV1), old);
+		zeroed = true;
+		for (int p = 0; p < 4; ++p) {
+			zeroed = zeroed && old[p].local == 0 && old[p].wheelSteps == 0 && bitsOf(old[p].cursorDx) == 0
+			      && bitsOf(old[p].cursorDy) == 0;
+		}
+		check(zeroed, "v1 decode zeroes the v4 fields");
+		std::memset(old, 0x5A, sizeof(old));
+		pc_input_log_decode_tick_v3(recV3, sizeof(recV3), old);
+		zeroed = true;
+		for (int p = 0; p < 4; ++p) {
+			zeroed = zeroed && old[p].local == 0 && old[p].wheelSteps == 0 && bitsOf(old[p].cursorDx) == 0
+			      && bitsOf(old[p].cursorDy) == 0;
+		}
+		check(zeroed, "v3 decode zeroes the v4 fields");
+
+		std::vector<uint8_t> headerV4;
+		pc_input_log_write_header_v4(headerV4);
+		uint16_t v4v = 0, v4p = 0, v4r = 0;
+		check(headerV4.size() == 10, "v4 header is 10 bytes");
+		check(pc_input_log_read_header(headerV4.data(), headerV4.size(), v4v, v4p, v4r) == PC_INPUT_HEADER_OK
+		          && v4v == 4 && v4p == 4 && v4r == 104,
+		      "v4 header reads back v4/4/104");
+		std::vector<uint8_t> v4wrongSize = headerV4;
+		v4wrongSize[8] = 64; // v4 version with the v3 size
+		check(pc_input_log_read_header(v4wrongSize.data(), v4wrongSize.size(), v4v, v4p, v4r)
+		          == PC_INPUT_HEADER_UNSUPPORTED,
+		      "v4 version with a v3 record size rejected");
+		std::vector<uint8_t> v3bigSize = headerV3;
+		v3bigSize[8] = 104; // v3 version with the v4 size
+		check(pc_input_log_read_header(v3bigSize.data(), v3bigSize.size(), v4v, v4p, v4r)
+		          == PC_INPUT_HEADER_UNSUPPORTED,
+		      "v3 version with a v4 record size rejected");
+	}
+
 	// Ext slots and the local rotate accumulator.
 	pc_input_log_ext_set(1, pc_input_log::kExtBomb | pc_input_log::kExtSwarm, -42);
 	check(pc_netplay_ext_bits(1) == 0x09 && pc_netplay_ext_cursor_rotate(1) == -42 && pc_netplay_ext_bits(0) == 0,
@@ -213,7 +377,12 @@ int main()
 
 	// Unsupported version / pad count / record size.
 	std::vector<uint8_t> wrong = header;
-	wrong[4]                   = 4; // version 4
+	wrong[4]                   = 4; // version 4 with the v2 size
+	check(pc_input_log_read_header(wrong.data(), wrong.size(), version, padCount, recordSize)
+	          == PC_INPUT_HEADER_UNSUPPORTED,
+	      "v4 version with the v2 size rejected");
+	wrong[4] = 5; // version 5
+	wrong[8] = 104;
 	check(pc_input_log_read_header(wrong.data(), wrong.size(), version, padCount, recordSize)
 	          == PC_INPUT_HEADER_UNSUPPORTED,
 	      "future version rejected");
@@ -268,6 +437,72 @@ int main()
 		check(sHookCalls == 3, "fresh capture runs the hook");
 		pc_input_log_set_yaw_capture_fn(nullptr);
 		pc_input_log_tick();
+	}
+	// Local slots without a record or replay file: the hook's values reach
+	// the slots (unknown bits masked), the delta and the notches go to the
+	// first reader only, the flags hold for the tick, and tick_end clears all.
+	{
+		check(pc_netplay_local_flags(1) == 0, "no local flags before a capture");
+		pc_input_log_set_local_capture_fn(&sTestLocalHook);
+		pc_input_log_tick();
+		check(sLocalHookCalls == 1, "local hook runs without record/replay");
+		check(pc_netplay_local_flags(1) == pc_input_log::kLocalMouseCursor, "local flags stored, unknown bit masked");
+		check(pc_netplay_local_flags(0) == 0 && pc_netplay_local_flags(-1) == 0 && pc_netplay_local_flags(4) == 0,
+		      "other and out-of-range pads read no flags");
+		float dx = 1.0f, dy = 1.0f;
+		pc_netplay_take_cursor_delta(0, &dx, &dy);
+		check(dx == 0.0f && dy == 0.0f, "pad 0 has no delta");
+		pc_netplay_take_cursor_delta(1, &dx, &dy);
+		check(dx == 12.5f && dy == -0.75f, "pad 1 delta taken");
+		pc_netplay_take_cursor_delta(1, &dx, &dy);
+		check(dx == 0.0f && dy == 0.0f, "second take of the tick reads zero");
+		check(pc_netplay_take_wheel_steps(1) == -3, "pad 1 wheel taken");
+		check(pc_netplay_take_wheel_steps(1) == 0, "second wheel take reads zero");
+		check(pc_netplay_local_flags(1) == pc_input_log::kLocalMouseCursor, "flags survive the takes");
+		pc_netplay_take_cursor_delta(9, nullptr, nullptr); // out of range, null outputs: no crash
+		check(pc_netplay_take_wheel_steps(9) == 0, "out-of-range wheel reads zero");
+		pc_input_log_tick_end();
+		check(pc_netplay_local_flags(1) == 0, "tick_end clears the local flags");
+		// Untaken input does not carry over: tick_end drops it.
+		pc_input_log_tick();
+		pc_input_log_tick_end();
+		pc_netplay_take_cursor_delta(1, &dx, &dy);
+		check(dx == 0.0f && dy == 0.0f && pc_netplay_take_wheel_steps(1) == 0, "untaken input dropped at tick_end");
+		pc_input_log_set_local_capture_fn(nullptr);
+		pc_input_log_tick();
+		check(sLocalHookCalls == 2, "removed local hook is not called");
+		check(pc_netplay_local_flags(1) == 0, "local slots clear every tick without a hook");
+		pc_input_log_tick_end();
+	}
+	// Per-pad camera rotation queued during a tick: the next tick's capture
+	// quantises it into that pad's cursor rotate and keeps the remainder;
+	// out-of-range pads are ignored and a huge drag clamps to the s16 range.
+	{
+		const float lsb = pc_input_log::kYawTurnsToRad;
+		check(!pc_netplay_local_slots_filled(), "slots not filled outside a tick");
+		pc_input_log_pad_rotate_add(3, lsb * 0.75f);
+		pc_input_log_pad_rotate_add(-1, 1.0f);
+		pc_input_log_pad_rotate_add(4, 1.0f);
+		pc_input_log_tick();
+		check(pc_netplay_local_slots_filled(), "slots filled during a tick");
+		check(pc_netplay_ext_cursor_rotate(3) == 1, "0.75 LSB rounds to 1");
+		check(pc_netplay_ext_cursor_rotate(0) == 0 && pc_netplay_ext_cursor_rotate(1) == 0
+		          && pc_netplay_ext_cursor_rotate(2) == 0,
+		      "other pads take no rotation");
+		pc_input_log_tick_end();
+		check(!pc_netplay_local_slots_filled(), "tick_end spends the slots");
+		pc_input_log_pad_rotate_add(3, lsb * 0.25f);
+		pc_input_log_tick();
+		check(pc_netplay_ext_cursor_rotate(3) == 0, "the -0.25 remainder cancels the next 0.25");
+		pc_input_log_tick_end();
+		pc_input_log_tick();
+		check(pc_netplay_ext_cursor_rotate(3) == 0, "a tick without a drag reads no rotation");
+		pc_input_log_tick_end();
+		pc_input_log_pad_rotate_add(3, 100.0f);
+		pc_input_log_pad_rotate_add(3, std::numeric_limits<float>::quiet_NaN());
+		pc_input_log_tick();
+		check(pc_netplay_ext_cursor_rotate(3) == 32767, "a huge drag clamps; NaN is ignored");
+		pc_input_log_tick_end();
 	}
 	{
 		const float pi = 3.14159265358979323846f;

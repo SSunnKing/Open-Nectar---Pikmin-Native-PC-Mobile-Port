@@ -10,6 +10,7 @@ static_assert(PAD_BUTTON_LEFT == PC_MENU_PAD_LEFT && PAD_BUTTON_RIGHT == PC_MENU
                   && PAD_BUTTON_START == PC_MENU_PAD_START,
               "menu pad bits must match the GameCube pad");
 #include "timing/pc_frame_scheduler.h"
+#include "pc_photo_mode.h"
 #include "pc_menu_click.h"
 #include "pc_button_prompt.h"
 #include "pc_hand_cursor.h"
@@ -18,6 +19,8 @@ static_assert(PAD_BUTTON_LEFT == PC_MENU_PAD_LEFT && PAD_BUTTON_RIGHT == PC_MENU
 #include "pc_xinput_usb.h"
 #include "pc_icon.h"
 #include "netplay/pc_netplay_det.h"
+#include "netplay/pc_input_log.h"
+#include "quicksave/pc_quicksave.h"
 #if PIKI_PC_TOUCH
 #include "gl/pc_gfx.h"
 #include "touch/pc_touch.h"
@@ -283,7 +286,9 @@ static SDL_Scancode sKeyBindings[PC_KEY_ACT_COUNT];
 // el código (izquierdo = A, derecho = B, central = Z) son sus valores por defecto.
 static SDL_Scancode sKeyBindings2[PC_KEY_ACT_COUNT];
 static bool sSwarmHeld = false; // PC_KEY_ACT_SWARM sampled by the last poll
-// D-pad Down of each player's pad, which is also the swarm button.
+// Physical D-pad Down of each player's pad. Filed into the deterministic
+// input record. Not the swarm button (issue #138): lie down stays on D-pad Down.
+static bool sPadDpadDownHeld[2] = { false, false };
 
 // Lock-On y Charge se consumen como flanco: el bucle sondea el mando muchas
 // veces entre ticks lógicos, así que la pulsación se guarda hasta que alguien
@@ -428,6 +433,10 @@ const SDL_Scancode kDefaultKeyBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_SWARM_STICK */ SDL_SCANCODE_UNKNOWN, // el teclado ya tiene Swarm y TFGH
     /* PC_KEY_ACT_LIEDOWN     */ SDL_SCANCODE_UNKNOWN, // la cruceta abajo (flecha abajo) ya lo hace
     /* PC_KEY_ACT_AIM_STICK  */ SDL_SCANCODE_UNKNOWN, // el ratón ya apunta
+    // Quick Save: F6/F7 are debug keys only outside deterministic mode, which
+    // the feature always runs in, and F5 stays the speedrun reset.
+    /* PC_KEY_ACT_QUICKSAVE    */ SDL_SCANCODE_F6,
+    /* PC_KEY_ACT_QUICKLOAD    */ SDL_SCANCODE_F7,
 };
 
 SDL_Scancode pc_window_default_key_binding2(int action) {
@@ -470,6 +479,8 @@ const int kDefaultGamepadBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_SWARM_STICK */ -1, // con Free Camera se asigna en Controls
     /* PC_KEY_ACT_LIEDOWN     */ -1, // la cruceta abajo, como en GameCube
     /* PC_KEY_ACT_AIM_STICK  */ -1, // se asigna en Controls
+    /* PC_KEY_ACT_QUICKSAVE    */ -1,
+    /* PC_KEY_ACT_QUICKLOAD    */ -1,
 };
 
 // Esquema Switch (Pikmin 1 de Switch): B silba, X retira, ZL mira al frente
@@ -506,6 +517,8 @@ static const int kSwitchGamepadBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_SWARM_STICK */ SDL_CONTROLLER_BUTTON_LEFTSHOULDER,
     /* PC_KEY_ACT_LIEDOWN     */ SDL_CONTROLLER_BUTTON_RIGHTSTICK,
     /* PC_KEY_ACT_AIM_STICK  */ -1, // se asigna en Controls
+    /* PC_KEY_ACT_QUICKSAVE    */ -1,
+    /* PC_KEY_ACT_QUICKLOAD    */ -1,
 };
 static int sPadScheme = PC_PAD_SCHEME_GAMECUBE;
 static int sRsAimMode = PC_RS_AIM_OFF;
@@ -535,6 +548,7 @@ static const char* kKeyActionNames[PC_KEY_ACT_COUNT] = {
     "Speedrun Reset",
     "Swarm with right stick (hold)", "Lie down",
     "Aim cursor with right stick (hold)",
+    "Quick Save", "Quick Load",
 };
 
 static void initKeyBindings() {
@@ -1232,6 +1246,10 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     static bool sCamHeightArmed[2]    = { true, true };
     if (swarmStick && !sSwarmStickWasDown[pl]) sSwarmStickMoved[pl] = false;
     sFreeCamSubY[pl] = 0.0f;
+    // Record the physical button for the input log. Swarm is only the Swarm
+    // binding: D-pad Down keeps the original lie down (issue #138), including
+    // while A is held to change Pikmin kind.
+    sPadDpadDownHeld[pl] = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_DOWN) != 0;
     if (aimStick) {
         // Unos 12 px por muestra a fondo por la sensibilidad propia (Right
         // Stick Aim Sensitivity), como si fuera el ratón: el juego lo suma al cursor.
@@ -1598,6 +1616,41 @@ void pc_window_poll_events(PADStatus* pad) {
         if (pc_bind_is_mouse(second) && !mouseSecondOk) return false;
         return pc_window_binding_held(second, state, boundMouse);
     };
+
+    // Quick Save (pc_quicksave.h): the save and load actions, from the
+    // keyboard or player 1's pad when a button is bound. Not game input: a
+    // request acts at the end of the tick, outside the sim, and is never
+    // recorded. With the feature off they do nothing.
+    if (pc_quicksave_enabled()) {
+        static bool sQuickSaveWasDown = false;
+        static bool sQuickLoadWasDown = false;
+        auto quickHeld = [&](int action) {
+            if (sSettingsMenuOpen) return false;
+            if (held(action)) return true;
+            const int bind = sGamepadBindings[action];
+            return sControllers[0] != nullptr && bind >= 0 && pc_window_gamepad_bind_held(sControllers[0], bind);
+        };
+        const bool saveDown = quickHeld(PC_KEY_ACT_QUICKSAVE);
+        const bool loadDown = quickHeld(PC_KEY_ACT_QUICKLOAD);
+        if (saveDown && !sQuickSaveWasDown) pc_quicksave_request_save();
+        // F7 opens the F1 menu on Quick Load. While a load is already running,
+        // ignore it: Escape must cancel the load, not close that menu.
+        if (loadDown && !sQuickLoadWasDown && !pc_quicksave_load_active()) pc_settings_request_quick_load_confirm();
+        sQuickSaveWasDown = saveDown;
+        sQuickLoadWasDown = loadDown;
+        // Escape (or player 1's B) cancels a load under way: a fresh press
+        // after the load began, so a key held from before does not.
+        static bool sCancelWasDown = false;
+        static bool sLoadWasActive = false;
+        const bool loadActive = pc_quicksave_load_active();
+        const bool cancelDown = !sSettingsMenuOpen
+            && (state[SDL_SCANCODE_ESCAPE] != 0
+                || (sControllers[0] != nullptr
+                    && SDL_GameControllerGetButton(sControllers[0], SDL_CONTROLLER_BUTTON_B) != 0));
+        if (loadActive && sLoadWasActive && cancelDown && !sCancelWasDown) pc_quicksave_request_cancel();
+        sCancelWasDown = cancelDown;
+        sLoadWasActive = loadActive;
+    }
 
     u16 button = 0;
     s8  stickX = 0;
@@ -1989,6 +2042,61 @@ static int driver_swap_interval_for(int interval) {
     return 0;
 #endif
 }
+
+// Deterministic mode: the sim reads the Mouse Cursor path from the per-tick
+// input (pc_input_log.h, PKNI v4), never from here, so a replay feeds it the
+// same values from the same place. pc_input_log_tick runs this after PADRead:
+// it takes what the window gathered since the last tick and files it under the
+// keyboard owner's pad, whose captain the mouse drives (the same test
+// Navi::makeVelocity makes outside deterministic mode). Outside deterministic
+// mode it takes nothing, and the sim reads the window as before.
+static void pcWindowCaptureLocalInput(PcLocalInput out[4]) {
+    if (!pc_netplay_deterministic()) return;
+    for (int p = 0; p < 2; p++) {
+        if (pc_first_person_active_for(p)) out[p].flags |= pc_input_log::kLocalFirstPerson;
+        if (sPadDpadDownHeld[p]) out[p].flags |= pc_input_log::kLocalPadDpadDown;
+        // Each player's Bomb, Lock-On and Charge presses and held Swarm
+        // button, from the queues the sim drains outside deterministic mode
+        // (player 1's are captain 1's, as there).
+        uint8_t ext = 0;
+        if (pc_window_take_bomb_press(p)) ext |= pc_input_log::kExtBomb;
+        if (pc_window_take_lockon_press(p)) ext |= pc_input_log::kExtLockOn;
+        if (pc_window_take_swarm_press(p)) ext |= pc_input_log::kExtCharge;
+        if (p == 0 ? sSwarmHeld : sSwarmHeldP2) ext |= pc_input_log::kExtSwarm;
+        out[p].ext = ext;
+    }
+    const float dx = sMouseCursorDeltaX;
+    const float dy = sMouseCursorDeltaY;
+    sMouseCursorDeltaX = 0.0f;
+    sMouseCursorDeltaY = 0.0f;
+    const bool recenter = pc_gyro_take_recenter_cursor() != 0;
+    // Photo mode freezes the sim, so its toggle (F3 or the touch button) is
+    // input too: one flag for the whole game, on pad 0.
+    if (pc_photo_mode_poll_toggle()) out[0].flags |= pc_input_log::kLocalPhotoToggle;
+    const int owner = sKeyboardOwner;
+    if (owner < 0 || owner > 3) return;
+    PcLocalInput& in = out[owner];
+    if (effectiveControlMode() == PC_CONTROL_MOUSE_CURSOR || dx != 0.0f || dy != 0.0f) {
+        in.flags |= pc_input_log::kLocalMouseCursor;
+    }
+    // The gyro recenter brings the keyboard owner's cursor back in front of
+    // the captain, as Navi::makeVelocity does outside deterministic mode.
+    if (recenter) in.flags |= pc_input_log::kLocalGyroRecenter;
+    in.cursorDx = dx;
+    in.cursorDy = dy;
+    // The wheel picks the throw colour only when set to; otherwise the
+    // camera zooms with it (local view state) and takes the notches itself.
+    int steps = 0;
+    if (pc_settings_get_mouse_wheel_action() == 0) steps += pc_window_take_wheel_steps();
+#if PIKI_PC_TOUCH
+    // A tap on the HUD colour icon is one notch for the keyboard owner's
+    // captain whatever the wheel does, as the sim counts it outside
+    // deterministic mode.
+    steps += pc_touch_take_color_taps();
+#endif
+    in.wheelSteps = static_cast<int8_t>(std::clamp(steps, -127, 127));
+}
+static const bool sPcLocalCaptureRegistered = (pc_input_log_set_local_capture_fn(&pcWindowCaptureLocalInput), true);
 
 void pc_window_set_swap_interval(int interval) {
     // 0 is meaningful here: it is the port's 120 Hz mode. Only negatives are

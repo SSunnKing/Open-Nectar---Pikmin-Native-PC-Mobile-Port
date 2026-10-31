@@ -399,7 +399,9 @@ u64 pc_vs_state_hash(void)
 	mixHash(h, sWinner);
 	mixHash(h, sWonByRocket);
 	mixHash(h, sExitRequest);
-	mixHash(h, sSerial);
+	// Not sSerial: it counts matches since launch, which no sim decision
+	// reads (it only tells a new match apart), and a quick load replays a
+	// match as whichever match of its process it happens to be.
 	mixHash(h, sCountdownArmed);
 	mixHash(h, sCountdownT0);
 	mixHash(h, sFrozenAt);

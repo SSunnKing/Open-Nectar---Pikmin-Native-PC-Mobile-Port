@@ -697,6 +697,9 @@ void NaviWalkState::exec(Navi* navi)
 	STACK_PAD_VAR(1);
 	navi->makeVelocity(false);
 
+	// D-pad Down lies the captain down, including from a gamepad (issue #138).
+	// The physical button is still recorded for the input log; the sim does
+	// not treat it as the swarm button.
 	if (!playerState->isTutorial() && navi->mGroundTriangle && navi->mKontroller->keyClick(KBBTN_DPAD_DOWN)) {
 		navi->mStateMachine->transit(navi, NAVISTATE_Pellet);
 		return;

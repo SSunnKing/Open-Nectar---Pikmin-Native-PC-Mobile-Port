@@ -388,6 +388,12 @@ set(PC_PORT_SOURCES
     pc_port/netplay/pc_netplay_navilead.cpp
     # Co-op switch and direct boot (--coop-direct, netplay).
     pc_port/netplay/pc_coop_switch.cpp
+    # Quick Save (experimental). Inert unless the setting is on.
+    pc_port/quicksave/pc_quicksave.cpp
+    pc_port/quicksave/pc_quicksave_carry.cpp
+    pc_port/quicksave/pc_quicksave_file.cpp
+    pc_port/quicksave/pc_quicksave_io.cpp
+    pc_port/quicksave/pc_quicksave_progress.cpp
     pc_port/audio/pc_audio.cpp
     pc_port/audio/pc_envelope.cpp
     pc_port/audio/pc_jam.cpp
@@ -398,6 +404,7 @@ set(PC_PORT_SOURCES
     pc_port/audio/pc_dsp_host.cpp
     pc_port/settings/pc_settings.cpp
     pc_port/settings/pc_settings_p2d.cpp
+    pc_port/settings/pc_sim_settings_text.cpp
     pc_port/settings/pc_prompt_pointer.cpp
     src/jaudio/pikiseq.c
     pc_port/dolphin_stubs/os_stubs.cpp
@@ -1573,14 +1580,64 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_coop_switch_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_coop_switch_test COMMAND pc_coop_switch_test)
 
-    # PKNI input-file format, yaw quantisation and the per-tick yaw slots.
+    # PKNI input-file format, yaw quantisation and the per-tick yaw and local slots.
     add_executable(pc_input_log_test
         pc_port/netplay/pc_input_log_test.cpp
-        pc_port/netplay/pc_input_log.cpp)
+        pc_port/netplay/pc_input_log.cpp
+        pc_port/netplay/pc_netplay_det.cpp
+        pc_port/netplay/pc_sim_rng.cpp)
     target_compile_options(pc_input_log_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_input_log_test COMMAND pc_input_log_test)
     # A stray switch in the caller's environment would load a real file.
-    set_tests_properties(pc_input_log_test PROPERTIES ENVIRONMENT "PIKMIN_INPUT_RECORD=;PIKMIN_INPUT_REPLAY=")
+    set_tests_properties(pc_input_log_test PROPERTIES ENVIRONMENT
+        "PIKMIN_INPUT_RECORD=;PIKMIN_INPUT_REPLAY=;PIKMIN_NETPLAY_DETERMINISTIC=")
+
+    # Record/replay through pc_input_log_tick, one process per mode (the
+    # switches are read once per process); the replay needs the record's file.
+    add_executable(pc_input_log_runtime_test
+        pc_port/netplay/pc_input_log_runtime_test.cpp
+        pc_port/netplay/pc_input_log.cpp
+        pc_port/netplay/pc_netplay_det.cpp
+        pc_port/netplay/pc_sim_rng.cpp)
+    target_compile_options(pc_input_log_runtime_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    set(PKNI_TEST_DIR ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME pc_input_log_v4_record
+        COMMAND pc_input_log_runtime_test record ${PKNI_TEST_DIR}/pkni_v4_test.pkni)
+    add_test(NAME pc_input_log_v4_replay
+        COMMAND pc_input_log_runtime_test replay ${PKNI_TEST_DIR}/pkni_v4_test.pkni ${PKNI_TEST_DIR}/pkni_v4_rerecord.pkni)
+    add_test(NAME pc_input_log_v2_nondet
+        COMMAND pc_input_log_runtime_test record-nondet ${PKNI_TEST_DIR}/pkni_v2_test.pkni)
+    add_test(NAME pc_input_log_v3_replay
+        COMMAND pc_input_log_runtime_test replay-v3 ${PKNI_TEST_DIR}/pkni_v3_test.pkni ${PKNI_TEST_DIR}/pkni_v3_rerecord.pkni)
+    set_tests_properties(pc_input_log_v4_record PROPERTIES FIXTURES_SETUP pkni_v4_file)
+    set_tests_properties(pc_input_log_v4_replay PROPERTIES FIXTURES_REQUIRED pkni_v4_file)
+    add_test(NAME pc_input_log_memory_replay COMMAND pc_input_log_runtime_test memory)
+    set_tests_properties(pc_input_log_v4_record pc_input_log_v4_replay pc_input_log_v2_nondet pc_input_log_v3_replay
+        pc_input_log_memory_replay
+        PROPERTIES ENVIRONMENT "PIKMIN_INPUT_RECORD=;PIKMIN_INPUT_REPLAY=;PIKMIN_NETPLAY_DETERMINISTIC=")
+
+    # Canonical text and hash of the sim-affecting settings (recording header).
+    add_executable(pc_sim_settings_text_test
+        pc_port/settings/pc_sim_settings_text_test.cpp
+        pc_port/settings/pc_sim_settings_text.cpp)
+    target_compile_options(pc_sim_settings_text_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_sim_settings_text_test COMMAND pc_sim_settings_text_test)
+
+    # Quick save file: format, CRC, truncation, header checks and atomic writes.
+    add_executable(pc_quicksave_file_test
+        pc_port/quicksave/pc_quicksave_file_test.cpp
+        pc_port/quicksave/pc_quicksave_file.cpp
+        pc_port/quicksave/pc_quicksave_io.cpp)
+    target_compile_options(pc_quicksave_file_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_quicksave_file_test COMMAND pc_quicksave_file_test)
+
+    # Quick save helpers: the day-start precision block and the load progress.
+    add_executable(pc_quicksave_helpers_test
+        pc_port/quicksave/pc_quicksave_helpers_test.cpp
+        pc_port/quicksave/pc_quicksave_carry.cpp
+        pc_port/quicksave/pc_quicksave_progress.cpp)
+    target_compile_options(pc_quicksave_helpers_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_quicksave_helpers_test COMMAND pc_quicksave_helpers_test)
 endif()
 
 # Netplay-only checks. The libm test compares against the platform libm

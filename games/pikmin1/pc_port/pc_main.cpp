@@ -66,6 +66,7 @@ __declspec(dllexport) int           AmdPowerXpressRequestHighPerformance = 1;
 #include "netplay/pc_input_log.h"
 #include "netplay/pc_state_hash.h"
 #include "netplay/pc_coop_switch.h"
+#include "quicksave/pc_quicksave.h"
 
 // Netplay session switches: strong-defined by pc_netplay_session.cpp in
 // netplay builds only, null otherwise.
@@ -202,6 +203,10 @@ int main(int argc, char* argv[])
     pc_settings_init();
     // A netplay launch locks the sim settings here; the joiner adopts the host's.
     if (pc_netplay_launch_post_settings != nullptr) pc_netplay_launch_post_settings();
+    // Quick Save (experimental): with the setting on, deterministic mode from
+    // here and a recording of every day; --quick-load <file> loads a save.
+    // Inert with the setting off.
+    pc_quicksave_init(argc, argv);
     // Con Pikmin 2 instalado, su Louie sirve de capitán sin bajar ningún pack.
     pc_hd_models_import_pikmin2();
 

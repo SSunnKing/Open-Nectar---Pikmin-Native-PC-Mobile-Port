@@ -9,9 +9,11 @@
 #if defined(PIKI_PC_PORT)
 #include "settings/pc_settings.h"
 #include "netplay/pc_netplay_det.h"
+#include "netplay/pc_input_log.h"
 #include "netplay/pc_netplay_present.h"
 #include "netplay/pc_coop_switch.h"
 #include "netplay/pc_state_hash.h"
+#include "quicksave/pc_quicksave.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_photo_mode.h"
 #include "pc_record.h"
@@ -121,6 +123,9 @@ void GameCoreSection::startPause(u16 pause)
 static BOOL sPhotoModeSavedPauseAll = FALSE;
 static BOOL sPhotoModeSavedOverlay  = FALSE;
 static f32 sPhotoModeSavedRoll      = 0.0f;
+// Quick save: the running day's core, whose cameras a save keeps and a load
+// puts back (pc_gamecore_view_state_save, at the end of this file).
+static GameCoreSection* sPcQuickSaveCore = nullptr;
 #endif
 int GameCoreSection::textDemoState;
 u16 GameCoreSection::textDemoTimer;
@@ -1374,7 +1379,11 @@ static u64 pcVsHashMode()
 		mix(bits);
 	};
 	for (u32 id : sVsPieceIds) mix(id);
-	mix(u32(sVsSerial));
+	// Whether this match's reinforcement state was reset yet, not the match
+	// counter itself: it counts matches since launch, so the same match
+	// played as a process's first or as a rematch (a quick load) would hash
+	// apart although the sim only compares it for a change.
+	mix(sVsSerial == pc_vs_match_serial() ? 1u : 0u);
 	for (int p = 0; p < 2; p++) {
 		mixF(sEmptyFor[p]);
 		mixF(sReinforceCd[p]);
@@ -2741,8 +2750,16 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 	// unless deterministic mode is on.
 	pc_netplay_det_reseed_for_new_day(gameflow.mWorldClock.mCurrentDay,
 	    flowCont.mCurrentStage != nullptr ? static_cast<int>(flowCont.mCurrentStage->mStageID) : 0);
+	// Quick Save: the settings the sim reads stay as they are now until the
+	// day ends, so the day's input replays against them.
+	if (pc_quicksave_enabled()) {
+		pc_settings_sim_lock_day_begin();
+	}
 	// The state hash's mode column: the VS state (0 outside VS).
 	pc_state_hash_set_mode_fn(&pcVsHashMode);
+	// Quick save: the day's recording starts here; a load starts its replay.
+	sPcQuickSaveCore = this;
+	pc_quicksave_day_begin();
 #endif
 	mDrawHideType = 0;
 	textDemoState = 0;
@@ -3547,7 +3564,18 @@ void GameCoreSection::updateAI()
 	// builds mLookAtMtx, and that matrix is what the renderer actually uses --
 	// setting mPosition after update() changes the reported position without
 	// moving the view at all.
-	if (!gameflow.mMoviePlayer->mIsActive && pc_photo_mode_poll_toggle()) {
+	//
+	// Netplay: the toggle freezes the sim, so offline deterministic mode takes
+	// it from pad 0's per-tick input (pc_input_log.h), where the window files
+	// F3 and the touch button, and a replay toggles on the same tick. A
+	// session and the default mode poll the key here.
+	bool photoToggle = false;
+	if (!gameflow.mMoviePlayer->mIsActive) {
+		photoToggle = (pc_netplay_deterministic() && pc_netplay_local_slots_filled())
+		                ? (pc_netplay_local_flags(0) & pc_input_log::kLocalPhotoToggle) != 0
+		                : pc_photo_mode_poll_toggle() != 0;
+	}
+	if (photoToggle) {
 		PcamCamera* pcam = cameraMgr->mCamera;
 		if (pc_photo_mode_active()) {
 			pc_photo_mode_exit();
@@ -4444,3 +4472,202 @@ void GameCoreSection::draw2D(Graphics& gfx)
 	STACK_PAD_TERNARY(triNames, 10);
 	STACK_PAD_TERNARY(triNames, 9);
 }
+
+#if defined(PIKI_PC_PORT)
+// ── Quick save: the view a load hands back (pc_quicksave.h) ─────────────────
+// A replay feeds the sim, not the cameras, which also follow local input (the
+// wheel zoom, the free-camera drag, the First Person pitch) that the record
+// does not carry. A save keeps each captain's camera as it is, and a load puts
+// it back at the handoff, so the next tick's control yaw (read from the
+// camera) and the view's further course are the recorded run's.
+namespace {
+struct PcViewWriter {
+	std::vector<uint8_t>& out;
+	void u(u32 v)
+	{
+		for (int i = 0; i < 4; ++i) out.push_back((uint8_t)(v >> (8 * i)));
+	}
+	void i(int& v) { u((u32)v); }
+	void b(bool& v) { u(v ? 1u : 0u); }
+	void f(f32& v)
+	{
+		u32 bits;
+		memcpy(&bits, &v, sizeof(bits));
+		u(bits);
+	}
+	void vec(Vector3f& v)
+	{
+		f(v.x);
+		f(v.y);
+		f(v.z);
+	}
+	void mtx(Matrix4f& m)
+	{
+		for (int r = 0; r < 4; ++r)
+			for (int c = 0; c < 4; ++c) f(m.mMtx[r][c]);
+	}
+};
+
+struct PcViewReader {
+	const uint8_t* p;
+	size_t left;
+	bool ok = true;
+	u32 u()
+	{
+		if (left < 4) {
+			ok   = false;
+			left = 0;
+			return 0;
+		}
+		const u32 v = (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24);
+		p += 4;
+		left -= 4;
+		return v;
+	}
+	void i(int& v) { v = (int)u(); }
+	void b(bool& v) { v = u() != 0; }
+	void f(f32& v)
+	{
+		const u32 bits = u();
+		memcpy(&v, &bits, sizeof(v));
+	}
+	void vec(Vector3f& v)
+	{
+		f(v.x);
+		f(v.y);
+		f(v.z);
+	}
+	void mtx(Matrix4f& m)
+	{
+		for (int r = 0; r < 4; ++r)
+			for (int c = 0; c < 4; ++c) f(m.mMtx[r][c]);
+	}
+};
+
+// The render camera's view: where it is, what it looks at, its axes (the
+// control yaw is read from them) and its projection inputs.
+template <class IO>
+void pcViewCamera(IO& io, Camera& c)
+{
+	io.vec(c.mPosition);
+	io.vec(c.mFocus);
+	io.vec(c.mViewXAxis);
+	io.vec(c.mViewYAxis);
+	io.vec(c.mViewZAxis);
+	io.vec(c.mInvXAxis);
+	io.vec(c.mInvYAxis);
+	io.vec(c.mInvZAxis);
+	io.f(c.mAspectRatio);
+	io.f(c.mVerticalScale);
+	io.f(c.mFov);
+	io.f(c.mNear);
+	io.f(c.mFar);
+	io.f(c.mDepth);
+	io.f(c.mWidth);
+	io.mtx(c.mLookAtMtx);
+	io.mtx(c.mInverseLookAtMtx);
+	io.vec(c.mRotation);
+	io.f(c.mBlurAlpha);
+}
+
+template <class IO>
+void pcViewMotion(IO& io, PcamMotionInfo& m)
+{
+	io.f(m.mDistance);
+	io.f(m.mAngle);
+	io.f(m.mFov);
+	io.f(m.mWatchAdjustment);
+	io.f(m.mNaviWatchWeight);
+	io.f(m.mBlur);
+}
+
+// Every field of the follow camera that carries over from one tick to the
+// next (the motion table is rebuilt from the camera parameters).
+template <class IO>
+void pcViewPcam(IO& io, PcamCameraManager& mgr)
+{
+	PcamCamera& c = *mgr.mCamera;
+	io.i(mgr.mCurrEventIndex);
+	io.f(c.mRotationAngle);
+	io.vec(c.mViewpoint);
+	io.vec(c.mWatchpoint);
+	io.b(c.mIsActive);
+	io.b(c.mAttentionEnabled);
+	io.b(c.mControlsEnabled);
+	pcViewMotion(io, c.mAttentionInfo);
+	pcViewMotion(io, c.mPrevMotionInfo);
+	pcViewMotion(io, c.mTargetMotionInfo);
+	io.i(c.mZoomLevel);
+	io.i(c.mToggleZoomPending);
+	io.i(c.mInclinationLevel);
+	io.i(c.mAdjustInclinationPending);
+	io.i(c.mAttentionState);
+	io.i(c.mRadiusMode);
+	io.f(c.mDistanceMultiplier);
+	io.f(c.mPcFovZoom);
+	io.f(c.mPcPitch);
+	io.f(c.mStoredRadius);
+	io.f(c.mCurrDistance);
+	io.f(c.mCurrentAzimuth);
+	io.f(c.mDefaultDistance);
+	io.f(c.mMinAngleThreshold);
+	io.f(c.mMaxAngleThreshold);
+	io.f(c.mPolarDir.mRadius);
+	io.f(c.mPolarDir.mInclination);
+	io.f(c.mPolarDir.mAzimuth);
+	io.f(c.mTimers[0]);
+	io.f(c.mTimers[1]);
+	io.f(c.mTimers[2]);
+	pcViewCamera(io, *c.mCamera);
+}
+
+constexpr u32 kPcViewVersion = 1;
+} // namespace
+
+bool pc_gamecore_view_state_save(std::vector<uint8_t>& out)
+{
+	GameCoreSection* core = sPcQuickSaveCore;
+	if (core == nullptr || naviMgr == nullptr) return false;
+	out.clear();
+	PcViewWriter w{ out };
+	w.u(kPcViewVersion);
+	PcamCameraManager* mgrs[2] = { cameraMgrP1 ? cameraMgrP1 : cameraMgr, core->mCameraMgr2 };
+	for (PcamCameraManager* mgr : mgrs) {
+		w.u(mgr != nullptr ? 1u : 0u);
+		if (mgr != nullptr) pcViewPcam(w, *mgr);
+	}
+	// Co-op: the merged-view blend and the views the captains steer by.
+	const bool split = core->isSplitScreen();
+	w.u(split ? 1u : 0u);
+	if (split) {
+		w.f(core->mSplitBlend);
+		w.i(core->mP1Side);
+		pcViewCamera(w, core->mViewCam[0]);
+		pcViewCamera(w, core->mViewCam[1]);
+	}
+	return true;
+}
+
+bool pc_gamecore_view_state_restore(const uint8_t* data, size_t len)
+{
+	GameCoreSection* core = sPcQuickSaveCore;
+	if (core == nullptr || naviMgr == nullptr || data == nullptr) return false;
+	PcViewReader r{ data, len };
+	if (r.u() != kPcViewVersion) return false;
+	PcamCameraManager* mgrs[2] = { cameraMgrP1 ? cameraMgrP1 : cameraMgr, core->mCameraMgr2 };
+	for (PcamCameraManager* mgr : mgrs) {
+		const bool present = r.u() != 0;
+		if (present != (mgr != nullptr)) return false;
+		if (mgr != nullptr) pcViewPcam(r, *mgr);
+	}
+	const bool split = r.u() != 0;
+	if (split != core->isSplitScreen()) return false;
+	if (split) {
+		r.f(core->mSplitBlend);
+		r.i(core->mP1Side);
+		pcViewCamera(r, core->mViewCam[0]);
+		pcViewCamera(r, core->mViewCam[1]);
+	}
+	return r.ok && r.left == 0;
+}
+#endif

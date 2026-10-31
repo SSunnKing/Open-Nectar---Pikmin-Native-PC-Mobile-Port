@@ -124,6 +124,8 @@ void pc_first_person_toggle(void);
 /// Coop/VS: primera persona de cada jugador (las de arriba son las de J1).
 int pc_first_person_active_for(int player);
 void pc_first_person_toggle_for(int player);
+/// Quick save load: puts back the state the recorded run had.
+void pc_first_person_set_active_for(int player, int on);
 /// Daño a un enemigo, ya escalado por "Enemy Health".
 float pc_mods_teki_damage(float damage);
 /// Contador de Pikmin ociosos sobre el juego. Lo llama vi_stubs en el retrace,
@@ -133,6 +135,14 @@ void pc_settings_draw_idle_counter(void);
 void pc_settings_draw_vs_hud(void);
 /// Aviso de logro desbloqueado (pc_achievements).
 void pc_settings_draw_achievement_toast(void);
+/// Quick Save (pc_quicksave.h): the load screen while a quick load runs, else
+/// the last save or load result for a few seconds (not over the menus).
+void pc_settings_draw_quick_load(void);
+/// A short result for the menus' notice line (F1 and the title's menu).
+void pc_settings_post_notice(int isError, const char* message);
+/// Quick Load (F7): opens the menu on Data > Quick Load now with the load
+/// armed, showing what it replaces; a second A loads.
+void pc_settings_request_quick_load_confirm(void);
 /// VS: pasa las reglas guardadas (menú previo) a la partida.
 void pc_settings_apply_vs_rules(void);
 #if defined(PIKI_PC_PORT)
@@ -314,6 +324,9 @@ unsigned char pcOsLanguageFromGame(int gameLanguage);
 int pc_settings_get_coop_split(void);
 // Cámara coop dinámica (una cámara con los Olimar cerca); 0 = partida fija.
 int pc_settings_get_coop_merge_camera(void);
+/// Quick Save (experimental), 0 = off (the default). The game reads it once at
+/// launch (pc_quicksave_init); a change takes effect at the next launch.
+int pc_settings_get_quick_save(void);
 
 /**
  * @brief The language the PAL disc should be played in, as an OS_LANG_* value.
@@ -353,6 +366,21 @@ void pc_texpack_install_progress(int files);
 void pc_save_transfer_finished(bool ok, const char* message);
 
 #if defined(PIKI_PC_PORT)
+// Deterministic recording (quick save): the settings a recorded day depends
+// on, as canonical one-line text ("simcfg=1;key=value;...", see
+// pc_sim_settings_text.h) for a recording's header, and the text's FNV-1a 64
+// hash. The text is valid until the next call.
+const char* pc_settings_sim_config_text(void);
+unsigned long long pc_settings_sim_config_hash(void);
+// Deterministic recording: called when a day starts in deterministic mode.
+// Until the game leaves that day, those settings keep the values they have
+// now: their F1 rows are greyed with the reason, and any other change to
+// them is undone when the settings save. Does nothing while a netplay
+// session holds its own lock.
+void pc_settings_sim_lock_day_begin(void);
+// 1 while that lock holds.
+int pc_settings_sim_locked(void);
+
 // Netplay builds: the sim-relevant settings both peers must share, as
 // "key=value;" pairs (the session hashes it in the handshake). Valid until
 // the next call.
