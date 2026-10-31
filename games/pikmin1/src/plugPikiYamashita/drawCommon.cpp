@@ -378,7 +378,10 @@ void zen::BalloonPane::setGoalPos()
 {
 	Vector3f randOffset;
 #if defined(PIKI_PC_PORT)
-	randOffset.set(mGoalRadius * (pc_cosmetic_randf(2.0f) - 1.0f), mGoalRadius * (pc_cosmetic_randf(2.0f) - 1.0f), 0.0f);
+	// Draw x before y: unspecified between arguments (clang left to right, GCC right to left).
+	const f32 offsetX = mGoalRadius * (pc_cosmetic_randf(2.0f) - 1.0f);
+	const f32 offsetY = mGoalRadius * (pc_cosmetic_randf(2.0f) - 1.0f);
+	randOffset.set(offsetX, offsetY, 0.0f);
 #else
 	randOffset.set(mGoalRadius * (zen::Rand(2.0f) - 1.0f), mGoalRadius * (zen::Rand(2.0f) - 1.0f), 0.0f);
 #endif

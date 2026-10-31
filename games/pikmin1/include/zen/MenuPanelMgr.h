@@ -76,7 +76,10 @@ public:
 		mRotationAngle    = 0.0f;
 #if defined(PIKI_PC_PORT)
 		// Netplay: UI-only drift, so it draws from the cosmetic stream.
-		mRotationSpeed    = (pc_cosmetic_randf(1.0f) + 1.0f) * ((pc_cosmetic_randf(10.0f) > 5.0f) ? 1.0f : -1.0f);
+		// Operands of one multiplication have no defined order: draw the magnitude before the sign.
+		const f32 speedMag  = pc_cosmetic_randf(1.0f) + 1.0f;
+		const f32 speedSign = (pc_cosmetic_randf(10.0f) > 5.0f) ? 1.0f : -1.0f;
+		mRotationSpeed    = speedMag * speedSign;
 		mScaleSpeedFactor = pc_cosmetic_randf(0.1f) + 0.05f;
 		mMoveSpeed        = pc_cosmetic_randf(10.0f) + 5.0f;
 #else

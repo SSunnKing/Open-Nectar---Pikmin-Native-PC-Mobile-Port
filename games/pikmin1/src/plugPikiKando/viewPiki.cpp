@@ -209,7 +209,19 @@ void ViewPiki::init(Shape* shp, MapMgr*, Navi* navi)
 
 	mSRT.s.set(1.0f, 1.0f, 1.0f);
 	mSRT.r.set(0.0f, 0.0f, 0.0f);
+#if defined(PIKI_PC_PORT)
+	// Draw x before z. As two arguments of one call the order is unspecified:
+	// clang draws x first, GCC (Linux, MinGW) z first, so the spawn point (and
+	// mLastEffectPosition below, which ActCrowd's trip roll reads) swapped x
+	// and z between compilers.
+	{
+		const f32 x = (gsys->getRand(1.0f) - 0.5f) * 300.0f;
+		const f32 z = (gsys->getRand(1.0f) - 0.5f) * 300.0f;
+		mSRT.t.set(x, 0.0f, z);
+	}
+#else
 	mSRT.t.set((gsys->getRand(1.0f) - 0.5f) * 300.0f, 0.0f, (gsys->getRand(1.0f) - 0.5f) * 300.0f);
+#endif
 
 	mWorldMtx.makeSRT(mSRT.s, mSRT.r, mSRT.t);
 	_268 = 0.0f;

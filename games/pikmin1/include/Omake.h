@@ -202,7 +202,14 @@ struct ClothFader : public AttentionCamera::Fader {
 			for (j = 0; j < mGridHeight; j++) {
 				Vector3f vec(0.0f, 0.0f, 0.0f);
 				if (i != 0 && j != 0 && i != mGridWidth - 1 && j != mGridHeight - 1) {
+#if defined(PIKI_PC_PORT)
+					// Draw x before y: unspecified between arguments (clang left to right, GCC right to left).
+					const f32 vx = gsys->getRand(1.0f) - 2.0f;
+					const f32 vy = gsys->getRand(1.0f) - 2.0f;
+					vec.set(vx, vy, 0.0f);
+#else
 					vec.set(gsys->getRand(1.0f) - 2.0f, gsys->getRand(1.0f) - 2.0f, 0.0f);
+#endif
 					vec.multiply(8.0f);
 					mParticles[i + j * mGridWidth].mPosition.add(vec);
 				}

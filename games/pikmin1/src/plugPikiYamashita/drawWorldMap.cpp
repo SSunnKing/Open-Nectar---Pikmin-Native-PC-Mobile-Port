@@ -2373,8 +2373,11 @@ public:
 	{
 #if defined(PIKI_PC_PORT)
 		if (pc_cosmetic_randf(100.0f) < mStarFallChance) {
-			WMeffMgr->create(EFF2D_MapShootingStar, Vector3f(PC_WM_STAR_X, 500.0f - pc_cosmetic_randf(50.0f), -pc_cosmetic_randf(150.0f)),
-			                 nullptr, nullptr);
+			// Three draws as arguments of one constructor: draw x, y, z in clang's (left to right) order.
+			const f32 starX = PC_WM_STAR_X;
+			const f32 starY = 500.0f - pc_cosmetic_randf(50.0f);
+			const f32 starZ = -pc_cosmetic_randf(150.0f);
+			WMeffMgr->create(EFF2D_MapShootingStar, Vector3f(starX, starY, starZ), nullptr, nullptr);
 		}
 #else
 		if (zen::Rand(100.0f) < mStarFallChance) {
