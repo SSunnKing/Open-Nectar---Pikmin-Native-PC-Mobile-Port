@@ -26,7 +26,7 @@ jobs:
         if: runner.os == 'Windows'
         with:
           msystem: MINGW64
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-python
+          install: git mingw-w64-x86_64-gcc mingw-w64-x86_64-python
       - name: Compile and verify expressions and mutations (Unix)
         if: runner.os != 'Windows'
         shell: bash
