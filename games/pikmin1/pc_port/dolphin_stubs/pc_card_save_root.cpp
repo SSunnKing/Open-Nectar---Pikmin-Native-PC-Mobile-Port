@@ -85,7 +85,26 @@ std::vector<fs::path> legacySaveRoots()
     return legacy;
 }
 
+fs::path legacySaveMigrationSource(const fs::path& installDir)
+{
+    std::error_code error;
+    const fs::path preferred = installDir.empty() ? fs::path("save") : installDir / "save";
+    if (fs::exists(preferred / "card0", error)) return {};
+
+    for (const fs::path& candidate : legacySaveRoots()) {
+        if (fs::equivalent(candidate, preferred, error) && !error) continue;
+        if (!fs::exists(candidate / "card0", error)) continue;
+        return candidate;
+    }
+    return {};
+}
+
 } // namespace
+
+fs::path pc_card_legacy_save_migration_source(const fs::path& installDir)
+{
+    return legacySaveMigrationSource(installDir);
+}
 
 fs::path pc_card_resolve_save_root(PcCardSaveRootOptions options)
 {
@@ -105,7 +124,7 @@ fs::path pc_card_resolve_save_root(PcCardSaveRootOptions options)
         fs::copy(candidate, preferred, fs::copy_options::recursive | fs::copy_options::overwrite_existing, copyError);
         if (!copyError && fs::exists(preferred / "card0", error)) {
             if (options.logMigration) {
-                std::printf("[PC Port] Moved your memory card into the game folder:\n  from %s\n  to   %s\n",
+                std::printf("[PC Port] Copied your memory card into the game folder:\n  from %s\n  to   %s\n",
                             candidate.string().c_str(), preferred.string().c_str());
             }
             return preferred;

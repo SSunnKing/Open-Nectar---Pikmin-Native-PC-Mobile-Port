@@ -238,21 +238,32 @@ void showMessage(const std::string& title, const std::string& message, bool erro
     std::cerr << title << ": " << message << '\n';
 }
 
-fs::path askForInstallDirectory(const std::string& title)
+fs::path askForInstallDirectory(const std::string& title, const fs::path& initialDirectory)
 {
+    std::error_code ec;
+    const fs::path initial = initialDirectory.empty() ? fs::path{} : fs::absolute(initialDirectory, ec);
+    const auto zenityInitial = [&] {
+        if (!initial.empty() && fs::is_directory(initial, ec)) {
+            std::string path = initial.string();
+            if (!path.empty() && path.back() != '/') path += '/';
+            return path;
+        }
+        if (const char* home = std::getenv("HOME")) return std::string(fs::path(home).string()) + "/";
+        return std::string {};
+    };
     if (commandExists("zenity")) {
-        std::string initial;
-        if (const char* home = std::getenv("HOME")) initial = fs::path(home).string() + "/";
         const std::string selected = runDialogProcess("zenity", {
             "--file-selection", "--directory",
             "--title=Open Nectar - " + title,
-            "--filename=" + initial
+            "--filename=" + zenityInitial()
         });
         if (!selected.empty()) return selected;
     } else if (commandExists("kdialog")) {
-        const std::string initial = std::getenv("HOME") ? std::getenv("HOME") : ".";
+        const std::string initialArg = !initial.empty() && fs::is_directory(initial, ec)
+            ? initial.string()
+            : (std::getenv("HOME") ? std::getenv("HOME") : ".");
         const std::string selected = runDialogProcess("kdialog", {
-            "--getexistingdirectory", initial,
+            "--getexistingdirectory", initialArg,
             "--title", "Open Nectar - " + title
         });
         if (!selected.empty()) return selected;
@@ -260,8 +271,9 @@ fs::path askForInstallDirectory(const std::string& title)
 #if defined(__APPLE__)
     else {
         // POSIX path returns a trailing slash. Drop it, but keep a bare "/".
+        const std::string defaultPath = initial.empty() ? std::string {} : initial.string();
         std::string selected = runDialogProcess("osascript", { "-e",
-            pc_dialog::chooseFolderScript("Open Nectar - " + title) });
+            pc_dialog::chooseFolderScript("Open Nectar - " + title, defaultPath) });
         while (selected.size() > 1 && selected.back() == '/') selected.pop_back();
         if (!selected.empty()) return selected;
     }

@@ -1,5 +1,7 @@
 #include "installer_ui.h"
 #include "../pc_icon.h"
+#include "dolphin_stubs/pc_card_save_root.h"
+#include "install_note_layout.h"
 #include "launcher_platform.h"
 
 #include <SDL.h>
@@ -8,9 +10,12 @@
 #include <atomic>
 #include <cctype>
 #include <cstdint>
+#include <filesystem>
 #include <thread>
 #include <unordered_map>
 #include <vector>
+
+namespace fs = std::filesystem;
 
 namespace pikmin {
 namespace launcher {
@@ -132,7 +137,32 @@ struct InstallerWindow::Impl {
     const SDL_Rect romBrowse { 580, 125, 135, 44 };
     const SDL_Rect installField { 45, 218, 520, 44 };
     const SDL_Rect installBrowse { 580, 218, 135, 44 };
-    const SDL_Rect installButton { 265, 300, 230, 54 };
+
+    SDL_Rect installButtonRect() const
+    {
+        const TextWidthMeasure measure = [&](const std::string& text) { return float(textWidth(text, 1)); };
+        std::vector<std::string> noteLines;
+        if (!installDirectory.empty()) {
+            const fs::path legacy = pc_card_legacy_save_migration_source(fs::u8path(installDirectory));
+            if (!legacy.empty())
+                noteLines = layoutInstallSaveMigrationNote(legacy, float(installField.w), 2, measure);
+        }
+        const int buttonY = noteLines.empty() ? 300 : 268 + int(noteLines.size()) * 18 + 16;
+        return SDL_Rect { 265, buttonY, 230, 54 };
+    }
+
+    void drawMigrationNote()
+    {
+        const TextWidthMeasure measure = [&](const std::string& text) { return float(textWidth(text, 1)); };
+        if (installDirectory.empty()) return;
+        const fs::path legacy = pc_card_legacy_save_migration_source(fs::u8path(installDirectory));
+        if (legacy.empty()) return;
+        const std::vector<std::string> lines
+            = layoutInstallSaveMigrationNote(legacy, float(installField.w), 2, measure);
+        for (std::size_t i = 0; i < lines.size(); ++i) {
+            drawText(renderer, 45, 268 + int(i) * 18, lines[i], 1, { 255, 115, 80, 255 });
+        }
+    }
 
     std::uint32_t lastRenderTicks = 0;
 
@@ -160,11 +190,13 @@ struct InstallerWindow::Impl {
                  fitPath(installDirectory.empty() ? "No folder chosen" : installDirectory,
                          installField.w - 20, 2),
                  2, { 28, 37, 49, 255 });
+        drawMigrationNote();
 
         int mouseX = 0, mouseY = 0;
         SDL_GetMouseState(&mouseX, &mouseY);
         drawButton(romBrowse, "Browse", contains(romBrowse, mouseX, mouseY));
         drawButton(installBrowse, "Browse", contains(installBrowse, mouseX, mouseY));
+        const SDL_Rect installButton = installButtonRect();
         drawButton(installButton, installing ? "Installing" : "Install",
                    contains(installButton, mouseX, mouseY), rom.empty() || installDirectory.empty() || installing);
 
@@ -266,6 +298,11 @@ bool InstallerWindow::open(std::string& error)
     return true;
 }
 
+void InstallerWindow::presetInstallDirectory(const std::string& directory)
+{
+    if (mImpl->installDirectory.empty() && !directory.empty()) mImpl->installDirectory = directory;
+}
+
 std::string InstallerWindow::runDialog(const std::function<std::string()>& dialog, const std::string& what)
 {
     const std::string status = mImpl->status;
@@ -313,7 +350,8 @@ std::string InstallerWindow::runDialog(const std::function<std::string()>& dialo
 }
 
 bool InstallerWindow::choosePaths(const std::function<std::string()>& chooseRom,
-                                  const std::function<std::string()>& chooseInstallDirectory,
+                                  const std::function<std::string(const std::string& currentInstallDirectory)>&
+                                      chooseInstallDirectory,
                                   std::string& rom, std::string& installDirectory)
 {
     mImpl->installing = false;
@@ -345,9 +383,10 @@ bool InstallerWindow::choosePaths(const std::function<std::string()>& chooseRom,
             const std::string selected = runDialog(chooseRom, "disc image picker");
             if (!selected.empty()) mImpl->rom = selected;
         } else if (contains(mImpl->installBrowse, x, y)) {
-            const std::string selected = runDialog(chooseInstallDirectory, "folder picker");
+            const std::string selected = runDialog(
+                [&] { return chooseInstallDirectory(mImpl->installDirectory); }, "folder picker");
             if (!selected.empty()) mImpl->installDirectory = selected;
-        } else if (contains(mImpl->installButton, x, y)) {
+        } else if (contains(mImpl->installButtonRect(), x, y)) {
             if (mImpl->rom.empty() || mImpl->installDirectory.empty()) {
                 mImpl->status = "Choose a disc image and a folder first";
             } else {
@@ -412,6 +451,28 @@ bool InstallerWindow::showComplete(const std::string& installDirectory, bool wil
     if (willLaunch) message += "\n\nThe game will start now.";
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Installation complete", message.c_str(), mImpl->window);
     return true;
+}
+
+bool InstallerWindow::saveSetupScreenshot(const std::string& path, const std::string& rom,
+                                            const std::string& installDirectory)
+{
+    if (!mImpl->renderer) return false;
+    mImpl->installing = false;
+    mImpl->rom          = rom;
+    mImpl->installDirectory = installDirectory;
+    mImpl->status       = "Choose your disc image and where to install";
+    mImpl->render();
+    SDL_Surface* surface
+        = SDL_CreateRGBSurfaceWithFormat(0, 760, 430, 32, SDL_PIXELFORMAT_ARGB8888);
+    if (!surface) return false;
+    if (SDL_RenderReadPixels(mImpl->renderer, nullptr, SDL_PIXELFORMAT_ARGB8888, surface->pixels, surface->pitch)
+        != 0) {
+        SDL_FreeSurface(surface);
+        return false;
+    }
+    const bool ok = SDL_SaveBMP(surface, path.c_str()) == 0;
+    SDL_FreeSurface(surface);
+    return ok;
 }
 
 } // namespace launcher

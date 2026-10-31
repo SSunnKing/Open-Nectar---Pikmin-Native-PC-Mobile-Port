@@ -23,6 +23,9 @@
 #include "launcher_coop.h"
 #endif
 #include "gci_save_import.h"
+#include "install_directory.h"
+#include "install_note_layout.h"
+#include "dolphin_stubs/pc_card_save_root.h"
 #include "launcher_cursor.h"
 #include "launcher_platform.h"
 #include "launcher_page_layout.h"
@@ -2673,7 +2676,8 @@ struct HubWindow::Impl {
     enum class Modal { None, Paths, Progress, Message };
     Modal modal = Modal::None;
     // Rutas
-    std::string rom, installDirectory, pathsNote;
+    std::string rom, installDirectory;
+    std::string pathsLegacyOverride;
     int pathsAction = 0; // 1 examinar imagen, 2 examinar carpeta, 3 instalar, 4 cancelar
     // Progreso
     std::uint32_t percent = 0;
@@ -2756,9 +2760,23 @@ struct HubWindow::Impl {
 
     void drawPaths(ImVec2 size)
     {
-        const ImVec2 panel(std::min(size.x - 80.0f, 700.0f), 430.0f);
+        const float panelW = std::min(size.x - 80.0f, 700.0f);
+        const float width = panelW - 68.0f;
+        const float noteSize = 16.0f;
+        const float noteLineStep = noteSize + 4.0f;
+        const TextWidthMeasure measure = [&](const std::string& text) {
+            return hub->fonts.caption->CalcTextSizeA(noteSize, FLT_MAX, 0.0f, text.c_str()).x;
+        };
+        std::vector<std::string> noteLines;
+        if (!installDirectory.empty()) {
+            const fs::path legacy = pathsLegacyOverride.empty()
+                ? pc_card_legacy_save_migration_source(fs::u8path(installDirectory))
+                : fs::u8path(pathsLegacyOverride);
+            if (!legacy.empty()) noteLines = layoutInstallSaveMigrationNote(legacy, width, 2, measure);
+        }
+        const float noteBlock = noteLines.empty() ? 0.0f : 8.0f + float(noteLines.size()) * noteLineStep;
+        const ImVec2 panel(panelW, 430.0f + noteBlock);
         const ImVec2 at = beginModal(size, panel);
-        const float width = panel.x - 68.0f;
         const bool pikmin2 = installGame == HubGame::Pikmin2;
         title(at, pikmin2 ? "Install Pikmin 2" : "Install Pikmin");
         ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -2767,8 +2785,13 @@ struct HubWindow::Impl {
                             : "Use your own disc: Pikmin USA (Rev 1) or Europe. ISO or GCM; RVZ, WIA and GCZ need Dolphin.");
         if (pathField(ImVec2(at.x, at.y + 80.0f), width, "Disc image", rom, "No disc image chosen", "rom")) pathsAction = 1;
         if (pathField(ImVec2(at.x, at.y + 170.0f), width, "Install to", installDirectory, "No folder chosen", "dir")) pathsAction = 2;
-        if (!pathsNote.empty()) {
-            dl->AddText(hub->fonts.caption, 16.0f, ImVec2(at.x, at.y + 262.0f), col(ImVec4(1.0f, 0.45f, 0.30f, 1.0f)), pathsNote.c_str());
+        if (!noteLines.empty()) {
+            const ImU32 noteColour = col(ImVec4(1.0f, 0.45f, 0.30f, 1.0f));
+            float y = at.y + 262.0f;
+            for (const std::string& line : noteLines) {
+                dl->AddText(hub->fonts.caption, noteSize, ImVec2(at.x, y), noteColour, line.c_str());
+                y += noteLineStep;
+            }
         }
         const float buttonsY = at.y + panel.y - 110.0f;
         const float actionW = buttons::buttonWidth(role::kAction);
@@ -3216,7 +3239,8 @@ int HubWindow::ask(const std::string& title, const std::string& text, const std:
 }
 
 bool HubWindow::choosePaths(const std::function<std::string()>& chooseRom,
-                            const std::function<std::string()>& chooseInstallDirectory,
+                            const std::function<std::string(const std::string& currentInstallDirectory)>&
+                                chooseInstallDirectory,
                             std::string& rom, std::string& installDirectory)
 {
     Impl& m = *mImpl;
@@ -3233,7 +3257,6 @@ bool HubWindow::choosePaths(const std::function<std::string()>& chooseRom,
             }
         }
         m.modal = Impl::Modal::Paths;
-        m.pathsNote.clear();
         for (;;) {
             m.pathsAction = 0;
             m.frame();
@@ -3243,7 +3266,15 @@ bool HubWindow::choosePaths(const std::function<std::string()>& chooseRom,
                 if (m.quitRequested) return false;
                 if (!selected.empty()) m.rom = selected;
             } else if (m.pathsAction == 2) {
-                const std::string selected = m.waitForDialog(chooseInstallDirectory, "folder picker");
+                const std::string selected = m.waitForDialog(
+                    [&] {
+                        if (chooseInstallDirectory) return chooseInstallDirectory(m.installDirectory);
+                        return platform::askForInstallDirectory(
+                                   "Choose the install folder",
+                                   m.installDirectory.empty() ? fs::path {} : fs::u8path(m.installDirectory))
+                            .u8string();
+                    },
+                    "folder picker");
                 if (m.quitRequested) return false;
                 if (!selected.empty()) m.installDirectory = selected;
             } else if (m.pathsAction == 3) {
@@ -3317,6 +3348,47 @@ bool HubWindow::showComplete(const std::string& installDirectory, bool willLaunc
     if (m.homeLoop) m.homeLoop();
     else if (runHome().action == HubAction::Play) return true;
     return false;
+}
+
+bool HubWindow::savePathsModalScreenshot(const std::string& path, int width, int height, const std::string& rom,
+                                         const std::string& installDirectory, const std::string& legacySaveOverride)
+{
+    Impl& m = *mImpl;
+    if (!m.window) return false;
+    SDL_SetWindowSize(m.window, width, height);
+    SDL_SetWindowPosition(m.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    m.rom                   = rom;
+    m.installDirectory      = installDirectory;
+    m.pathsLegacyOverride   = legacySaveOverride;
+    m.modal                 = Impl::Modal::Paths;
+    m.frame();
+    glFinish();
+    int fbW = 0, fbH = 0;
+    SDL_GL_GetDrawableSize(m.window, &fbW, &fbH);
+    if (fbW <= 0 || fbH <= 0) return false;
+    std::vector<unsigned char> rgba(static_cast<std::size_t>(fbW) * static_cast<std::size_t>(fbH) * 4);
+    glReadPixels(0, 0, fbW, fbH, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(0, fbW, fbH, 32, SDL_PIXELFORMAT_ABGR8888);
+    if (!surface) return false;
+    const int pitch = surface->pitch;
+    auto* dst       = static_cast<unsigned char*>(surface->pixels);
+    for (int y = 0; y < fbH; ++y) {
+        const int srcY = fbH - 1 - y;
+        for (int x = 0; x < fbW; ++x) {
+            const unsigned char* src = &rgba[(static_cast<std::size_t>(srcY) * static_cast<std::size_t>(fbW)
+                                             + static_cast<std::size_t>(x))
+                                            * 4];
+            unsigned char* out       = dst + y * pitch + x * 4;
+            out[0]                   = src[0];
+            out[1]                   = src[1];
+            out[2]                   = src[2];
+            out[3]                   = 255;
+        }
+    }
+    const bool ok = SDL_SaveBMP(surface, path.c_str()) == 0;
+    SDL_FreeSurface(surface);
+    m.pathsLegacyOverride.clear();
+    return ok;
 }
 
 } // namespace launcher
