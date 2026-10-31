@@ -26,7 +26,7 @@ SITES = [
 
 def extract(site):
     name, path, anchor, *_ = site
-    source = (GAME / path).read_text()
+    source = (GAME / path).read_text(encoding="utf-8")
     if source.count(anchor) != 1:
         raise ValueError(f'{name}: source anchor missing or ambiguous')
     start = source.index(anchor)
