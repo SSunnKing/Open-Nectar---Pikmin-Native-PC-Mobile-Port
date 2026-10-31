@@ -109,9 +109,10 @@ def program(blocks):
         out.append(f'void test_{name}(int weight) {{ draws.clear(); {setup}\n{blocks[name]}\ncheck({" && ".join(checks)},"{name}");\n}}')
         if name == 'star':
             out.append(f'void test_star_skip() {{ draws.clear(); {setup} mStarFallChance=0;\n{blocks[name]}\ncheck(draws.size()==1 && draws[0].cosmetic && equal(draws[0].range,100),"star_skip"); }}')
-    out.append('int main() { for(unsigned seed: {1u,7u,42u,0xc05e77u}) { unsigned state=seed; for(float& v:u) {state=state*1103515245u+12345u; v=float((state>>16)&32767u)/32768.f;} for(int weight: {1,51,101}) {')
+    out.append('void run_cases() { for(int weight: {1,51,100,101}) {')
     out.extend(f'test_{s[0]}(weight);' for s in SITES)
-    out.append('test_star_skip(); } } std::puts("PASS all eight RNG sites, seeds=1,7,42,12607095 weights=1,51,101"); }')
+    out.append('test_star_skip(); } }')
+    out.append('int main() { for(unsigned seed: {1u,7u,42u,0xc05e77u}) { unsigned state=seed; for(float& v:u) {state=state*1103515245u+12345u; v=float((state>>16)&32767u)/32768.f;} run_cases(); } for(float v: {0.f,.01f,.999f}) {for(float& x:u) x=v; run_cases();} for(float second: {std::nextafter(1.f/15,0.f),1.f/15,std::nextafter(1.f/15,1.f)}) {for(float& x:u) x=.5f; u[1]=second; run_cases();} std::puts("PASS all eight RNG sites including attack hit/miss/boundary vectors"); }')
     return '\n'.join(out)
 
 
@@ -133,13 +134,17 @@ def main():
     blocks = {s[0]: extract(s) for s in SITES}
     metadata = {'revision': subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip(),
                 'compiler': subprocess.check_output([args.cxx, '--version'], text=True),
-                'seeds': [1,7,42,0xc05e77], 'weights': [1,51,101], 'results': [],
+                'seeds': [1,7,42,0xc05e77], 'weights': [1,51,100,101], 'explicit_vectors': 'all-zero, .01, .999; attack product boundary at weight=100 with nextafter neighbors', 'results': [],
                 'sources': {s[1]: hashlib.sha256((GAME/s[1]).read_bytes()).hexdigest() for s in SITES}}
     try:
         for opt in ['-O0', '-O2']:
-            for mutation in [None] + list(blocks):
+            for mutation in [None] + list(blocks) + ['attack-decision']:
                 variant = dict(blocks)
-                if mutation:
+                if mutation == 'attack-decision':
+                    variant['attack'], count = re.subn(r'if \(chanceA \* chanceB <= 1\.0f\)', 'if (false)', variant['attack'])
+                    if count != 1:
+                        raise ValueError('attack decision anchor changed')
+                elif mutation:
                     variant[mutation] = mutate(variant[mutation], mutation)
                 label = f'{opt[1:]}-{mutation or "baseline"}'
                 cpp = args.output / f'{label}.cpp'
@@ -152,7 +157,7 @@ def main():
                     raise RuntimeError(f'{label}: compilation failed (not mutation detection)')
                 run = subprocess.run([str(exe.resolve())], text=True, capture_output=True)
                 (args.output/f'{label}.run.log').write_text(run.stdout+run.stderr)
-                ok = run.returncode == 0 if mutation is None else run.returncode == 17 and run.stderr.strip() == f'FAIL {mutation}'
+                ok = run.returncode == 0 if mutation is None else run.returncode == 17 and run.stderr.strip() == f'FAIL {"attack" if mutation == "attack-decision" else mutation}'
                 metadata['results'].append({'variant': label, 'command': shlex.join(command), 'returncode': run.returncode, 'passed': ok})
                 print(f'{label}: {"PASS" if ok else "FAIL"}', flush=True)
                 if not ok:
