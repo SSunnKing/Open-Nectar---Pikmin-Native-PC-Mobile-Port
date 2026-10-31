@@ -1189,6 +1189,7 @@ static int pc_window_poll_one(SDL_Event* event)
 }
 
 void pc_window_poll_events(PADStatus* pad) {
+    pc_xinput_usb_update();
 #if PIKI_P2_HOST
     // Pikmin 2: el audio lo pauta la cola de SDL desde VIWaitForRetrace.
 #elif PIKI_USE_JAUDIO

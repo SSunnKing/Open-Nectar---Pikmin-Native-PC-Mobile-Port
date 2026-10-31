@@ -6,7 +6,9 @@
 # una build normal solo deja `nectar` (USA), así que aquí se compila también la
 # PAL y se copia como nectar-pal a build/pikmin1/bin.
 #
-# Requisitos: brew install cmake sdl2-compat (y xcode-select --install).
+# Requisitos: brew install cmake (y xcode-select --install).
+# Opcional: brew install libusb para un mando USB Xbox 360 (con reconexión).
+# Sin libusb se compila igualmente, con los mandos que SDL reconoce de serie.
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -32,9 +34,12 @@ if [[ ! -f "${sdl_dir}/install/lib/libSDL2.a" ]]; then
     cmake --build "${sdl_dir}/build" -j"${jobs}"
     cmake --install "${sdl_dir}/build"
 fi
-sdl_args=(-DCMAKE_PREFIX_PATH="${sdl_dir}/install" -DPIKMIN_STATIC_RUNTIME=ON)
+# SDL2_DIR puede estar en caché tras seguir el README con Homebrew. Cambiar
+# solo CMAKE_PREFIX_PATH no lo sustituye: seleccionar el paquete explícitamente.
+sdl_args=(-DCMAKE_PREFIX_PATH="${sdl_dir}/install" -DSDL2_DIR="${sdl_dir}/install/lib/cmake/SDL2" -DPIKMIN_STATIC_RUNTIME=ON)
 
-cmake -S "${root}/games/pikmin1" -B "${usa_dir}" -DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_JAUDIO=ON -DPIKMIN_XINPUT_USB=ON "${sdl_args[@]}"
+cmake -S "${root}/games/pikmin1" -B "${usa_dir}" -DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_JAUDIO=ON -DPIKMIN_XINPUT_USB=ON "${sdl_args[@]}" \
+    -DPIKMIN_GAME_VERSION=VERSION_GPIE01_01
 cmake --build "${usa_dir}" --target pikmin_pc pikmin_launcher -j"${jobs}"
 
 cmake -S "${root}/games/pikmin1" -B "${pal_dir}" -DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_JAUDIO=ON -DPIKMIN_XINPUT_USB=ON "${sdl_args[@]}" \
@@ -44,7 +49,8 @@ cmake --build "${pal_dir}" --target pikmin_pc -j"${jobs}"
 cp "${pal_dir}/bin/nectar" "${usa_dir}/bin/nectar-pal"
 chmod 755 "${usa_dir}/bin/nectar-pal"
 
-cmake -S "${root}/games/pikmin2" -B "${root}/build/pikmin2" -DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_JAUDIO=ON "${sdl_args[@]}" -DPIKMIN_XINPUT_USB=ON
+cmake -S "${root}/games/pikmin2" -B "${root}/build/pikmin2" -DCMAKE_BUILD_TYPE=Release "${sdl_args[@]}" -DPIKMIN_XINPUT_USB=ON \
+    -DPIKMIN_GAME_VERSION=VERSION_GPVP01
 cmake --build "${root}/build/pikmin2" --target pikmin2_pc -j"${jobs}"
 
 printf 'Listo: %s/bin (nectar, nectar-pal, nectar-launcher)\n' "${usa_dir}"

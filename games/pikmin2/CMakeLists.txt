@@ -559,6 +559,15 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
     # it reports CTest's standard skip code until its native backend is wired.
     if(BUILD_TESTING AND NOT ANDROID)
         set(P2_HOST_TEST_TARGETS)
+        if(APPLE AND PIKMIN_XINPUT_USB AND LIBUSB_INCLUDE_DIR)
+            add_executable(p2_xinput_usb_test
+                ../../tests/pc_xinput_usb_test.cpp pc_port/pc_xinput_usb.cpp)
+            target_compile_definitions(p2_xinput_usb_test PRIVATE
+                PIKI_XINPUT_USB=1 SDL_CreateThread=pc_xinput_test_create_thread)
+            target_include_directories(p2_xinput_usb_test PRIVATE pc_port ${P2_SDL_INCLUDES} ${LIBUSB_INCLUDE_DIR})
+            target_link_libraries(p2_xinput_usb_test PRIVATE ${P2_SDL_LIBS} Threads::Threads)
+            add_test(NAME p2_xinput_usb_test COMMAND p2_xinput_usb_test)
+        endif()
         function(pikmin2_add_host_test target)
             add_executable(${target} ${ARGN})
             target_compile_options(${target} PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)

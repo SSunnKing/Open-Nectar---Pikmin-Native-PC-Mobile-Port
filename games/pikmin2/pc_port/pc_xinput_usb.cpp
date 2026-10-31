@@ -20,6 +20,7 @@ uint8_t               sOutEp  = 0; // endpoint de salida (vibración); 0 si no t
 SDL_Joystick*         sJoy    = nullptr;
 SDL_JoystickID        sJoyId  = -1;
 std::atomic<bool>     sRun { false };
+Uint32                sNextScan = 0;
 SDL_Thread*           sThread = nullptr; // SDL_CreateThread: sin operator new (P2 lo redirige al heap del juego)
 
 // Interfaz Xbox 360 (clase 0xFF, subclase 0x5D, protocolo 0x01) y su
@@ -126,26 +127,44 @@ int readLoop(void*)
         }
         if (n >= 14 && buf[0] == 0x00) apply(buf);
     }
-    // Mando desconectado o cierre del juego: se retira el mando virtual.
+    // El hilo principal recoge el lector y sus recursos antes de reconectar.
+    sRun = false;
+    return 0;
+}
+
+void closeDevice()
+{
+    sRun = false;
+    if (sThread) {
+        SDL_WaitThread(sThread, nullptr);
+        sThread = nullptr;
+    }
+    // No mantener el bloqueo al esperar al lector: también usa las APIs SDL.
+    // Serializa la retirada con los callbacks de vibración de SDL.
+    SDL_LockJoysticks();
+    if (sHandle && sOutEp) rumble(nullptr, 0, 0);
     for (int i = 0; i < SDL_NumJoysticks(); i++) {
         if (SDL_JoystickGetDeviceInstanceID(i) == sJoyId) {
             SDL_JoystickDetachVirtual(i);
             break;
         }
     }
-    return 0;
+    if (sJoy) SDL_JoystickClose(sJoy);
+    sJoy = nullptr;
+    sJoyId = -1;
+    if (sHandle) {
+        libusb_release_interface(sHandle, sIface);
+        libusb_close(sHandle);
+        sHandle = nullptr;
+    }
+    sIface = -1;
+    sEp = sOutEp = 0;
+    SDL_UnlockJoysticks();
 }
 } // namespace
 
-void pc_xinput_usb_init(void)
+static void scanDevices()
 {
-    if (libusb_init(&sCtx) != 0) {
-        printf("[PC Port] USB XInput: libusb_init failed\n");
-        fflush(stdout);
-        return;
-    }
-    printf("[PC Port] USB XInput: scanning for Xbox 360-protocol controllers\n");
-    fflush(stdout);
     libusb_device** list = nullptr;
     const ssize_t count = libusb_get_device_list(sCtx, &list);
     libusb_device_descriptor chosen = {};
@@ -202,11 +221,7 @@ void pc_xinput_usb_init(void)
         chosen  = dd;
     }
     libusb_free_device_list(list, 1);
-    if (!sHandle) {
-        printf("[PC Port] USB XInput: no controller attached\n");
-        fflush(stdout);
-        return;
-    }
+    if (!sHandle) return;
 
     SDL_VirtualJoystickDesc desc;
     SDL_zero(desc);
@@ -222,9 +237,7 @@ void pc_xinput_usb_init(void)
     if (index < 0) {
         printf("[PC Port] Could not create the virtual controller: %s\n", SDL_GetError());
         fflush(stdout);
-        libusb_release_interface(sHandle, sIface);
-        libusb_close(sHandle);
-        sHandle = nullptr;
+        closeDevice();
         return;
     }
     char guid[40] = {};
@@ -238,26 +251,51 @@ void pc_xinput_usb_init(void)
     SDL_GameControllerAddMapping(mapping);
     sJoyId = SDL_JoystickGetDeviceInstanceID(index);
     sJoy   = SDL_JoystickOpen(index);
-    if (!sJoy) return;
+    if (!sJoy) {
+        closeDevice();
+        return;
+    }
     printf("[PC Port] USB XInput controller %04x:%04x attached as a virtual SDL controller (in 0x%02x, out %s0x%02x)\n",
            chosen.idVendor, chosen.idProduct, sEp, sOutEp ? "" : "none ", sOutEp);
     fflush(stdout);
     sRun    = true;
     sThread = SDL_CreateThread(readLoop, "usb-xinput", nullptr);
+    if (!sThread) {
+        printf("[PC Port] USB XInput: could not start reader: %s\n", SDL_GetError());
+        fflush(stdout);
+        closeDevice();
+    }
+}
+
+void pc_xinput_usb_init(void)
+{
+    if (sCtx) return;
+    if (libusb_init(&sCtx) != 0) {
+        sCtx = nullptr;
+        printf("[PC Port] USB XInput: libusb_init failed\n");
+        fflush(stdout);
+        return;
+    }
+    printf("[PC Port] USB XInput: scanning for Xbox 360-protocol controllers\n");
+    fflush(stdout);
+    scanDevices();
+    sNextScan = SDL_GetTicks() + 1000;
+}
+
+void pc_xinput_usb_update(void)
+{
+    if (!sCtx) return;
+    if (sHandle && !sRun) closeDevice();
+    const Uint32 now = SDL_GetTicks();
+    if (!sHandle && SDL_TICKS_PASSED(now, sNextScan)) {
+        sNextScan = now + 1000;
+        scanDevices();
+    }
 }
 
 void pc_xinput_usb_shutdown(void)
 {
-    if (sHandle && sOutEp) rumble(nullptr, 0, 0);
-    if (sRun.exchange(false) && sThread) {
-        SDL_WaitThread(sThread, nullptr);
-        sThread = nullptr;
-    }
-    if (sHandle) {
-        libusb_release_interface(sHandle, sIface);
-        libusb_close(sHandle);
-        sHandle = nullptr;
-    }
+    closeDevice();
     if (sCtx) {
         libusb_exit(sCtx);
         sCtx = nullptr;
@@ -271,5 +309,6 @@ void pc_xinput_usb_init(void)
     printf("[PC Port] USB XInput: not compiled in (build with -DPIKMIN_XINPUT_USB=ON and libusb)\n");
     fflush(stdout);
 }
+void pc_xinput_usb_update(void) {}
 void pc_xinput_usb_shutdown(void) {}
 #endif
