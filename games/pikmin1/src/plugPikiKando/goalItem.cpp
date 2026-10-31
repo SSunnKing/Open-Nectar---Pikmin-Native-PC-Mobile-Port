@@ -1,3 +1,4 @@
+#include <cstdio>
 #include "GoalItem.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
@@ -413,7 +414,11 @@ Piki* GoalItem::exitPiki()
 	Piki* piki                 = (Piki*)pikiMgr->birth();
 	pikiMgr->containerExitMode = false;
 	if (!piki) {
-#if defined(VERSION_GPIJ01) || defined(VERSION_DPIJ01_PIKIDEMO)
+#if defined(PIKI_PC_PORT)
+		// Retail US/PAL compile ERROR to nothing: the Onion just skips this
+		// Pikmin. The port's ERROR panics, which crashed the game (#236, #237).
+		fprintf(stderr, "[PC Port] Onion: piki birth failed (pool full), skipped\n");
+#elif defined(VERSION_GPIJ01) || defined(VERSION_DPIJ01_PIKIDEMO)
 #else
 		ERROR("*** PIKI BIRTH FAILED !!!\n");
 #endif
@@ -783,7 +788,9 @@ void GoalItem::update()
 				int mapPikis = GameStat::mapPikis;
 				int mePikis  = GameStat::mePikis;
 				BUGPRINT("map=%d mePiki=%d exitC=%d", mapPikis, mePikis, mPikisToExit);
+#if !defined(PIKI_PC_PORT) // retail: ERROR is empty; the port's would panic (#236)
 				ERROR("2d err %d %d %d", mapPikis, mePikis, mPikisToExit);
+#endif
 			}
 
 			mPikisToExit--;
