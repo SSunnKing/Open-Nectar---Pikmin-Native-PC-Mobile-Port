@@ -1738,12 +1738,12 @@ void pc_gfx_end_swap_framebuffer(unsigned int bound);
 
 void pc_window_swap_buffers(void) {
     if (sWindow) {
-#if defined(__APPLE__)
-        // macOS solo muestra el frame si aquí está enlazado el framebuffer por defecto.
+#if defined(__APPLE__) || defined(_WIN32)
+        // Bind the default framebuffer for presentation, then restore the render target.
         const unsigned int renderTarget = pc_gfx_begin_swap_framebuffer();
 #endif
         SDL_GL_SwapWindow(sWindow);
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
         pc_gfx_end_swap_framebuffer(renderTarget);
 #endif
         // VSync Off must not retain the software presentation limiter. Game
