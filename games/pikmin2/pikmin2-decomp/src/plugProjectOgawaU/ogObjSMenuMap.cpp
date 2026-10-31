@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include "og/newScreen/SMenu.h"
@@ -204,6 +205,13 @@ void ObjSMenuMap::setMapPos()
 			if (Game::Cave::randMapMgr) {
 				f32 x, y;
 				Game::Cave::randMapMgr->getPositionOnTex(aNaviPos, x, y);
+#ifdef PIKI_PC_PORT
+				if (getenv("PIKMIN_RADAR_DEBUG")) {
+					fprintf(stderr, "[radar] menu navi world=(%.1f,%.1f) onTex=(%.1f,%.1f) grid=(%.2f,%.2f) texDim=(%.0f,%.0f) pane=(%.0f,%.0f)\n",
+					        aNaviPos.x, aNaviPos.z, x, y, aNaviPos.x / 170.0f, aNaviPos.z / 170.0f, mMapTextureDimensions.x,
+					        mMapTextureDimensions.y, mMapTexPane->getWidth(), mMapTexPane->getHeight());
+				}
+#endif
 				mMapPosition.x = -(x + -0.2f);
 				mMapPosition.y = -(y + -0.6f);
 			}

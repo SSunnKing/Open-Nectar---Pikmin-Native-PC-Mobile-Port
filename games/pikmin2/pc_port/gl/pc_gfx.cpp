@@ -12009,9 +12009,37 @@ void pc_gfx_copy_tex(void* dest, GXBool clear) {
 
     GLint sx, sy; GLsizei sw, sh;
     map_gx_rect(float(sTexCopySrc[0]), float(sTexCopySrc[1]), float(sTexCopySrc[2]), float(sTexCopySrc[3]), sx, sy, sw, sh);
+    // The EFB pixels were rasterised through the current viewport. Its GL
+    // rect was fixed when GXSetViewport ran, and the 4:3/HUD mode can change
+    // afterwards without re-setting it: the cave radar is captured at the
+    // start of the frame with the viewport the pause menu left in 4:3
+    // (pillarboxed), while map_gx_rect already used the stretched mapping, so
+    // the copy read a different area than the rooms were drawn to (#244/#248).
+    // Map the copy rect through that same viewport.
+    if (sGxVp[2] > 0.0f && sGxVp[3] > 0.0f && sLastViewportW > 0 && sLastViewportH > 0) {
+        const float kx = float(sLastViewportW) / sGxVp[2];
+        const float ky = float(sLastViewportH) / sGxVp[3];
+        const float vpTop = float(sLastViewportY + sLastViewportH);
+        sx = (GLint)lroundf(float(sLastViewportX) + (float(sTexCopySrc[0]) - sGxVp[0]) * kx);
+        sy = (GLint)lroundf(vpTop - (float(sTexCopySrc[1]) - sGxVp[1] + float(sTexCopySrc[3])) * ky);
+        sw = (GLsizei)lroundf(float(sTexCopySrc[2]) * kx);
+        sh = (GLsizei)lroundf(float(sTexCopySrc[3]) * ky);
+    }
     const GLboolean scissorWasEnabled = glIsEnabled(GL_SCISSOR_TEST);
     glDisable(GL_SCISSOR_TEST);
     // Fila 0 de una textura GX es la de arriba; en GL el framebuffer empieza abajo.
+    // PIKMIN_RADAR_DEBUG=1: rectángulo real de la captura del radar de cueva (R4).
+    static const bool radarDbg = getenv("PIKMIN_RADAR_DEBUG") != nullptr;
+    if (radarDbg && f == GX_CTF_R4) {
+        float rsx, rsy, rox, roy;
+        gx_rect_params(rsx, rsy, rox, roy);
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+        std::fprintf(stderr, "[radar] copy gxsrc=(%d,%d %dx%d) gl=(%d,%d %dx%d) dst=%dx%d scale=(%.3f,%.3f) off=(%.1f,%.1f) "
+                     "hudWide=%d ui43=%d gx=%.0fx%.0f viewport=(%d,%d %dx%d) fbo=%d\n",
+                     int(sTexCopySrc[0]), int(sTexCopySrc[1]), int(sTexCopySrc[2]), int(sTexCopySrc[3]), sx, sy, sw, sh, w, h,
+                     rsx, rsy, rox, roy, int(sHudWide), int(sUi43), sGxW, sGxH, vp[0], vp[1], vp[2], vp[3], int(sourceDrawFbo));
+    }
     glBlitFramebuffer_ptr(sx, sy, sx + sw, sy + sh, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
     glBindFramebuffer_ptr(GL_DRAW_FRAMEBUFFER, GLuint(sourceDrawFbo));
     glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, GLuint(previousReadFbo));
