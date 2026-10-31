@@ -1280,6 +1280,17 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_bundle_compat_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_bundle_compat_test COMMAND pc_bundle_compat_test)
 
+    if(APPLE AND PIKMIN_XINPUT_USB AND LIBUSB_INCLUDE_DIR)
+        # Real SDL virtual controllers with a simulated USB transport: no pad/assets needed.
+        add_executable(pc_xinput_usb_test
+            ../../tests/pc_xinput_usb_test.cpp pc_port/pc_xinput_usb.cpp)
+        target_compile_definitions(pc_xinput_usb_test PRIVATE
+                PIKI_XINPUT_USB=1 SDL_CreateThread=pc_xinput_test_create_thread)
+        target_include_directories(pc_xinput_usb_test PRIVATE pc_port ${SDL2_INCLUDE_DIRS} ${LIBUSB_INCLUDE_DIR})
+        target_link_libraries(pc_xinput_usb_test PRIVATE ${SDL2_LIBRARIES} Threads::Threads)
+        add_test(NAME pc_xinput_usb_test COMMAND pc_xinput_usb_test)
+    endif()
+
     add_executable(pc_generator_cache_validation_test
         pc_port/save/pc_generator_cache_validation_test.cpp)
     target_include_directories(pc_generator_cache_validation_test PRIVATE pc_port/save)

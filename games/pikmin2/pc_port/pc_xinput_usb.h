@@ -9,6 +9,8 @@
 
 /// Una vez, tras SDL_Init y antes de enumerar los mandos.
 void pc_xinput_usb_init(void);
+/// Hilo principal, antes de recoger eventos SDL: recoge y reconecta un mando.
+void pc_xinput_usb_update(void);
 void pc_xinput_usb_shutdown(void);
 
 #endif

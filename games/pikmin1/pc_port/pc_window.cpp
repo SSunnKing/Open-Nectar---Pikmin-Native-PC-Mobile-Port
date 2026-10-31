@@ -1319,6 +1319,7 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
 void pc_gfx_get_drawable_size(int* width, int* height); // gl/pc_gfx.h
 
 void pc_window_poll_events(PADStatus* pad) {
+    pc_xinput_usb_update();
     // Age a menu click only on the logical input sample. The present path
     // polls again with a null pad and must not drop a click the menu has not
     // seen yet.
