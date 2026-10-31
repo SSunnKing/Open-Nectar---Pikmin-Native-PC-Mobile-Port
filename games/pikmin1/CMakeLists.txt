@@ -312,6 +312,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_window.cpp
     pc_port/pc_keycaps.cpp
     pc_port/pc_gyro.cpp
+    pc_port/pc_xinput_usb.cpp
     pc_port/pc_pad_axis.cpp
     pc_port/pc_menu_pad.cpp
     pc_port/pc_menu_mode.cpp
@@ -647,6 +648,24 @@ if (WIN32)
 endif()
 target_compile_options(${NECTAR_GAME} PRIVATE ${NATIVE_COMPILE_OPTIONS})
 target_link_libraries(${NECTAR_GAME} PRIVATE ${NECTAR_LEGACY} nectar_paths)
+
+# Mandos Xbox 360 (XInput) por USB en macOS, que no trae driver para ellos: se
+# leen con libusb y se presentan a SDL como mando virtual. Apagado por defecto
+# (la dylib de Homebrew no viaja en las releases); scripts/build-macos.sh lo
+# enciende.
+option(PIKMIN_XINPUT_USB "Read USB Xbox 360-protocol controllers with libusb (macOS)" OFF)
+if(PIKMIN_XINPUT_USB)
+    find_path(LIBUSB_INCLUDE_DIR libusb.h HINTS /opt/homebrew /usr/local PATH_SUFFIXES include/libusb-1.0 libusb-1.0)
+    find_library(LIBUSB_LIBRARY NAMES usb-1.0 HINTS /opt/homebrew/lib /usr/local/lib)
+    if(LIBUSB_INCLUDE_DIR AND LIBUSB_LIBRARY)
+        target_include_directories(${NECTAR_GAME} PRIVATE ${LIBUSB_INCLUDE_DIR})
+        target_link_libraries(${NECTAR_GAME} PRIVATE ${LIBUSB_LIBRARY})
+        target_compile_definitions(${NECTAR_GAME} PRIVATE PIKI_XINPUT_USB=1)
+        message(STATUS "USB XInput controllers: libusb ${LIBUSB_LIBRARY}")
+    else()
+        message(WARNING "PIKMIN_XINPUT_USB=ON but libusb was not found (brew install libusb)")
+    endif()
+endif()
 if(NECTAR_ONLINE)
     if(NOT TARGET nectar_net)
         add_subdirectory("${NECTAR_LIBS_DIR}/nectar_net" "${CMAKE_BINARY_DIR}/nectar_net")

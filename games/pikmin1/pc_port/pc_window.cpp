@@ -15,6 +15,7 @@ static_assert(PAD_BUTTON_LEFT == PC_MENU_PAD_LEFT && PAD_BUTTON_RIGHT == PC_MENU
 #include "pc_hand_cursor.h"
 #include "pc_speedrun.h"
 #include "pc_gyro.h"
+#include "pc_xinput_usb.h"
 #include "pc_icon.h"
 #include "netplay/pc_netplay_det.h"
 #if PIKI_PC_TOUCH
@@ -189,8 +190,18 @@ static void pc_auto_promote_pad(SDL_JoystickID id)
 
 static bool pc_controller_open_slot(int index)
 {
-	if (!SDL_IsGameController(index) || pc_joystick_is_secondary(index))
+	if (!SDL_IsGameController(index) || pc_joystick_is_secondary(index)) {
+		// Dejar rastro: un mando que SDL ve como joystick pero sin mapa de
+		// GameController se descartaba sin decir nada.
+		char guid[40] = {};
+		SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(index), guid, sizeof guid);
+		const char* jname = SDL_JoystickNameForIndex(index);
+		printf("[PC Port] Ignored joystick #%d \"%s\" (vid %04x pid %04x, guid %s): %s\n", index, jname ? jname : "?",
+		       SDL_JoystickGetDeviceVendor(index), SDL_JoystickGetDeviceProduct(index), guid,
+		       SDL_IsGameController(index) ? "motion/touchpad sub-device" : "no GameController mapping");
+		fflush(stdout);
 		return false;
+	}
 	SDL_GameController* ctl = SDL_GameControllerOpen(index);
 	if (!ctl)
 		return false;
@@ -972,6 +983,9 @@ bool pc_window_init(const char* title, int width, int height) {
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "0");
 #endif
 
+    // Que el mando siga llegando aunque el terminal o el launcher sean la app
+    // en primer plano al arrancar.
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) < 0) {
         printf("[PC Port Error] SDL_Init failed: %s\n", SDL_GetError());
         fflush(stdout);
@@ -1108,7 +1122,12 @@ bool pc_window_init(const char* title, int width, int height) {
     }
     printf("[PC Port] Target refresh rate: %.2f Hz\n", sTargetRefreshRate);
 
+    // Mandos Xbox 360 por USB, que macOS no expone como HID (solo con libusb).
+    pc_xinput_usb_init();
+
     // Check for connected controllers
+    printf("[PC Port] SDL %d.%d.%d, sees %d joystick(s) at startup\n", SDL_MAJOR_VERSION, SDL_MINOR_VERSION,
+           SDL_PATCHLEVEL, SDL_NumJoysticks());
     for (int i = 0; i < SDL_NumJoysticks(); ++i) {
         pc_controller_open_slot(i);
     }
@@ -1443,6 +1462,17 @@ void pc_window_poll_events(PADStatus* pad) {
             case SDL_TEXTINPUT:
                 pc_settings_text_input(event.text.text);
                 break;
+            case SDL_JOYDEVICEADDED: {
+                // Sale aunque SDL no tenga mapa de GameController para el mando:
+                // sirve para saber si macOS lo entrega o no.
+                const int jidx = event.jdevice.which;
+                const char* jname = SDL_JoystickNameForIndex(jidx);
+                printf("[PC Port] Joystick connected #%d \"%s\" (vid %04x pid %04x, game controller: %s)\n", jidx,
+                       jname ? jname : "?", SDL_JoystickGetDeviceVendor(jidx), SDL_JoystickGetDeviceProduct(jidx),
+                       SDL_IsGameController(jidx) ? "yes" : "no");
+                fflush(stdout);
+                break;
+            }
             case SDL_CONTROLLERDEVICEADDED:
                 pc_controller_open_slot(event.cdevice.which);
                 break;
@@ -1986,6 +2016,7 @@ void pc_window_set_swap_interval(int interval) {
 }
 
 void pc_window_shutdown(void) {
+    pc_xinput_usb_shutdown();
 #if PIKI_USE_JAUDIO
     StopAudioThread();
 #endif

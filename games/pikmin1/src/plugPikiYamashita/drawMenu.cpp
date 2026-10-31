@@ -263,11 +263,12 @@ P2DPane* pcClonePane(P2DPane* src, u32 tag)
 }
 } // namespace
 
-// Apple Clang 21's optimized arm64 build can remove the row-loop exit in
-// this routine: title startup then spins past total instead of drawing a menu.
-// Keep this startup-only layout pass unoptimized on that toolchain until the
-// optimizer-sensitive code can be reduced; gameplay/rendering stay optimized.
-#if defined(__APPLE__) && defined(__aarch64__) && defined(__clang__) && __clang_major__ == 21
+// Apple Clang's optimized arm64 build can remove the row-loop exit in
+// this routine: title startup then spins past total instead of drawing a menu
+// (seen with Clang 21 and reported again on newer Xcode toolchains, so no
+// version check). Keep this startup-only layout pass unoptimized on Apple
+// arm64; gameplay/rendering stay optimized.
+#if defined(__APPLE__) && defined(__aarch64__) && defined(__clang__)
 __attribute__((optnone))
 #endif
 void zen::DrawMenu::pcExtendMenu(immut PcMenuExtend& ext)

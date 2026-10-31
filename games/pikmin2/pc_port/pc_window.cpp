@@ -10,6 +10,7 @@ static_assert(PAD_BUTTON_LEFT == PC_MENU_PAD_LEFT && PAD_BUTTON_RIGHT == PC_MENU
                   && PAD_BUTTON_START == PC_MENU_PAD_START,
               "menu pad bits must match the GameCube pad");
 #include "pc_gyro.h"
+#include "pc_xinput_usb.h"
 #include "pc_icon.h"
 #include "pc_speedrun.h"
 #if PIKI_PC_TOUCH
@@ -1004,6 +1005,9 @@ bool pc_window_init(const char* title, int width, int height) {
     }
     printf("[PC Port] Target refresh rate: %.2f Hz\n", sTargetRefreshRate);
 
+    // Mandos Xbox 360 por USB, que macOS no expone como HID (solo con libusb).
+    pc_xinput_usb_init();
+
     // Check for connected controllers
     for (int i = 0; i < SDL_NumJoysticks(); ++i) {
         pc_controller_open_slot(i);
@@ -1829,6 +1833,7 @@ void pc_window_monitor_vsync_fallback(void) {
 }
 
 void pc_window_shutdown(void) {
+    pc_xinput_usb_shutdown();
 #if !PIKI_P2_HOST
 #if PIKI_USE_JAUDIO
     StopAudioThread();
