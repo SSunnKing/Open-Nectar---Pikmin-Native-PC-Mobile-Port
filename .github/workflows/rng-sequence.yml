@@ -1,0 +1,48 @@
+name: RNG sequencing
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/rng-sequence.yml'
+      - 'games/pikmin1/**'
+  push:
+    branches: [main, 'knakamura/rng-sequence-250']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  expressions:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        with:
+          msystem: MINGW64
+          install: git mingw-w64-x86_64-gcc mingw-w64-x86_64-python
+      - name: Compile and verify expressions and mutations (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          CXX=clang++
+          if [ "$RUNNER_OS" = Linux ]; then CXX=g++; fi
+          python3 games/pikmin1/tools/rng-sequence/check.py --cxx "$CXX" --output rng-results
+      - name: Compile and verify expressions and mutations (MinGW)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: python games/pikmin1/tools/rng-sequence/check.py --cxx g++ --output rng-results
+      - name: Retain source, commands, compiler, revision and results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rng-sequence-${{ runner.os }}
+          path: rng-results/
+          if-no-files-found: error
+          retention-days: 30
