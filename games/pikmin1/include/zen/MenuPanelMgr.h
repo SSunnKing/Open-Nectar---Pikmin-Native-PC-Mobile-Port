@@ -76,9 +76,12 @@ public:
 		mRotationAngle    = 0.0f;
 #if defined(PIKI_PC_PORT)
 		// Netplay: UI-only drift, so it draws from the cosmetic stream.
-		// Operands of one multiplication have no defined order: draw the magnitude before the sign.
-		const f32 speedMag  = pc_cosmetic_randf(1.0f) + 1.0f;
+		// Draw the sign, then the magnitude: the original's order (Metrowerks; verified in
+		// main.dol, USA Rev1, inlined in MenuPanelMgr::setCallBack at 0x801C9618 then
+		// 0x801C964C). Pinned because C++ leaves operand order unspecified (clang draws
+		// left to right, GCC right to left).
 		const f32 speedSign = (pc_cosmetic_randf(10.0f) > 5.0f) ? 1.0f : -1.0f;
+		const f32 speedMag  = pc_cosmetic_randf(1.0f) + 1.0f;
 		mRotationSpeed    = speedMag * speedSign;
 		mScaleSpeedFactor = pc_cosmetic_randf(0.1f) + 0.05f;
 		mMoveSpeed        = pc_cosmetic_randf(10.0f) + 5.0f;

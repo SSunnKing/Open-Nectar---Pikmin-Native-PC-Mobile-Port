@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile the actual PC expression blocks from #224 in a synthetic context."""
+"""Compile the actual PC expression blocks of the eight two-RNG sites in a synthetic context."""
 import argparse
 import hashlib
 import json
@@ -13,14 +13,14 @@ ROOT = pathlib.Path(__file__).resolve().parents[4]
 GAME = ROOT / 'games/pikmin1'
 # Each anchor is unique. Extract the PC arm, not a hand-maintained copy.
 SITES = [
-    ('spawn', 'src/plugPikiKando/viewPiki.cpp', 'void ViewPiki::init(', 'mSRT.t', [1, 1], 'sim', ['(u[0]-.5f)*300', '0', '(u[1]-.5f)*300']),
-    ('territory', 'src/plugPikiYamashita/TAIAmove.cpp', 'void TAIAflyingInTerritory::setTargetPosition(', 'offset', [2, 2], 'sim', ['u[0]*2-1', '0', 'u[1]*2-1']),
-    ('direction', 'src/plugPikiYamashita/TAIAmove.cpp', 'void TAIAlookAround::setTargetDirection(', 'teki.mTargetAngle', [0.75, 10], 'sim', ['(.75f+u[0]*.75f)*(u[1]*10>5?1.f:-1.f)+.25f']),
-    ('attack', 'src/plugPikiYamashita/TAImar.cpp', '// - weight = 101', 'res', ['100.f/weight', 30], 'sim', ['(u[0]*(100.f/weight))*(u[1]*30)<=1']),
-    ('cloth', 'include/Omake.h', 'if (i != 0 && j != 0 && i != mGridWidth', 'vec', [1, 1], 'sim', ['u[0]-2', 'u[1]-2', '0']),
-    ('balloon', 'src/plugPikiYamashita/drawCommon.cpp', 'void zen::BalloonPane::setGoalPos(', 'randOffset', [2, 2], 'cosmetic', ['12*(u[0]*2-1)', '12*(u[1]*2-1)', '0']),
-    ('star', 'src/plugPikiYamashita/drawWorldMap.cpp', 'if (pc_cosmetic_randf(100.0f) < mStarFallChance)', 'starResult', [100, 720, 50, 150], 'cosmetic', ['u[1]*720-40', '500-u[2]*50', '-u[3]*150']),
-    ('panel', 'include/zen/MenuPanelMgr.h', 'MenuPanel(P2DPane* pane,', 'mRotationSpeed', [1, 10, 0.1, 10], 'cosmetic', ['(u[0]+1)*(u[1]*10>5?1.f:-1.f)']),
+    ('spawn', 'src/plugPikiKando/viewPiki.cpp', 'void ViewPiki::init(', 'mSRT.t', [1, 1], 'sim', ['(u[1]-.5f)*300', '0', '(u[0]-.5f)*300']),
+    ('territory', 'src/plugPikiYamashita/TAIAmove.cpp', 'void TAIAflyingInTerritory::setTargetPosition(', 'offset', [2, 2], 'sim', ['u[1]*2-1', '0', 'u[0]*2-1']),
+    ('direction', 'src/plugPikiYamashita/TAIAmove.cpp', 'void TAIAlookAround::setTargetDirection(', 'teki.mTargetAngle', [10, 0.75], 'sim', ['(.75f+u[1]*.75f)*(u[0]*10>5?1.f:-1.f)+.25f']),
+    ('attack', 'src/plugPikiYamashita/TAImar.cpp', '// - weight = 101', 'res', [30, '100.f/weight'], 'sim', ['(u[1]*(100.f/weight))*(u[0]*30)<=1']),
+    ('cloth', 'include/Omake.h', 'if (i != 0 && j != 0 && i != mGridWidth', 'vec', [1, 1], 'sim', ['u[1]-2', 'u[0]-2', '0']),
+    ('balloon', 'src/plugPikiYamashita/drawCommon.cpp', 'void zen::BalloonPane::setGoalPos(', 'randOffset', [2, 2], 'cosmetic', ['12*(u[1]*2-1)', '12*(u[0]*2-1)', '0']),
+    ('star', 'src/plugPikiYamashita/drawWorldMap.cpp', 'if (pc_cosmetic_randf(100.0f) < mStarFallChance)', 'starResult', [100, 150, 50, 720], 'cosmetic', ['u[3]*720-40', '500-u[2]*50', '-u[1]*150']),
+    ('panel', 'include/zen/MenuPanelMgr.h', 'MenuPanel(P2DPane* pane,', 'mRotationSpeed', [10, 1, 0.1, 10], 'cosmetic', ['(u[1]+1)*(u[0]*10>5?1.f:-1.f)']),
 ]
 
 

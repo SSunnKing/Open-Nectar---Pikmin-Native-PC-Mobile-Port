@@ -378,9 +378,11 @@ void zen::BalloonPane::setGoalPos()
 {
 	Vector3f randOffset;
 #if defined(PIKI_PC_PORT)
-	// Draw x before y: unspecified between arguments (clang left to right, GCC right to left).
-	const f32 offsetX = mGoalRadius * (pc_cosmetic_randf(2.0f) - 1.0f);
+	// Draw y, then x: the original's order (Metrowerks; verified in main.dol, USA Rev1,
+	// rand calls at 0x801C01E4 then 0x801C0224). Pinned because C++ leaves argument
+	// order unspecified (clang draws left to right, GCC right to left).
 	const f32 offsetY = mGoalRadius * (pc_cosmetic_randf(2.0f) - 1.0f);
+	const f32 offsetX = mGoalRadius * (pc_cosmetic_randf(2.0f) - 1.0f);
 	randOffset.set(offsetX, offsetY, 0.0f);
 #else
 	randOffset.set(mGoalRadius * (zen::Rand(2.0f) - 1.0f), mGoalRadius * (zen::Rand(2.0f) - 1.0f), 0.0f);

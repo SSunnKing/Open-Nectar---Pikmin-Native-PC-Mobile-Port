@@ -356,11 +356,14 @@ bool TAIAapproachTargetPriorityFaceDir::act(Teki& teki)
 void TAIAlookAround::setTargetDirection(Teki& teki, f32 angle)
 {
 #if defined(PIKI_PC_PORT)
-	// Operands of one multiplication have no defined order (clang left to right,
-	// GCC right to left): draw the spread before the sign.
+	// Draw the sign, then the spread: the original's order (Metrowerks; verified
+	// in main.dol, USA Rev1, inlined in TAIAlookAround::start at 0x801A9A08 then
+	// 0x801A9A50, and in act at 0x801A9CF4 then 0x801A9D3C). Pinned because C++
+	// leaves operand order unspecified (clang draws left to right, GCC right to
+	// left).
 	{
-		const f32 spread = angle + zen::Rand(angle);
 		const f32 sign   = (zen::Rand(10.0f) > 5.0f) ? 1.0f : -1.0f;
+		const f32 spread = angle + zen::Rand(angle);
 		teki.mTargetAngle = spread * sign + teki.mFaceDirection;
 	}
 #else
@@ -888,11 +891,14 @@ void TAIAflyingInTerritory::setTargetPosition(Teki& teki)
 {
 	Vector3f offset;
 #if defined(PIKI_PC_PORT)
-	// Draw x before z. Two arguments of one call have no defined order: clang
-	// draws x first, GCC (Linux, MinGW) z first.
+	// Draw z, then x: the original's order (Metrowerks; verified in main.dol,
+	// USA Rev1, inlined in TAIAflyingInTerritory::start at 0x801AB470 then
+	// 0x801AB4A0, and in act at 0x801AB6A8 then 0x801AB6D8). Pinned because C++
+	// leaves argument order unspecified (clang draws left to right, GCC right
+	// to left).
 	{
-		const f32 x = zen::Rand(2.0f) - 1.0f;
 		const f32 z = zen::Rand(2.0f) - 1.0f;
+		const f32 x = zen::Rand(2.0f) - 1.0f;
 		offset.set(x, 0.0f, z);
 	}
 #else

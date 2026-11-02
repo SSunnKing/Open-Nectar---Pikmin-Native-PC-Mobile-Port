@@ -203,9 +203,11 @@ struct ClothFader : public AttentionCamera::Fader {
 				Vector3f vec(0.0f, 0.0f, 0.0f);
 				if (i != 0 && j != 0 && i != mGridWidth - 1 && j != mGridHeight - 1) {
 #if defined(PIKI_PC_PORT)
-					// Draw x before y: unspecified between arguments (clang left to right, GCC right to left).
-					const f32 vx = gsys->getRand(1.0f) - 2.0f;
+					// Draw y, then x: the original's order (Metrowerks; verified in main.dol, USA Rev1,
+					// ClothFader::reset at 0x80079354 then 0x80079374). Pinned because C++ leaves
+					// argument order unspecified (clang draws left to right, GCC right to left).
 					const f32 vy = gsys->getRand(1.0f) - 2.0f;
+					const f32 vx = gsys->getRand(1.0f) - 2.0f;
 					vec.set(vx, vy, 0.0f);
 #else
 					vec.set(gsys->getRand(1.0f) - 2.0f, gsys->getRand(1.0f) - 2.0f, 0.0f);
