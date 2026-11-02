@@ -2373,10 +2373,14 @@ public:
 	{
 #if defined(PIKI_PC_PORT)
 		if (pc_cosmetic_randf(100.0f) < mStarFallChance) {
-			// Three draws as arguments of one constructor: draw x, y, z in clang's (left to right) order.
-			const f32 starX = PC_WM_STAR_X;
-			const f32 starY = 500.0f - pc_cosmetic_randf(50.0f);
+			// Draw z, then y, then x (PC_WM_STAR_X is itself a draw): the original's order
+			// (Metrowerks; verified in main.dol, USA Rev1, inlined in DrawWorldMap::modeOperation
+			// at 0x801E61EC, 0x801E6218, 0x801E6244, after the chance roll at 0x801E61B0).
+			// Pinned because C++ leaves argument order unspecified (clang draws left to
+			// right, GCC right to left).
 			const f32 starZ = -pc_cosmetic_randf(150.0f);
+			const f32 starY = 500.0f - pc_cosmetic_randf(50.0f);
+			const f32 starX = PC_WM_STAR_X;
 			WMeffMgr->create(EFF2D_MapShootingStar, Vector3f(starX, starY, starZ), nullptr, nullptr);
 		}
 #else
