@@ -2804,6 +2804,16 @@ static const char* fShaderTail =
     "            float qb = floor(clamp(bl, 0.0, 1.0) * 255.0 + 0.5);\n"
     "            bool pass = ((alphaOp & 1) != 0) ? (qa == qb) : (qa > qb);\n"
     "            aResult = dl + (pass ? ac : 0.0);\n"
+    // Compare ops 8..13 on the alpha combiner test the colour inputs, exactly
+    // as the colour combiner does, and add alpha C when they pass (the
+    // ShadowCylinder2 filter uses R8_GT). They used to fall into the subtract
+    // branch below, which made that filter's alpha 0.
+    "        } else if (alphaOp >= 8) {\n"
+    "            int acomp = (alphaOp < 10) ? 1 : (alphaOp < 12) ? 2 : 3;\n"
+    "            float acv = packTevCompare(a.rgb, acomp);\n"
+    "            float bcv = packTevCompare(b.rgb, acomp);\n"
+    "            bool apass = ((alphaOp & 1) != 0) ? (acv == bcv) : (acv > bcv);\n"
+    "            aResult = dl + (apass ? ac : 0.0);\n"
     "        } else if (alphaOp == 0) aResult = dl + aMix;\n"
     "        else aResult = dl - aMix;\n"
     "        if (alphaOp < 8) aResult = (aResult + abias) * ascl;\n"
