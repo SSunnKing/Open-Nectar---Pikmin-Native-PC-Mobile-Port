@@ -177,6 +177,14 @@ public:
 	}
 
 #if defined(PIKI_PC_PORT)
+	/// Tag de un objetivo de clic: al dibujarse, el rectángulo que ocupa en la ventana se anota
+	/// si su pantalla está recogiendo objetivos (pc_menu_click_targets_begin). -1: ninguno.
+	void setPcClickTag(int tag) { mPcClickTag = tag; }
+
+	/// The .blo of the screen being drawn, for the prompt log (nullptr outside a screen).
+	/// Returns the previous one, to put back when the screen is done.
+	static const char* pcSetPromptScreen(const char* bloName);
+
 	/// Copia todo menos el árbol (queda huérfano) y el callback (nullptr).
 	void pcCopyPaneFrom(immut P2DPane& o)
 	{
@@ -248,6 +256,13 @@ protected:
 	s16 mOffsetY;               // _BA
 	f32 mRotation;              // _BC
 	Vector3f mScale;            // _C0
+#if defined(PIKI_PC_PORT)
+	int mPcClickTag = -1; // not copied by pcCopyPaneFrom: a clone is not a target
+	// Button glyph tag (pc_keycaps_tag_for_texture) of a picture, worked out on its first
+	// draw: -1 not yet, 0 not a button glyph. Drawn glyphs become click targets (pc_button_prompt).
+	s8 mPcPromptTag = -1;
+	void pcNotePrompt(P2DPane* parentPane, const Matrix4f& viewMtx);
+#endif
 	int mCullMode;              // _CC
 	PSUTree<P2DPane> mPaneTree; // _D0
 };

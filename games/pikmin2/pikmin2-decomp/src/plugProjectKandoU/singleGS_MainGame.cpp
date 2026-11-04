@@ -494,9 +494,14 @@ void GameState::exec(SingleGameSection* game)
 		pc_speedrun_on_finish(-1, gameSystem->mTimeMgr->mDayCount);
 	}
 	if (pc_speedrun_debug_take_cave_warp() && ItemCave::mgr) {
-		// Junto a Emergence Cave ('t_01') o, si no está en este mapa, la primera
-		// cueva abierta. A 40 de su centro: Navi::checkCave la ofrece a menos de 80.
+		// Junto a la cueva abierta más cercana al capitán activo. A 40 de su
+		// centro: Navi::checkCave la ofrece a menos de 80.
+		Navi* navi = naviMgr->getActiveNavi();
+		if (!navi) {
+			navi = naviMgr->getMovieNavi(); // co-op: Olimar o, si no, Louie
+		}
 		ItemCave::Item* target = nullptr;
+		f32 bestDist           = 0.0f;
 		Iterator<BaseItem> iterator(ItemCave::mgr);
 		CI_LOOP(iterator)
 		{
@@ -504,15 +509,13 @@ void GameState::exec(SingleGameSection* game)
 			if (!hole->isAlive() || hole->mBarrel) {
 				continue;
 			}
-			if (!target || hole->mCaveID.getID() == 't_01') {
-				target = hole;
+			Vector3f holePos = hole->getPosition();
+			f32 dist         = navi ? navi->getPosition().distance(holePos) : 0.0f;
+			if (!target || dist < bestDist) {
+				target   = hole;
+				bestDist = dist;
 			}
 		}
-#ifdef PIKI_PC_PORT
-		Navi* navi = naviMgr->getMovieNavi(); // co-op: Olimar o, si no, Louie
-#else
-		Navi* navi = naviMgr->getActiveNavi();
-#endif
 		if (target && navi) {
 			Vector3f pos = target->getPosition();
 			pos.x += 40.0f;

@@ -10,6 +10,7 @@ static_assert(PAD_BUTTON_LEFT == PC_MENU_PAD_LEFT && PAD_BUTTON_RIGHT == PC_MENU
                   && PAD_BUTTON_START == PC_MENU_PAD_START,
               "menu pad bits must match the GameCube pad");
 #include "pc_gyro.h"
+#include "pc_xinput_usb.h"
 #include "pc_icon.h"
 #include "pc_speedrun.h"
 #if PIKI_PC_TOUCH
@@ -141,8 +142,16 @@ struct PcHostAllocScope {
 static bool pc_controller_open_slot(int index)
 {
 	PcHostAllocScope pcHostAlloc;
-	if (!SDL_IsGameController(index) || pc_joystick_is_secondary(index))
+	if (!SDL_IsGameController(index) || pc_joystick_is_secondary(index)) {
+		// Diagnóstico (issue #213): un mando que no se abre no dejaba rastro.
+		char guid[33] = {};
+		SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(index), guid, sizeof(guid));
+		const char* name = SDL_JoystickNameForIndex(index);
+		printf("[PC Port] Joystick #%d not opened (%s): %s guid=%s\n", index,
+		       SDL_IsGameController(index) ? "auxiliary device" : "no controller mapping", name ? name : "?", guid);
+		fflush(stdout);
 		return false;
+	}
 	SDL_GameController* ctl = SDL_GameControllerOpen(index);
 	if (!ctl)
 		return false;
@@ -190,6 +199,7 @@ static int sLogicalRetraceInterval = 1;
 // like the pad's edge-shaped buttons.
 static Uint32 sMousePressedMask = 0; // real presses since the last take
 static Uint32 sRealMouseButtons = 0; // real buttons still held
+static Uint32 sPadMousePressed = 0;  // real presses since the last pad sample (issue #165)
 static int sMouseWheelSteps = 0;
 static float sTouchZoomDelta = 0.0f;
 // Co-op: giro y cabeceo de la cámara de cada jugador (docs/PLAN_COOP.md §6.7).
@@ -253,7 +263,10 @@ static bool sMouseWarped = false;
 
 // Control mode
 static int sControlMode = PC_CONTROL_CLASSIC;
-static int effectiveControlMode() { return pc_speedrun_active() ? PC_CONTROL_CLASSIC : sControlMode; }
+// Con un mando conectado el cursor va con su stick: Mouse Cursor no aplica.
+static int effectiveControlMode() {
+    return (pc_speedrun_active() || !sOpenPads.empty()) ? PC_CONTROL_CLASSIC : sControlMode;
+}
 static float sMouseSensitivity = 2.0f;
 static bool sSettingsMenuOpen = false;
 
@@ -292,6 +305,9 @@ const SDL_Scancode kDefaultKeyBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_FIRSTPERSON */ SDL_SCANCODE_V,
     /* PC_KEY_ACT_GYRO_RECENTER */ SDL_SCANCODE_UNKNOWN, // el giroscopio va en el mando
     /* PC_KEY_ACT_SPEEDRUN_RESET */ SDL_SCANCODE_F5,
+    /* PC_KEY_ACT_SWARM_STICK */ SDL_SCANCODE_UNKNOWN, // el teclado ya tiene Swarm y TFGH
+    /* PC_KEY_ACT_LIEDOWN     */ SDL_SCANCODE_UNKNOWN,
+    /* PC_KEY_ACT_AIM_STICK  */ SDL_SCANCODE_UNKNOWN, // el ratón ya apunta
 };
 
 SDL_Scancode pc_window_default_key_binding2(int action) {
@@ -330,7 +346,61 @@ const int kDefaultGamepadBindings[PC_KEY_ACT_COUNT] = {
     /* PC_KEY_ACT_FIRSTPERSON */ SDL_CONTROLLER_BUTTON_LEFTSTICK,
     /* PC_KEY_ACT_GYRO_RECENTER */ -1, // sin botón libre por defecto; se asigna en Controls
     /* PC_KEY_ACT_SPEEDRUN_RESET */ -1, // sin botón libre por defecto; se asigna en Controls
+    /* PC_KEY_ACT_SWARM_STICK */ -1, // con Free Camera se asigna en Controls
+    /* PC_KEY_ACT_LIEDOWN     */ -1, // mantener X, como en GameCube
+    /* PC_KEY_ACT_AIM_STICK  */ -1, // se asigna en Controls
 };
+
+// Esquema Switch (Pikmin 2 de Switch): B silba, X retira, Y cambia de capitán,
+// ZL mira al frente (y fija con Lock-On), ZR zoom, L + stick derecho swarm,
+// stick derecho cámara, R cambia el tipo, clic del stick derecho se tumba.
+#define PC_GP_AXIS(axis) (PC_GP_AXIS_BIND + (axis) * 2 + 1)
+static const int kSwitchGamepadBindings[PC_KEY_ACT_COUNT] = {
+    /* PC_KEY_ACT_A       */ SDL_CONTROLLER_BUTTON_A,
+    /* PC_KEY_ACT_B       */ SDL_CONTROLLER_BUTTON_B,
+    /* PC_KEY_ACT_X       */ SDL_CONTROLLER_BUTTON_X,
+    /* PC_KEY_ACT_Y       */ SDL_CONTROLLER_BUTTON_Y,
+    /* PC_KEY_ACT_Z       */ -1, // altura de cámara: stick derecho arriba/abajo
+    /* PC_KEY_ACT_START   */ SDL_CONTROLLER_BUTTON_START,
+    /* PC_KEY_ACT_L       */ PC_GP_AXIS(SDL_CONTROLLER_AXIS_TRIGGERLEFT),
+    /* PC_KEY_ACT_R       */ PC_GP_AXIS(SDL_CONTROLLER_AXIS_TRIGGERRIGHT),
+    /* PC_KEY_ACT_DPAD_UP    */ SDL_CONTROLLER_BUTTON_DPAD_UP,
+    /* PC_KEY_ACT_DPAD_DOWN  */ SDL_CONTROLLER_BUTTON_DPAD_DOWN,
+    /* PC_KEY_ACT_DPAD_LEFT  */ SDL_CONTROLLER_BUTTON_DPAD_LEFT,
+    /* PC_KEY_ACT_DPAD_RIGHT */ SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, // R: cambiar tipo
+    /* PC_KEY_ACT_STICK_UP   */ -1,
+    /* PC_KEY_ACT_STICK_DOWN */ -1,
+    /* PC_KEY_ACT_STICK_LEFT */ -1,
+    /* PC_KEY_ACT_STICK_RIGHT*/ -1,
+    /* PC_KEY_ACT_CSTICK_UP   */ -1,
+    /* PC_KEY_ACT_CSTICK_DOWN */ -1,
+    /* PC_KEY_ACT_CSTICK_LEFT */ -1,
+    /* PC_KEY_ACT_CSTICK_RIGHT*/ -1,
+    /* PC_KEY_ACT_SWARM       */ -1,
+    /* PC_KEY_ACT_LOCKON      */ -1, // ZL, si el mod Lock-On está activo
+    /* PC_KEY_ACT_FIRSTPERSON */ SDL_CONTROLLER_BUTTON_LEFTSTICK,
+    /* PC_KEY_ACT_GYRO_RECENTER */ -1,
+    /* PC_KEY_ACT_SPEEDRUN_RESET */ -1,
+    /* PC_KEY_ACT_SWARM_STICK */ SDL_CONTROLLER_BUTTON_LEFTSHOULDER,
+    /* PC_KEY_ACT_LIEDOWN     */ SDL_CONTROLLER_BUTTON_RIGHTSTICK,
+    /* PC_KEY_ACT_AIM_STICK  */ -1, // se asigna en Controls
+};
+static int sPadScheme = PC_PAD_SCHEME_GAMECUBE;
+static int sRsAimMode = PC_RS_AIM_OFF;
+static float sRsAimSens = 1.0f;
+void pc_window_set_rs_aim(int mode, float sens) {
+    sRsAimMode = (mode >= PC_RS_AIM_OFF && mode <= PC_RS_AIM_ALWAYS) ? mode : PC_RS_AIM_OFF;
+    sRsAimSens = std::clamp(sens, 0.25f, 3.0f);
+}
+
+void pc_window_set_pad_scheme(int scheme) {
+    sPadScheme = (scheme >= 0 && scheme < PC_PAD_SCHEME_COUNT) ? scheme : PC_PAD_SCHEME_GAMECUBE;
+}
+int pc_window_get_pad_scheme(void) { return sPadScheme; }
+int pc_window_scheme_default_gamepad_binding(int scheme, int action) {
+    if (action < 0 || action >= PC_KEY_ACT_COUNT) return -1;
+    return scheme == PC_PAD_SCHEME_SWITCH ? kSwitchGamepadBindings[action] : kDefaultGamepadBindings[action];
+}
 
 // Action names for UI display.
 static const char* kKeyActionNames[PC_KEY_ACT_COUNT] = {
@@ -340,6 +410,8 @@ static const char* kKeyActionNames[PC_KEY_ACT_COUNT] = {
     "C-Stick Up", "C-Stick Down", "C-Stick Left", "C-Stick Right",
     "Swarm to cursor",
     "Lock-On", "First Person", "Gyro Recenter", "Speedrun Reset",
+    "Swarm with right stick (hold)", "Lie down",
+    "Aim cursor with right stick (hold)",
 };
 
 static void initKeyBindings() {
@@ -421,8 +493,9 @@ int pc_window_get_cstick_invert(void) {
 int pc_window_get_gamepad_binding(int action) {
     if (action < 0 || action >= PC_KEY_ACT_COUNT) return -1;
     initGamepadBindings();
+    if (sGamepadBindings[action] == PC_GP_BIND_NONE) return -1;
     if (sGamepadBindings[action] >= 0) return sGamepadBindings[action];
-    return kDefaultGamepadBindings[action];
+    return pc_window_scheme_default_gamepad_binding(sPadScheme, action);
 }
 
 bool pc_window_last_input_is_gamepad(void)
@@ -932,6 +1005,9 @@ bool pc_window_init(const char* title, int width, int height) {
     }
     printf("[PC Port] Target refresh rate: %.2f Hz\n", sTargetRefreshRate);
 
+    // Mandos Xbox 360 por USB, que macOS no expone como HID (solo con libusb).
+    pc_xinput_usb_init();
+
     // Check for connected controllers
     for (int i = 0; i < SDL_NumJoysticks(); ++i) {
         pc_controller_open_slot(i);
@@ -956,6 +1032,7 @@ static float sFreeCamSubY[2] = { 0.0f, 0.0f };
 extern "C" float pc_window_free_camera_sub_y_for(int player) { return sFreeCamSubY[player == 1 ? 1 : 0]; }
 extern "C" float pc_window_free_camera_sub_y(void) { return sFreeCamSubY[0]; }
 
+extern "C" void pc_window_add_cursor_delta(float dx, float dy);
 static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& stickX, s8& stickY,
                                    s8& substickX, s8& substickY, u8& triggerL, u8& triggerR, bool& swarmHeld)
 {
@@ -1020,15 +1097,60 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     // which has no default on the pad: every D-pad direction is already a
     // Pikmin 2 action (sprays, maturity and colour of the held Pikmin), so it
     // is left for the player to bind.
+    //
+    // Esquema Switch: el stick derecho es siempre la cámara (como Free Camera,
+    // pero solo para el mando) y arriba/abajo cambia la altura (un toque de Z
+    // por empujón). Mantener "Swarm with right stick" (L) lo devuelve al swarm
+    // en cualquier esquema; con el mod Charge, un toque de ese botón sin mover
+    // el stick lanza la carga.
+    const int pl = sInputPlayer == 1 ? 1 : 0;
+    const bool switchScheme = sPadScheme == PC_PAD_SCHEME_SWITCH;
+    const bool swarmStick = boundButtonPressed(PC_KEY_ACT_SWARM_STICK);
+    // Mantener "Aim cursor with right stick": el stick derecho apunta el cursor.
+    const bool aimStick = !swarmStick && (sRsAimMode == PC_RS_AIM_ALWAYS
+        || (sRsAimMode == PC_RS_AIM_HOLD && boundButtonPressed(PC_KEY_ACT_AIM_STICK)));
+    static bool sSwarmStickWasDown[2] = { false, false };
+    static bool sSwarmStickMoved[2]   = { false, false };
+    static bool sCamHeightArmed[2]    = { true, true };
+    if (swarmStick && !sSwarmStickWasDown[pl]) sSwarmStickMoved[pl] = false;
     sFreeCamSubY[sInputPlayer] = 0.0f;
-    if (pc_settings_get_free_camera()) {
+    if (aimStick) {
+        // Unos 12 px por muestra a fondo por la sensibilidad propia (Right
+        // Stick Aim Sensitivity), como si fuera el ratón: el juego lo suma al cursor.
+        const float k = 12.0f * sRsAimSens;
+        const float ax = abs(rx) > axisDeadZone ? (float)rx / 32767.0f : 0.0f;
+        const float ay = abs(ry) > axisDeadZone ? (float)ry / 32767.0f : 0.0f;
+        if (ax != 0.0f || ay != 0.0f) pc_window_add_cursor_delta(ax * k, ay * k);
+    } else if ((switchScheme || pc_settings_get_free_camera()) && !swarmStick) {
         if (abs(ry) > axisDeadZone) sFreeCamSubY[sInputPlayer] = pc_pad_axis_from_sdl(-ry) / 72.0f;
         if (abs(rx) > axisDeadZone) {
             pc_window_add_camera_drag(-(float)rx / 32767.0f * 0.02f * pc_settings_get_free_camera_pad_scale());
         }
+        if (switchScheme) {
+            if (abs(ry) > 24000 && abs(ry) > abs(rx) && sCamHeightArmed[pl]) {
+                button |= PAD_TRIGGER_Z;
+                sCamHeightArmed[pl] = false;
+            } else if (abs(ry) < 12000) {
+                sCamHeightArmed[pl] = true;
+            }
+        }
     } else {
         if (abs(rx) > axisDeadZone) substickX = pc_pad_axis_from_sdl(rx);
         if (abs(ry) > axisDeadZone) substickY = pc_pad_axis_from_sdl(-ry);
+        if (swarmStick && (abs(rx) > 12000 || abs(ry) > 12000)) sSwarmStickMoved[pl] = true;
+    }
+    if (!swarmStick && sSwarmStickWasDown[pl] && !sSwarmStickMoved[pl] && pc_settings_get_charge())
+        sSwarmPending[pl] = true;
+    sSwarmStickWasDown[pl] = swarmStick;
+
+    // Tumbarse: en Pikmin 2 es mantener X (un toque de X retira a los Pikmin).
+    if (boundButtonPressed(PC_KEY_ACT_LIEDOWN)) button |= PAD_BUTTON_X;
+    // Esquema Switch: X con un Pikmin en la mano (A sujeto) cambia su madurez,
+    // que en GameCube es la cruceta arriba con el Pikmin en la mano.
+    if (switchScheme && (button & PAD_BUTTON_A) && boundButtonPressed(PC_KEY_ACT_X)
+        && !boundButtonPressed(PC_KEY_ACT_LIEDOWN)) {
+        button &= ~PAD_BUTTON_X;
+        button |= PAD_BUTTON_UP;
     }
 
     // Optional digital bindings for stick directions are merged after the
@@ -1067,6 +1189,7 @@ static int pc_window_poll_one(SDL_Event* event)
 }
 
 void pc_window_poll_events(PADStatus* pad) {
+    pc_xinput_usb_update();
 #if PIKI_P2_HOST
     // Pikmin 2: el audio lo pauta la cola de SDL desde VIWaitForRetrace.
 #elif PIKI_USE_JAUDIO
@@ -1139,6 +1262,8 @@ void pc_window_poll_events(PADStatus* pad) {
                                               event.type == SDL_MOUSEBUTTONDOWN);
                 if (event.type != SDL_MOUSEBUTTONDOWN)
                     break;
+                if (event.button.which != SDL_TOUCH_MOUSEID && event.button.button >= 1 && event.button.button <= 8)
+                    sPadMousePressed |= SDL_BUTTON(event.button.button);
                 // Issue #52: Escape (or the OS) can drop the mouse out of
                 // relative mode, which froze the cursor until the option was
                 // toggled. A click in the window takes it back.
@@ -1186,6 +1311,9 @@ void pc_window_poll_events(PADStatus* pad) {
                 break;
             case SDL_CONTROLLERDEVICEADDED:
                 pc_controller_open_slot(event.cdevice.which);
+                break;
+            case SDL_JOYDEVICEADDED: // sin mapeo no llega CONTROLLERDEVICEADDED; queda en el log (#213)
+                pc_controller_open_slot(event.jdevice.which);
                 break;
             case SDL_CONTROLLERDEVICEREMOVED:
                 pc_controller_close_instance(event.cdevice.which);
@@ -1278,7 +1406,10 @@ void pc_window_poll_events(PADStatus* pad) {
     const Uint8* state = SDL_GetKeyboardState(NULL);
     // Bindings may name a mouse button (issue #42). SDL_GetMouseState also
     // reports a finger, so mouse-button bindings use the real-mouse mask.
-    const Uint32 boundMouse = sRealMouseButtons;
+    // Un clic que sube antes de esta muestra (clics rápidos para lanzar,
+    // issue #165) cuenta como pulsado en ella; la siguiente lo ve soltado.
+    const Uint32 boundMouse = sRealMouseButtons | sPadMousePressed;
+    sPadMousePressed = 0;
     // La segunda tecla con un clic solo cuenta fuera de Classic, como los clics
     // fijos que sustituye (en Classic el ratón no juega).
     const bool mouseSecondOk = effectiveControlMode() != PC_CONTROL_CLASSIC;
@@ -1307,6 +1438,7 @@ void pc_window_poll_events(PADStatus* pad) {
                        || (!pc_bind_is_mouse(bindB2) && pc_window_binding_held(bindB2, state, boundMouse));
 
     if (held(PC_KEY_ACT_A))        button |= PAD_BUTTON_A;
+    if (held(PC_KEY_ACT_LIEDOWN))  button |= PAD_BUTTON_X; // tumbarse = mantener X
     const bool bMouseHeld = (pc_bind_is_mouse(bindB1) && pc_window_binding_held(bindB1, state, boundMouse))
                          || (pc_bind_is_mouse(bindB2) && mouseSecondOk && pc_window_binding_held(bindB2, state, boundMouse));
     if (bMouseHeld || bKeyHeld) button |= PAD_BUTTON_B;
@@ -1399,6 +1531,9 @@ void pc_window_poll_events(PADStatus* pad) {
     const bool usedKeyboard = button != 0 || dirX != 0 || dirY != 0 || cdirX != 0 || cdirY != 0;
     bool usedGamepad = false;
     sSwarmHeld = held(PC_KEY_ACT_SWARM);
+#if PIKI_PC_TOUCH
+    sSwarmHeld = sSwarmHeld || pc_touch_swarm_active();
+#endif
 
     {
         // Por jugador: el teclado de quien lo tenga y el mando de cada uno.
@@ -1412,6 +1547,11 @@ void pc_window_poll_events(PADStatus* pad) {
                 lockDown[p] |= pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_LOCKON));
                 swarmDown[p] |= pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_SWARM));
                 fpDown[p] |= pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_FIRSTPERSON));
+                // Esquema Switch con el mod Lock-On: ZL (el L de GameCube) también
+                // fija objetivo, si Lock-On no tiene un botón propio.
+                if (sPadScheme == PC_PAD_SCHEME_SWITCH && pc_settings_get_lock_on()
+                    && pc_window_get_gamepad_binding(PC_KEY_ACT_LOCKON) < 0)
+                    lockDown[p] |= pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_L));
             }
             if (lockDown[p] && !sLockOnWasDown[p]) sLockOnPending[p] = true;
             sLockOnWasDown[p] = lockDown[p];
@@ -1694,6 +1834,7 @@ void pc_window_monitor_vsync_fallback(void) {
 }
 
 void pc_window_shutdown(void) {
+    pc_xinput_usb_shutdown();
 #if !PIKI_P2_HOST
 #if PIKI_USE_JAUDIO
     StopAudioThread();
@@ -1923,7 +2064,7 @@ void pc_window_set_control_mode(int mode) {
 }
 
 int pc_window_get_control_mode(void) {
-    return sControlMode;
+    return effectiveControlMode();
 }
 
 void pc_window_set_mouse_sensitivity(float sensitivity) {

@@ -311,7 +311,8 @@ void PcamCamera::control(Controller& controller)
 	const bool detMode = pc_netplay_deterministic();
 	// Cámara libre: L1 la devuelve detrás del capitán, y el cursor (que ha
 	// girado con ella) vuelve también delante de él (issue #74).
-	if (pc_settings_get_free_camera() && controller.keyClick(KBBTN_L) && mTargetCreature
+	// "Face Forward Aims At: Cursor": L vuelve a mirar al cursor, como el original.
+	if (pc_settings_get_free_camera() && !pc_settings_get_face_cursor() && controller.keyClick(KBBTN_L) && mTargetCreature
 	    && mTargetCreature->mObjType == OBJTYPE_Navi) {
 		static_cast<Navi*>(mTargetCreature)->pcCursorToFront();
 	}

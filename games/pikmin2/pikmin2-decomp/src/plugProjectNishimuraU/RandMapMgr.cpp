@@ -1,3 +1,5 @@
+#include <cstdio>
+#include <cstdlib>
 #include "Game/Cave/RandMapMgr.h"
 #include "Game/Navi.h"
 #include "Dolphin/rand.h"
@@ -266,6 +268,22 @@ void RandMapMgr::captureRadarMap(Graphics& gfx)
 		GXSetChanMatColor(GX_COLOR0A0, JUtility::TColor(255, 255, 255, 255));
 		GXSetChanCtrl(GX_COLOR0A0, GX_FALSE, GX_SRC_REG, GX_SRC_REG, 0, GX_DF_NONE, GX_AF_NONE);
 		mRandMapDraw->draw(gfx, 0.0f, 0.0f, 8.0f);
+#ifdef PIKI_PC_PORT
+		// PIKMIN_RADAR_DEBUG=1: salas descubiertas que entran en la captura (#244/#248).
+		if (getenv("PIKMIN_RADAR_DEBUG")) {
+			int count = 0;
+			FOREACH_NODE(MapNode, mGenerator->mVisitedMapNodes->mChild, node) { count++; }
+			fprintf(stderr, "[radar] capture tex=%dx%d visited=%d\n", mRadarMapTexture->getSizeX(), mRadarMapTexture->getSizeY(),
+			        count);
+			FOREACH_NODE(MapNode, mGenerator->mVisitedMapNodes->mChild, node)
+			{
+				fprintf(stderr, "[radar]   room grid=(%d,%d) size=%dx%d rot=%d kind=%d tex=%p\n", node->getNodeOffsetX(),
+				        node->getNodeOffsetY(), node->mUnitInfo->getUnitSizeX(), node->mUnitInfo->getUnitSizeY(),
+				        (int)node->mUnitInfo->mUnitRotation, (int)node->mUnitInfo->getUnitKind(),
+				        (void*)node->mUnitInfo->mMapUnits->mTexture);
+			}
+		}
+#endif
 		mRadarMapTexture->capture(0, 0, GX_CTF_R4, false, 0);
 		drawFrameBuffer(gfx);
 		mIsCaptureOn = false;

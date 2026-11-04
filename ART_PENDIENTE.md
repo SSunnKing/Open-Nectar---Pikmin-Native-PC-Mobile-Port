@@ -18,6 +18,8 @@ ni texto, PNG cuadrado ~1024×1024).
 | `swap_captain.png` | P2 | Cambiar de capitán (Olimar ⇄ Louie) | las dos carpetas (el APK empaqueta la de P1) |
 | `spray_bitter.png` | P2 | Usar spray amargo (cruceta ↑) | las dos carpetas |
 | `spray_spicy.png` | P2 | Usar spray picante (cruceta ↓) | las dos carpetas |
+| `swarm.png` | P1, P2 | Swarm: un toque lo activa/desactiva (el grupo va al cursor), arrastrar = stick C | las dos carpetas |
+| `lie_down.png` | P1, P2 | Tumbarse (P1: cruceta ↓; P2: mantener X) | las dos carpetas |
 
 Al tener el definitivo de un icono compartido, copiarlo a las dos carpetas.
 Quitar la fila de esta tabla cuando el PNG ya sea el definitivo.

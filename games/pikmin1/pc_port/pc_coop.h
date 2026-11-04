@@ -84,4 +84,15 @@ void pc_coop_begin_run(void);
 bool pc_coop_active(void);
 void pc_coop_end_run(void);
 
+/// Split screen draws the world once per view in the same tick. Sim work that
+/// runs inside the world draw must run in the first view pass only. The view
+/// loop in newPikiGame.cpp sets the pass; it is 0 outside split screen.
+inline int& pc_coop_view_pass_ref(void)
+{
+	static int sPass = 0;
+	return sPass;
+}
+inline void pc_coop_set_view_pass(int view) { pc_coop_view_pass_ref() = view; }
+inline bool pc_coop_first_view_pass(void) { return pc_coop_view_pass_ref() == 0; }
+
 #endif // PC_COOP_H

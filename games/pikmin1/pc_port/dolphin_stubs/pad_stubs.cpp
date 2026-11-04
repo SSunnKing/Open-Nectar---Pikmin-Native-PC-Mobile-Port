@@ -37,7 +37,8 @@ u32 PADRead(PADStatus* status) {
     return 0xf0000000; // Bitmask of connected controllers (channel 0)
 }
 void PADSetSamplingRate(u32 msec)             { (void)msec; }
-void PADClamp(PADStatus* status)              { (void)status; }
+// PADClamp is src/pad/Padclamp.c. ControllerMgr calls it after PADRead, on
+// sticks and triggers that are already in the GameCube byte range.
 void PADClampCircle(PADStatus* status)        { (void)status; }
 void PADControlAllMotors(const u32* cmdArray) { (void)cmdArray; }
 void PADControlMotor(s32 chan, u32 command) {

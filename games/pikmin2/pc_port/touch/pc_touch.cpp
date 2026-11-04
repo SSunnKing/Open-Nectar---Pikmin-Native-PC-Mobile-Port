@@ -35,6 +35,21 @@ static void pc_photo_mode_add_touch_look(float, float) { }
 #define STBI_NO_STDIO
 #include "stb_image.h"
 
+bool pc_host_alloc_active();
+void pc_host_alloc_set(bool active);
+
+namespace {
+// Los vectores globales de este archivo crecen desde menús de secciones
+// distintas: su memoria no puede salir del heap JKR de una sección (al crecer
+// liberaban un bloque de una sección ya destruida: cuelgue al ir al
+// atardecer, #238).
+struct TouchHostAlloc {
+	bool prev = pc_host_alloc_active();
+	TouchHostAlloc() { pc_host_alloc_set(true); }
+	~TouchHostAlloc() { pc_host_alloc_set(prev); }
+};
+} // namespace
+
 namespace {
 
 // ── Disposición ──────────────────────────────────────────────────────────────
@@ -63,6 +78,8 @@ enum ButtonId {
 	BTN_GYRO,         // recentrar giroscopio
 	BTN_DPAD_LEFT,    // P2: color anterior con Pikmin en la mano
 	BTN_DPAD_RIGHT,   // P2: color siguiente con Pikmin en la mano
+	BTN_SWARM,        // un toque: el grupo va al cursor (otro toque lo para); arrastrar: stick C
+	BTN_LIEDOWN,      // tumbarse (P1: cruceta abajo; P2: mantener X)
 	BTN_BACK,
 	BTN_MENU_CONFIRM,
 	BTN_COUNT
@@ -98,6 +115,13 @@ const ButtonSpec kButtons[BTN_COUNT] = {
 	{ "gyro_recenter", 0.73f, 0.09f, false, 0.045f, 0 },
 	{ "kind_left", 0.42f, 0.19f, true, 0.045f, PAD_BUTTON_LEFT },
 	{ "kind_right", 0.31f, 0.19f, true, 0.045f, PAD_BUTTON_RIGHT },
+	// Swarm junto a disolver y silbar, al alcance del pulgar derecho.
+	{ "swarm", 0.44f, 0.50f, true, 0.05f, 0 },
+#if PIKI_P2_HOST
+	{ "lie_down", 0.53f, 0.29f, true, 0.045f, PAD_BUTTON_X },
+#else
+	{ "lie_down", 0.53f, 0.29f, true, 0.045f, PAD_BUTTON_DOWN },
+#endif
 	{ "back", 0.10f, 0.84f, false, 0.055f, PAD_BUTTON_B },
 	{ nullptr, 0.10f, 0.84f, true, 0.055f, PAD_BUTTON_A },
 };
@@ -206,6 +230,10 @@ struct GroupDrag {
 	bool dragging = false;
 };
 GroupDrag sGroupDrag;
+// Botón de swarm: lo mismo que el arrastre de disolver (stick C), y un toque
+// sin arrastre deja al grupo yendo hacia el cursor hasta otro toque o silbar.
+GroupDrag sSwarmDrag;
+bool sSwarmToggle = false;
 constexpr float kGroupDragStart = 0.025f; // fracción de H: a partir de aquí es arrastre
 constexpr float kGroupDragFull = 0.12f;   // fracción de H: deflexión máxima del C-stick
 
@@ -793,6 +821,12 @@ void pc_touch_on_finger(long long fingerId, PcTouchPhase phase, float x, float y
 #endif
 				if (btn == BTN_FIRST_PERSON && sGameMenuClaimFrames <= 0) pc_window_request_firstperson_press();
 				if (btn == BTN_GYRO && sGameMenuClaimFrames <= 0) pc_gyro_request_recenter();
+				if (btn == BTN_SWARM) {
+					sSwarmDrag.ax = x;
+					sSwarmDrag.ay = y;
+					sSwarmDrag.dx = sSwarmDrag.dy = 0.0f;
+					sSwarmDrag.dragging = false;
+				}
 				if (btn == BTN_DISBAND) {
 					sGroupDrag.ax = x;
 					sGroupDrag.ay = y;
@@ -858,6 +892,18 @@ void pc_touch_on_finger(long long fingerId, PcTouchPhase phase, float x, float y
 			if (i == BTN_THROW || i == BTN_WHISTLE) {
 				pc_window_add_cursor_delta(x - b.lastX, y - b.lastY);
 			}
+			if (i == BTN_SWARM && sLayoutH > 0) {
+				float dx = x - sSwarmDrag.ax, dy = y - sSwarmDrag.ay;
+				const float len = std::sqrt(dx * dx + dy * dy);
+				if (len > kGroupDragStart * float(sLayoutH)) sSwarmDrag.dragging = true;
+				const float full = kGroupDragFull * float(sLayoutH);
+				if (len > full && len > 0.0f) {
+					dx *= full / len;
+					dy *= full / len;
+				}
+				sSwarmDrag.dx = dx;
+				sSwarmDrag.dy = dy;
+			}
 			if (i == BTN_DISBAND && sLayoutH > 0) {
 				float dx = x - sGroupDrag.ax, dy = y - sGroupDrag.ay;
 				const float len = std::sqrt(dx * dx + dy * dy);
@@ -919,6 +965,11 @@ void pc_touch_on_finger(long long fingerId, PcTouchPhase phase, float x, float y
 		for (int i = 0; i < BTN_COUNT; ++i) {
 			if (sButtons[i].finger != fingerId) continue;
 			sButtons[i].finger = -1;
+			if (i == BTN_SWARM) {
+				if (!sSwarmDrag.dragging) sSwarmToggle = !sSwarmToggle;
+				sSwarmDrag.dragging = false;
+				sSwarmDrag.dx = sSwarmDrag.dy = 0.0f;
+			}
 			if (i == BTN_DISBAND) {
 				// Sin arrastre fue un toque: ahora sí, X durante un frame.
 				if (!sGroupDrag.dragging) sButtons[i].tapLatch = true;
@@ -980,6 +1031,14 @@ bool pc_touch_merge_pad(u16* button, s8* stickX, s8* stickY, s8* substickX, s8* 
 			*button |= kButtons[i].pad;
 			touchButtons |= kButtons[i].pad;
 		}
+	}
+	// Silbar o un menú del juego cortan el swarm continuo.
+	if (sButtons[BTN_WHISTLE].finger >= 0 || sGameMenuClaimFrames > 0) sSwarmToggle = false;
+	if (sButtons[BTN_SWARM].finger >= 0 && sSwarmDrag.dragging && sLayoutH > 0 && *substickX == 0 && *substickY == 0) {
+		const float full = kGroupDragFull * float(sLayoutH);
+		const float nx = sSwarmDrag.dx / full, ny = -sSwarmDrag.dy / full; // GC: Y hacia arriba
+		*substickX = (s8)std::lround(std::fmax(-1.0f, std::fmin(1.0f, nx)) * 127.0f);
+		*substickY = (s8)std::lround(std::fmax(-1.0f, std::fmin(1.0f, ny)) * 127.0f);
 	}
 	if (sButtons[BTN_DISBAND].finger >= 0 && sGroupDrag.dragging && sLayoutH > 0 && *substickX == 0 && *substickY == 0) {
 		const float full = kGroupDragFull * float(sLayoutH);
@@ -1081,7 +1140,10 @@ void pc_touch_mark_inline_icon(char tag, float x, float y, float size)
 	// El texto se dibuja a veces dos veces (sombra + relleno): un solo icono.
 	for (const InlineIcon& other : sInlineIcons)
 		if (other.button == icon.button && std::fabs(other.cx - icon.cx) < icon.size * 0.5f && std::fabs(other.cy - icon.cy) < icon.size * 0.5f) return;
-	if (sInlineIcons.size() < 64) sInlineIcons.push_back(icon);
+	if (sInlineIcons.size() < 64) {
+		TouchHostAlloc hostAlloc;
+		sInlineIcons.push_back(icon);
+	}
 }
 
 static void push_help_icon(char tag, float cx, float cy, float diam, float alpha)
@@ -1097,6 +1159,7 @@ static void push_help_icon(char tag, float cx, float cy, float diam, float alpha
 	icon.cy = cy;
 	icon.diam = diam;
 	icon.alpha = alpha;
+	TouchHostAlloc hostAlloc;
 	sHelpIcons.push_back(icon);
 }
 
@@ -1141,6 +1204,7 @@ void pc_touch_mark_button_icon(char tag, float cx, float cy, float size, float a
 
 void pc_touch_set_visible(bool visible) { sVisible = visible; }
 bool pc_touch_visible(void) { return sVisible; }
+bool pc_touch_swarm_active(void) { return sSwarmToggle && sVisible && !sEditMode; }
 
 void pc_touch_claim_game_menu(void) { sGameMenuClaimFrames = 3; }
 void pc_touch_menu_uses_stick(void) { sMenuStickFrames = 3; }
@@ -1204,6 +1268,7 @@ bool pc_touch_pane_rect(const void* pane, float* x0, float* y0, float* x1, float
 	if (!pane) return false;
 	TrackedPane* t = find_tracked(pane);
 	if (!t) {
+		TouchHostAlloc hostAlloc;
 		sTrackedPanes.push_back({ pane, 0, 0, 0, 0, -100, sTouchFrame });
 		return false;
 	}
@@ -1222,6 +1287,7 @@ bool pc_touch_pane_hit(const void* pane, float nx, float ny, float margin)
 	TrackedPane* t = find_tracked(pane);
 	if (!t) {
 		// Primera pregunta: aún no se sabe dónde está; se sabrá al dibujarlo.
+		TouchHostAlloc hostAlloc;
 		sTrackedPanes.push_back({ pane, 0, 0, 0, 0, -100, sTouchFrame });
 		return false;
 	}
@@ -1297,7 +1363,8 @@ void pc_touch_draw(void)
 		}
 		if (!sEditMode && button_modded_off(i)) continue;
 		const ButtonState& b = sButtons[i];
-		const bool pressed = sEditMode ? i == sEditDragButton : b.finger >= 0;
+		// El swarm continuo se ve pulsado mientras dura.
+		const bool pressed = sEditMode ? i == sEditDragButton : (b.finger >= 0 || (i == BTN_SWARM && sSwarmToggle));
 		const float d = b.r * 2.0f;
 		if (sEditMode && i == sEditSelected) {
 			// Halo amarillo: es el botón al que afectan + y −.

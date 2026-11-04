@@ -759,6 +759,10 @@ void StateBombWait::exec(EnemyBase* enemy)
 	Obj* ota = OBJ(enemy);
 
 	if (ota->mTargetCreature == nullptr) {
+#ifdef PIKI_PC_PORT
+		// El randomizer puede darle un tesoro; kill() directo no pasa por deathProcedure().
+		ota->throwupItem();
+#endif
 		ota->kill(nullptr);
 		return;
 	}
@@ -814,6 +818,10 @@ void StateBombMove::exec(EnemyBase* enemy)
 	Obj* ota = OBJ(enemy);
 
 	if (ota->mTargetCreature == nullptr) {
+#ifdef PIKI_PC_PORT
+		// El randomizer puede darle un tesoro; kill() directo no pasa por deathProcedure().
+		ota->throwupItem();
+#endif
 		ota->kill(nullptr);
 		return;
 	}
@@ -878,6 +886,10 @@ void StateBombTurn::exec(EnemyBase* enemy)
 	Obj* ota = OBJ(enemy);
 
 	if (ota->mTargetCreature == nullptr) {
+#ifdef PIKI_PC_PORT
+		// El randomizer puede darle un tesoro; kill() directo no pasa por deathProcedure().
+		ota->throwupItem();
+#endif
 		ota->kill(nullptr);
 		return;
 	}

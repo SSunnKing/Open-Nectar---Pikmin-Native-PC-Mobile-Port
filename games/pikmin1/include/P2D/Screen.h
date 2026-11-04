@@ -50,6 +50,9 @@ private:
 	bool _EC;                       // _EC
 	zen::PikaAlphaMgr* mAlphaMgr;   // _F0
 	zen::ogTexAnimMgr* mTexAnimMgr; // _F4, unknown
+#if defined(PIKI_PC_PORT)
+	char mPcBloName[32] = {}; // the .blo file name, for the button prompt log
+#endif
 };
 
 #endif

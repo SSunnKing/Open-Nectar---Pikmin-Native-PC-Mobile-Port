@@ -23,7 +23,9 @@ static u32 padChannels[PAD_CHANMAX] = { PAD_CHAN0_BIT, PAD_CHAN1_BIT, PAD_CHAN2_
 
 #if defined(PIKI_PC_PORT)
 // Netplay input record/replay reads and overwrites the polled pads here,
-// after PADRead and before the tick consumes them.
+// after PADRead and PADClamp and before the tick consumes them. PADClamp
+// subtracts its dead zone, so it is not idempotent: a replay or a remote
+// sample must not be clamped a second time.
 PADStatus* pc_netplay_pad_status(void) { return sControllerPad; }
 #endif
 

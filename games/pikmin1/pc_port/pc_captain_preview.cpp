@@ -17,6 +17,7 @@
 #include "mods/pc_hd_models.h"
 #include "pc_coop.h"
 #include "mods/pc_pikmin_models.h"
+#include "timing/pc_render_phase.h"
 
 #include <chrono>
 #include <cmath>
@@ -33,6 +34,8 @@ struct PreviewModel {
 	PaniPikiAnimator upper;
 	PaniPikiAnimator lower;
 	bool animated = false;
+	bool hasAnimatedTick = false;
+	std::uint64_t animatedTick = 0;
 };
 
 // 0 = Olimar (y Louie HD encima de su esqueleto), 1..3 = Pikmin rojo/amarillo/azul.
@@ -220,8 +223,13 @@ void pc_captain_preview_draw(int captain, int x, int y, int w, int h, int virtW,
 	const f32 yaw  = selected ? secs * 1.2f : 0.35f;
 
 	if (m->animated) {
-		m->upper.animate(m->upper.getAnimationSpeed());
-		m->lower.animate(m->lower.getAnimationSpeed());
+		const std::uint64_t tick = pc_render_tick_serial();
+		if (pc_render_is_authoritative() && (!m->hasAnimatedTick || m->animatedTick != tick)) {
+			m->upper.animate(m->upper.getAnimationSpeed());
+			m->lower.animate(m->lower.getAnimationSpeed());
+			m->animatedTick = tick;
+			m->hasAnimatedTick = true;
+		}
 		m->upper.changeContext(&m->ctxB);
 		m->lower.changeContext(&m->ctxA);
 		m->upper.updateContext();

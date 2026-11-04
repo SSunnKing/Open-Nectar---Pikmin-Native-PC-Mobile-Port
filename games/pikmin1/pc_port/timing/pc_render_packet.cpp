@@ -80,6 +80,8 @@ bool PcRenderPacketStore::preparePresentation(uint64_t targetSerial, double alph
 		return false;
 	}
 
+	// Reserve packet vector capacity up front to prevent repeated reallocations when preparing presentation frames. Behavior is identical.
+	mImpl->presentationFrame.packets.reserve(sourceFrame->packets.size());
 	for (const auto& packet : sourceFrame->packets) {
 		mImpl->presentationFrame.packets.push_back(std::make_unique<PcRenderPacket>(*packet));
 	}

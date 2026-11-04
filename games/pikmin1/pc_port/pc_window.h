@@ -65,8 +65,31 @@ enum {
     PC_KEY_ACT_BOMB          = 24,
     // Modo Speedrun: mantener 1 s reinicia la run (pc_speedrun.cpp).
     PC_KEY_ACT_SPEEDRUN_RESET = 25,
+    // Esquema Switch (y opcionales en el de GameCube). Al final, como los demás.
+    // Mantener: el stick derecho hace swarm en vez de mover la cámara (L de Switch).
+    PC_KEY_ACT_SWARM_STICK    = 26,
+    // Tumbarse en un botón propio (en GameCube es la cruceta abajo).
+    PC_KEY_ACT_LIEDOWN        = 27,
+    // Mantener: el stick derecho mueve el cursor (como el ratón) en vez de la cámara o el swarm.
+    PC_KEY_ACT_AIM_STICK      = 28,
     PC_KEY_ACT_COUNT
 };
+
+// Esquema de botones del mando: qué hace cada botón por defecto. Los botones
+// reasignados en Controls mandan sobre el esquema.
+enum {
+    PC_PAD_SCHEME_GAMECUBE = 0,
+    PC_PAD_SCHEME_SWITCH   = 1,
+    PC_PAD_SCHEME_COUNT
+};
+// Apuntar con el stick derecho (solo mando): 0 = no, 1 = mientras se mantiene
+// "Aim cursor with right stick", 2 = siempre. sens multiplica la velocidad.
+enum { PC_RS_AIM_OFF = 0, PC_RS_AIM_HOLD = 1, PC_RS_AIM_ALWAYS = 2 };
+void pc_window_set_rs_aim(int mode, float sens);
+void pc_window_set_pad_scheme(int scheme);
+int pc_window_get_pad_scheme(void);
+// Botón por defecto de una acción en un esquema (-1 = ninguno).
+int pc_window_scheme_default_gamepad_binding(int scheme, int action);
 void pc_window_set_key_binding(int action, SDL_Scancode scancode);
 SDL_Scancode pc_window_get_key_binding(int action);
 // Issue #68: segunda tecla por acción (SDL_SCANCODE_UNKNOWN = ninguna).
@@ -122,6 +145,8 @@ extern const int kDefaultGamepadBindings[PC_KEY_ACT_COUNT];
 // Gamepad remapping. Values are SDL_GameControllerButton, -1 for default,
 // or PC_GP_AXIS_BIND + axis*2 + (positive?1:0) for analog axes / triggers.
 #define PC_GP_AXIS_BIND 1000
+// Acción sin botón (desasignada en Controls). -1 sigue siendo "por defecto".
+#define PC_GP_BIND_NONE (-2)
 void pc_window_set_gamepad_binding(int action, int button);
 int pc_window_get_gamepad_binding(int action);
 // Coop: bindings del mando de J2 (mismo formato; -1 = por defecto).
@@ -207,6 +232,8 @@ int pc_window_get_control_mode(void);
 void pc_window_set_mouse_sensitivity(float sensitivity);
 float pc_window_get_mouse_sensitivity(void);
 void pc_window_set_settings_menu_open(bool open);
+void pc_window_set_gameplay_active(bool active);  // pointer is captured only while a level runs
+void pc_window_set_menu_overlay(bool open);       // a pause or in-game menu releases the pointer
 
 // Virtual cursor (mouse-controlled cursor input)
 extern "C" s8 pc_window_get_virtual_cursor_x(void);

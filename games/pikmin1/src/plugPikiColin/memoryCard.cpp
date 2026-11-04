@@ -736,7 +736,7 @@ bool MemoryCard::getCardStatus(int channel)
  */
 void MemoryCard::checkUseFile()
 {
-#if defined(VERSION_GPIP01)
+#if defined(VERSION_GPIP01) || defined(PIKI_PC_PORT)
 	DVDDiskID* diskID = DVDGetCurrentDiskID();
 #endif
 	for (int i = 0; i < 127; i++) {
@@ -745,6 +745,15 @@ void MemoryCard::checkUseFile()
 		if (CARDGetStatus(mCardChannel, i, &stat) < 0) {
 			continue;
 		}
+#if defined(PIKI_PC_PORT)
+		// P1 y P2 comparten carpeta de tarjeta. La version USA no mira de que
+		// juego es cada archivo y toma "Pikmin2_SaveData" por un temporal suyo
+		// ("Pikmin*"), que luego borra si no hay partida de P1 (#253). El PAL
+		// ya filtra por juego; aplicarlo en todas las versiones.
+		if (diskID && (memcmp(stat.gameName, diskID->gameName, 4) != 0 || memcmp(stat.company, diskID->company, 2) != 0)) {
+			continue;
+		}
+#endif
 		OSTicksToCalendarTime(OSSecondsToTicks((OSTime)stat.time), &calendar);
 
 		(i / 100);

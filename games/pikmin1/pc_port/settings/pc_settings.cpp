@@ -22,6 +22,8 @@
 #include "pc_file_dialog.h"
 #include "settings/pc_settings_p2d.h"
 #include "pc_menu_repeat.h"
+#include "pc_menu_click.h"
+#include "settings/pc_prompt_pointer.h"
 #ifdef __ANDROID__
 #include "android/pc_texpack_android.h"
 #include "android/pc_save_android.h"
@@ -96,7 +98,7 @@ struct PcConfig {
     int displayMode = PC_WINDOW_FULLSCREEN_WINDOWED; // 0 windowed, 1 fullscreen, 2 borderless
     double refreshRate = 0.0;                        // 0 = auto (detect)
     bool vsync = true;                               // presentation pacing on/off
-    float renderScale = 2.0f / 3.0f;                 // internal 3D resolution multiplier
+    float renderScale = 0.0f; // 0 = original de GameCube (480 líneas)                 // internal 3D resolution multiplier
     int aspectRatioMode = 0;                         // 0=auto, 1=4:3, 2=16:10, 3=16:9, 4=21:9
 
     // FPS mode (0=30fps, 1=60fps, 2=120fps experimental, 3=monitor refresh rate)
@@ -104,6 +106,11 @@ struct PcConfig {
 
     // Control mode (0=Classic, 1=Mouse Cursor)
     int controlMode = PC_CONTROL_CLASSIC;
+    // Botones del mando por defecto: GameCube o Switch (PC_PAD_SCHEME_*).
+    int padScheme = PC_PAD_SCHEME_GAMECUBE;
+    // Apuntar con el stick derecho (PC_RS_AIM_*) y su sensibilidad.
+    int rsAimMode = PC_RS_AIM_OFF;
+    float rsAimSens = 1.0f;
 
     // Keyboard bindings (scancodes for each action)
     int keyboardBindings[PC_KEY_ACT_COUNT];
@@ -154,6 +161,8 @@ struct PcConfig {
     // Mod: free camera. Shift + mouse orbits on keyboard, the right stick
     // orbits on a pad, and the squad moves to the Swarm button.
     int freeCamera = 0;
+    // Free Camera: L mira hacia el cursor (1) o al frente del capitán (0).
+    int faceCursor = 0;
     int whistleRadiusPct = 100; // radio máximo del silbato, % del original
     int throwSpeedPct = 100;    // velocidad de las animaciones de coger y lanzar
     int throwCancelB = 0;       // B con un Pikmin en la mano lo devuelve al grupo
@@ -265,10 +274,13 @@ struct PcConfig {
         displayMode = PC_WINDOW_FULLSCREEN_WINDOWED;
         refreshRate = 0.0;
         vsync = true;
-        renderScale = 2.0f / 3.0f;
+        renderScale = 0.0f;
         aspectRatioMode = 0;
         fpsMode = 0;
         controlMode = PC_CONTROL_CLASSIC;
+        padScheme = PC_PAD_SCHEME_GAMECUBE;
+        rsAimMode = PC_RS_AIM_OFF;
+        rsAimSens = 1.0f;
         mouseSensitivity = 1.0f;
         gyroEnabled = 0;
         gyroSensitivity = 1.0f;
@@ -286,6 +298,7 @@ struct PcConfig {
         tekiHealthPct = 100;
         infiniteDay = 0;
         freeCamera = 0;
+        faceCursor = 0;
         whistleRadiusPct = 100;
         throwSpeedPct = 100;
         throwCancelB = 0;
@@ -528,6 +541,14 @@ Uint32 sCapturePrevMouse = 0; // mouse buttons seen on the previous capture tick
 
 // Gamepad controls submenu state.
 bool sInGamepadSubmenu = false;
+// Controller Guide: qué hace cada botón con el esquema, los botones y los
+// mods de ahora mismo (se rehace cada vez que se pinta).
+bool sInPadGuide = false;
+int sPadGuideSel = 0;
+int padGuideCount();
+const char* padGuideLabel(int i);
+const char* padGuideValue(int i);
+bool padGuideIsHeader(int i);
 int sGamepadSelection = 0;
 bool sWaitingForButton = false;
 
@@ -892,6 +913,8 @@ void applyGraphics(const PcConfig& config) {
 
 void applyControls(const PcConfig& config) {
     pc_window_set_control_mode(config.controlMode);
+    pc_window_set_pad_scheme(config.padScheme);
+    pc_window_set_rs_aim(config.rsAimMode, config.rsAimSens);
     pc_window_set_mouse_sensitivity(config.mouseSensitivity);
     pc_window_set_stick_dead_zone(config.stickDeadZone);
     pc_window_set_stick_invert(config.stickInvert);
@@ -983,6 +1006,7 @@ void closeMenu() {
     sHdModelRestartPrompt = false;
     sInControlsSubmenu = false;
     sInGamepadSubmenu = false;
+    sInPadGuide = false;
     sWaitingForKey = false;
     sWaitingForButton = false;
     sCaptureWaitRelease = false;
@@ -1204,6 +1228,7 @@ void saveConfig() {
     out << "tekiHealthPct = " << sConfig.tekiHealthPct << "\n";
     out << "infiniteDay = " << sConfig.infiniteDay << "\n";
     out << "freeCamera = " << sConfig.freeCamera << "\n";
+    out << "faceCursor = " << sConfig.faceCursor << "\n";
     out << "whistleRadiusPct = " << sConfig.whistleRadiusPct << "\n";
     out << "throwSpeedPct = " << sConfig.throwSpeedPct << "\n";
     out << "throwCancelB = " << sConfig.throwCancelB << "\n";
@@ -1273,6 +1298,9 @@ void saveConfig() {
     out << "pikminModelRed = " << sConfig.pikminModel[Red] << "\n";
     out << "pikminModelYellow = " << sConfig.pikminModel[Yellow] << "\n";
     out << "controlMode = " << sConfig.controlMode << "\n";
+    out << "padScheme = " << sConfig.padScheme << "\n";
+    out << "rsAimMode = " << sConfig.rsAimMode << "\n";
+    out << "rsAimSens = " << sConfig.rsAimSens << "\n";
     out << "mouseSensitivity = " << sConfig.mouseSensitivity << "\n";
     out << "gyroEnabled = " << sConfig.gyroEnabled << "\n";
     out << "gyroSensitivity = " << sConfig.gyroSensitivity << "\n";
@@ -1333,7 +1361,19 @@ void loadConfig() {
         else if (key == "vsync") sConfig.vsync = atoi(val.c_str()) != 0;
         else if (key == "renderScale") {
             sConfig.renderScale = (float)atof(val.c_str());
-            if (sConfig.renderScale < 0.25f || sConfig.renderScale > 4.0f) sConfig.renderScale = 2.0f / 3.0f;
+            if (sConfig.renderScale != 0.0f && (sConfig.renderScale < 0.25f || sConfig.renderScale > 4.0f)) sConfig.renderScale = 0.0f;
+        }
+        else if (key == "rsAimMode") {
+            sConfig.rsAimMode = atoi(val.c_str());
+            if (sConfig.rsAimMode < PC_RS_AIM_OFF || sConfig.rsAimMode > PC_RS_AIM_ALWAYS) sConfig.rsAimMode = PC_RS_AIM_OFF;
+        }
+        else if (key == "rsAimSens") {
+            sConfig.rsAimSens = (float)atof(val.c_str());
+            if (!(sConfig.rsAimSens >= 0.25f && sConfig.rsAimSens <= 3.0f)) sConfig.rsAimSens = 1.0f;
+        }
+        else if (key == "padScheme") {
+            sConfig.padScheme = atoi(val.c_str());
+            if (sConfig.padScheme < 0 || sConfig.padScheme >= PC_PAD_SCHEME_COUNT) sConfig.padScheme = PC_PAD_SCHEME_GAMECUBE;
         }
         else if (key == "controlMode") {
             sConfig.controlMode = atoi(val.c_str());
@@ -1400,6 +1440,7 @@ void loadConfig() {
         else if (key == "infiniteDay") {
             sConfig.infiniteDay = atoi(val.c_str()) ? 1 : 0;
         }
+        else if (key == "faceCursor") sConfig.faceCursor = atoi(val.c_str()) ? 1 : 0;
         else if (key == "freeCamera") {
             sConfig.freeCamera = atoi(val.c_str()) ? 1 : 0;
         }
@@ -1627,7 +1668,7 @@ void loadConfig() {
             int idx = atoi(key.substr(p2 ? 4 : 3).c_str());
             if (idx >= 0 && idx < PC_KEY_ACT_COUNT) {
                 const int button = atoi(val.c_str());
-                const bool isButton = button >= -1 && button < SDL_CONTROLLER_BUTTON_MAX;
+                const bool isButton = button >= PC_GP_BIND_NONE && button < SDL_CONTROLLER_BUTTON_MAX;
                 const int axis = (button - PC_GP_AXIS_BIND) / 2;
                 const bool isAxis = button >= PC_GP_AXIS_BIND && axis >= 0 && axis < SDL_CONTROLLER_AXIS_MAX;
                 if (isButton || isAxis) {
@@ -1681,14 +1722,24 @@ bool padNavRight(SDL_GameController* c)
 	return padEdge((c && (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)
 	                   || menuStickHorizontal(c, 1))) || (sTouchFrameButtons & PAD_BUTTON_RIGHT), 3);
 }
-bool padNavA(SDL_GameController* c) { return padEdge((c && SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_A)) || (sTouchFrameButtons & PAD_BUTTON_A), 4); }
-bool padNavB(SDL_GameController* c) { return padEdge((c && SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_B)) || (sTouchFrameButtons & PAD_BUTTON_B), 5); }
+// A y B del menú siguen los bindings del mando, como el juego: con A y B
+// intercambiados el menú aceptaba con uno y el juego con el otro. Una acción
+// sin botón asignado vuelve al físico para que el menú nunca quede inservible.
+bool menuPadHeld(SDL_GameController* c, int action, SDL_GameControllerButton physical)
+{
+	if (!c)
+		return false;
+	const int bind = pc_window_get_gamepad_binding(action);
+	if (bind < 0)
+		return SDL_GameControllerGetButton(c, physical) != 0;
+	return pc_window_gamepad_bind_held(c, bind);
+}
+bool padNavA(SDL_GameController* c) { return padEdge(menuPadHeld(c, PC_KEY_ACT_A, SDL_CONTROLLER_BUTTON_A) || (sTouchFrameButtons & PAD_BUTTON_A), 4); }
+bool padNavB(SDL_GameController* c) { return padEdge(menuPadHeld(c, PC_KEY_ACT_B, SDL_CONTROLLER_BUTTON_B) || (sTouchFrameButtons & PAD_BUTTON_B), 5); }
 
 // The new-game prompt is a game-facing dialog rather than the F1 settings
 // menu. Its accept/cancel actions follow the configured A/B bindings, which
 // may be either SDL buttons or the axis encodings used by the remapping page.
-// Keep these separate from padNavA/B: F1 navigation deliberately retains its
-// physical A/B convention.
 bool promptPadBinding(SDL_GameController* c, int action, int edgeSlot)
 {
 	return c && padEdge(pc_window_gamepad_bind_held(c, pc_window_get_gamepad_binding(action)), edgeSlot);
@@ -1712,7 +1763,7 @@ bool captureConfirmHeld(SDL_GameController* ctl)
 		return true;
 	if (SDL_SCANCODE_SPACE < numKeys && keys[SDL_SCANCODE_SPACE])
 		return true;
-	return ctl && SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_A);
+	return menuPadHeld(ctl, PC_KEY_ACT_A, SDL_CONTROLLER_BUTTON_A);
 }
 
 } // namespace
@@ -1737,29 +1788,18 @@ bool menuAcceptClick() {
     return (sMenuMouseEdge & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
 }
 
-// Window coordinates, 0-1. Menus that hit-test cards use this instead of a
-// second take of the click.
-bool menuMouseNorm(float* nx, float* ny) {
-    int mx = 0, my = 0;
-    SDL_GetMouseState(&mx, &my);
-    SDL_Window* win = SDL_GetMouseFocus();
-    int ww = 0, wh = 0;
-    if (!win) return false;
-    SDL_GetWindowSize(win, &ww, &wh);
-    if (ww <= 0 || wh <= 0) return false;
-    *nx = float(mx) / float(ww);
-    *ny = float(my) / float(wh);
-    return true;
-}
-
 // Accept: Enter, numpad Enter, Space, left click, and a non-mouse A binding.
 // Cancel: Escape, Backspace, right click, and a B binding that is not Shift.
 // A text field keeps Backspace for delete and does not call menuCancelKey.
-bool menuOkKey() {
+// The accept keys without the left click, for a panel whose rows take the click themselves.
+bool menuOkKeyNoClick() {
     return keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_KP_ENTER)
-        || keyWentDown(SDL_SCANCODE_SPACE) || menuAcceptClick()
+        || keyWentDown(SDL_SCANCODE_SPACE)
         || menuBindingWentDown(pc_window_get_key_binding(PC_KEY_ACT_A))
         || menuBindingWentDown(pc_window_get_key_binding2(PC_KEY_ACT_A));
+}
+bool menuOkKey() {
+    return menuOkKeyNoClick() || menuAcceptClick();
 }
 static bool menuCancelBinding(int bind) {
     if (bind == SDL_SCANCODE_LSHIFT || bind == SDL_SCANCODE_RSHIFT) return false;
@@ -2236,6 +2276,22 @@ void pollMenuInput() {
         return;
     }
 
+    // Controller Guide: solo lectura; arriba/abajo recorre, B/Esc vuelve.
+    if (sInPadGuide) {
+        bool up = keyWentDown(SDL_SCANCODE_UP) || keyWentDown(SDL_SCANCODE_W);
+        bool down = keyWentDown(SDL_SCANCODE_DOWN) || keyWentDown(SDL_SCANCODE_S);
+        if (ctl || sTouchFrameButtons) {
+            if (padNavUp(ctl)) up = true;
+            if (padNavDown(ctl)) down = true;
+        }
+        const int count = padGuideCount();
+        if (up && sPadGuideSel > 0) sPadGuideSel--;
+        if (down && sPadGuideSel < count - 1) sPadGuideSel++;
+        if (menuCancelKey() || keyWentDown(SDL_SCANCODE_B) || padNavB(ctl) || padNavA(ctl) || menuOkKey())
+            sInPadGuide = false;
+        return;
+    }
+
     // Gamepad submenu (button capture mode).
     if (sInGamepadSubmenu) {
         if (pollButtonCapture(ctl)) return;
@@ -2273,8 +2329,14 @@ void pollMenuInput() {
             sCaptureWaitRelease = true;
             return;
         }
+        // Izquierda/derecha: por defecto <-> ninguno; Supr/Retroceso lo vacía.
+        if (keyWentDown(SDL_SCANCODE_DELETE) || keyWentDown(SDL_SCANCODE_BACKSPACE)) {
+            pendingPadBinds()[sGamepadSelection] = PC_GP_BIND_NONE;
+            return;
+        }
         if (left || right) {
-            pendingPadBinds()[sGamepadSelection] = -1;
+            int& b = pendingPadBinds()[sGamepadSelection];
+            b = b == -1 ? PC_GP_BIND_NONE : -1;
             return;
         }
         if (menuCancelKey() || keyWentDown(SDL_SCANCODE_K) ||
@@ -2568,6 +2630,10 @@ void pollMenuInput() {
             sWaitingForKey = false;
             sCaptureWaitRelease = false;
             break;
+        case PC_SET_PICKER_PADGUIDE:
+            sInPadGuide = true;
+            sPadGuideSel = 0;
+            break;
         case PC_SET_PICKER_GAMEPAD:
             sInGamepadSubmenu = true;
             sGamepadSelection = pc_settings_picker_current(picker);
@@ -2633,6 +2699,13 @@ bool pollButtonCapture(SDL_GameController* ctl) {
     if (sWaitingForButton) {
         // B/Circle is a bindable face button. Only Esc cancels capture.
         if (keyWentDown(SDL_SCANCODE_ESCAPE)) {
+            sWaitingForButton = false;
+            sCaptureWaitRelease = false;
+            return true;
+        }
+        // Supr o Retroceso dejan la acción sin botón, como en el teclado.
+        if (keyWentDown(SDL_SCANCODE_DELETE) || keyWentDown(SDL_SCANCODE_BACKSPACE)) {
+            pendingPadBinds()[sGamepadSelection] = PC_GP_BIND_NONE;
             sWaitingForButton = false;
             sCaptureWaitRelease = false;
             return true;
@@ -2705,6 +2778,20 @@ void advancedRowChange(int row, bool left, bool right) {
     // Gyro calibrate: measures the resting drift of the active sensor.
     else if (row == 7) {
         if (left || right) pc_gyro_calibrate_start();
+    }
+    // Controller layout: GameCube or Switch button defaults.
+    else if (row == 8) {
+        if (left || right) sPending.padScheme = sPending.padScheme == PC_PAD_SCHEME_SWITCH ? PC_PAD_SCHEME_GAMECUBE : PC_PAD_SCHEME_SWITCH;
+    }
+    // Right stick aim: Off / Hold button / Always.
+    else if (row == 9) {
+        if (left) sPending.rsAimMode = (sPending.rsAimMode + 2) % 3;
+        else if (right) sPending.rsAimMode = (sPending.rsAimMode + 1) % 3;
+    }
+    // Right stick aim sensitivity (0.25 - 3.00, step 0.25).
+    else if (row == 10) {
+        if (left) sPending.rsAimSens = std::max(0.25f, sPending.rsAimSens - 0.25f);
+        if (right) sPending.rsAimSens = std::min(3.0f, sPending.rsAimSens + 0.25f);
     }
 }
 
@@ -2956,6 +3043,10 @@ void modsRowChange(int row, bool left, bool right) {
     else if (row == 40) {
         if (left || right) sPending.eternalNight = sPending.eternalNight ? 0 : 1;
     }
+    // Free Camera: hacia dónde mira la cámara al pulsar L.
+    else if (row == 43) {
+        if (left || right) sPending.faceCursor = sPending.faceCursor ? 0 : 1;
+    }
     else if (row == 42) {
         static const int kSteps[] = { 0, 30, 60, 120 };
         int i = 0;
@@ -3119,7 +3210,8 @@ void mainRowValue(int row, char* out, size_t n) {
     snprintf(valueBuf[2], sizeof(valueBuf[2]), "%s", aspectBuf);
     {
         float rs = sPending.renderScale;
-        if (fabsf(rs - 2.0f / 3.0f) < 0.01f) snprintf(valueBuf[3], sizeof(valueBuf[3]), "Auto (native)");
+        if (rs <= 0.0f) snprintf(valueBuf[3], sizeof(valueBuf[3]), "Original (GameCube, 480p)");
+        else if (fabsf(rs - 2.0f / 3.0f) < 0.01f) snprintf(valueBuf[3], sizeof(valueBuf[3]), "Auto (native)");
         else snprintf(valueBuf[3], sizeof(valueBuf[3]), "%.2fx", rs);
     }
     if (sPending.refreshRate <= 0.0) snprintf(valueBuf[4], sizeof(valueBuf[4]), "Auto");
@@ -3174,8 +3266,8 @@ void mainRowChange(int row, bool left, bool right, bool ok) {
         }
         break;
     case ROW_RENDER_SCALE: {
-        static const float kScales[] = { 2.0f / 3.0f, 0.5f, 1.0f, 1.5f, 2.0f };
-        constexpr int kScaleCount = 5;
+        static const float kScales[] = { 0.0f, 0.5f, 2.0f / 3.0f, 1.0f, 1.5f, 2.0f };
+        constexpr int kScaleCount = 6;
         int idx = 0;
         float cur = sPending.renderScale;
         for (int i = 0; i < kScaleCount; i++) {
@@ -3446,10 +3538,22 @@ bool drawGlassOption(int boxX, int boxY, int boxW, int boxH, const char* label, 
     return true;
 }
 
+// The button icons of the help line drawn last, and where each one starts. The VS lobby's
+// "A: play" hint takes a click over its span, so it reads these after the line is drawn.
+struct HelpLineIcon {
+    char letter;
+    int x;
+};
+constexpr int kHelpLineIcons = 8;
+HelpLineIcon sHelpIcons[kHelpLineIcons];
+int sHelpIconCount = 0;
+int sHelpLineY = 0, sHelpLineH = 0, sHelpLineEnd = 0;
+
 // Línea de ayuda centrada en cx. Con el marco P2D, cada letra de botón suelta
 // (A, B, X, Y, Z seguida de espacio, "/" o ":") se dibuja con el icono del
 // botón del juego; el resto del texto no cambia.
 void drawHelpLine(int cx, int y, const char* text, Colour c, int maxWidth = 570) {
+    sHelpIconCount = 0;
     if (!pc_settings_p2d_active()) {
         drawTextOutline(cx - menuTextWidth(text) / 2, y, "%s", c, Colour(8, 12, 28, 255), text);
         return;
@@ -3498,6 +3602,7 @@ void drawHelpLine(int cx, int y, const char* text, Colour c, int maxWidth = 570)
             }
             n = 0;
             if (*p == '\0') break;
+            if (sHelpIconCount < kHelpLineIcons) sHelpIcons[sHelpIconCount++] = HelpLineIcon{ *p, x };
             if (!pc_settings_p2d_button(x, y + (fh - icon) / 2 - 1, icon, *p)) {
                 const char letter[2] = { *p, '\0' };
                 pc_settings_p2d_text(x + (icon - pc_settings_p2d_text_width(letter, fw)) / 2, y, letter, c, fw, fh);
@@ -3507,6 +3612,24 @@ void drawHelpLine(int cx, int y, const char* text, Colour c, int maxWidth = 570)
         }
         if (n < int(sizeof(chunk)) - 1) chunk[n++] = *p;
     }
+    sHelpLineY = y;
+    sHelpLineH = fh;
+    sHelpLineEnd = x;
+}
+
+// Span of the button icon for letter in the help line drawn last: from its icon to the next
+// icon, or to the end of the line. False when that line drew no such icon.
+bool helpLineIconSpan(char letter, int* x0, int* x1, int* y0, int* y1)
+{
+    for (int i = 0; i < sHelpIconCount; i++) {
+        if (sHelpIcons[i].letter != letter) continue;
+        *x0 = sHelpIcons[i].x;
+        *x1 = i + 1 < sHelpIconCount ? sHelpIcons[i + 1].x : sHelpLineEnd;
+        *y0 = sHelpLineY;
+        *y1 = sHelpLineY + sHelpLineH;
+        return true;
+    }
+    return false;
 }
 
 void drawSubmenuSurface(DGXGraphics* gfx, int x, int y, int w, int h,
@@ -4979,15 +5102,16 @@ namespace {
 // Geometría compartida por el dibujo y los toques: tres filas de dos
 // opciones (Difficulty / Game mode / Skip tutorial) y, debajo, el botón Start.
 // Las flechas mueven el cursor, A elige la opción bajo él y solo Start empieza.
-const int kNgPanelW = 620;
-const int kNgPanelH = 420;
-const int kNgBoxW   = 230;
-const int kNgBoxH   = 44;
-const int kNgRowCount = 3;
+// The numbers live in pc_prompt_pointer so the mouse hit test uses the same boxes.
+const int kNgPanelW = kPcNewGamePanelW;
+const int kNgPanelH = kPcNewGamePanelH;
+const int kNgBoxW   = kPcNewGameBoxW;
+const int kNgBoxH   = kPcNewGameBoxH;
+const int kNgRowCount = kPcNewGameRows;
 const int kNgStartRow = kNgRowCount; // fila del botón Start
-int ngRowY(int panelY, int row) { return panelY + 72 + row * 70; }
-int ngStartX(int panelX) { return panelX + kNgPanelW / 2 - kNgBoxW / 2; }
-int ngBoxX(int panelX, int i) { return panelX + 40 + i * (kNgBoxW + 40); }
+int ngRowY(int panelY, int row) { return pc_newgame_row_y(panelY, row); }
+int ngStartX(int panelX) { return pc_newgame_start_x(panelX); }
+int ngBoxX(int panelX, int i) { return pc_newgame_box_x(panelX, i); }
 
 // En una partida Randomizer la fila 2 (Skip tutorial) queda fija en Yes: el
 // tutorial depende de generadores y una pieza que el barajado cambia.
@@ -5007,6 +5131,47 @@ void ngSetRowValue(int row, int v) {
     else               sNewGamePromptSkipTutorial = v != 0;
 }
 
+// Mouse on the New Game panel. Motion over an option or Start moves the cursor there. A click
+// on an option chooses it and returns 1; a click on Start returns 2. Empty space and the
+// locked Randomizer row do nothing. The claim keeps the click from also being A.
+int ngPointer() {
+    pc_menu_click_claim_pointer_menu();
+    DGXGraphics* gfx = (gsys && gsys->mDGXGfx) ? static_cast<DGXGraphics*>(gsys->mDGXGfx) : nullptr;
+    if (!gfx) return 0;
+    const int screenW = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
+    const int screenH = gfx->mScreenHeight;
+    PcMenuClickRect rects[PC_NEWGAME_PTR_COUNT];
+    pc_newgame_pointer_rects(screenW, screenH, rects);
+    int active[PC_NEWGAME_PTR_COUNT];
+    for (int i = 0; i < PC_NEWGAME_PTR_COUNT; ++i) active[i] = (i < PC_NEWGAME_PTR_START && ngSeedRow(i / 2)) ? 0 : 1;
+    float x = 0.0f, y = 0.0f;
+    if (pc_gfx_menu_graph_point(false, &x, &y)) {
+        const PcMenuClickResult hover
+            = pc_menu_click_hover(PC_MENU_CLICK_MAIN, x, y, rects, active, PC_NEWGAME_PTR_COUNT, kPcMenuClickMargin);
+        if (hover.index == PC_NEWGAME_PTR_START) {
+            sNewGamePromptRow = kNgStartRow;
+        } else if (hover.index >= 0) {
+            sNewGamePromptRow = hover.index / 2;
+            sNewGamePromptCol = hover.index % 2;
+        }
+    }
+    if (pc_gfx_menu_graph_point(true, &x, &y)) {
+        const PcMenuClickResult hit
+            = pc_menu_click_resolve(PC_MENU_CLICK_MAIN, x, y, rects, active, PC_NEWGAME_PTR_COUNT, kPcMenuClickMargin);
+        if (hit.action == PC_MENU_CLICK_ACTIVATE) {
+            if (hit.index == PC_NEWGAME_PTR_START) {
+                sNewGamePromptRow = kNgStartRow;
+                return 2;
+            }
+            sNewGamePromptRow = hit.index / 2;
+            sNewGamePromptCol = hit.index % 2;
+            ngSetRowValue(sNewGamePromptRow, sNewGamePromptCol);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void pcNewGamePromptInput() {
     if (!sNewGamePromptOpen) return;
 
@@ -5014,8 +5179,10 @@ void pcNewGamePromptInput() {
     bool right  = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
     bool up     = keyWentDown(SDL_SCANCODE_UP)    || keyWentDown(SDL_SCANCODE_W);
     bool down   = keyWentDown(SDL_SCANCODE_DOWN)  || keyWentDown(SDL_SCANCODE_S);
-    bool accept = menuOkKey();
+    // The boxes hit-test the left click (ngPointer), so a click is not also A on the cursor.
+    bool accept = menuOkKeyNoClick();
     bool cancel = menuCancelKey();
+    cancel |= pc_menu_click_take_back(); // right click: back
 
     left |= (sTouchFrameButtons & PAD_BUTTON_LEFT) != 0;
     right |= (sTouchFrameButtons & PAD_BUTTON_RIGHT) != 0;
@@ -5063,6 +5230,7 @@ void pcNewGamePromptInput() {
         if (promptPadA(ctl))  accept = true;
         if (promptPadB(ctl))  cancel = true;
     }
+    if (ngPointer() == 2) accept = true; // Start was clicked; an option click already chose it
 
     const int rows = kNgRowCount + 1; // opciones + Start
     if (up || down) {
@@ -5193,6 +5361,7 @@ void pc_newgame_prompt_draw(void) {
 
     const char* help = "Arrows: move    A / Enter: select    B / Esc: back";
     drawHelpLine(panelX + panelW / 2, panelY + 382, help, Colour(150, 165, 195, 255));
+    pc_gfx_note_menu_tap_space(screenW, screenH); // ngPointer maps the mouse through this projection
 }
 
 
@@ -5432,15 +5601,15 @@ const char* captainArt(int captain) {
 // Si falta el PNG de un Pikmin, sale de la textura del juego piki3 (116x64):
 // rojo, amarillo y azul tumbados con su hoja. Columnas de cada uno.
 const int kCaptainPikiCol[PC_CAPTAIN_COUNT][2] = { { 0, 0 }, { 0, 0 }, { 0, 38 }, { 34, 78 }, { 76, 116 } };
-constexpr int kCaptainBoxW = 104, kCaptainBoxGap = 9;
+constexpr int kCaptainBoxW = kPcCaptainBoxW, kCaptainBoxGap = kPcCaptainBoxGap;
 // Filas: 0 los de Pikmin 1; 1 los de Pikmin 2 instalados y el Puffmin, que
 // siempre está; 2 los personajes propios. Con las tres a la vista las
 // tarjetas son algo más bajas para caber en 480 de alto.
 constexpr int kCaptainBoxTall = 120, kCaptainBoxShort = 104;
 // Tarjetas a la vista por fila; los propios van por páginas de cinco.
-constexpr int kCaptainRowSlots = 5;
+constexpr int kCaptainRowSlots = kPcCaptainRowSlots;
 int sCaptainCustomPage = 0;
-constexpr int captainRowLeft(int count) { return (620 - (count * kCaptainBoxW + (count - 1) * kCaptainBoxGap)) / 2; }
+int captainRowLeft(int count) { return pc_captain_row_left(count); }
 int captainRowOf(int captain) {
     if (captain < PC_CAPTAIN_FIRST_PIKMIN2) return 0;
     return pc_captain_is_custom(captain) ? 2 : 1;
@@ -5538,8 +5707,9 @@ bool captainCardPos(int captain, int panelX, int panelY, int* x, int* y) {
     const int col = captainViewCol(captain);
     if (col < 0 || col >= kCaptainRowSlots) return false;
     const int shown = std::min(captainRowCount(row), kCaptainRowSlots);
-    *x = panelX + captainRowLeft(shown) + col * (kCaptainBoxW + kCaptainBoxGap);
-    *y = panelY + 84 + captainScreenRow(row) * (captainBoxH() + kCaptainBoxGap);
+    const PcMenuClickRect r = pc_captain_card_rect(panelX, panelY, captainScreenRow(row), col, shown, captainBoxH());
+    *x = r.minX;
+    *y = r.minY;
     return true;
 }
 const char* devAssignCaptainName(int captain) { return captainName(captain); }
@@ -5557,6 +5727,55 @@ const char* devAssignName(int player) {
     return "-";
 }
 
+// Mouse on the captain cards, in the graph the prompt draws (pc_captain_prompt_draw and the
+// co-op picker note it). Motion over a card highlights it. A click on a card picks it and
+// returns 1, so one click confirms; a click on a page arrow returns 2 (previous) or 3 (next).
+// Empty space does nothing. ignore drops the click and the hover during the opening window.
+int captainPickPointer(int* captain, bool ignore) {
+    pc_menu_click_claim_pointer_menu();
+    DGXGraphics* gfx = (gsys && gsys->mDGXGfx) ? static_cast<DGXGraphics*>(gsys->mDGXGfx) : nullptr;
+    if (!gfx) return 0;
+    const int screenW = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
+    const int screenH = gfx->mScreenHeight;
+    int panelX = 0, panelY = 0;
+    pc_captain_panel_origin(screenW, screenH, captainExtraH(), &panelX, &panelY);
+    constexpr int kPagePrev = -2, kPageNext = -3;
+    PcMenuClickRect rects[PC_CAPTAIN_COUNT + 2];
+    int ids[PC_CAPTAIN_COUNT + 2];
+    int count = 0;
+    for (int i = 0; i < PC_CAPTAIN_COUNT; ++i) {
+        int boxX = 0, boxY = 0;
+        if (!captainCardPos(i, panelX, panelY, &boxX, &boxY) || !pc_captain_available(i)) continue;
+        rects[count] = { boxX, boxY, boxX + kCaptainBoxW, boxY + captainBoxH() };
+        ids[count++] = i;
+    }
+    int arrowL = 0, arrowR = 0, arrowY = 0, arrowH = 0;
+    if (captainPageArrows(panelX, panelY, &arrowL, &arrowR, &arrowY, &arrowH)) {
+        rects[count] = { arrowL, arrowY, arrowL + kPcCaptainArrowW, arrowY + arrowH };
+        ids[count++] = kPagePrev;
+        rects[count] = { arrowR, arrowY, arrowR + kPcCaptainArrowW, arrowY + arrowH };
+        ids[count++] = kPageNext;
+    }
+    float x = 0.0f, y = 0.0f;
+    if (!ignore && pc_gfx_menu_graph_point(false, &x, &y)) {
+        const PcMenuClickResult hover
+            = pc_menu_click_hover(PC_MENU_CLICK_MAIN, x, y, rects, nullptr, count, kPcMenuClickMargin);
+        if (hover.index >= 0 && ids[hover.index] >= 0) *captain = ids[hover.index];
+    }
+    if (pc_gfx_menu_graph_point(true, &x, &y) && !ignore) {
+        const PcMenuClickResult hit
+            = pc_menu_click_resolve(PC_MENU_CLICK_MAIN, x, y, rects, nullptr, count, kPcMenuClickMargin);
+        if (hit.action == PC_MENU_CLICK_ACTIVATE && hit.index >= 0) {
+            const int id = ids[hit.index];
+            if (id == kPagePrev) return 2;
+            if (id == kPageNext) return 3;
+            *captain = id;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 // Selector de capitán (Olimar, Louie o un Pikmin) compartido por el prompt de mandos del
 // coop y el de 1 jugador. Devuelve 0 nada, 1 aceptado, 2 atrás.
 int captainPickInput(int player, bool keyboardOk, SDL_GameController* ctl, int* captain, bool ignoreWindow) {
@@ -5569,8 +5788,10 @@ int captainPickInput(int player, bool keyboardOk, SDL_GameController* ctl, int* 
         right  = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
         up     = keyWentDown(SDL_SCANCODE_UP)    || keyWentDown(SDL_SCANCODE_W);
         down   = keyWentDown(SDL_SCANCODE_DOWN)  || keyWentDown(SDL_SCANCODE_S);
-        accept = menuOkKey();
+        // The cards hit-test the left click (captainPickPointer), so a click is not also A.
+        accept = menuOkKeyNoClick();
         back   = menuCancelKey();
+        back |= pc_menu_click_take_back(); // right click: back
     }
     if (player == 0) {
         left |= (sTouchFrameButtons & PAD_BUTTON_LEFT) != 0;
@@ -5619,6 +5840,15 @@ int captainPickInput(int player, bool keyboardOk, SDL_GameController* ctl, int* 
         if (padEdge(SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) != 0, 12)) pagePrev = true;
         if (padEdge(SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) != 0, 13)) pageNext = true;
     }
+    // The mouse belongs to whoever has the keyboard. A click inside the opening window is
+    // taken and dropped with the rest of the input.
+    bool pointerPick = false;
+    if (keyboardOk) {
+        const int pointer = captainPickPointer(captain, ignoreWindow);
+        if (pointer == 1) pointerPick = true;
+        if (pointer == 2) pagePrev = true;
+        if (pointer == 3) pageNext = true;
+    }
     if (ignoreWindow) return 0;
     // Izquierda/derecha dan la vuelta dentro de la fila; arriba/abajo cambian
     // de fila (la segunda solo con Pikmin 2), a la misma columna o la última.
@@ -5647,29 +5877,9 @@ int captainPickInput(int player, bool keyboardOk, SDL_GameController* ctl, int* 
             captainKeepVisible(*captain);
         }
     }
-    // A click on a card selects that card. A click anywhere else confirms the
-    // card already highlighted. The opening click is ignored with the rest of
-    // the input (ignoreWindow returns above).
-    if (menuAcceptClick()) {
-        float nx = 0.0f, ny = 0.0f;
-        if (menuMouseNorm(&nx, &ny)) {
-            int dw = 0, dh = 0;
-            pc_gfx_get_drawable_size(&dw, &dh);
-            const float aspect = dh > 0 ? float(dw) / float(dh) : 4.0f / 3.0f;
-            const float screenW = aspect * 480.0f;
-            const float x = nx * screenW, y = ny * 480.0f;
-            const int panelX = int(screenW * 0.5f) - 310, panelY = 240 - (260 + captainExtraH()) / 2;
-            for (int i = 0; i < PC_CAPTAIN_COUNT; ++i) {
-                int boxX = 0, boxY = 0;
-                if (!captainCardPos(i, panelX, panelY, &boxX, &boxY) || !pc_captain_available(i)) continue;
-                if (x >= boxX && x <= boxX + kCaptainBoxW && y >= boxY && y <= boxY + captainBoxH()) {
-                    *captain = i;
-                    break;
-                }
-            }
-        }
-        accept = true;
-    }
+    // One click on a card picks it and confirms. Navigation above ran with no key held, so it
+    // left the clicked card alone.
+    if (pointerPick) accept = true;
     if (accept && *captain == PC_CAPTAIN_LOUIE && !devAssignLouieInstalled()) {
         // Sin el modelo no se puede jugar con Louie: aviso y se queda.
         sDevAssignLouieNoticeUntil = SDL_GetTicks() + 3000;
@@ -5823,6 +6033,7 @@ void pc_captain_prompt_draw(void) {
         captainPickDraw(gfx, panelX, panelY, panelW, 0, sCaptainPromptChoice,
                         captainSecondRow() ? "Arrows: choose    A / Enter: confirm    B / Esc: back"
                                             : "Left/Right: choose    A / Enter: confirm    B / Esc: back");
+        pc_gfx_note_menu_tap_space(screenW, screenH); // captainPickPointer maps the mouse through this
     }
     if (sCaptainCards3D) {
         // Mismo hueco que el sprite: encima del nombre de la tarjeta.
@@ -6004,6 +6215,7 @@ void pc_devassign_prompt_draw(void) {
             captainPickDraw(gfx, panelX, panelY, panelW, player, sDevAssignCaptain[player],
                             captainSecondRow() ? "Arrows: choose    A / Enter: confirm    B: reassign    Esc: back"
                                                : "Left/Right: choose    A / Enter: confirm    B: reassign    Esc: back");
+            pc_gfx_note_menu_tap_space(screenW, screenH);
         }
         if (sCaptainCards3D) {
             // Mismo hueco que el sprite: encima del nombre de la tarjeta.
@@ -6225,8 +6437,32 @@ void vsRuleText(int row, const char** label, char* value, size_t n)
 
 bool sVsRulesOpen   = false;
 int sVsRulesRow     = 0; // 0 = mapa, 1.. = reglas (vsRuleField(row - 1))
+// The "A: play" span of the lobby's help line, from the last frame the lobby drew.
+bool sVsPlaySpanOk = false;
+int sVsPlayX0 = 0, sVsPlayX1 = 0, sVsPlayY0 = 0, sVsPlayY1 = 0;
 int sVsRulesResult  = PC_DEVASSIGN_PENDING;
 constexpr int kVsMenuRows = kVsRuleRows + 1;
+
+// The rules panel. The draw and the mouse hit test both read this layout, so a click lands on
+// the row that is drawn.
+struct VsRulesLayout {
+    int panelX, panelY, panelW, panelH;
+    int rx, rowsY, colW, rowH;
+};
+
+VsRulesLayout vsRulesLayout(int screenW, int screenH)
+{
+    VsRulesLayout l;
+    l.panelW = std::min(800, screenW - 24);
+    l.panelH = 452;
+    l.panelX = screenW / 2 - l.panelW / 2;
+    l.panelY = screenH / 2 - l.panelH / 2;
+    l.colW   = (l.panelW - 72) / 2;
+    l.rx     = l.panelX + 24 + l.colW + 24;
+    l.rowsY  = l.panelY + 88;
+    l.rowH   = 34;
+    return l;
+}
 
 // Selector de mapa: posición en pc_vs_map_list y, si al pulsar A no se pudo
 // montar, por qué (se enseña en la tarjeta de abajo y no se empieza).
@@ -6249,6 +6485,46 @@ bool vsEndScreenShown()
     return pc_vs_active() && pc_vs_match_over() && sVsOverSince && SDL_GetTicks() - sVsOverSince >= kVsEndScreenDelayMs;
 }
 
+// Mouse on the rules panel. Motion over a row highlights it. A click highlights its row and
+// returns 1, so the caller cycles that row forward, as Right does. A click on the drawn
+// "A: play" hint returns 2, which is A. The claim keeps a left click in Mouse Cursor mode
+// from also being A.
+int pcVsRulesPointer()
+{
+    pc_menu_click_claim_pointer_menu();
+    DGXGraphics* gfx = (gsys && gsys->mDGXGfx) ? static_cast<DGXGraphics*>(gsys->mDGXGfx) : nullptr;
+    if (!gfx) return 0;
+    const int screenW       = pc_gfx_menu_wide() ? pc_gfx_menu_virt_width() : gfx->mScreenWidth;
+    const int screenH       = gfx->mScreenHeight;
+    const VsRulesLayout lay = vsRulesLayout(screenW, screenH);
+    PcMenuClickRect rects[kVsMenuRows + 1];
+    for (int row = 0; row < kVsMenuRows; row++) {
+        const int ry = lay.rowsY + row * lay.rowH;
+        rects[row]   = { lay.rx, ry, lay.rx + lay.colW, ry + lay.rowH };
+    }
+    int count = kVsMenuRows;
+    if (sVsPlaySpanOk) {
+        rects[kVsMenuRows] = { sVsPlayX0, sVsPlayY0, sVsPlayX1, sVsPlayY1 };
+        count              = kVsMenuRows + 1;
+    }
+    float x = 0.0f, y = 0.0f;
+    if (pc_gfx_menu_graph_point(false, &x, &y)) {
+        const PcMenuClickResult hover
+            = pc_menu_click_hover(PC_MENU_CLICK_MAIN, x, y, rects, nullptr, count, kPcMenuClickMargin);
+        if (hover.index >= 0 && hover.index < kVsMenuRows) sVsRulesRow = hover.index;
+    }
+    if (pc_gfx_menu_graph_point(true, &x, &y)) {
+        const PcMenuClickResult hit
+            = pc_menu_click_resolve(PC_MENU_CLICK_MAIN, x, y, rects, nullptr, count, kPcMenuClickMargin);
+        if (hit.action == PC_MENU_CLICK_ACTIVATE) {
+            if (hit.index == kVsMenuRows) return 2;
+            sVsRulesRow = hit.index;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void pcVsRulesInput()
 {
     if (!sVsRulesOpen) return;
@@ -6256,8 +6532,10 @@ void pcVsRulesInput()
     bool down   = keyWentDown(SDL_SCANCODE_DOWN) || keyWentDown(SDL_SCANCODE_S);
     bool left   = keyWentDown(SDL_SCANCODE_LEFT) || keyWentDown(SDL_SCANCODE_A);
     bool right  = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
-    bool accept = menuOkKey();
+    // The rows hit-test the left click, so a click on a row cycles it and is not also A.
+    bool accept = menuOkKeyNoClick();
     bool cancel = menuCancelKey();
+    cancel |= pc_menu_click_take_back(); // a right click backs out; a mouse press only
     up |= (sTouchFrameButtons & PAD_BUTTON_UP) != 0;
     down |= (sTouchFrameButtons & PAD_BUTTON_DOWN) != 0;
     left |= (sTouchFrameButtons & PAD_BUTTON_LEFT) != 0;
@@ -6274,6 +6552,9 @@ void pcVsRulesInput()
         if (promptPadA(ctl)) accept = true;
         if (promptPadB(ctl)) cancel = true;
     }
+    const int pointer = pcVsRulesPointer();
+    if (pointer == 1) right = true; // a click cycles its row forward, as Right does
+    if (pointer == 2) accept = true; // a click on the drawn "A: play" hint is A
     if (up) sVsRulesRow = (sVsRulesRow + kVsMenuRows - 1) % kVsMenuRows;
     if (down) sVsRulesRow = (sVsRulesRow + 1) % kVsMenuRows;
     if ((left || right) && sVsRulesRow == 0) {
@@ -6458,14 +6739,15 @@ void pc_vsrules_prompt_draw(void) {
     gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
 
     const Colour title(255, 229, 120, 255), body(214, 224, 245, 255), dim(150, 165, 195, 255);
-    const int panelW = std::min(800, screenW - 24), panelH = 452;
-    const int panelX = screenW / 2 - panelW / 2, panelY = screenH / 2 - panelH / 2;
+    const VsRulesLayout lay = vsRulesLayout(screenW, screenH);
+    const int panelW = lay.panelW, panelH = lay.panelH;
+    const int panelX = lay.panelX, panelY = lay.panelY;
     drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
     drawPikminHeader(gfx, panelX, panelY, panelW, es ? "VS: Carrera de piezas" : "VS: Part Race");
 
-    const int colW = (panelW - 72) / 2;
+    const int colW = lay.colW;
     const int lx   = panelX + 24;
-    const int rx   = lx + colW + 24;
+    const int rx   = lay.rx;
 
     // ── Izquierda: cómo se juega, en tres tarjetas ─────────────────────────
     int y = panelY + 52;
@@ -6499,8 +6781,8 @@ void pc_vsrules_prompt_draw(void) {
 
     // ── Derecha: reglas ─────────────────────────────────────────────────────
     vsText(rx + 8, panelY + 56, es ? "REGLAS" : "RULES", title, 14, 21);
-    const int rowsY = panelY + 88;
-    constexpr int kRowH = 34;
+    const int rowsY = lay.rowsY;
+    const int kRowH = lay.rowH;
     const PcVsMapEntry& map = vsMapEntry();
     const bool mapBad       = !map.error.empty() || !sVsMapError.empty();
     for (int row = 0; row < kVsMenuRows; row++) {
@@ -6574,6 +6856,8 @@ void pc_vsrules_prompt_draw(void) {
     const char* help = es ? "Arriba/Abajo: opción   Izq/Der: cambiar   A: jugar   B: salir"
                           : "Up/Down: option   Left/Right: change   A: play   B: back";
     drawHelpLine(panelX + panelW / 2, panelY + panelH - 38, help, dim);
+    sVsPlaySpanOk = helpLineIconSpan('A', &sVsPlayX0, &sVsPlayX1, &sVsPlayY0, &sVsPlayY1);
+    pc_gfx_note_menu_tap_space(screenW, screenH);
 }
 
 
@@ -8312,13 +8596,44 @@ void pc_settings_draw(void) {
         return; // Don't draw footer when submenu is open.
     }
 
+    // Controller Guide overlay.
+    if (sInPadGuide) {
+        const int subX = px1 + 18, subY = py1 + 44;
+        const int subW = panelW - 36, subH = panelH - 58;
+        drawSubmenuSurface(gfx, subX, subY, subW, subH, "Controller Guide",
+                           "What each button does now", "Up/Down: scroll   Esc/B: back");
+        const int listStartY = subY + 48;
+        const int itemH = 24;
+        const int visibleItems = std::max(1, (subH - 70) / itemH);
+        const int count = padGuideCount();
+        int startIdx = 0;
+        if (sPadGuideSel >= visibleItems) startIdx = sPadGuideSel - visibleItems + 1;
+        const int endIdx = std::min(count, startIdx + visibleItems);
+        for (int i = startIdx; i < endIdx; i++) {
+            const int itemY = listStartY + (i - startIdx) * itemH;
+            if (padGuideIsHeader(i)) {
+                drawTextOutline(subX + 24, itemY + 4, "%s", Colour(255, 214, 120, 255), Colour(10, 16, 36, 255),
+                                padGuideLabel(i));
+            } else {
+                drawSubmenuRow(gfx, subX + 20, itemY, subW - 40, padGuideLabel(i), padGuideValue(i), i == sPadGuideSel);
+            }
+        }
+        if (count > visibleItems) {
+            char hint[64];
+            snprintf(hint, sizeof(hint), "%d / %d", sPadGuideSel + 1, count);
+            drawTextOutline(subX + subW - 12 - menuTextWidth(hint), subY + 12, "%s",
+                            Colour(180, 180, 200, 255), Colour(10, 16, 36, 255), hint);
+        }
+        return;
+    }
+
     // Gamepad submenu overlay.
     if (sInGamepadSubmenu) {
         const int subX = px1 + 18, subY = py1 + 44;
         const int subW = panelW - 36, subH = panelH - 58;
         drawSubmenuSurface(gfx, subX, subY, subW, subH, "Gamepad Controls",
                            sWaitingForButton ? "Press a button, trigger or stick   Esc: cancel"
-                                            : "Enter: capture   Left/Right: default",
+                                            : "Enter: capture   Left/Right: default/none   Del: none",
                            sWaitingForButton ? "" : "Up/Down: select   Esc/B: back");
 
         const int listStartY = subY + 48;
@@ -8338,7 +8653,8 @@ void pc_settings_draw(void) {
 
             const char* actionName = pc_window_get_key_action_name(i);
             int boundBtn = pendingPadBinds()[i];
-            if (boundBtn < 0) boundBtn = kDefaultGamepadBindings[i];
+            if (boundBtn == PC_GP_BIND_NONE) boundBtn = -1;
+            else if (boundBtn < 0) boundBtn = pc_window_scheme_default_gamepad_binding(sPending.padScheme, i);
             const char* btnName = pc_window_get_gamepad_button_name(boundBtn);
 
             char value[96];
@@ -8638,6 +8954,7 @@ int pc_settings_get_infinite_day(void) { if (pc_speedrun_active()) return 0;
     return pc_hardmode_active() ? 0 : sConfig.infiniteDay;
 }
 
+int pc_settings_get_face_cursor(void) { return sConfig.faceCursor; }
 int pc_settings_get_free_camera(void) { if (pc_speedrun_active()) return 0;
     return sConfig.freeCamera;
 }
@@ -8929,6 +9246,7 @@ const char* pc_settings_group_name(int group) {
     case PC_SET_PICKER_HDMODELS: return "HD Models";
     case PC_SET_PICKER_KEYBOARD: return "Keyboard";
     case PC_SET_PICKER_GAMEPAD: return "Gamepad";
+    case PC_SET_PICKER_PADGUIDE: return "Controller Guide";
     default: return "";
     }
 }
@@ -9057,6 +9375,7 @@ void modsRowValue(int i, char* value, size_t n) {
     case 39: snprintf(value, n, "%s", sPending.p2Selection ? "On" : "Off"); break;
     case 40: snprintf(value, n, "%s", sPending.eternalNight ? "On" : "Off (original)"); break;
     case 41: snprintf(value, n, "%s", sPending.fireflies ? "On" : "Off (original)"); break;
+    case 43: snprintf(value, n, "%s", sPending.faceCursor ? "Cursor" : "Captain (default)"); break;
     case 42:
         if (sPending.bombRespawnSec <= 0) snprintf(value, n, "Off (original)");
         else if (sPending.bombRespawnSec < 60) snprintf(value, n, "Every %d s", sPending.bombRespawnSec);
@@ -9092,6 +9411,13 @@ void advancedRowValue(int i, char* value, size_t n) {
         else snprintf(value, n, "Press A (keep still)");
         break;
     }
+    case 8: snprintf(value, n, "%s", sPending.padScheme == PC_PAD_SCHEME_SWITCH ? "Switch" : "GameCube (original)"); break;
+    case 9: {
+        const char* names[3] = { "Off", "Hold button", "Always" };
+        snprintf(value, n, "%s", names[(sPending.rsAimMode >= 0 && sPending.rsAimMode <= 2) ? sPending.rsAimMode : 0]);
+        break;
+    }
+    case 10: snprintf(value, n, "%.2f", sPending.rsAimSens); break;
     default: value[0] = '\0';
     }
 }
@@ -9128,7 +9454,7 @@ namespace {
 // página de vídeo, de Advanced, de Graphics, de Mods...), así que reordenar
 // aquí no toca qué hace cada ajuste ni cómo se guarda: el .conf va por nombre.
 // ---------------------------------------------------------------------------
-enum RowSrc { SRC_MAIN, SRC_ADV, SRC_GFX, SRC_MODS, SRC_DATA, SRC_KEYS, SRC_PADS, SRC_RECENTER, SRC_ACH };
+enum RowSrc { SRC_MAIN, SRC_ADV, SRC_GFX, SRC_MODS, SRC_DATA, SRC_KEYS, SRC_PADS, SRC_RECENTER, SRC_ACH, SRC_PADGUIDE, SRC_AIMBTN };
 struct GroupRow {
     RowSrc src;
     int idx;
@@ -9140,7 +9466,7 @@ const GroupRow kDisplayRows[] = {
     { SRC_MAIN, ROW_DISPLAY_MODE, "Display Mode", "Windowed, fullscreen, or a borderless window that fills the screen." },
     { SRC_MAIN, ROW_RESOLUTION, "Resolution", "Size of the window or the fullscreen picture. A: full list. Left/Right: next size." },
     { SRC_MAIN, ROW_ASPECT_RATIO, "Aspect Ratio", "Auto fills the window. The others keep that shape and add black bars." },
-    { SRC_MAIN, ROW_RENDER_SCALE, "3D Resolution", "Detail of the 3D world. Higher looks sharper, lower runs faster." },
+    { SRC_MAIN, ROW_RENDER_SCALE, "3D Resolution", "Detail of the 3D world. Original renders at the GameCube's 480 lines, the lightest and the default. Higher looks sharper, lower runs faster." },
     { SRC_MAIN, ROW_REFRESH_RATE, "Refresh Rate", "How often the screen updates in fullscreen. Auto keeps your monitor's setting." },
     { SRC_MAIN, ROW_VSYNC, "Frame Sync (VSync)", "Waits for the screen before showing each frame. Stops tearing (a picture split in two), adds a little input delay." },
     { SRC_MAIN, ROW_FPS_MODE, "FPS Mode", "Frames per second. 30 is the original and the most stable. 60 and 120 are smoother but experimental." },
@@ -9167,6 +9493,11 @@ const GroupRow kGraphicsRows[] = {
 };
 
 const GroupRow kControlsRows[] = {
+    { SRC_ADV, 8, "Controller Layout", "What each controller button does. GameCube: the original layout. Switch: as in Pikmin 1 + 2 on Switch (right stick turns the camera, L + right stick swarms, ZL faces forward, ZR zooms). Buttons you reassigned keep your choice." },
+    { SRC_ADV, 9, "Right Stick Aim", "Controller only. Move the cursor with the right stick, like a mouse. Hold button: only while you hold the button below (the right stick goes back to the camera when you let go). Always: the right stick always aims; the swarm button still swarms." },
+    { SRC_AIMBTN, 0, "Right Stick Aim Button", "Button to hold so the right stick aims the cursor (Hold button mode). A: choose the button." },
+    { SRC_ADV, 10, "Right Stick Aim Sensitivity", "How fast the cursor moves with the right stick. 1.00 is the default." },
+    { SRC_PADGUIDE, 0, "Controller Guide", "Every controller button and what it does right now, sorted by topic. It follows the layout, your reassigned buttons and the mods you have on." },
     { SRC_KEYS, 0, "Keyboard Bindings", "Two keys or mouse buttons per action. A: main key. Right: second key. Left: back to default. While waiting, Delete clears it. Shift, Ctrl and Alt can be used." },
     { SRC_PADS, 0, "Controller Bindings", "Choose the controller button for each action." },
     { SRC_MODS, 0, "Control Scheme", "Classic: the stick moves the cursor, as on GameCube. Mouse Cursor: aim the cursor with the mouse." },
@@ -9196,6 +9527,7 @@ const GroupRow kControlsRows[] = {
 const GroupRow kCameraRows[] = {
     { SRC_MODS, 14, "Free Camera", "Turn the camera freely, as in Pikmin 3. Mouse: push the cursor against the edge of its circle. Controller: right stick. L puts the camera back behind Olimar. Swarming moves to the Swarm button (assign it in Controls)." },
     { SRC_MODS, 38, "Free Camera Speed", "How fast the right stick turns the free camera. 100% is the default." },
+    { SRC_MODS, 43, "Face Forward Aims At", "With Free Camera, what L (face forward) points the camera at. Captain: behind the captain, and the cursor comes back in front of him. Cursor: towards the cursor, wherever you left it, as in the original game." },
     { SRC_MODS, 18, "First Person", "Look at the world from inside Olimar's helmet. Switch in game with the First Person button (V on keyboard, L3 on a controller)." },
     { SRC_MODS, 6, "Co-op Split Screen", "How the screen divides in two-player co-op." },
     { SRC_MODS, 7, "Co-op Merged Camera", "Joins both halves into one view while the captains are close." },
@@ -9307,10 +9639,12 @@ bool rowHidden(const GroupRow& r) {
     case SRC_ADV:
         if (r.idx == 0) return sPending.controlMode == PC_CONTROL_CLASSIC;
         if (r.idx >= 5 && r.idx <= 7) return !sPending.gyroEnabled;
+        if (r.idx == 10) return sPending.rsAimMode == PC_RS_AIM_OFF;
         return false;
     case SRC_RECENTER: return !sPending.gyroEnabled;
+    case SRC_AIMBTN: return sPending.rsAimMode != PC_RS_AIM_HOLD;
     case SRC_GFX: return r.idx >= 7 && r.idx <= 9 && !sPending.colourGrading;
-    case SRC_MODS: return r.idx == 16 && !sPending.lockOn;
+    case SRC_MODS: return (r.idx == 16 && !sPending.lockOn) || (r.idx == 43 && !sPending.freeCamera);
     default: return false;
     }
 }
@@ -9440,6 +9774,8 @@ const char* disabledReason(const GroupRow& r) {
             return "Borderless always uses the desktop resolution.";
         break;
     case SRC_ADV:
+        if ((r.idx == 9 || r.idx == 10) && !pc_window_get_controller()) return "Connect a controller first.";
+        if (r.idx == 10 && sPending.rsAimMode == PC_RS_AIM_OFF) return "Turn on Right Stick Aim first.";
         if (r.idx == 0 && sPending.controlMode == PC_CONTROL_CLASSIC)
             return "Only used with the Mouse Cursor control scheme.";
         if ((r.idx == 5 || r.idx == 6) && !sPending.gyroEnabled) return "Turn on Gyro Aiming first.";
@@ -9448,11 +9784,18 @@ const char* disabledReason(const GroupRow& r) {
     case SRC_RECENTER:
         if (!sPending.gyroEnabled) return "Turn on Gyro Aiming first.";
         break;
+    case SRC_AIMBTN:
+        if (!pc_window_get_controller()) return "Connect a controller first.";
+        if (sPending.rsAimMode != PC_RS_AIM_HOLD) return "Set Right Stick Aim to Hold button first.";
+        break;
     case SRC_GFX:
         if (r.idx >= 7 && r.idx <= 9 && !sPending.colourGrading) return "Turn on Colour Adjustments first.";
         break;
     case SRC_MODS:
+        if (r.idx == 0 && pc_window_get_controller())
+            return "A controller is connected, so the cursor is aimed with its stick (Classic). Unplug it to use Mouse Cursor.";
         if (r.idx == 16 && !sPending.lockOn) return "Turn on Lock-On first.";
+        if (r.idx == 43 && !sPending.freeCamera) return "Turn on Free Camera first.";
         break;
     case SRC_DATA:
         if (r.idx == 3 && !online_guest()) return "Only while you are the guest of an online co-op session.";
@@ -9493,10 +9836,100 @@ void startButtonCapture(int action) {
 
 void gamepadBindingName(int action, char* out, size_t n) {
     int bound = pendingPadBinds()[action];
-    if (bound < 0) bound = kDefaultGamepadBindings[action];
+    if (bound == PC_GP_BIND_NONE) bound = -1;
+    else if (bound < 0) bound = pc_window_scheme_default_gamepad_binding(sPending.padScheme, action);
     const char* name = bound >= 0 ? pc_window_get_gamepad_button_name(bound) : nullptr;
     snprintf(out, n, "%s", name ? name : "None");
 }
+
+// ── Controller Guide ──
+// Una línea por acción, agrupadas por tema. Los botones salen de los bindings
+// pendientes (o del esquema si no se tocaron), así que la guía siempre dice lo
+// que hará el mando al cerrar el menú.
+struct PadGuideLine { std::string label, value; bool header; };
+std::vector<PadGuideLine> sPadGuide;
+
+std::string padBtn(int action) {
+    int b = pendingPadBinds()[action];
+    if (b == PC_GP_BIND_NONE) return "(not assigned)";
+    if (b < 0) b = pc_window_scheme_default_gamepad_binding(sPending.padScheme, action);
+    const char* name = b >= 0 ? pc_window_get_gamepad_button_name(b) : nullptr;
+    return name && b >= 0 ? name : "(not assigned)";
+}
+bool padBound(int action) {
+    int b = pendingPadBinds()[action];
+    if (b == PC_GP_BIND_NONE) return false;
+    if (b < 0) b = pc_window_scheme_default_gamepad_binding(sPending.padScheme, action);
+    return b >= 0;
+}
+
+void buildPadGuide() {
+    sPadGuide.clear();
+    auto H = [](const char* t) { sPadGuide.push_back({ t, "", true }); };
+    auto L = [](const std::string& a, const std::string& b) { sPadGuide.push_back({ a, b, false }); };
+    const bool sw = sPending.padScheme == PC_PAD_SCHEME_SWITCH;
+    // "Right Stick Aim: Always" se queda el stick derecho: ni cámara ni swarm sin el botón.
+    const bool aimAlways = sPending.rsAimMode == PC_RS_AIM_ALWAYS;
+    const bool rsCamera = (sw || sPending.freeCamera) && !aimAlways;
+    const std::string A = padBtn(PC_KEY_ACT_A), B = padBtn(PC_KEY_ACT_B), X = padBtn(PC_KEY_ACT_X);
+    const std::string Lt = padBtn(PC_KEY_ACT_L);
+    std::string swarm;
+    if (!rsCamera && !aimAlways && !sw && !sPending.freeCamera) swarm = "Right Stick";
+    else if (padBound(PC_KEY_ACT_SWARM_STICK)) swarm = "Hold " + padBtn(PC_KEY_ACT_SWARM_STICK) + " + Right Stick";
+    else swarm = "Assign \"Swarm with right stick\"";
+
+    H(sw ? "Layout: Switch" : "Layout: GameCube (original)");
+    H("Moving");
+    L("Move the captain and the cursor", "Left Stick");
+    if (sPending.rsAimMode == PC_RS_AIM_ALWAYS) L("Aim the cursor", "Right Stick");
+    else if (sPending.rsAimMode == PC_RS_AIM_HOLD)
+        L("Aim the cursor", padBound(PC_KEY_ACT_AIM_STICK) ? "Hold " + padBtn(PC_KEY_ACT_AIM_STICK) + " + Right Stick"
+                                                            : "Assign \"Right Stick Aim Button\"");
+    H("Pikmin");
+    L("Throw a Pikmin (hold, then release)", A);
+    L("Pluck a sprout", sPending.holdToPluck ? A + " (hold to keep going)" : A);
+    L("Whistle (hold for a bigger circle)", B);
+    if (sPending.throwCancelB) L("Put the Pikmin in hand back", "Hold " + A + ", press " + B);
+    L("Swarm the squad", swarm);
+    if (padBound(PC_KEY_ACT_SWARM)) L("Swarm toward the cursor", padBtn(PC_KEY_ACT_SWARM));
+    L("Dismiss the squad", X);
+    L("Lie down", padBound(PC_KEY_ACT_LIEDOWN) ? padBtn(PC_KEY_ACT_LIEDOWN) : padBtn(PC_KEY_ACT_DPAD_DOWN));
+    L("Change the colour to throw", sw ? padBtn(PC_KEY_ACT_DPAD_RIGHT)
+                                    : padBtn(PC_KEY_ACT_DPAD_LEFT) + " / " + padBtn(PC_KEY_ACT_DPAD_RIGHT));
+    if (sPending.p2Selection)
+        L("Leaf, bud or flower (Pikmin in hand)", sw ? "Hold " + A + ", press " + X
+                                                    : "Hold " + A + ", " + padBtn(PC_KEY_ACT_DPAD_UP) + " / " + padBtn(PC_KEY_ACT_DPAD_DOWN));
+    H("Camera");
+    L("Turn the camera", rsCamera ? "Right Stick left / right" : "Hold " + Lt + " + Left Stick");
+    L("Face forward", "Tap " + Lt);
+    L("Camera height", sw ? "Right Stick up / down" : padBtn(PC_KEY_ACT_Z));
+    L("Zoom", padBtn(PC_KEY_ACT_R));
+    const bool anyMod = sPending.lockOn || sPending.firstPerson || sPending.gyroEnabled || sPending.bombControl;
+    if (anyMod) H("Mods you have on");
+    if (sPending.lockOn) {
+        const bool zlLock = sw && !padBound(PC_KEY_ACT_LOCKON);
+        L("Lock-On", zlLock ? Lt + " (also faces forward)" : padBtn(PC_KEY_ACT_LOCKON));
+        if (sPending.charge) {
+            std::string charge = padBound(PC_KEY_ACT_SWARM) ? padBtn(PC_KEY_ACT_SWARM) : std::string();
+            if (padBound(PC_KEY_ACT_SWARM_STICK)) {
+                const std::string tap = "Tap " + padBtn(PC_KEY_ACT_SWARM_STICK);
+                charge = charge.empty() ? tap : charge + " or " + tap;
+            }
+            L("Charge at the locked target", charge.empty() ? "Assign \"Swarm to cursor\"" : charge);
+        }
+    }
+    if (sPending.firstPerson) L("First-person view", padBtn(PC_KEY_ACT_FIRSTPERSON));
+    if (sPending.gyroEnabled) L("Bring the gyro cursor back", padBtn(PC_KEY_ACT_GYRO_RECENTER));
+    if (sPending.bombControl) L("Bomb Control (Yellow with a bomb rock)", padBtn(PC_KEY_ACT_BOMB));
+    H("Menus");
+    L("Pause", padBtn(PC_KEY_ACT_START));
+    L("Accept / Back", A + " / " + B);
+}
+
+int padGuideCount() { buildPadGuide(); return (int)sPadGuide.size(); }
+const char* padGuideLabel(int i) { return (i >= 0 && i < (int)sPadGuide.size()) ? sPadGuide[i].label.c_str() : ""; }
+const char* padGuideValue(int i) { return (i >= 0 && i < (int)sPadGuide.size()) ? sPadGuide[i].value.c_str() : ""; }
+bool padGuideIsHeader(int i) { return i >= 0 && i < (int)sPadGuide.size() && sPadGuide[i].header; }
 } // namespace
 
 const char* pc_settings_row_section(int group, int row) { return rowSection(group, row); }
@@ -9523,6 +9956,7 @@ int pc_settings_rows_count(int group) {
     case PC_SET_PICKER_HDMODELS: return 6;
     case PC_SET_PICKER_KEYBOARD:
     case PC_SET_PICKER_GAMEPAD: return PC_KEY_ACT_COUNT;
+    case PC_SET_PICKER_PADGUIDE: return padGuideCount();
     default: return 0;
     }
 }
@@ -9558,7 +9992,8 @@ const char* pc_settings_row_help(int group, int row) {
     case PC_SET_PICKER_TEXPACKS: return "A: install, activate or deactivate. Changes need a restart.";
     case PC_SET_PICKER_HDMODELS: return "A: pick the model's zip to install it. Needs a restart.";
     case PC_SET_PICKER_KEYBOARD: return "A: press the new key or mouse button. Left/Right: back to default.";
-    case PC_SET_PICKER_GAMEPAD: return "A: press the new button. Left/Right: back to default.";
+    case PC_SET_PICKER_GAMEPAD: return "A: press the new button. Left/Right: default or none. Delete: none.";
+    case PC_SET_PICKER_PADGUIDE: return "What each controller button does now. Change it in Controller Layout and Controller Bindings.";
     default: return "";
     }
 }
@@ -9577,6 +10012,8 @@ int pc_settings_row_opens_picker(int group, int row) {
     case SRC_KEYS: sPickerFocusRow = 0; return PC_SET_PICKER_KEYBOARD;
     case SRC_PADS: sPickerFocusRow = 0; return PC_SET_PICKER_GAMEPAD;
     case SRC_RECENTER: sPickerFocusRow = PC_KEY_ACT_GYRO_RECENTER; return PC_SET_PICKER_GAMEPAD;
+    case SRC_AIMBTN: sPickerFocusRow = PC_KEY_ACT_AIM_STICK; return PC_SET_PICKER_GAMEPAD;
+    case SRC_PADGUIDE: return PC_SET_PICKER_PADGUIDE;
     default: return 0;
     }
 }
@@ -9604,6 +10041,7 @@ const char* pc_settings_row_label(int group, int row) {
         return label;
     }
     if (group == PC_SET_PICKER_HDMODELS) return (row >= 0 && row < 6) ? kHdModelLabels[row] : "";
+    if (group == PC_SET_PICKER_PADGUIDE) return padGuideLabel(row);
     if (group == PC_SET_PICKER_RESOLUTION) {
         std::vector<int> c = pickerResolutionChoices();
         if (row < 0 || row >= (int)c.size()) return "";
@@ -9634,10 +10072,17 @@ void pc_settings_row_value(int group, int row, char* out, unsigned long n) {
             break;
         case SRC_ACH: break;
         case SRC_KEYS:
-        case SRC_PADS: snprintf(out, n, "Open  >"); break;
+        case SRC_PADS:
+        case SRC_PADGUIDE: snprintf(out, n, "Open  >"); break;
         case SRC_RECENTER: {
             char name[64];
             gamepadBindingName(PC_KEY_ACT_GYRO_RECENTER, name, sizeof(name));
+            snprintf(out, n, "%s  >", name);
+            break;
+        }
+        case SRC_AIMBTN: {
+            char name[64];
+            gamepadBindingName(PC_KEY_ACT_AIM_STICK, name, sizeof(name));
             snprintf(out, n, "%s  >", name);
             break;
         }
@@ -9667,6 +10112,7 @@ void pc_settings_row_value(int group, int row, char* out, unsigned long n) {
             }
         }
     }
+    if (group == PC_SET_PICKER_PADGUIDE) snprintf(out, n, "%s", padGuideValue(row));
     if (group == PC_SET_PICKER_HDMODELS) {
         if (sTexturePackPickerActive && sHdModelsSelection == row) snprintf(out, n, "Installing...");
         else snprintf(out, n, "%s", !hdModelInstalled(row) ? "Not installed" : (pc_settings_get_hd_model_enabled(row) ? "On" : "Off"));
@@ -9733,7 +10179,7 @@ void pc_settings_row_change(int group, int row, int dir, bool ok) {
         }
     } else if (group == PC_SET_PICKER_GAMEPAD && row >= 0 && row < PC_KEY_ACT_COUNT) {
         if (ok) startButtonCapture(row);
-        else if (dir) pendingPadBinds()[row] = -1;
+        else if (dir) pendingPadBinds()[row] = pendingPadBinds()[row] == -1 ? PC_GP_BIND_NONE : -1;
     } else if (group == PC_SET_PICKER_TEXPACKS && ok) {
         texturePacksRowAction(row, pc_texpack_list_packs());
     } else if (group == PC_SET_PICKER_HDMODELS && dir) {

@@ -21,6 +21,7 @@ enum PcSettingsGroup {
 	PC_SET_PICKER_HDMODELS,
 	PC_SET_PICKER_KEYBOARD, ///< una fila por acción: A captura, izquierda/derecha restaura
 	PC_SET_PICKER_GAMEPAD,
+	PC_SET_PICKER_PADGUIDE, ///< guía de solo lectura: qué hace cada botón del mando ahora
 };
 
 /// Captura de tecla/botón en curso (fila de Controls): la lista debe

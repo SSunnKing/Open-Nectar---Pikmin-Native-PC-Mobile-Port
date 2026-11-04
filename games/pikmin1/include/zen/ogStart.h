@@ -34,6 +34,12 @@ struct ogScrStartMgr {
 	void stop();
 	StartStatus update(Controller*);
 	void draw(Graphics&);
+#if defined(PIKI_PC_PORT)
+	// True when a left click landed on a Press Start button this frame.
+	// A miss still consumes the click so it cannot fall through. No button
+	// panes yet (before the first draw) leaves the click pending.
+	bool pcPointerPressed();
+#endif
 
 	StartStatus mState;           // _00, see ogScrStartState enum
 	StartStatus mExitState;       // _04, see ogScrStartState enum

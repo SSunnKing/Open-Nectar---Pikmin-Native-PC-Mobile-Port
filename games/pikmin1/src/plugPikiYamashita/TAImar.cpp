@@ -264,7 +264,17 @@ public:
 			// - weight = 1 (no pikis in range), A = 100, chance of success is 0.3%
 			// - weight = 51 (50 pikis in range), A = 100/51, chance of success is 8.6%
 			// - weight = 101 (100 pikis in range), A = 100/101, chance of success is 14.8%
+#if defined(PIKI_PC_PORT)
+			// Draw Rand(30), then Rand(100 / weight): the original's order (Metrowerks;
+			// verified in main.dol, USA Rev1, TAIAflyingDistanceMar::act at 0x801A7524
+			// then 0x801A7554). Pinned because C++ leaves operand order unspecified
+			// (clang draws left to right, GCC right to left).
+			const f32 chanceB = zen::Rand(30.0f);
+			const f32 chanceA = zen::Rand(100.0f / weight);
+			if (chanceA * chanceB <= 1.0f) {
+#else
 			if (zen::Rand(100.0f / weight) * zen::Rand(30.0f) <= 1.0f) {
+#endif
 				res = true;
 			} else {
 				res = false;

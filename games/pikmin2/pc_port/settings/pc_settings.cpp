@@ -124,7 +124,7 @@ struct PcConfig {
     int displayMode = PC_WINDOW_FULLSCREEN_WINDOWED; // 0 windowed, 1 fullscreen, 2 borderless
     double refreshRate = 0.0;                        // 0 = auto (detect)
     bool vsync = true;                               // presentation pacing on/off
-    float renderScale = 2.0f / 3.0f;                 // internal 3D resolution multiplier
+    float renderScale = 0.0f; // 0 = original de GameCube (480 líneas)                 // internal 3D resolution multiplier
     int aspectRatioMode = 0;                         // 0=auto, 1=4:3, 2=16:10, 3=16:9, 4=21:9
 
     // FPS mode (0=30fps, 1=60fps, 2=120fps experimental)
@@ -132,6 +132,11 @@ struct PcConfig {
 
     // Control mode (0=Classic, 1=Mouse Cursor)
     int controlMode = PC_CONTROL_CLASSIC;
+    // Botones del mando por defecto: GameCube o Switch (PC_PAD_SCHEME_*).
+    int padScheme = PC_PAD_SCHEME_GAMECUBE;
+    // Apuntar con el stick derecho (PC_RS_AIM_*) y su sensibilidad.
+    int rsAimMode = PC_RS_AIM_OFF;
+    float rsAimSens = 1.0f;
 
     // Keyboard bindings (scancodes for each action)
     int keyboardBindings[PC_KEY_ACT_COUNT];
@@ -185,6 +190,8 @@ struct PcConfig {
     // Mod: free camera. Shift + mouse orbits on keyboard, the right stick
     // orbits on a pad, and the squad moves to the Swarm button.
     int freeCamera = 0;
+    // Free Camera: L mira hacia el cursor (1) o al frente del capitán (0).
+    int faceCursor = 0;
     int whistleRadiusPct = 100; // radio máximo del silbato, % del original
     int throwSpeedPct = 100;    // velocidad de las animaciones de coger y lanzar
     int throwCancelB = 0;       // B con un Pikmin en la mano lo devuelve al grupo
@@ -288,10 +295,13 @@ struct PcConfig {
         displayMode = PC_WINDOW_FULLSCREEN_WINDOWED;
         refreshRate = 0.0;
         vsync = true;
-        renderScale = 2.0f / 3.0f;
+        renderScale = 0.0f;
         aspectRatioMode = 0;
         fpsMode = 0;
         controlMode = PC_CONTROL_CLASSIC;
+        padScheme = PC_PAD_SCHEME_GAMECUBE;
+        rsAimMode = PC_RS_AIM_OFF;
+        rsAimSens = 1.0f;
         mouseSensitivity = 1.0f;
         gyroEnabled = 0;
         gyroSensitivity = 1.0f;
@@ -312,6 +322,7 @@ struct PcConfig {
         tekiHealthPct = 100;
         infiniteDay = 0;
         freeCamera = 0;
+        faceCursor = 0;
         whistleRadiusPct = 100;
         throwSpeedPct = 100;
         throwCancelB = 0;
@@ -580,6 +591,14 @@ Uint32 sCapturePrevMouse = 0; // mouse buttons seen on the previous capture tick
 
 // Gamepad controls submenu state.
 bool sInGamepadSubmenu = false;
+// Controller Guide: qué hace cada botón con el esquema, los botones y los
+// mods de ahora mismo (se rehace cada vez que se pinta).
+bool sInPadGuide = false;
+int sPadGuideSel = 0;
+int padGuideCount();
+const char* padGuideLabel(int i);
+const char* padGuideValue(int i);
+bool padGuideIsHeader(int i);
 int sGamepadSelection = 0;
 bool sWaitingForButton = false;
 
@@ -953,6 +972,8 @@ void applyGraphics(const PcConfig& config) {
 
 void applyControls(const PcConfig& config) {
     pc_window_set_control_mode(config.controlMode);
+    pc_window_set_pad_scheme(config.padScheme);
+    pc_window_set_rs_aim(config.rsAimMode, config.rsAimSens);
     pc_window_set_mouse_sensitivity(config.mouseSensitivity);
     pc_window_set_stick_dead_zone(config.stickDeadZone);
     pc_window_set_stick_invert(config.stickInvert);
@@ -1044,6 +1065,7 @@ void closeMenu() {
     sHdModelRestartPrompt = false;
     sInControlsSubmenu = false;
     sInGamepadSubmenu = false;
+    sInPadGuide = false;
     sWaitingForKey = false;
     sWaitingForButton = false;
     sCaptureWaitRelease = false;
@@ -1189,6 +1211,7 @@ void saveConfig() {
     out << "tekiHealthPct = " << sConfig.tekiHealthPct << "\n";
     out << "infiniteDay = " << sConfig.infiniteDay << "\n";
     out << "freeCamera = " << sConfig.freeCamera << "\n";
+    out << "faceCursor = " << sConfig.faceCursor << "\n";
     out << "whistleRadiusPct = " << sConfig.whistleRadiusPct << "\n";
     out << "throwSpeedPct = " << sConfig.throwSpeedPct << "\n";
     out << "throwCancelB = " << sConfig.throwCancelB << "\n";
@@ -1250,6 +1273,9 @@ void saveConfig() {
     out << "texturePackEnabled = " << sConfig.texturePackEnabled << "\n";
     out << "hdModelsDisabled = " << sConfig.hdModelsDisabled << "\n";
     out << "controlMode = " << sConfig.controlMode << "\n";
+    out << "padScheme = " << sConfig.padScheme << "\n";
+    out << "rsAimMode = " << sConfig.rsAimMode << "\n";
+    out << "rsAimSens = " << sConfig.rsAimSens << "\n";
     out << "mouseSensitivity = " << sConfig.mouseSensitivity << "\n";
     out << "gyroEnabled = " << sConfig.gyroEnabled << "\n";
     out << "gyroSensitivity = " << sConfig.gyroSensitivity << "\n";
@@ -1319,7 +1345,19 @@ void loadConfig() {
         else if (key == "vsync") sConfig.vsync = atoi(val.c_str()) != 0;
         else if (key == "renderScale") {
             sConfig.renderScale = (float)atof(val.c_str());
-            if (sConfig.renderScale < 0.25f || sConfig.renderScale > 4.0f) sConfig.renderScale = 2.0f / 3.0f;
+            if (sConfig.renderScale != 0.0f && (sConfig.renderScale < 0.25f || sConfig.renderScale > 4.0f)) sConfig.renderScale = 0.0f;
+        }
+        else if (key == "rsAimMode") {
+            sConfig.rsAimMode = atoi(val.c_str());
+            if (sConfig.rsAimMode < PC_RS_AIM_OFF || sConfig.rsAimMode > PC_RS_AIM_ALWAYS) sConfig.rsAimMode = PC_RS_AIM_OFF;
+        }
+        else if (key == "rsAimSens") {
+            sConfig.rsAimSens = (float)atof(val.c_str());
+            if (!(sConfig.rsAimSens >= 0.25f && sConfig.rsAimSens <= 3.0f)) sConfig.rsAimSens = 1.0f;
+        }
+        else if (key == "padScheme") {
+            sConfig.padScheme = atoi(val.c_str());
+            if (sConfig.padScheme < 0 || sConfig.padScheme >= PC_PAD_SCHEME_COUNT) sConfig.padScheme = PC_PAD_SCHEME_GAMECUBE;
         }
         else if (key == "controlMode") {
             sConfig.controlMode = atoi(val.c_str());
@@ -1389,6 +1427,7 @@ void loadConfig() {
         else if (key == "infiniteDay") {
             sConfig.infiniteDay = atoi(val.c_str()) ? 1 : 0;
         }
+        else if (key == "faceCursor") sConfig.faceCursor = atoi(val.c_str()) ? 1 : 0;
         else if (key == "freeCamera") {
             sConfig.freeCamera = atoi(val.c_str()) ? 1 : 0;
         }
@@ -1587,7 +1626,7 @@ void loadConfig() {
             int idx = atoi(key.substr(p2 ? 4 : 3).c_str());
             if (idx >= 0 && idx < PC_KEY_ACT_COUNT) {
                 const int button = atoi(val.c_str());
-                const bool isButton = button >= -1 && button < SDL_CONTROLLER_BUTTON_MAX;
+                const bool isButton = button >= PC_GP_BIND_NONE && button < SDL_CONTROLLER_BUTTON_MAX;
                 const int axis = (button - PC_GP_AXIS_BIND) / 2;
                 const bool isAxis = button >= PC_GP_AXIS_BIND && axis >= 0 && axis < SDL_CONTROLLER_AXIS_MAX;
                 if (isButton || isAxis) {
@@ -1645,14 +1684,24 @@ bool padNavRight(SDL_GameController* c)
 	return padEdge((c && (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)
 	                   || menuStickHorizontal(c, 1))) || (sTouchFrameButtons & PAD_BUTTON_RIGHT), 3);
 }
-bool padNavA(SDL_GameController* c) { return padEdge((c && SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_A)) || (sTouchFrameButtons & PAD_BUTTON_A), 4); }
-bool padNavB(SDL_GameController* c) { return padEdge((c && SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_B)) || (sTouchFrameButtons & PAD_BUTTON_B), 5); }
+// A y B del menú siguen los bindings del mando, como el juego: con A y B
+// intercambiados el menú aceptaba con uno y el juego con el otro. Una acción
+// sin botón asignado vuelve al físico para que el menú nunca quede inservible.
+bool menuPadHeld(SDL_GameController* c, int action, SDL_GameControllerButton physical)
+{
+	if (!c)
+		return false;
+	const int bind = pc_window_get_gamepad_binding(action);
+	if (bind < 0)
+		return SDL_GameControllerGetButton(c, physical) != 0;
+	return pc_window_gamepad_bind_held(c, bind);
+}
+bool padNavA(SDL_GameController* c) { return padEdge(menuPadHeld(c, PC_KEY_ACT_A, SDL_CONTROLLER_BUTTON_A) || (sTouchFrameButtons & PAD_BUTTON_A), 4); }
+bool padNavB(SDL_GameController* c) { return padEdge(menuPadHeld(c, PC_KEY_ACT_B, SDL_CONTROLLER_BUTTON_B) || (sTouchFrameButtons & PAD_BUTTON_B), 5); }
 
 // The new-game prompt is a game-facing dialog rather than the F1 settings
 // menu. Its accept/cancel actions follow the configured A/B bindings, which
 // may be either SDL buttons or the axis encodings used by the remapping page.
-// Keep these separate from padNavA/B: F1 navigation deliberately retains its
-// physical A/B convention.
 bool promptPadBinding(SDL_GameController* c, int action, int edgeSlot)
 {
 	return c && padEdge(pc_window_gamepad_bind_held(c, pc_window_get_gamepad_binding(action)), edgeSlot);
@@ -1676,7 +1725,7 @@ bool captureConfirmHeld(SDL_GameController* ctl)
 		return true;
 	if (SDL_SCANCODE_SPACE < numKeys && keys[SDL_SCANCODE_SPACE])
 		return true;
-	return ctl && SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_A);
+	return menuPadHeld(ctl, PC_KEY_ACT_A, SDL_CONTROLLER_BUTTON_A);
 }
 
 } // namespace
@@ -2165,6 +2214,22 @@ void pollMenuInput() {
         return;
     }
 
+    // Controller Guide: solo lectura; arriba/abajo recorre, B/Esc vuelve.
+    if (sInPadGuide) {
+        bool up = keyWentDown(SDL_SCANCODE_UP) || keyWentDown(SDL_SCANCODE_W);
+        bool down = keyWentDown(SDL_SCANCODE_DOWN) || keyWentDown(SDL_SCANCODE_S);
+        if (ctl || sTouchFrameButtons) {
+            if (padNavUp(ctl)) up = true;
+            if (padNavDown(ctl)) down = true;
+        }
+        const int count = padGuideCount();
+        if (up && sPadGuideSel > 0) sPadGuideSel--;
+        if (down && sPadGuideSel < count - 1) sPadGuideSel++;
+        if (menuCancelKey() || keyWentDown(SDL_SCANCODE_B) || padNavB(ctl) || padNavA(ctl) || menuOkKey())
+            sInPadGuide = false;
+        return;
+    }
+
     // Gamepad submenu (button capture mode).
     if (sInGamepadSubmenu) {
         if (pollButtonCapture(ctl)) return;
@@ -2202,8 +2267,14 @@ void pollMenuInput() {
             sCaptureWaitRelease = true;
             return;
         }
+        // Izquierda/derecha: por defecto <-> ninguno; Supr/Retroceso lo vacía.
+        if (keyWentDown(SDL_SCANCODE_DELETE) || keyWentDown(SDL_SCANCODE_BACKSPACE)) {
+            pendingPadBinds()[sGamepadSelection] = PC_GP_BIND_NONE;
+            return;
+        }
         if (left || right) {
-            pendingPadBinds()[sGamepadSelection] = -1;
+            int& b = pendingPadBinds()[sGamepadSelection];
+            b = b == -1 ? PC_GP_BIND_NONE : -1;
             return;
         }
         if (menuCancelKey() || keyWentDown(SDL_SCANCODE_K) ||
@@ -2492,6 +2563,10 @@ void pollMenuInput() {
             sWaitingForKey = false;
             sCaptureWaitRelease = false;
             break;
+        case PC_SET_PICKER_PADGUIDE:
+            sInPadGuide = true;
+            sPadGuideSel = 0;
+            break;
         case PC_SET_PICKER_GAMEPAD:
             sInGamepadSubmenu = true;
             sGamepadSelection = pc_settings_picker_current(picker);
@@ -2557,6 +2632,13 @@ bool pollButtonCapture(SDL_GameController* ctl) {
     if (sWaitingForButton) {
         // B/Circle is a bindable face button. Only Esc cancels capture.
         if (keyWentDown(SDL_SCANCODE_ESCAPE)) {
+            sWaitingForButton = false;
+            sCaptureWaitRelease = false;
+            return true;
+        }
+        // Supr o Retroceso dejan la acción sin botón, como en el teclado.
+        if (keyWentDown(SDL_SCANCODE_DELETE) || keyWentDown(SDL_SCANCODE_BACKSPACE)) {
+            pendingPadBinds()[sGamepadSelection] = PC_GP_BIND_NONE;
             sWaitingForButton = false;
             sCaptureWaitRelease = false;
             return true;
@@ -2629,6 +2711,20 @@ void advancedRowChange(int row, bool left, bool right) {
     // Gyro calibrate: measures the resting drift of the active sensor.
     else if (row == 7) {
         if (left || right) pc_gyro_calibrate_start();
+    }
+    // Controller layout: GameCube or Switch button defaults.
+    else if (row == 8) {
+        if (left || right) sPending.padScheme = sPending.padScheme == PC_PAD_SCHEME_SWITCH ? PC_PAD_SCHEME_GAMECUBE : PC_PAD_SCHEME_SWITCH;
+    }
+    // Right stick aim: Off / Hold button / Always.
+    else if (row == 9) {
+        if (left) sPending.rsAimMode = (sPending.rsAimMode + 2) % 3;
+        else if (right) sPending.rsAimMode = (sPending.rsAimMode + 1) % 3;
+    }
+    // Right stick aim sensitivity (0.25 - 3.00, step 0.25).
+    else if (row == 10) {
+        if (left) sPending.rsAimSens = std::max(0.25f, sPending.rsAimSens - 0.25f);
+        if (right) sPending.rsAimSens = std::min(3.0f, sPending.rsAimSens + 0.25f);
     }
 }
 
@@ -2791,6 +2887,10 @@ void modsRowChange(int row, bool left, bool right) {
     }
     else if (row == 41) {
         if (left || right) sPending.fireflies = sPending.fireflies ? 0 : 1;
+    }
+    // Free Camera: hacia dónde mira la cámara al pulsar L.
+    else if (row == 43) {
+        if (left || right) sPending.faceCursor = sPending.faceCursor ? 0 : 1;
     }
     else if (row == 42) {
         if (left || right) sPending.skipHealthSafety = sPending.skipHealthSafety ? 0 : 1;
@@ -3017,7 +3117,8 @@ void mainRowValue(int row, char* out, size_t n) {
     snprintf(valueBuf[2], sizeof(valueBuf[2]), "%s", aspectBuf);
     {
         float rs = sPending.renderScale;
-        if (fabsf(rs - 2.0f / 3.0f) < 0.01f) snprintf(valueBuf[3], sizeof(valueBuf[3]), "Auto (native)");
+        if (rs <= 0.0f) snprintf(valueBuf[3], sizeof(valueBuf[3]), "Original (GameCube, 480p)");
+        else if (fabsf(rs - 2.0f / 3.0f) < 0.01f) snprintf(valueBuf[3], sizeof(valueBuf[3]), "Auto (native)");
         else snprintf(valueBuf[3], sizeof(valueBuf[3]), "%.2fx", rs);
     }
     if (sPending.refreshRate <= 0.0) snprintf(valueBuf[4], sizeof(valueBuf[4]), "Auto");
@@ -3081,8 +3182,8 @@ void mainRowChange(int row, bool left, bool right, bool ok) {
         }
         break;
     case ROW_RENDER_SCALE: {
-        static const float kScales[] = { 2.0f / 3.0f, 0.5f, 1.0f, 1.5f, 2.0f };
-        constexpr int kScaleCount = 5;
+        static const float kScales[] = { 0.0f, 0.5f, 2.0f / 3.0f, 1.0f, 1.5f, 2.0f };
+        constexpr int kScaleCount = 6;
         int idx = 0;
         float cur = sPending.renderScale;
         for (int i = 0; i < kScaleCount; i++) {
@@ -5241,8 +5342,8 @@ void pcNewGamePromptInput()
     if (!sNewGamePromptOpen) return;
     if (!sNewGamePromptArmed) {
         SDL_GameController* pad = pc_window_get_controller();
-        const bool padHeld = pad && (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A)
-                                     || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_B));
+        const bool padHeld = (menuPadHeld(pad, PC_KEY_ACT_A, SDL_CONTROLLER_BUTTON_A)
+                                     || menuPadHeld(pad, PC_KEY_ACT_B, SDL_CONTROLLER_BUTTON_B));
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
         const bool keyHeld = keys && (keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_ESCAPE]);
         sTouchTapPending = false;
@@ -6011,8 +6112,8 @@ void pcCaptainSelectInput()
     }
     if (!sCapSelArmed) {
         SDL_GameController* pad = pc_window_get_controller();
-        const bool padHeld = pad && (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A)
-                                     || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_B));
+        const bool padHeld = (menuPadHeld(pad, PC_KEY_ACT_A, SDL_CONTROLLER_BUTTON_A)
+                                     || menuPadHeld(pad, PC_KEY_ACT_B, SDL_CONTROLLER_BUTTON_B));
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
         const bool keyHeld = keys && (keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_ESCAPE]);
         sTouchTapPending = false;
@@ -6401,8 +6502,8 @@ void pcSpeedrunMenuInput()
     if (!sSrMenuOpen) return;
     if (!sSrMenuArmed) {
         SDL_GameController* pad = pc_window_get_controller();
-        const bool padHeld = pad && (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A)
-                                     || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_B));
+        const bool padHeld = (menuPadHeld(pad, PC_KEY_ACT_A, SDL_CONTROLLER_BUTTON_A)
+                                     || menuPadHeld(pad, PC_KEY_ACT_B, SDL_CONTROLLER_BUTTON_B));
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
         const bool keyHeld = keys && (keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_ESCAPE]);
         sTouchTapPending = false;
@@ -7515,13 +7616,44 @@ void pc_settings_draw(void) {
         return; // Don't draw footer when submenu is open.
     }
 
+    // Controller Guide overlay.
+    if (sInPadGuide) {
+        const int subX = px1 + 18, subY = py1 + 44;
+        const int subW = panelW - 36, subH = panelH - 58;
+        drawSubmenuSurface(gfx, subX, subY, subW, subH, "Controller Guide",
+                           "What each button does now", "Up/Down: scroll   Esc/B: back");
+        const int listStartY = subY + 48;
+        const int itemH = 24;
+        const int visibleItems = std::max(1, (subH - 70) / itemH);
+        const int count = padGuideCount();
+        int startIdx = 0;
+        if (sPadGuideSel >= visibleItems) startIdx = sPadGuideSel - visibleItems + 1;
+        const int endIdx = std::min(count, startIdx + visibleItems);
+        for (int i = startIdx; i < endIdx; i++) {
+            const int itemY = listStartY + (i - startIdx) * itemH;
+            if (padGuideIsHeader(i)) {
+                drawTextOutline(subX + 24, itemY + 4, "%s", Colour(255, 214, 120, 255), Colour(10, 16, 36, 255),
+                                padGuideLabel(i));
+            } else {
+                drawSubmenuRow(gfx, subX + 20, itemY, subW - 40, padGuideLabel(i), padGuideValue(i), i == sPadGuideSel);
+            }
+        }
+        if (count > visibleItems) {
+            char hint[64];
+            snprintf(hint, sizeof(hint), "%d / %d", sPadGuideSel + 1, count);
+            drawTextOutline(subX + subW - 12 - menuTextWidth(hint), subY + 12, "%s",
+                            Colour(180, 180, 200, 255), Colour(10, 16, 36, 255), hint);
+        }
+        return;
+    }
+
     // Gamepad submenu overlay.
     if (sInGamepadSubmenu) {
         const int subX = px1 + 18, subY = py1 + 44;
         const int subW = panelW - 36, subH = panelH - 58;
         drawSubmenuSurface(gfx, subX, subY, subW, subH, "Gamepad Controls",
                            sWaitingForButton ? "Press a button, trigger or stick   Esc: cancel"
-                                            : "Enter: capture   Left/Right: default",
+                                            : "Enter: capture   Left/Right: default/none   Del: none",
                            sWaitingForButton ? "" : "Up/Down: select   Esc/B: back");
 
         const int listStartY = subY + 48;
@@ -7543,7 +7675,8 @@ void pc_settings_draw(void) {
 
             const char* actionName = pc_window_get_key_action_name(act);
             int boundBtn = pendingPadBinds()[act];
-            if (boundBtn < 0) boundBtn = kDefaultGamepadBindings[act];
+            if (boundBtn == PC_GP_BIND_NONE) boundBtn = -1;
+            else if (boundBtn < 0) boundBtn = pc_window_scheme_default_gamepad_binding(sPending.padScheme, act);
             const char* btnName = pc_window_get_gamepad_button_name(boundBtn);
 
             char value[96];
@@ -7856,6 +7989,7 @@ int pc_settings_get_infinite_day(void) {
 
 float pc_settings_get_free_camera_pad_scale(void) { return sConfig.freeCamPadPct / 100.0f; }
 
+int pc_settings_get_face_cursor(void) { return sConfig.faceCursor; }
 int pc_settings_get_free_camera(void) {
     if (pc_speedrun_active()) return 0;
     return sConfig.freeCamera;
@@ -8103,6 +8237,7 @@ const char* pc_settings_group_name(int group) {
     case PC_SET_PICKER_HDMODELS: return "HD Models";
     case PC_SET_PICKER_KEYBOARD: return "Keyboard";
     case PC_SET_PICKER_GAMEPAD: return "Gamepad";
+    case PC_SET_PICKER_PADGUIDE: return "Controller Guide";
     default: return "";
     }
 }
@@ -8207,6 +8342,7 @@ void modsRowValue(int i, char* value, size_t n) {
     case 10: snprintf(value, n, "%s", sPending.idleCounter ? "On" : "Off (original)"); break;
     case 40: snprintf(value, n, "%s", sPending.eternalNight ? "On" : "Off (original)"); break;
     case 41: snprintf(value, n, "%s", sPending.fireflies ? "On" : "Off (original)"); break;
+    case 43: snprintf(value, n, "%s", sPending.faceCursor ? "Cursor" : "Captain (default)"); break;
     case 42: snprintf(value, n, "%s", sPending.skipHealthSafety ? "On" : "Off (original)"); break;
     case 11: healthPctLabel(sPending.naviHealthPct, "Infinite", value, n); break;
     case 12: healthPctLabel(sPending.tekiHealthPct, "Insta Kill", value, n); break;
@@ -8262,6 +8398,13 @@ void advancedRowValue(int i, char* value, size_t n) {
         else snprintf(value, n, "Press A (keep still)");
         break;
     }
+    case 8: snprintf(value, n, "%s", sPending.padScheme == PC_PAD_SCHEME_SWITCH ? "Switch" : "GameCube (original)"); break;
+    case 9: {
+        const char* names[3] = { "Off", "Hold button", "Always" };
+        snprintf(value, n, "%s", names[(sPending.rsAimMode >= 0 && sPending.rsAimMode <= 2) ? sPending.rsAimMode : 0]);
+        break;
+    }
+    case 10: snprintf(value, n, "%.2f", sPending.rsAimSens); break;
     default: value[0] = '\0';
     }
 }
@@ -8298,7 +8441,7 @@ namespace {
 // página de vídeo, de Advanced, de Graphics, de Mods...), así que reordenar
 // aquí no toca qué hace cada ajuste ni cómo se guarda: el .conf va por nombre.
 // ---------------------------------------------------------------------------
-enum RowSrc { SRC_MAIN, SRC_ADV, SRC_GFX, SRC_MODS, SRC_DATA, SRC_KEYS, SRC_PADS, SRC_RECENTER, SRC_ACH };
+enum RowSrc { SRC_MAIN, SRC_ADV, SRC_GFX, SRC_MODS, SRC_DATA, SRC_KEYS, SRC_PADS, SRC_RECENTER, SRC_ACH, SRC_PADGUIDE, SRC_AIMBTN };
 struct GroupRow {
     RowSrc src;
     int idx;
@@ -8310,7 +8453,7 @@ const GroupRow kDisplayRows[] = {
     { SRC_MAIN, ROW_DISPLAY_MODE, "Display Mode", "Windowed, fullscreen, or a borderless window that fills the screen." },
     { SRC_MAIN, ROW_RESOLUTION, "Resolution", "Size of the window or the fullscreen picture. A: full list. Left/Right: next size." },
     { SRC_MAIN, ROW_ASPECT_RATIO, "Aspect Ratio", "Auto fills the window. The others keep that shape and add black bars." },
-    { SRC_MAIN, ROW_RENDER_SCALE, "3D Resolution", "Detail of the 3D world. Higher looks sharper, lower runs faster." },
+    { SRC_MAIN, ROW_RENDER_SCALE, "3D Resolution", "Detail of the 3D world. Original renders at the GameCube's 480 lines, the lightest and the default. Higher looks sharper, lower runs faster." },
     { SRC_MAIN, ROW_REFRESH_RATE, "Refresh Rate", "How often the screen updates in fullscreen. Auto keeps your monitor's setting." },
     { SRC_MAIN, ROW_VSYNC, "Frame Sync (VSync)", "Waits for the screen before showing each frame. Stops tearing (a picture split in two), adds a little input delay." },
     { SRC_MAIN, ROW_FPS_MODE, "FPS Mode", "Frames per second. 30 is the original and the most stable. 60, 120 and Monitor (your screen's refresh rate) are smoother but experimental." },
@@ -8357,6 +8500,11 @@ const GroupRow kControlsRows[] = {
     { SRC_ADV, 6, "Gyro Invert", "Flips gyro aiming: none, horizontal, vertical or both." },
     { SRC_ADV, 7, "Gyro Calibrate", "Put the controller or phone down, keep it still and press A. Fixes a cursor that drifts on its own." },
     { SRC_RECENTER, 0, "Gyro Recenter Button", "Button that brings the cursor back in front of the captain. A: choose the button." },
+    { SRC_ADV, 8, "Controller Layout", "What each controller button does. GameCube: the original layout. Switch: as in Pikmin 1 + 2 on Switch (right stick turns the camera, L + right stick swarms, ZL faces forward, ZR zooms). Buttons you reassigned keep your choice." },
+    { SRC_ADV, 9, "Right Stick Aim", "Controller only. Move the cursor with the right stick, like a mouse. Hold button: only while you hold the button below (the right stick goes back to the camera when you let go). Always: the right stick always aims; the swarm button still swarms." },
+    { SRC_AIMBTN, 0, "Right Stick Aim Button", "Button to hold so the right stick aims the cursor (Hold button mode). A: choose the button." },
+    { SRC_ADV, 10, "Right Stick Aim Sensitivity", "How fast the cursor moves with the right stick. 1.00 is the default." },
+    { SRC_PADGUIDE, 0, "Controller Guide", "Every controller button and what it does right now, sorted by topic. It follows the layout, your reassigned buttons and the mods you have on." },
     { SRC_KEYS, 0, "Keyboard Bindings", "Two keys or mouse buttons per action. A: main key. Right: second key. Left: back to default. While waiting, Delete clears it. Shift, Ctrl and Alt can be used." },
     { SRC_PADS, 0, "Controller Bindings", "Choose the controller button for each action." },
 #else
@@ -8381,6 +8529,11 @@ const GroupRow kControlsRows[] = {
     { SRC_ADV, 6, "Gyro Invert", "Flips gyro aiming: none, horizontal, vertical or both." },
     { SRC_ADV, 7, "Gyro Calibrate", "Put the controller or phone down, keep it still and press A. Fixes a cursor that drifts on its own." },
     { SRC_RECENTER, 0, "Gyro Recenter Button", "Button that brings the cursor back in front of the captain. A: choose the button." },
+    { SRC_ADV, 8, "Controller Layout", "What each controller button does. GameCube: the original layout. Switch: as in Pikmin 1 + 2 on Switch (right stick turns the camera, L + right stick swarms, ZL faces forward, ZR zooms). Buttons you reassigned keep your choice." },
+    { SRC_ADV, 9, "Right Stick Aim", "Controller only. Move the cursor with the right stick, like a mouse. Hold button: only while you hold the button below (the right stick goes back to the camera when you let go). Always: the right stick always aims; the swarm button still swarms." },
+    { SRC_AIMBTN, 0, "Right Stick Aim Button", "Button to hold so the right stick aims the cursor (Hold button mode). A: choose the button." },
+    { SRC_ADV, 10, "Right Stick Aim Sensitivity", "How fast the cursor moves with the right stick. 1.00 is the default." },
+    { SRC_PADGUIDE, 0, "Controller Guide", "Every controller button and what it does right now, sorted by topic. It follows the layout, your reassigned buttons and the mods you have on." },
     { SRC_KEYS, 0, "Keyboard Bindings", "Two keys or mouse buttons per action. A: main key. Right: second key. Left: back to default. While waiting, Delete clears it. Shift, Ctrl and Alt can be used." },
     { SRC_PADS, 0, "Controller Bindings", "Choose the controller button for each action." },
 #endif
@@ -8390,12 +8543,14 @@ const GroupRow kCameraRows[] = {
 #if PIKI_P2_HOST
     { SRC_MODS, 14, "Free Camera", "Turn the camera freely, as in Pikmin 3. Mouse: push the cursor against the edge of its circle. Controller: right stick. L puts the camera back behind the captain. Swarming moves to its own Swarm button: bind it in Controls (on the pad every D-pad direction is a Pikmin 2 action)." },
     { SRC_MODS, 38, "Free Camera Speed", "How fast the right stick turns the free camera. 100% is the default." },
+    { SRC_MODS, 43, "Face Forward Aims At", "With Free Camera, what L (face forward) points the camera at. Captain: behind the captain, and the cursor comes back in front of him. Cursor: towards the cursor, wherever you left it, as in the original game." },
     { SRC_MODS, 18, "First Person", "Look at the world from inside the captain's helmet. Switch in game with the First Person button (V on keyboard, L3 on a controller)." },
     { SRC_MODS, 6, "Co-op Split Screen", "How the screen divides in two-player co-op (Coop on the title screen). 2-Player Battle keeps its own top/bottom split." },
     { SRC_MODS, 7, "Co-op Merged Camera", "Joins both halves into one view while the captains are close, and splits smoothly when they move apart." },
 #else
     { SRC_MODS, 14, "Free Camera", "Turn the camera freely, as in Pikmin 3. Mouse: push the cursor against the edge of its circle. Controller: right stick. L puts the camera back behind the captain. Swarming moves to its own Swarm button: bind it in Controls (on the pad every D-pad direction is a Pikmin 2 action)." },
     { SRC_MODS, 38, "Free Camera Speed", "How fast the right stick turns the free camera. 100% is the default." },
+    { SRC_MODS, 43, "Face Forward Aims At", "With Free Camera, what L (face forward) points the camera at. Captain: behind the captain, and the cursor comes back in front of him. Cursor: towards the cursor, wherever you left it, as in the original game." },
     { SRC_MODS, 18, "First Person", "Look at the world from inside the captain's helmet. Switch in game with the First Person button (V on keyboard, L3 on a controller)." },
     { SRC_MODS, 6, "Co-op Split Screen", "How the screen divides in two-player co-op." },
     { SRC_MODS, 7, "Co-op Merged Camera", "Joins both halves into one view while the captains are close." },
@@ -8642,6 +8797,8 @@ const char* disabledReason(const GroupRow& r) {
             return "Borderless always uses the desktop resolution.";
         break;
     case SRC_ADV:
+        if ((r.idx == 9 || r.idx == 10) && !pc_window_get_controller()) return "Connect a controller first.";
+        if (r.idx == 10 && sPending.rsAimMode == PC_RS_AIM_OFF) return "Turn on Right Stick Aim first.";
         if (r.idx == 0 && sPending.controlMode == PC_CONTROL_CLASSIC)
             return "Only used with the Mouse Cursor control scheme.";
         if ((r.idx == 5 || r.idx == 6) && !sPending.gyroEnabled) return "Turn on Gyro Aiming first.";
@@ -8650,11 +8807,18 @@ const char* disabledReason(const GroupRow& r) {
     case SRC_RECENTER:
         if (!sPending.gyroEnabled) return "Turn on Gyro Aiming first.";
         break;
+    case SRC_AIMBTN:
+        if (!pc_window_get_controller()) return "Connect a controller first.";
+        if (sPending.rsAimMode != PC_RS_AIM_HOLD) return "Set Right Stick Aim to Hold button first.";
+        break;
     case SRC_GFX:
         if (r.idx >= 7 && r.idx <= 9 && !sPending.colourGrading) return "Turn on Colour Adjustments first.";
         break;
     case SRC_MODS:
+        if (r.idx == 0 && pc_window_get_controller())
+            return "A controller is connected, so the cursor is aimed with its stick (Classic). Unplug it to use Mouse Cursor.";
         if (r.idx == 16 && !sPending.lockOn) return "Turn on Lock-On first.";
+        if (r.idx == 43 && !sPending.freeCamera) return "Turn on Free Camera first.";
         break;
     default:
         break;
@@ -8692,10 +8856,102 @@ void startButtonCapture(int action) {
 
 void gamepadBindingName(int action, char* out, size_t n) {
     int bound = pendingPadBinds()[action];
-    if (bound < 0) bound = kDefaultGamepadBindings[action];
+    if (bound == PC_GP_BIND_NONE) bound = -1;
+    else if (bound < 0) bound = pc_window_scheme_default_gamepad_binding(sPending.padScheme, action);
     const char* name = bound >= 0 ? pc_window_get_gamepad_button_name(bound) : nullptr;
     snprintf(out, n, "%s", name ? name : "None");
 }
+
+// ── Controller Guide ──
+// Una línea por acción, agrupadas por tema. Los botones salen de los bindings
+// pendientes (o del esquema si no se tocaron), así que la guía siempre dice lo
+// que hará el mando al cerrar el menú.
+struct PadGuideLine { std::string label, value; bool header; };
+std::vector<PadGuideLine> sPadGuide;
+
+std::string padBtn(int action) {
+    int b = pendingPadBinds()[action];
+    if (b == PC_GP_BIND_NONE) return "(not assigned)";
+    if (b < 0) b = pc_window_scheme_default_gamepad_binding(sPending.padScheme, action);
+    const char* name = b >= 0 ? pc_window_get_gamepad_button_name(b) : nullptr;
+    return name && b >= 0 ? name : "(not assigned)";
+}
+bool padBound(int action) {
+    int b = pendingPadBinds()[action];
+    if (b == PC_GP_BIND_NONE) return false;
+    if (b < 0) b = pc_window_scheme_default_gamepad_binding(sPending.padScheme, action);
+    return b >= 0;
+}
+
+void buildPadGuide() {
+    sPadGuide.clear();
+    auto H = [](const char* t) { sPadGuide.push_back({ t, "", true }); };
+    auto L = [](const std::string& a, const std::string& b) { sPadGuide.push_back({ a, b, false }); };
+    const bool sw = sPending.padScheme == PC_PAD_SCHEME_SWITCH;
+    // "Right Stick Aim: Always" se queda el stick derecho: ni cámara ni swarm sin el botón.
+    const bool aimAlways = sPending.rsAimMode == PC_RS_AIM_ALWAYS;
+    const bool rsCamera = (sw || sPending.freeCamera) && !aimAlways;
+    const std::string A = padBtn(PC_KEY_ACT_A), B = padBtn(PC_KEY_ACT_B), X = padBtn(PC_KEY_ACT_X);
+    const std::string Lt = padBtn(PC_KEY_ACT_L);
+    std::string swarm;
+    if (!rsCamera && !aimAlways && !sw && !sPending.freeCamera) swarm = "Right Stick";
+    else if (padBound(PC_KEY_ACT_SWARM_STICK)) swarm = "Hold " + padBtn(PC_KEY_ACT_SWARM_STICK) + " + Right Stick";
+    else swarm = "Assign \"Swarm with right stick\"";
+
+    H(sw ? "Layout: Switch" : "Layout: GameCube (original)");
+    H("Moving");
+    L("Move the captain and the cursor", "Left Stick");
+    if (sPending.rsAimMode == PC_RS_AIM_ALWAYS) L("Aim the cursor", "Right Stick");
+    else if (sPending.rsAimMode == PC_RS_AIM_HOLD)
+        L("Aim the cursor", padBound(PC_KEY_ACT_AIM_STICK) ? "Hold " + padBtn(PC_KEY_ACT_AIM_STICK) + " + Right Stick"
+                                                            : "Assign \"Right Stick Aim Button\"");
+    H("Pikmin");
+    L("Throw a Pikmin (hold, then release)", A);
+    L("Pluck a sprout", sPending.holdToPluck ? A + " (hold to keep going)" : A);
+    L("Whistle (hold for a bigger circle)", B);
+    if (sPending.throwCancelB) L("Put the Pikmin in hand back", "Hold " + A + ", press " + B);
+    L("Swarm the squad", swarm);
+    if (padBound(PC_KEY_ACT_SWARM)) L("Swarm toward the cursor", padBtn(PC_KEY_ACT_SWARM));
+    L("Dismiss the squad", "Tap " + X);
+    L("Lie down", padBound(PC_KEY_ACT_LIEDOWN) ? "Hold " + padBtn(PC_KEY_ACT_LIEDOWN) : "Hold " + X);
+    L("Switch captain", padBtn(PC_KEY_ACT_Y));
+    L("Change the Pikmin type in hand", sw ? padBtn(PC_KEY_ACT_DPAD_RIGHT)
+                                         : padBtn(PC_KEY_ACT_DPAD_LEFT) + " / " + padBtn(PC_KEY_ACT_DPAD_RIGHT));
+    L("Change its maturity (Pikmin in hand)", sw ? "Hold " + A + ", press " + X
+                                               : "Hold " + A + ", " + padBtn(PC_KEY_ACT_DPAD_UP) + " / " + padBtn(PC_KEY_ACT_DPAD_DOWN));
+    H("Sprays");
+    L("Ultra-Bitter spray", padBtn(PC_KEY_ACT_DPAD_UP));
+    L("Ultra-Spicy spray", padBtn(PC_KEY_ACT_DPAD_DOWN));
+    H("Camera");
+    L("Turn the camera", rsCamera ? "Right Stick left / right" : "Hold " + Lt + " + Left Stick");
+    L("Face forward", "Tap " + Lt);
+    L("Camera height", sw ? "Right Stick up / down" : padBtn(PC_KEY_ACT_Z));
+    L("Zoom", padBtn(PC_KEY_ACT_R));
+    const bool anyMod = sPending.lockOn || sPending.firstPerson || sPending.gyroEnabled;
+    if (anyMod) H("Mods you have on");
+    if (sPending.lockOn) {
+        const bool zlLock = sw && !padBound(PC_KEY_ACT_LOCKON);
+        L("Lock-On", zlLock ? Lt + " (also faces forward)" : padBtn(PC_KEY_ACT_LOCKON));
+        if (sPending.charge) {
+            std::string charge = padBound(PC_KEY_ACT_SWARM) ? padBtn(PC_KEY_ACT_SWARM) : std::string();
+            if (padBound(PC_KEY_ACT_SWARM_STICK)) {
+                const std::string tap = "Tap " + padBtn(PC_KEY_ACT_SWARM_STICK);
+                charge = charge.empty() ? tap : charge + " or " + tap;
+            }
+            L("Charge at the locked target", charge.empty() ? "Assign \"Swarm to cursor\"" : charge);
+        }
+    }
+    if (sPending.firstPerson) L("First-person view", padBtn(PC_KEY_ACT_FIRSTPERSON));
+    if (sPending.gyroEnabled) L("Bring the gyro cursor back", padBtn(PC_KEY_ACT_GYRO_RECENTER));
+    H("Menus");
+    L("Pause", padBtn(PC_KEY_ACT_START));
+    L("Accept / Back", A + " / " + B);
+}
+
+int padGuideCount() { buildPadGuide(); return (int)sPadGuide.size(); }
+const char* padGuideLabel(int i) { return (i >= 0 && i < (int)sPadGuide.size()) ? sPadGuide[i].label.c_str() : ""; }
+const char* padGuideValue(int i) { return (i >= 0 && i < (int)sPadGuide.size()) ? sPadGuide[i].value.c_str() : ""; }
+bool padGuideIsHeader(int i) { return i >= 0 && i < (int)sPadGuide.size() && sPadGuide[i].header; }
 } // namespace
 
 const char* pc_settings_row_section(int group, int row) { return rowSection(group, row); }
@@ -8725,6 +8981,7 @@ int pc_settings_rows_count(int group) {
     case PC_SET_PICKER_HDMODELS: return 6;
     case PC_SET_PICKER_KEYBOARD:
     case PC_SET_PICKER_GAMEPAD: return PC_KEY_ACT_COUNT;
+    case PC_SET_PICKER_PADGUIDE: return padGuideCount();
     default: return 0;
     }
 }
@@ -8760,7 +9017,8 @@ const char* pc_settings_row_help(int group, int row) {
     case PC_SET_PICKER_TEXPACKS: return "A: install, activate or deactivate. Changes need a restart.";
     case PC_SET_PICKER_HDMODELS: return "A: pick the model's zip to install it. Needs a restart.";
     case PC_SET_PICKER_KEYBOARD: return "A: press the new key or mouse button. Left/Right: back to default.";
-    case PC_SET_PICKER_GAMEPAD: return "A: press the new button. Left/Right: back to default.";
+    case PC_SET_PICKER_GAMEPAD: return "A: press the new button. Left/Right: default or none. Delete: none.";
+    case PC_SET_PICKER_PADGUIDE: return "What each controller button does now. Change it in Controller Layout and Controller Bindings.";
     default: return "";
     }
 }
@@ -8779,6 +9037,8 @@ int pc_settings_row_opens_picker(int group, int row) {
     case SRC_KEYS: sPickerFocusRow = 0; return PC_SET_PICKER_KEYBOARD;
     case SRC_PADS: sPickerFocusRow = 0; return PC_SET_PICKER_GAMEPAD;
     case SRC_RECENTER: sPickerFocusRow = PC_KEY_ACT_GYRO_RECENTER; return PC_SET_PICKER_GAMEPAD;
+    case SRC_AIMBTN: sPickerFocusRow = PC_KEY_ACT_AIM_STICK; return PC_SET_PICKER_GAMEPAD;
+    case SRC_PADGUIDE: return PC_SET_PICKER_PADGUIDE;
     default: return 0;
     }
 }
@@ -8806,6 +9066,7 @@ const char* pc_settings_row_label(int group, int row) {
         return label;
     }
     if (group == PC_SET_PICKER_HDMODELS) return (row >= 0 && row < 6) ? kHdModelLabels[row] : "";
+    if (group == PC_SET_PICKER_PADGUIDE) return padGuideLabel(row);
     if (group == PC_SET_PICKER_RESOLUTION) {
         std::vector<int> c = pickerResolutionChoices();
         if (row < 0 || row >= (int)c.size()) return "";
@@ -8834,10 +9095,17 @@ void pc_settings_row_value(int group, int row, char* out, unsigned long n) {
             break;
         case SRC_ACH: break;
         case SRC_KEYS:
-        case SRC_PADS: snprintf(out, n, "Open  >"); break;
+        case SRC_PADS:
+        case SRC_PADGUIDE: snprintf(out, n, "Open  >"); break;
         case SRC_RECENTER: {
             char name[64];
             gamepadBindingName(PC_KEY_ACT_GYRO_RECENTER, name, sizeof(name));
+            snprintf(out, n, "%s  >", name);
+            break;
+        }
+        case SRC_AIMBTN: {
+            char name[64];
+            gamepadBindingName(PC_KEY_ACT_AIM_STICK, name, sizeof(name));
             snprintf(out, n, "%s  >", name);
             break;
         }
@@ -8867,6 +9135,7 @@ void pc_settings_row_value(int group, int row, char* out, unsigned long n) {
             }
         }
     }
+    if (group == PC_SET_PICKER_PADGUIDE) snprintf(out, n, "%s", padGuideValue(row));
     if (group == PC_SET_PICKER_HDMODELS) {
         if (sTexturePackPickerActive && sHdModelsSelection == row) snprintf(out, n, "Installing...");
         else snprintf(out, n, "%s", hdModelInstalled(row) ? "Installed" : "Not installed");
@@ -8926,7 +9195,7 @@ void pc_settings_row_change(int group, int row, int dir, bool ok) {
         }
     } else if (group == PC_SET_PICKER_GAMEPAD && row >= 0 && row < PC_KEY_ACT_COUNT) {
         if (ok) startButtonCapture(row);
-        else if (dir) pendingPadBinds()[row] = -1;
+        else if (dir) pendingPadBinds()[row] = pendingPadBinds()[row] == -1 ? PC_GP_BIND_NONE : -1;
     } else if (group == PC_SET_PICKER_TEXPACKS && ok) {
         texturePacksRowAction(row, pc_texpack_list_packs());
     } else if (group == PC_SET_PICKER_HDMODELS && ok) {

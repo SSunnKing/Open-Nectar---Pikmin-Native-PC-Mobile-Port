@@ -313,6 +313,19 @@ cmake --build build/pikmin2 --target pikmin2_pc -j"$(sysctl -n hw.ncpu)"
 
 There are no ready-made macOS packages: macOS players build from source.
 
+The Pikmin 1 commands above build the USA game only, so the launcher will ask for
+`nectar-pal` when you install a European (PAL) Pikmin disc. To get both next
+to the launcher, run `scripts/build-macos.sh` instead: it also builds the PAL
+game and places it as `build/pikmin1/bin/nectar-pal`.
+
+The helper builds its own static SDL2 and explicitly selects the USA/PAL build
+regions, including when reusing an existing build directory. Optionally install
+`libusb` with `brew install libusb` to enable its USB Xbox 360-protocol adapter.
+That adapter supports one controller at a time and checks for connections and
+reconnections once per second. Without libusb, standard SDL controller support
+remains available. The development binaries use Homebrew's libusb when enabled;
+use the release script for distributable packages.
+
 The compiler comes from the Xcode command-line tools (`xcode-select --install`). The port requests an OpenGL 4.1 core context, the newest core profile macOS provides.
 
 ### Choosing which release to build

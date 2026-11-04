@@ -3,6 +3,10 @@
 #include "SoundMgr.h"
 #include "sysNew.h"
 #include "zen/DrawMenu.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_gfx.h"
+#include "pc_menu_click.h"
+#endif
 
 /**
  * @todo: Documentation
@@ -99,6 +103,9 @@ bool zen::DrawMenuBase::update(Controller* controller)
 void zen::DrawMenuBase::draw(Graphics&)
 {
 	DrawScreen::draw();
+#if defined(PIKI_PC_PORT)
+	pc_gfx_note_menu_tap_space(pc_gfx_menu_virt_width(), 480);
+#endif
 }
 
 /**
@@ -163,6 +170,41 @@ bool zen::DrawMenuBase::modeOperation(Controller* controller)
 		} while (!newItem->getActiveSw());
 	}
 
+	bool pointerDecide = false;
+	bool mouseBack     = false;
+#if defined(PIKI_PC_PORT)
+	if (mPointerClicks) {
+		// Mouse: motion over a row highlights it, and a click on an open row decides it. A right
+		// click cancels. Claimed, so a left click in Mouse Cursor mode is not also A.
+		pc_menu_click_claim_pointer_menu();
+		constexpr int kMaxClickRows = 32;
+		const int rowCount          = mOptionCount < kMaxClickRows ? mOptionCount : kMaxClickRows;
+		PcMenuClickRect rects[kMaxClickRows];
+		int active[kMaxClickRows];
+		for (int i = 0; i < rowCount; i++) {
+			const PUTRect& b = mMenuItems[i].getTouchBounds();
+			rects[i]         = { b.mMinX, b.mMinY, b.mMaxX, b.mMaxY };
+			active[i]        = mMenuItems[i].getActiveSw() ? 1 : 0;
+		}
+		float gx = 0.0f, gy = 0.0f;
+		if (pc_gfx_menu_graph_point(false, &gx, &gy)) {
+			const PcMenuClickResult hover = pc_menu_click_hover(PC_MENU_CLICK_MAIN, gx, gy, rects, active, rowCount, kPcMenuClickMargin);
+			if (hover.index >= 0) {
+				mCurrentHover = hover.index;
+				newItem       = &mMenuItems[mCurrentHover];
+			}
+		}
+		if (pc_gfx_menu_graph_point(true, &gx, &gy)) {
+			const PcMenuClickResult hit = pc_menu_click_resolve(PC_MENU_CLICK_MAIN, gx, gy, rects, active, rowCount, kPcMenuClickMargin);
+			if (hit.action == PC_MENU_CLICK_ACTIVATE) {
+				mCurrentHover = hit.index;
+				newItem       = &mMenuItems[mCurrentHover];
+				pointerDecide = true;
+			}
+		}
+		mouseBack = pc_menu_click_take_back();
+	}
+#endif
 	for (int i = 0; i < mOptionCount; i++) {
 		mMenuItems[i].update(i == mCurrentHover, mCharColor, mGradColor);
 	}
@@ -175,11 +217,11 @@ bool zen::DrawMenuBase::modeOperation(Controller* controller)
 		mRightCursorMgr.move(newItem->getIconRPosH(), newItem->getIconRPosV(), 0.5f);
 		mEventFlag |= 0x1;
 	}
-	if (controller->keyClick(mKeyCancel)) {
+	if (controller->keyClick(mKeyCancel) || mouseBack) {
 		SeSystem::playSysSe(SYSSE_CANCEL);
 		mSelectedNum = SELECT_CANCEL;
 		res          = true;
-	} else if (controller->keyClick(mKeyDecide)) {
+	} else if (controller->keyClick(mKeyDecide) || pointerDecide) {
 		SeSystem::playSysSe(SYSSE_DECIDE1);
 		mSelectedNum = mCurrentHover;
 		res          = true;

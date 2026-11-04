@@ -1,6 +1,7 @@
 #include "ItemAI.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
+#include "pc_seed_landing.h"
 #include "pc_speedrun.h"
 #include "netplay/pc_input_log.h"
 #include "netplay/pc_netplay_det.h"
@@ -266,14 +267,17 @@ void PikiHeadAI::BuryInit::act(AICreature* item)
 {
 	PikiHeadItem* obj = (PikiHeadItem*)item;
 #if defined(PIKI_PC_PORT)
-	// startFix congela la semilla donde esté. Tras el rebote del aterrizaje
-	// puede seguir en el aire, y a más de 30 FPS el rebote cambia lo bastante
-	// como para que se plantara flotando: se baja al suelo antes de fijarla.
-	f32 groundY = mapMgr->getMinY(obj->mSRT.t.x, obj->mSRT.t.z, true);
-	if (obj->mSRT.t.y > groundY) {
-		obj->mSRT.t.y = groundY;
+	// startFix freezes the seed where the bounce left it. At the GameCube
+	// 30 Hz step that is the original landing. At 60/120 the smaller step
+	// changes the bounce enough that the seed is still in the air, so drop
+	// it to the ground before freezing it.
+	if (pc_seed_landing_snaps_to_ground(gsys->pcTicksPer30Hz())) {
+		f32 groundY = mapMgr->getMinY(obj->mSRT.t.x, obj->mSRT.t.z, true);
+		if (obj->mSRT.t.y > groundY) {
+			obj->mSRT.t.y = groundY;
+		}
+		obj->mVelocity.set(0.0f, 0.0f, 0.0f);
 	}
-	obj->mVelocity.set(0.0f, 0.0f, 0.0f);
 #endif
 	obj->startFix();
 	obj->mFlowerStage               = Leaf;
@@ -288,11 +292,11 @@ void PikiHeadAI::BuryInit::act(AICreature* item)
 void PikiHeadAI::BuryExec::act(AICreature* item)
 {
 #if defined(PIKI_PC_PORT)
-	// Issue #65: a seed that lands against a steep wall (e.g. the cliff by the
-	// Blue Onion in the Forest Navel) used to plant right there, in mid air.
-	// Push it off the wall and let it fall again until it reaches a floor.
+	// Upstream issue #65: an edge hit on a steep face is stored as the ground
+	// triangle (the collision normal points up) and the seed used to plant
+	// there, in mid-air. Push it off and let it fall to a floor.
 	CollTriInfo* tri = item->mGroundTriangle;
-	if (tri && tri->mTriangle.mNormal.y < 0.5f) {
+	if (tri && pc_seed_landing_pushes_off_steep_face(tri->mTriangle.mNormal.y)) {
 		item->mVelocity.set(tri->mTriangle.mNormal.x * 80.0f, 0.0f, tri->mTriangle.mNormal.z * 80.0f);
 		item->mSAICtx.mStateMachine->transit(item, PIKIHEAD_Flying);
 		return;

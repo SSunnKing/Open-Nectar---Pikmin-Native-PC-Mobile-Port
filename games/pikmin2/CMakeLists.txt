@@ -357,6 +357,7 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
         ${PC_PORT_DIR}/pc_window.cpp
         ${PC_PORT_DIR}/pc_discord.cpp
         ${PC_PORT_DIR}/pc_gyro.cpp
+        ${PC_PORT_DIR}/pc_xinput_usb.cpp
         ${PC_PORT_DIR}/pc_icon.cpp
         ${PC_PORT_DIR}/pc_file_dialog.cpp
         ${PC_PORT_DIR}/mods/pc_hd_model_convert.cpp
@@ -523,6 +524,21 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
     else()
         target_link_libraries(${P2_GAME} PRIVATE ${P2_LEGACY} m Threads::Threads ${P2_SDL_LIBS} OpenGL::GL)
     endif()
+    # Mandos Xbox 360 (XInput) por USB en macOS, que no trae driver para ellos:
+    # se leen con libusb y se presentan a SDL como mando virtual (como en P1).
+    option(PIKMIN_XINPUT_USB "Read USB Xbox 360-protocol controllers with libusb (macOS)" OFF)
+    if(PIKMIN_XINPUT_USB)
+        find_path(LIBUSB_INCLUDE_DIR libusb.h HINTS /opt/homebrew /usr/local PATH_SUFFIXES include/libusb-1.0 libusb-1.0)
+        find_library(LIBUSB_LIBRARY NAMES usb-1.0 HINTS /opt/homebrew/lib /usr/local/lib)
+        if(LIBUSB_INCLUDE_DIR AND LIBUSB_LIBRARY)
+            target_include_directories(${P2_GAME} PRIVATE ${LIBUSB_INCLUDE_DIR})
+            target_link_libraries(${P2_GAME} PRIVATE ${LIBUSB_LIBRARY})
+            target_compile_definitions(${P2_GAME} PRIVATE PIKI_XINPUT_USB=1)
+            message(STATUS "USB XInput controllers: libusb ${LIBUSB_LIBRARY}")
+        else()
+            message(WARNING "PIKMIN_XINPUT_USB=ON but libusb was not found (brew install libusb)")
+        endif()
+    endif()
     # Cliente TCP de LiveSplit (pc_livesplit.cpp), modo Speedrun.
     if(WIN32)
         target_link_libraries(${P2_GAME} PRIVATE ws2_32)
@@ -543,6 +559,15 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
     # it reports CTest's standard skip code until its native backend is wired.
     if(BUILD_TESTING AND NOT ANDROID)
         set(P2_HOST_TEST_TARGETS)
+        if(APPLE AND PIKMIN_XINPUT_USB AND LIBUSB_INCLUDE_DIR)
+            add_executable(p2_xinput_usb_test
+                ../../tests/pc_xinput_usb_test.cpp pc_port/pc_xinput_usb.cpp)
+            target_compile_definitions(p2_xinput_usb_test PRIVATE
+                PIKI_XINPUT_USB=1 SDL_CreateThread=pc_xinput_test_create_thread)
+            target_include_directories(p2_xinput_usb_test PRIVATE pc_port ${P2_SDL_INCLUDES} ${LIBUSB_INCLUDE_DIR})
+            target_link_libraries(p2_xinput_usb_test PRIVATE ${P2_SDL_LIBS} Threads::Threads)
+            add_test(NAME p2_xinput_usb_test COMMAND p2_xinput_usb_test)
+        endif()
         function(pikmin2_add_host_test target)
             add_executable(${target} ${ARGN})
             target_compile_options(${target} PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)

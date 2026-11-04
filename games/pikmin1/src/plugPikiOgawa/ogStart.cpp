@@ -1,11 +1,16 @@
 #include "zen/ogStart.h"
 #include "DebugLog.h"
 #include "P2D/Graph.h"
+#include "P2D/Pane.h"
+#include "P2D/Picture.h"
 #include "P2D/Screen.h"
+#include "P2D/TextBox.h"
+#include "PSU/Tree.h"
 #include "sysNew.h"
 #include "zen/DrawCommon.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
+#include "pc_menu_click.h"
 #endif
 
 /**
@@ -46,6 +51,64 @@ void zen::ogScrStartMgr::start()
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+namespace {
+
+void pcCollectTitleButtons(P2DPane* pane, const PcMenuClickRect& root, PcMenuClickRect* rects, int* active, P2DPane** panes,
+                           int* count, int cap, bool skipSelf)
+{
+	if (!pane || !count || *count >= cap) {
+		return;
+	}
+	if (!skipSelf && pane->IsVisible()) {
+		const u16 type = pane->getTypeID();
+		if (type == PANETYPE_TextBox || type == PANETYPE_Picture) {
+			const PUTRect& bounds = pane->getGlobalBounds();
+			const PcMenuClickRect rect = { bounds.mMinX, bounds.mMinY, bounds.mMaxX, bounds.mMaxY };
+			if (pc_menu_click_is_button_rect(rect, root)) {
+				rects[*count]  = rect;
+				active[*count] = 1;
+				if (panes) {
+					panes[*count] = pane;
+				}
+				*count += 1;
+			}
+		}
+	}
+	for (PSUTree<P2DPane>* child = pane->getFirstChild(); child != nullptr; child = child->getNextChild()) {
+		pcCollectTitleButtons(child->getObject(), root, rects, active, panes, count, cap, false);
+	}
+}
+
+void pcBrightenTitleButton(P2DPane* pane)
+{
+	if (!pane) {
+		return;
+	}
+	if (pane->getTypeID() == PANETYPE_TextBox) {
+		static_cast<P2DTextBox*>(pane)->setAlpha(255);
+	} else if (pane->getTypeID() == PANETYPE_Picture) {
+		static_cast<P2DPicture*>(pane)->setAlpha(255);
+	}
+}
+
+} // namespace
+
+bool pcTitleGraphPoint(bool click, float* x, float* y)
+{
+	return pc_gfx_menu_graph_point(click, x, y);
+}
+
+bool zen::ogScrStartMgr::pcPointerPressed()
+{
+	if (mState != START_Oscillate) {
+		return false;
+	}
+	// Any left click in the window presses Start, including letterbox bars.
+	return pc_menu_click_take(nullptr, nullptr);
+}
+#endif
+
 void zen::ogScrStartMgr::stop()
 {
 	if (mState == START_Oscillate) {
@@ -64,6 +127,10 @@ zen::ogScrStartMgr::StartStatus zen::ogScrStartMgr::update(Controller* controlle
 	if (mState == START_NULL) {
 		return mState;
 	}
+#if defined(PIKI_PC_PORT)
+	// Press Start takes the click itself (pcPointerPressed), so a left click here is not A.
+	pc_menu_click_claim_pointer_menu();
+#endif
 
 	mPressStartScreen->update();
 	mFadeTimer += gsys->getFrameTime();
@@ -105,6 +172,30 @@ zen::ogScrStartMgr::StartStatus zen::ogScrStartMgr::update(Controller* controlle
 		}
 
 		P2DPaneLibrary::setFamilyAlpha(mPressStartScreen, 255.0f * (0.5f - 0.5f * cosf(TAU * mFadeTimer)));
+
+#if defined(PIKI_PC_PORT)
+		// The pointer brightens the Press Start pane it is over. A click still
+		// decides, later, in the title section.
+		if (mRootPane) {
+			const PUTRect& rootBounds = mRootPane->getGlobalBounds();
+			const PcMenuClickRect root = { rootBounds.mMinX, rootBounds.mMinY, rootBounds.mMaxX, rootBounds.mMaxY };
+			constexpr int kMaxButtons = 16;
+			PcMenuClickRect rects[kMaxButtons];
+			int active[kMaxButtons];
+			P2DPane* panes[kMaxButtons];
+			int count = 0;
+			pcCollectTitleButtons(mRootPane, root, rects, active, panes, &count, kMaxButtons, true);
+			float x = 0.0f;
+			float y = 0.0f;
+			if (count > 0 && pcTitleGraphPoint(false, &x, &y)) {
+				const PcMenuClickResult hover
+				    = pc_menu_click_hover(PC_MENU_CLICK_TITLE, x, y, rects, active, count, kPcMenuClickMargin);
+				if (hover.action == PC_MENU_CLICK_HIGHLIGHT) {
+					pcBrightenTitleButton(panes[hover.index]);
+				}
+			}
+		}
+#endif
 
 		if (controller->keyClick(KBBTN_START)) {
 			mExitState = START_Exit;

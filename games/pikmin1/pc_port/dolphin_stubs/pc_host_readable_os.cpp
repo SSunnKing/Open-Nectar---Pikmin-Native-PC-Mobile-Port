@@ -1,9 +1,10 @@
 // End of the host memory the OS reports readable from a pointer.
 // Windows: VirtualQuery. macOS: mach_vm_region_recurse (issue #45: there is no
 // /proc there, so every host pointer used to read as unreadable and Pikmin 1
-// drew nothing), cached because one Mach call costs microseconds and the
-// renderer asks thousands of times a frame. Linux, Android and anything else:
-// /proc/self/maps, cached.
+// drew nothing). Both cached, because one call costs microseconds and the
+// renderer asks thousands of times a frame (GXSetArray per model; uncached
+// VirtualQuery made Pikmin 1 lag with many Pikmin on screen, issue #218).
+// Linux, Android and anything else: /proc/self/maps, cached.
 #include "pc_host_readable_os.h"
 
 #include <cstdint>
@@ -20,6 +21,8 @@
 #elif defined(__APPLE__)
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
+#endif
+#if defined(_WIN32) || defined(__APPLE__)
 
 #include <chrono>
 #include <iterator>
@@ -29,6 +32,7 @@
 #include <chrono>
 #include <cerrno>
 #include <cstdio>
+#include <cstring>
 #include <utility>
 #include <vector>
 #endif
@@ -52,20 +56,37 @@ constexpr size_t kUnsizedWant = size_t(65536) * 256;
 }
 
 #if defined(_WIN32)
-PcHostReadable osReadableEnd(const u8* p, size_t want, const u8** out)
+// One walk over the VirtualQuery regions from p, with the same contract as the
+// Mach walk below: *lo is where the first readable region starts (at or before
+// p); *hard says the walk ended at memory that is not readable, so *out is the
+// true end of the run rather than a stopping point.
+PcHostReadable osWalk(const u8* p, size_t want, const u8** lo, const u8** out, bool* hard)
 {
 	const u8* end = nullptr;
+	*lo = p;
+	*hard = true;
 	MEMORY_BASIC_INFORMATION mbi;
-	int regions = 0;
-	for (const u8* q = p; regions < kMaxRegions && VirtualQuery(q, &mbi, sizeof(mbi)) == sizeof(mbi); q = end, ++regions) {
+	const u8* q = p;
+	for (int regions = 0;; ++regions) {
+		if (regions >= kMaxRegions) {
+			*hard = false;
+			break;
+		}
+		if (VirtualQuery(q, &mbi, sizeof(mbi)) != sizeof(mbi))
+			break;
 		const DWORD prot = mbi.Protect & 0xFF;
 		const bool readable = mbi.State == MEM_COMMIT && !(mbi.Protect & PAGE_GUARD) && prot != PAGE_NOACCESS
 		                   && prot != PAGE_EXECUTE;
 		if (!readable)
 			break;
+		if (!end)
+			*lo = (const u8*)mbi.BaseAddress;
 		end = (const u8*)mbi.BaseAddress + mbi.RegionSize;
-		if (covered(p, end, want))
+		if (covered(p, end, want)) {
+			*hard = false;
 			break;
+		}
+		q = end;
 	}
 	*out = end;
 	return end ? PcHostReadable::Yes : PcHostReadable::No;
@@ -74,7 +95,7 @@ PcHostReadable osReadableEnd(const u8* p, size_t want, const u8** out)
 // One walk over the Mach regions from p. *lo is where the first readable
 // region starts (at or before p); *hard says the walk ended at memory that is
 // not readable, so *out is the true end of the run rather than a stopping point.
-PcHostReadable machReadableEnd(const u8* p, size_t want, const u8** lo, const u8** out, bool* hard)
+PcHostReadable osWalk(const u8* p, size_t want, const u8** lo, const u8** out, bool* hard)
 {
 	const u8* end = nullptr;
 	*lo = p;
@@ -125,64 +146,66 @@ PcHostReadable machReadableEnd(const u8* p, size_t want, const u8** lo, const u8
 	*out = end;
 	return end ? PcHostReadable::Yes : PcHostReadable::No;
 }
+#endif
 
+#if defined(_WIN32) || defined(__APPLE__)
 // Readable runs already walked, keyed by start: [lo, hi), and whether hi is
 // where readable memory ended (rather than where the walk stopped). A hit
-// costs a map lookup instead of Mach calls. A pointer outside every run
-// always asks Mach, so a block mapped a moment ago is found at once.
+// costs a map lookup instead of OS calls. A pointer outside every run
+// always asks the OS, so a block mapped a moment ago is found at once.
 //
 // Addresses get reused (free() then malloc() of a large block hands back the
 // same range, maybe bigger), so a sized read that wants past a cached end
-// asks Mach about the memory at that end again (one call) instead of trusting
+// asks the OS about the memory at that end again (one call) instead of trusting
 // it. Only unsized queries (GXSetArray, want = 0) take a cached end as final.
 // A run that shrank (part of it unmapped) is not noticed that way, so the
 // whole cache is dropped every kCacheLife; the Linux /proc cache likewise
 // only re-reads on a miss.
-struct MachRun {
+struct HostRun {
 	uintptr_t hi;
 	bool hard;
 };
-std::map<uintptr_t, MachRun> sMachRuns;
-std::chrono::steady_clock::time_point sMachRunsBorn;
+std::map<uintptr_t, HostRun> sHostRuns;
+std::chrono::steady_clock::time_point sHostRunsBorn;
 constexpr auto kCacheLife = std::chrono::milliseconds(250);
 constexpr size_t kMaxRuns = 4096;
 
-void machRunsAdd(uintptr_t lo, uintptr_t hi, bool hard)
+void hostRunsAdd(uintptr_t lo, uintptr_t hi, bool hard)
 {
 	// Fold in every cached run that overlaps or touches [lo, hi). The walk just
 	// made is the newest word on [lo, hi): when it ended at unreadable memory,
 	// an older run that claimed more is stale and is cut back.
-	auto it = sMachRuns.upper_bound(lo);
-	if (it != sMachRuns.begin() && std::prev(it)->second.hi >= lo)
+	auto it = sHostRuns.upper_bound(lo);
+	if (it != sHostRuns.begin() && std::prev(it)->second.hi >= lo)
 		--it;
 	uintptr_t newLo = lo, newHi = hi;
 	bool newHard = hard;
-	while (it != sMachRuns.end() && it->first <= hi) {
+	while (it != sHostRuns.end() && it->first <= hi) {
 		if (it->first < newLo)
 			newLo = it->first;
 		if (!hard && it->second.hi > newHi) {
 			newHi = it->second.hi;
 			newHard = it->second.hard;
 		}
-		it = sMachRuns.erase(it);
+		it = sHostRuns.erase(it);
 	}
-	if (sMachRuns.size() >= kMaxRuns)
-		sMachRuns.clear();
-	sMachRuns[newLo] = { newHi, newHard };
+	if (sHostRuns.size() >= kMaxRuns)
+		sHostRuns.clear();
+	sHostRuns[newLo] = { newHi, newHard };
 }
 
 PcHostReadable osReadableEnd(const u8* p, size_t want, const u8** out)
 {
 	const auto now = std::chrono::steady_clock::now();
-	if (now - sMachRunsBorn > kCacheLife) {
-		sMachRuns.clear();
-		sMachRunsBorn = now;
+	if (now - sHostRunsBorn > kCacheLife) {
+		sHostRuns.clear();
+		sHostRunsBorn = now;
 	}
 	const uintptr_t a = (uintptr_t)p;
-	auto it = sMachRuns.upper_bound(a);
-	if (it != sMachRuns.begin()) {
+	auto it = sHostRuns.upper_bound(a);
+	if (it != sHostRuns.begin()) {
 		--it;
-		const MachRun run = it->second;
+		const HostRun run = it->second;
 		if (a < run.hi) {
 			if (run.hi - a >= want || (run.hard && want == kUnsizedWant)) {
 				*out = (const u8*)run.hi;
@@ -193,12 +216,12 @@ PcHostReadable osReadableEnd(const u8* p, size_t want, const u8** out)
 			const u8* more = nullptr;
 			bool hard = false;
 			const u8* hiPtr = (const u8*)run.hi;
-			const PcHostReadable ext = machReadableEnd(hiPtr, want - (run.hi - a), &lo, &more, &hard);
+			const PcHostReadable ext = osWalk(hiPtr, want - (run.hi - a), &lo, &more, &hard);
 			if (ext == PcHostReadable::Yes && lo <= hiPtr) {
-				machRunsAdd(it->first, (uintptr_t)more, hard);
+				hostRunsAdd(it->first, (uintptr_t)more, hard);
 				*out = more;
 			} else {
-				machRunsAdd(it->first, run.hi, ext != PcHostReadable::Unknown);
+				hostRunsAdd(it->first, run.hi, ext != PcHostReadable::Unknown);
 				*out = hiPtr;
 			}
 			return PcHostReadable::Yes;
@@ -206,9 +229,9 @@ PcHostReadable osReadableEnd(const u8* p, size_t want, const u8** out)
 	}
 	const u8* lo = nullptr;
 	bool hard = false;
-	const PcHostReadable r = machReadableEnd(p, want, &lo, out, &hard);
+	const PcHostReadable r = osWalk(p, want, &lo, out, &hard);
 	if (r == PcHostReadable::Yes)
-		machRunsAdd((uintptr_t)lo, (uintptr_t)*out, hard);
+		hostRunsAdd((uintptr_t)lo, (uintptr_t)*out, hard);
 	return r;
 }
 #else
@@ -240,16 +263,53 @@ void hostMapsRefresh(bool force = false)
 			sHostMapsAvailable = false;
 		return;
 	}
-	char line[512];
-	while (fgets(line, sizeof(line), f)) {
-		unsigned long lo = 0, hi = 0;
-		char perms[8] = {};
-		if (sscanf(line, "%lx-%lx %7s", &lo, &hi, perms) != 3 || perms[0] != 'r')
-			continue;
-		if (!sHostMaps.empty() && sHostMaps.back().second == lo)
-			sHostMaps.back().second = hi;
-		else
-			sHostMaps.emplace_back(lo, hi);
+	// One read of the whole file and a hand-rolled parse: on Android the maps
+	// run to thousands of lines, and fgets + sscanf per line made each refresh
+	// cost milliseconds (issue #218). Lines look like "lo-hi rwxp ...".
+	static std::vector<char> buf;
+	if (buf.empty())
+		buf.resize(1 << 18);
+	size_t len = 0;
+	for (;;) {
+		if (len == buf.size())
+			buf.resize(buf.size() * 2);
+		const size_t got = fread(buf.data() + len, 1, buf.size() - len, f);
+		if (got == 0)
+			break;
+		len += got;
+	}
+	auto hex = [](const char*& c, const char* e) {
+		unsigned long v = 0;
+		for (; c < e; ++c) {
+			const char ch = *c;
+			unsigned d;
+			if (ch >= '0' && ch <= '9')
+				d = unsigned(ch - '0');
+			else if (ch >= 'a' && ch <= 'f')
+				d = unsigned(ch - 'a' + 10);
+			else
+				break;
+			v = (v << 4) | d;
+		}
+		return v;
+	};
+	const char* c = buf.data();
+	const char* const e = c + len;
+	while (c < e) {
+		const char* nl = static_cast<const char*>(memchr(c, '\n', size_t(e - c)));
+		const char* le = nl ? nl : e;
+		const unsigned long lo = hex(c, le);
+		if (c < le && *c == '-') {
+			++c;
+			const unsigned long hi = hex(c, le);
+			if (c + 1 < le && *c == ' ' && c[1] == 'r') {
+				if (!sHostMaps.empty() && sHostMaps.back().second == lo)
+					sHostMaps.back().second = hi;
+				else
+					sHostMaps.emplace_back(lo, hi);
+			}
+		}
+		c = le + 1;
 	}
 	fclose(f);
 }

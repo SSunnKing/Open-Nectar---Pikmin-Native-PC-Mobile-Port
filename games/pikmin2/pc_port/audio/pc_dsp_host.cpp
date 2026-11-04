@@ -693,6 +693,28 @@ void pc_dsp_host_render_frame(DSPchannel_* channels, u32 channelCount, s16* out,
 				channel.endReached = DSP_TRUE;
 				channel.done       = DSP_TRUE;
 			}
+
+			// Pre-calculate subframe volume ramp deltas to eliminate redundant
+			// per-sample division when volume is constant (steady-state audio).
+			// Behaviour-identical: diff==0 gives start/fxStart; diff!=0 matches
+			// original linear ramp formula start + (diff * t) / n.
+			const s32 diffL = endL - startL;
+			const s32 diffR = endR - startR;
+			const s32 n = static_cast<s32>(subLength);
+			const bool rampL = (diffL != 0);
+			const bool rampR = (diffR != 0);
+
+			s32 fxDiff[kFxLines] = { 0 };
+			bool fxRamp[kFxLines] = { false };
+			if (hasFx) {
+				for (int f = 0; f < kFxLines; ++f) {
+					if (sFx[f].enabled) {
+						fxDiff[f] = fxEnd[f] - fxStart[f];
+						fxRamp[f] = (fxDiff[f] != 0);
+					}
+				}
+			}
+
 			for (u32 i = 0; i < subLength; ++i) {
 				if (channel.done
 				    // Auto-mixer voices keep playing through a finish
@@ -751,9 +773,8 @@ void pc_dsp_host_render_frame(DSPchannel_* channels, u32 channelCount, s16* out,
 
 				// Ramp both sides across the subframe.
 				const s32 t = static_cast<s32>(i);
-				const s32 n = static_cast<s32>(subLength);
-				const s32 volL = startL + ((endL - startL) * t) / n;
-				const s32 volR = startR + ((endR - startR) * t) / n;
+				const s32 volL = rampL ? startL + (diffL * t) / n : startL;
+				const s32 volR = rampR ? startR + (diffR * t) / n : startR;
 
 				const u32 slot = sub + i;
 				const s32 mixedL = multiplyQ15(interpolated, volL);
@@ -770,7 +791,7 @@ void pc_dsp_host_render_frame(DSPchannel_* channels, u32 channelCount, s16* out,
 				if (hasFx) {
 					for (int f = 0; f < kFxLines; ++f) {
 						if (!sFx[f].enabled) continue;
-						const s32 vol = fxStart[f] + ((fxEnd[f] - fxStart[f]) * t) / n;
+						const s32 vol = fxRamp[f] ? fxStart[f] + (fxDiff[f] * t) / n : fxStart[f];
 						sFx[f].input[slot] += multiplyQ15(interpolated, vol);
 					}
 				}

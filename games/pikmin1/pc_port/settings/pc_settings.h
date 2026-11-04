@@ -74,6 +74,8 @@ int pc_settings_get_infinite_day(void);
 int pc_settings_get_eternal_night(void);
 int pc_settings_get_fireflies(void);
 int pc_settings_get_free_camera(void);
+/// Free Camera: L mira hacia el cursor en vez de al frente del capitán.
+int pc_settings_get_face_cursor(void);
 /// Radio máximo del silbato, % del original (100 = sin cambio).
 int pc_settings_get_whistle_radius_pct(void);
 /// Multiplicador de la velocidad de las animaciones de coger y lanzar (1 = original).

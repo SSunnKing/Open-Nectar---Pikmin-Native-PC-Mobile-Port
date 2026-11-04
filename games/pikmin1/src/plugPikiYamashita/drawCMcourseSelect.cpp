@@ -118,6 +118,9 @@ public:
 		}
 
 		setKeyAssignDecide(KBBTN_START | KBBTN_A);
+#if defined(PIKI_PC_PORT)
+		setPointerClicks(true); // the course rows, mouse only
+#endif
 	}
 
 	virtual bool update(Controller* controller) // _14

@@ -36,6 +36,7 @@
 #include "../timing/pc_tick_profiler.h"
 #include "../netplay/pc_netplay_present.h"
 #include "../netplay/pc_netplay_loadguard.h"
+#include "../pc_menu_click.h"
 
 // Netplay keep-alive (pc_netplay_loadguard.h): strong-defined by
 // pc_netplay_session.cpp in netplay builds only, null otherwise.
@@ -393,8 +394,10 @@ static bool uniform_cache_disabled() {
     static const bool disabled = std::getenv("PIKMIN_NO_UNIFORM_CACHE") != nullptr;
     return disabled;
 }
+static void use_scratch_uniform_cache();
 static void invalidate_uniform_cache() {
     if (++sUniformGeneration == 0) sUniformGeneration = 1;
+    use_scratch_uniform_cache();
 }
 
 // Post-process programs share location indices (uDepth is often loc 1). The
@@ -416,13 +419,44 @@ struct Uniform4iValue { GLint x, y, z, w; };
 struct Uniform4fValue { GLfloat x, y, z, w; };
 struct UniformMat4Value { GLfloat value[16]; };
 struct UniformMat3Value { GLfloat value[9]; };
-static UniformCacheEntry<GLint> sUniform1iCache[PC_UNIFORM_CACHE_SIZE];
-static UniformCacheEntry<GLfloat> sUniform1fCache[PC_UNIFORM_CACHE_SIZE];
-static UniformCacheEntry<Uniform2iValue> sUniform2iCache[PC_UNIFORM_CACHE_SIZE];
-static UniformCacheEntry<Uniform4iValue> sUniform4iCache[PC_UNIFORM_CACHE_SIZE];
-static UniformCacheEntry<Uniform4fValue> sUniform4fCache[PC_UNIFORM_CACHE_SIZE];
-static UniformCacheEntry<UniformMat4Value> sUniformMat4Cache[PC_UNIFORM_CACHE_SIZE];
-static UniformCacheEntry<UniformMat3Value> sUniformMat3Cache[PC_UNIFORM_CACHE_SIZE];
+// Una caché por programa: GL guarda los uniforms en cada programa, así que
+// volver a uno ya usado no obliga a resubirlos. Antes la caché era global y
+// cada cambio de programa (decenas por frame con los TEV especializados) la
+// vaciaba: se resubían ~30 uniforms por dibujo (la mayor parte del coste de
+// CPU por dibujo, issue de rendimiento con muchos Pikmin). Los programas que no
+// son de dibujo (overlays, post, configuración) usan el juego "scratch", que
+// se invalida como antes. Reservado con calloc: no pasa por los heaps del juego.
+constexpr int kUniformSetSize = 192;      // ubicaciones cacheadas por programa
+constexpr GLuint kUniformSetPrograms = 4096; // ids de programa con juego propio
+struct UniformCacheSet {
+    UniformCacheEntry<GLint> c1i[kUniformSetSize];
+    UniformCacheEntry<GLfloat> c1f[kUniformSetSize];
+    UniformCacheEntry<Uniform2iValue> c2i[kUniformSetSize];
+    UniformCacheEntry<Uniform4iValue> c4i[kUniformSetSize];
+    UniformCacheEntry<Uniform4fValue> c4f[kUniformSetSize];
+    UniformCacheEntry<UniformMat4Value> cMat4[kUniformSetSize];
+    UniformCacheEntry<UniformMat3Value> cMat3[kUniformSetSize];
+};
+static UniformCacheSet sScratchUniformSet;
+static UniformCacheSet* sProgramUniformSets[kUniformSetPrograms];
+static UniformCacheSet* sUC = &sScratchUniformSet;
+// El programa de dibujo recién enlazado: sus valores siguen en su juego.
+static void select_uniform_cache(GLuint program) {
+    if (program == 0 || program >= kUniformSetPrograms) {
+        invalidate_uniform_cache();
+        return;
+    }
+    UniformCacheSet*& set = sProgramUniformSets[program];
+    if (!set) set = static_cast<UniformCacheSet*>(calloc(1, sizeof(UniformCacheSet)));
+    sUC = set ? set : &sScratchUniformSet;
+    if (!set) invalidate_uniform_cache();
+}
+static void use_scratch_uniform_cache() { sUC = &sScratchUniformSet; }
+// Un programa nuevo (o un id reutilizado) empieza sin valores conocidos.
+static void drop_uniform_cache(GLuint program) {
+    if (program == 0 || program >= kUniformSetPrograms || !sProgramUniformSets[program]) return;
+    memset(sProgramUniformSets[program], 0, sizeof(UniformCacheSet));
+}
 
 
 // Names the exact uniform write that OpenGL rejects. A rejected write leaves
@@ -461,8 +495,8 @@ static void check_uniform_write(GLint loc, const char* kind) {
 static void cached_uniform1i(GLint loc, GLint value) {
     if (loc < 0) return;
     if (uniform_cache_disabled()) { pc_gfx_count_real_gl(); glUniform1i_ptr(loc, value); return; }
-    if (loc >= PC_UNIFORM_CACHE_SIZE) { pc_gfx_count_real_gl(); glUniform1i_ptr(loc, value); return; }
-    auto& entry = sUniform1iCache[loc];
+    if (loc >= kUniformSetSize) { pc_gfx_count_real_gl(); glUniform1i_ptr(loc, value); return; }
+    auto& entry = sUC->c1i[loc];
     if (entry.generation == sUniformGeneration && entry.value == value) return;
     entry.generation = sUniformGeneration; entry.value = value;
     pc_gfx_count_real_gl(); glUniform1i_ptr(loc, value);
@@ -471,8 +505,8 @@ static void cached_uniform1i(GLint loc, GLint value) {
 static void cached_uniform1f(GLint loc, GLfloat value) {
     if (loc < 0) return;
     if (uniform_cache_disabled()) { pc_gfx_count_real_gl(); glUniform1f_ptr(loc, value); return; }
-    if (loc >= PC_UNIFORM_CACHE_SIZE) { pc_gfx_count_real_gl(); glUniform1f_ptr(loc, value); return; }
-    auto& entry = sUniform1fCache[loc];
+    if (loc >= kUniformSetSize) { pc_gfx_count_real_gl(); glUniform1f_ptr(loc, value); return; }
+    auto& entry = sUC->c1f[loc];
     if (entry.generation == sUniformGeneration && entry.value == value) return;
     entry.generation = sUniformGeneration; entry.value = value;
     pc_gfx_count_real_gl(); glUniform1f_ptr(loc, value);
@@ -481,8 +515,8 @@ static void cached_uniform1f(GLint loc, GLfloat value) {
 static void cached_uniform2i(GLint loc, GLint x, GLint y) {
     if (loc < 0) return;
     if (uniform_cache_disabled()) { pc_gfx_count_real_gl(); glUniform2i_ptr(loc, x, y); return; }
-    if (loc >= PC_UNIFORM_CACHE_SIZE) { pc_gfx_count_real_gl(); glUniform2i_ptr(loc, x, y); return; }
-    auto& entry = sUniform2iCache[loc];
+    if (loc >= kUniformSetSize) { pc_gfx_count_real_gl(); glUniform2i_ptr(loc, x, y); return; }
+    auto& entry = sUC->c2i[loc];
     const Uniform2iValue value { x, y };
     if (entry.generation == sUniformGeneration && memcmp(&entry.value, &value, sizeof(value)) == 0) return;
     entry.generation = sUniformGeneration; entry.value = value;
@@ -492,8 +526,8 @@ static void cached_uniform2i(GLint loc, GLint x, GLint y) {
 static void cached_uniform4i(GLint loc, GLint x, GLint y, GLint z, GLint w) {
     if (loc < 0) return;
     if (uniform_cache_disabled()) { pc_gfx_count_real_gl(); glUniform4i_ptr(loc, x, y, z, w); return; }
-    if (loc >= PC_UNIFORM_CACHE_SIZE) { pc_gfx_count_real_gl(); glUniform4i_ptr(loc, x, y, z, w); return; }
-    auto& entry = sUniform4iCache[loc];
+    if (loc >= kUniformSetSize) { pc_gfx_count_real_gl(); glUniform4i_ptr(loc, x, y, z, w); return; }
+    auto& entry = sUC->c4i[loc];
     const Uniform4iValue value { x, y, z, w };
     if (entry.generation == sUniformGeneration && memcmp(&entry.value, &value, sizeof(value)) == 0) return;
     entry.generation = sUniformGeneration; entry.value = value;
@@ -503,8 +537,8 @@ static void cached_uniform4i(GLint loc, GLint x, GLint y, GLint z, GLint w) {
 static void cached_uniform4f(GLint loc, GLfloat x, GLfloat y, GLfloat z, GLfloat w) {
     if (loc < 0) return;
     if (uniform_cache_disabled()) { pc_gfx_count_real_gl(); glUniform4f_ptr(loc, x, y, z, w); return; }
-    if (loc >= PC_UNIFORM_CACHE_SIZE) { pc_gfx_count_real_gl(); glUniform4f_ptr(loc, x, y, z, w); return; }
-    auto& entry = sUniform4fCache[loc];
+    if (loc >= kUniformSetSize) { pc_gfx_count_real_gl(); glUniform4f_ptr(loc, x, y, z, w); return; }
+    auto& entry = sUC->c4f[loc];
     const Uniform4fValue value { x, y, z, w };
     if (entry.generation == sUniformGeneration && memcmp(&entry.value, &value, sizeof(value)) == 0) return;
     entry.generation = sUniformGeneration; entry.value = value;
@@ -514,10 +548,10 @@ static void cached_uniform4f(GLint loc, GLfloat x, GLfloat y, GLfloat z, GLfloat
 static void cached_uniform_mat4(GLint loc, GLsizei count, GLboolean transpose, const GLfloat* value) {
     if (loc < 0 || !value) return;
     if (uniform_cache_disabled()) { pc_gfx_count_real_gl(); glUniformMatrix4fv_ptr(loc, count, transpose, value); return; }
-    if (count != 1 || transpose != GL_FALSE || loc >= PC_UNIFORM_CACHE_SIZE) {
+    if (count != 1 || transpose != GL_FALSE || loc >= kUniformSetSize) {
         pc_gfx_count_real_gl(); glUniformMatrix4fv_ptr(loc, count, transpose, value); return;
     }
-    auto& entry = sUniformMat4Cache[loc];
+    auto& entry = sUC->cMat4[loc];
     if (entry.generation == sUniformGeneration && memcmp(entry.value.value, value, sizeof(entry.value.value)) == 0) return;
     entry.generation = sUniformGeneration; memcpy(entry.value.value, value, sizeof(entry.value.value));
     pc_gfx_count_real_gl(); glUniformMatrix4fv_ptr(loc, count, transpose, value);
@@ -526,10 +560,10 @@ static void cached_uniform_mat4(GLint loc, GLsizei count, GLboolean transpose, c
 static void cached_uniform_mat3(GLint loc, GLsizei count, GLboolean transpose, const GLfloat* value) {
     if (loc < 0 || !value) return;
     if (uniform_cache_disabled()) { pc_gfx_count_real_gl(); glUniformMatrix3fv_ptr(loc, count, transpose, value); return; }
-    if (count != 1 || transpose != GL_FALSE || loc >= PC_UNIFORM_CACHE_SIZE) {
+    if (count != 1 || transpose != GL_FALSE || loc >= kUniformSetSize) {
         pc_gfx_count_real_gl(); glUniformMatrix3fv_ptr(loc, count, transpose, value); return;
     }
-    auto& entry = sUniformMat3Cache[loc];
+    auto& entry = sUC->cMat3[loc];
     if (entry.generation == sUniformGeneration && memcmp(entry.value.value, value, sizeof(entry.value.value)) == 0) return;
     entry.generation = sUniformGeneration; memcpy(entry.value.value, value, sizeof(entry.value.value));
     pc_gfx_count_real_gl(); glUniformMatrix3fv_ptr(loc, count, transpose, value);
@@ -1579,6 +1613,41 @@ bool pc_gfx_menu_tap_to_graph(float nx, float ny, float* x, float* y) {
     return true;
 }
 
+bool pc_gfx_menu_pointer_to_graph(float nx, float ny, float* x, float* y) {
+    if (!sTapSpaceValid || sDrawableWidth <= 0 || sDrawableHeight <= 0) return false;
+    GLint outX, outY, outW, outH;
+    calculate_output_area(sDrawableWidth, sDrawableHeight, sCurrentAspectRatio, outX, outY, outW, outH);
+    PcMenuClickFrame frame;
+    frame.drawableW = sDrawableWidth;
+    frame.drawableH = sDrawableHeight;
+    frame.outX = int(outX);
+    frame.outY = int(outY);
+    frame.outW = int(outW);
+    frame.outH = int(outH);
+    frame.scaleX = sTapScaleX;
+    frame.scaleY = sTapScaleY;
+    frame.offsetX = sTapOffsetX;
+    frame.offsetY = sTapOffsetY;
+    frame.targetW = sTapTargetW;
+    frame.targetH = sTapTargetH;
+    frame.graphW = sTapGraphW;
+    frame.graphH = sTapGraphH;
+    return pc_menu_click_map_to_graph(frame, nx, ny, x, y);
+}
+
+bool pc_gfx_menu_graph_point(bool click, float* x, float* y) {
+    float nx = 0.0f;
+    float ny = 0.0f;
+    const bool have = click ? pc_menu_click_pending(&nx, &ny) : pc_menu_click_read_pointer_normalized(&nx, &ny);
+    if (!have || !pc_gfx_menu_pointer_to_graph(nx, ny, x, y)) {
+        return false;
+    }
+    if (click) {
+        pc_menu_click_take(nullptr, nullptr);
+    }
+    return true;
+}
+
 static void map_gx_rect(float x, float y, float width, float height,
                         GLint& glX, GLint& glY, GLsizei& glWidth, GLsizei& glHeight) {
     float scaleX, scaleY, offsetX, offsetY;
@@ -2446,8 +2515,12 @@ void pc_gfx_set_render_resolution(int width, int height) {
     printf("[PC Port] Internal render resolution requested: %dx%d\n", sRenderResolutionW, sRenderResolutionH);
 }
 
+// Escala 0 (o menos) = resolución original de GameCube: 480 líneas, con el
+// ancho que pida la relación de aspecto, sea cual sea la ventana.
+static bool sRenderOriginal = false;
 void pc_gfx_set_render_scale(float scale) {
-    sRenderScale = std::clamp(scale, 0.25f, 4.0f);
+    sRenderOriginal = scale <= 0.0f;
+    sRenderScale = sRenderOriginal ? 1.0f : std::clamp(scale, 0.25f, 4.0f);
     sRenderScaleSet = true;
     printf("[PC Port] Internal render scale set to %.2f\n", sRenderScale);
 }
@@ -2551,18 +2624,15 @@ float pc_gfx_get_window_aspect_ratio(void) {
 static void calculate_output_area(int drawableWidth, int drawableHeight,
                                   float renderedAspect, GLint& outX, GLint& outY,
                                   GLint& outWidth, GLint& outHeight) {
-    const float windowAspect = float(drawableWidth) / float(drawableHeight);
-    if (renderedAspect >= windowAspect) {
-        outWidth = drawableWidth;
-        outHeight = GLint(lroundf(float(drawableWidth) / renderedAspect));
-        outX = 0;
-        outY = (drawableHeight - outHeight) / 2;
-    } else {
-        outHeight = drawableHeight;
-        outWidth = GLint(lroundf(float(drawableHeight) * renderedAspect));
-        outX = (drawableWidth - outWidth) / 2;
-        outY = 0;
-    }
+    int x = 0;
+    int y = 0;
+    int w = 0;
+    int h = 0;
+    pc_menu_click_output_area(drawableWidth, drawableHeight, renderedAspect, &x, &y, &w, &h);
+    outX = GLint(x);
+    outY = GLint(y);
+    outWidth = GLint(w);
+    outHeight = GLint(h);
 }
 
 // Attribute indices are forced to fixed slots for every program so the one
@@ -2612,6 +2682,7 @@ static void bind_fixed_attrib_locations(GLuint program) {
 static void query_program_locations(GLuint program, ProgramLocations& out) {
     out = ProgramLocations();
     invalidate_uniform_cache();
+    drop_uniform_cache(program);
     out.projMtx = glGetUniformLocation_ptr(program, "uProjMtx");
     out.posMtx = glGetUniformLocation_ptr(program, "uPosMtx");
     out.usePalette = glGetUniformLocation_ptr(program, "uUsePalette");
@@ -3492,6 +3563,10 @@ void pc_gfx_begin_frame(void) {
                 baseWidth = float(sRenderResolutionW);
                 baseHeight = baseWidth / sCurrentAspectRatio;
             }
+        }
+        if (sRenderOriginal) {
+            baseHeight = 480.0f;
+            baseWidth  = 480.0f * sCurrentAspectRatio;
         }
         const int wantedWidth = std::max(160, int(lroundf(baseWidth * sRenderScale)));
         const int wantedHeight = std::max(120, int(lroundf(baseHeight * sRenderScale)));
@@ -4779,12 +4854,11 @@ void pc_gfx_set_current_mtx(u32 id) {
 static GLint sLastViewportX = 0, sLastViewportY = 0;
 static GLsizei sLastViewportW = 0, sLastViewportH = 0;
 
-bool pc_gfx_project_current(float x, float y, float z, float* winX, float* winY)
+static bool project_with_model(const float* model, float x, float y, float z, float* winX, float* winY)
 {
-    // Igual que un vértice del juego: matriz de posición actual, proyección,
+    // Igual que un vértice del juego: matriz de posición dada, proyección,
     // viewport GX sobre el render target, y de ahí al área de salida de la
     // ventana (blit del present).
-    const float* model = sPosMatrix[sCurrentPosMtxId];
     const float mx = model[0] * x + model[4] * y + model[8] * z + model[12];
     const float my = model[1] * x + model[5] * y + model[9] * z + model[13];
     const float mz = model[2] * x + model[6] * y + model[10] * z + model[14];
@@ -4803,6 +4877,22 @@ bool pc_gfx_project_current(float x, float y, float z, float* winX, float* winY)
     if (winX) *winX = wx;
     if (winY) *winY = float(sDrawableHeight) - wyUp; // ventana: origen arriba
     return true;
+}
+
+bool pc_gfx_project_current(float x, float y, float z, float* winX, float* winY)
+{
+    return project_with_model(sPosMatrix[sCurrentPosMtxId], x, y, z, winX, winY);
+}
+
+bool pc_gfx_project_with_mtx(const float (*mtx)[4], float x, float y, float z, float* winX, float* winY)
+{
+    // Same layout as pc_gfx_load_pos_mtx.
+    float model[16];
+    model[0] = mtx[0][0]; model[1] = mtx[1][0]; model[2] = mtx[2][0]; model[3] = 0.0f;
+    model[4] = mtx[0][1]; model[5] = mtx[1][1]; model[6] = mtx[2][1]; model[7] = 0.0f;
+    model[8] = mtx[0][2]; model[9] = mtx[1][2]; model[10] = mtx[2][2]; model[11] = 0.0f;
+    model[12] = mtx[0][3]; model[13] = mtx[1][3]; model[14] = mtx[2][3]; model[15] = 1.0f;
+    return project_with_model(model, x, y, z, winX, winY);
 }
 
 void pc_gfx_set_viewport(f32 xOrig, f32 yOrig, f32 wd, f32 ht, f32 nearZ, f32 farZ) {
@@ -6905,7 +6995,7 @@ static void use_program_for_current_state() {
         || int(sNumTevStages) > sSpecialiseMaxStages) {
         if (sCurrentProgram != sShaderProgram) {
             glUseProgram_ptr(sShaderProgram);
-            invalidate_uniform_cache();
+            select_uniform_cache(sShaderProgram);
             sCurrentProgram = sShaderProgram;
             sCheckProgram = sShaderProgram;
             sLoc = sUberLocations;
@@ -6926,7 +7016,7 @@ static void use_program_for_current_state() {
         if (entry.hash != hash || !(entry.key == key)) continue;
         if (sCurrentProgram != entry.program) {
             glUseProgram_ptr(entry.program);
-            invalidate_uniform_cache();
+            select_uniform_cache(entry.program);
             sCurrentProgram = entry.program;
             sCheckProgram = entry.program;
             sLoc = entry.locations;
@@ -6953,7 +7043,7 @@ static void use_program_for_current_state() {
         sLastTevKeyValid = false;
         fprintf(stderr, "[PC GX] Falling back to the TEV ubershader for the rest of the session.\n");
         glUseProgram_ptr(sShaderProgram);
-        invalidate_uniform_cache();
+        select_uniform_cache(sShaderProgram);
         sCurrentProgram = sShaderProgram;
         sLoc = sUberLocations;
         return;
@@ -6987,7 +7077,7 @@ static void use_program_for_current_state() {
     }
 
     glUseProgram_ptr(program);
-    invalidate_uniform_cache();
+    select_uniform_cache(program);
     sCurrentProgram = program;
     sCheckProgram = program;
     sLoc = entry.locations;
@@ -7664,7 +7754,9 @@ static void upload_matrix_palette(int slots) {
     if (slots < 1) slots = 1;
     if (slots > kPaletteSlots) slots = kPaletteSlots;
     // Fingerprint: which program, which slots, and their revisions.
-    uint64_t fp = uint64_t(sUniformGeneration) << 32 ^ uint64_t(slots);
+    // El programa entra en la huella: con la caché por programa la generación
+    // ya no cambia al cambiar de programa, y cada uno tiene su propia paleta.
+    uint64_t fp = (uint64_t(sUniformGeneration) << 32 ^ uint64_t(slots)) ^ (uint64_t(sCurrentProgram) * 0x9E3779B97F4A7C15ull);
     for (int slot = 0; slot < slots; ++slot) {
         const u32 id = u32(slot) * 3;
         fp = (fp ^ (uint64_t(sPosMtxGen[id]) << 20) ^ uint64_t(sNrmMtxGen[id]) ^ (uint64_t(slot) << 56)) * 1099511628211ull;
@@ -7698,6 +7790,8 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
     // Pick the program for this material first: every uniform below is written
     // through sLoc, which describes whichever program is now bound.
     use_program_for_current_state();
+    // Si algo invalidó la caché sin cambiar de programa, vuelve al juego del actual.
+    if (sUC == &sScratchUniformSet && sCurrentProgram != 0) select_uniform_cache(sCurrentProgram);
     if (profilingSubmit) sSubmitProgramMs += submit_clock_ms() - stateT0;
     filesel_debug_log_draw();
 

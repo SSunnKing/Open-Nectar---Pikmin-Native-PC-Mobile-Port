@@ -12,6 +12,7 @@
 #include "pc_gfx.h"
 #include "pc_coop.h"
 #include "mods/pc_mission.h"
+#include "pc_window.h"
 #include "settings/pc_settings.h"
 #endif
 
@@ -44,6 +45,9 @@ zen::ogScrPauseMgr::ogScrPauseMgr()
 #else
 	mMainMenu = new DrawMenu("screen/blo/pause.blo", false, false);
 #endif
+#if defined(PIKI_PC_PORT)
+	mMainMenu->setPointerClicks(true); // mouse rows only; the keyboard and controller path is unchanged
+#endif
 	mMainMenuScreen           = mMainMenu->getScreenPtr();
 	mQuitChalModeMainTextBox  = static_cast<P2DTextBox*>(mMainMenuScreen->search('yame', true));
 	mContLastSaveMainTextBox1 = static_cast<P2DTextBox*>(mMainMenuScreen->search('he02', true));
@@ -58,6 +62,10 @@ zen::ogScrPauseMgr::ogScrPauseMgr()
 	mSubMenu = new DrawMenu("screen/blo/ot_pa_ok.blo", false, false);
 #else
 	mSubMenu = new DrawMenu("screen/blo/pause_ok.blo", false, false);
+#endif
+#if defined(PIKI_PC_PORT)
+	mSubMenu->setPointerClicks(true); // the quit and save confirmation rows, mouse only
+	mSubMenu->setPointerBack(true); // a right click cancels the confirmation, as B does
 #endif
 	mSubMenuScreen          = mSubMenu->getScreenPtr();
 	mQuitChalModeSubTextBox = static_cast<P2DTextBox*>(mSubMenuScreen->search('yame', true));
@@ -132,6 +140,10 @@ void zen::ogScrPauseMgr::start(bool isChallengeMode)
 	mState      = PAUSE_FadeIn;
 	mFrameTimer = 0.0f;
 	mIsActive   = true;
+#if defined(PIKI_PC_PORT)
+	// A pause over a level releases the pointer so its rows can be clicked.
+	pc_window_set_menu_overlay(true);
+#endif
 }
 
 /**
@@ -145,6 +157,10 @@ zen::ogScrPauseMgr::PauseStatus zen::ogScrPauseMgr::update(Controller* controlle
 
 	if (mState >= PAUSE_EXIT_CODE) {
 		mState = PAUSE_NULL;
+#if defined(PIKI_PC_PORT)
+		// Closing the pause takes the pointer back, if the level is still running.
+		pc_window_set_menu_overlay(false);
+#endif
 		return mState;
 	}
 

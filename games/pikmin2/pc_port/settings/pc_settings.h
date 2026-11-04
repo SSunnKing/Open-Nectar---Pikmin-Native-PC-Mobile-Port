@@ -78,6 +78,8 @@ int pc_settings_get_fireflies(void);
 /// USA: arranca en el logo de Nintendo sin la pantalla Health & Safety (bootSection.cpp).
 int pc_settings_get_skip_health_safety(void);
 int pc_settings_get_free_camera(void);
+/// Free Camera: L mira hacia el cursor en vez de al frente del capitán.
+int pc_settings_get_face_cursor(void);
 float pc_settings_get_free_camera_pad_scale(void); ///< issue #66, 1 = default
 /// Radio máximo del silbato, % del original (100 = sin cambio).
 int pc_settings_get_whistle_radius_pct(void);

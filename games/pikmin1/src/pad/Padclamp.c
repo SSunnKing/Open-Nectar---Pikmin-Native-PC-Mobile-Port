@@ -21,12 +21,28 @@ static PADClampRegion ClampRegion = {
 	// Left stick
 	15,
 	72,
+#if defined(PIKI_PC_PORT)
+	// Quality-of-life choice to match upstream. The original octagon diagonal
+	// is 40, about 0.789 of a run. 46 is the smallest corner that keeps every
+	// point on this octagon at a full run, so the shape only clips beyond full.
+	46,
+#else
 	40,
+#endif
 
 	// Right stick
 	15,
+#if defined(PIKI_PC_PORT)
+	// Quality-of-life choice to match upstream. The original C-stick octagon
+	// is 59 / 31, about 0.524 of a swarm on a full cardinal and about 0.394
+	// on a full diagonal. The same beyond-full octagon as the main stick
+	// (72 / 46) still clips the square corners and stays a full swarm.
+	72,
+	46,
+#else
 	59,
 	31,
+#endif
 };
 
 /**
@@ -104,6 +120,29 @@ static void ClampTrigger(u8* trigger)
 	}
 }
 
+#if defined(PIKI_PC_PORT)
+// Quality-of-life choice to match upstream. GameCube PADClamp subtracts its
+// dead zone (15) from every axis, so a half tilt (byte 64) falls to about
+// 0.662 of a run and equal-axis diagonals 44-58 fall short of a full run.
+// Only a stick at rest (both axes within the dead zone) is zeroed. A stick
+// that has already left that square keeps its bytes.
+static void PcRestGate(s8* px, s8* py, int min)
+{
+	int x = *px;
+	int y = *py;
+	if (x < 0) {
+		x = -x;
+	}
+	if (y < 0) {
+		y = -y;
+	}
+	if (x <= min && y <= min) {
+		*px = 0;
+		*py = 0;
+	}
+}
+#endif
+
 /**
  * @TODO: Documentation
  */
@@ -115,8 +154,18 @@ void PADClamp(PADStatus* status)
 			continue;
 		}
 
+#if defined(PIKI_PC_PORT)
+		PcRestGate(&status->stickX, &status->stickY, ClampRegion.minStick);
+		PcRestGate(&status->substickX, &status->substickY, ClampRegion.minSubstick);
+		// min is 0: the rest gate above owns the dead zone. Subtracting it
+		// here would shrink every axis the way the GameCube routine does.
+		ClampStick(&status->stickX, &status->stickY, ClampRegion.maxStick, ClampRegion.xyStick, 0);
+		ClampStick(&status->substickX, &status->substickY, ClampRegion.maxSubstick, ClampRegion.xySubstick, 0);
+#else
 		ClampStick(&status->stickX, &status->stickY, ClampRegion.maxStick, ClampRegion.xyStick, ClampRegion.minStick);
-		ClampStick(&status->substickX, &status->substickY, ClampRegion.maxSubstick, ClampRegion.xySubstick, ClampRegion.minSubstick);
+		ClampStick(&status->substickX, &status->substickY, ClampRegion.maxSubstick, ClampRegion.xySubstick,
+		           ClampRegion.minSubstick);
+#endif
 		ClampTrigger(&status->triggerLeft);
 		ClampTrigger(&status->triggerRight);
 	}

@@ -916,6 +916,7 @@ void GameCoreSection::prepareBadEnd()
 void GameCoreSection::exitStage()
 {
 #if defined(PIKI_PC_PORT)
+	pc_window_set_gameplay_active(false);
 	// Stale focus would keep depth of field running on the file-select and
 	// title screens: those frames have no HUD ortho, so the pass hits the UI.
 	pc_gfx_set_dof_focus(0.0f);
@@ -2103,6 +2104,9 @@ static void pcMissionUpdate(MapMgr* map)
 
 void GameCoreSection::initStage()
 {
+#if defined(PIKI_PC_PORT)
+	pc_window_set_gameplay_active(true);
+#endif
 #if defined(VERSION_PIKIDEMO)
 #else
 	STACK_PAD_VAR(2);

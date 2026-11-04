@@ -1,4 +1,7 @@
 #include "NewPikiGame.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_window.h"
+#endif
 
 #include "Controller.h"
 #include "DayMgr.h"
@@ -544,6 +547,8 @@ struct DayOverModeState : public ModeState {
 	{
 		flowCont.mIsDayEndSeqStarted = TRUE;
 #if defined(PIKI_PC_PORT)
+		// Day-end screens keep a free pointer, so capture ends here.
+		pc_window_set_gameplay_active(false);
 		// Speedrun: un split por día, con la zona que se acaba de jugar.
 		if (flowCont.mCurrentStage) {
 			pc_speedrun_on_day_end(flowCont.mCurrentStage->mStageID, gameflow.mWorldClock.mCurrentDay);
@@ -2571,6 +2576,7 @@ public:
 		mSplitViews = splitScreen ? 2 : 1;
 		for (int view = 0; view < mSplitViews; view++) {
 			if (sGamecoreLive && gamecore) gamecore->mRenderPass = view;
+			pc_coop_set_view_pass(view);
 			if (splitScreen) {
 				beginSplitView(gfx, view);
 			}
@@ -2638,6 +2644,7 @@ public:
 			endSplitViews(gfx);
 		}
 		if (sGamecoreLive && gamecore) gamecore->mRenderPass = 0;
+		pc_coop_set_view_pass(0);
 #endif
 
 		// do any 2D post-rendering (for overlays and windows)

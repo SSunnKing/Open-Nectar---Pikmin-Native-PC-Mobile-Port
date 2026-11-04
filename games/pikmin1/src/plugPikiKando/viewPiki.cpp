@@ -209,7 +209,20 @@ void ViewPiki::init(Shape* shp, MapMgr*, Navi* navi)
 
 	mSRT.s.set(1.0f, 1.0f, 1.0f);
 	mSRT.r.set(0.0f, 0.0f, 0.0f);
+#if defined(PIKI_PC_PORT)
+	// Draw z, then x: the original's order (Metrowerks; verified in main.dol,
+	// USA Rev1, rand calls at 0x800D8F38 then 0x800D8F68). Pinned because C++
+	// leaves argument order unspecified (clang draws left to right, GCC right
+	// to left), and the spawn point (and mLastEffectPosition below, which
+	// ActCrowd's trip roll reads) would otherwise swap x and z per compiler.
+	{
+		const f32 z = (gsys->getRand(1.0f) - 0.5f) * 300.0f;
+		const f32 x = (gsys->getRand(1.0f) - 0.5f) * 300.0f;
+		mSRT.t.set(x, 0.0f, z);
+	}
+#else
 	mSRT.t.set((gsys->getRand(1.0f) - 0.5f) * 300.0f, 0.0f, (gsys->getRand(1.0f) - 0.5f) * 300.0f);
+#endif
 
 	mWorldMtx.makeSRT(mSRT.s, mSRT.r, mSRT.t);
 	_268 = 0.0f;
@@ -768,7 +781,18 @@ void ViewPiki::refresh(Graphics& gfx)
 #endif
 		if (updateHeadPose)
 		{
+#if defined(PIKI_PC_PORT)
+			// Split screen draws the world once per view. updateLook turns the
+			// head, counts mLookTimer down and can end the look, which the sim
+			// reads (startMotion and startHimaLook draw from the sim RNG when
+			// the Pikmin is not looking). Advance it in the first view only, so
+			// it runs once per tick; the second view applies the same pose.
+			if (pc_coop_first_view_pass()) {
+				updateLook();
+			}
+#else
 			updateLook();
+#endif
 
 			Matrix4f animMtx1 = mPikiShape->mShape->getAnimMatrix(2);
 #if defined(VERSION_PIKIDEMO)

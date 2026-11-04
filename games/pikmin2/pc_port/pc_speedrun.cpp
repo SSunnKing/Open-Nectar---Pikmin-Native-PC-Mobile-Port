@@ -761,9 +761,9 @@ struct Latch {
         on = true;
         at = SDL_GetTicks();
     }
-    bool take()
+    bool take(bool always = false)
     {
-        const bool pending = sActive && on && SDL_GetTicks() - at < kLatchMs;
+        const bool pending = (sActive || always) && on && SDL_GetTicks() - at < kLatchMs;
         on = false;
         return pending;
     }
@@ -823,7 +823,8 @@ void pollDebug()
         prev[i] = now;
         if (!went) continue;
         std::fprintf(stderr, "[SR debug] F%d (running=%d)\n", names[i], int(sRunning));
-        if (sRunning) latches[i]->set();
+        // F10 (a la cueva más cercana) también fuera de una partida de Speedrun.
+        if (sRunning || latches[i] == &sDbgCaveWarp) latches[i]->set();
     }
 }
 
@@ -917,9 +918,9 @@ void pc_speedrun_on_finish(int kind, int days)
 void pc_speedrun_frame(void)
 {
     pc_livesplit_update(sActive && pc_settings_get_speedrun_livesplit(), sRunning, elapsedMs());
+    pollDebug();
     if (!sActive) return;
     pollReset();
-    pollDebug();
 }
 
 void pc_speedrun_set_practice_day(int day) { sPracticeDay = day >= 0 && day <= kMaxDays ? day : 0; }
@@ -1215,6 +1216,6 @@ int pc_speedrun_export_lss(char* outName, int n)
 int pc_speedrun_debug_take_day_end(void) { return sDbgDayEnd.take(); }
 int pc_speedrun_debug_take_cave_exit(void) { return sDbgCaveExit.take(); }
 int pc_speedrun_debug_take_finish(void) { return sDbgFinish.take(); }
-int pc_speedrun_debug_take_cave_warp(void) { return sDbgCaveWarp.take(); }
+int pc_speedrun_debug_take_cave_warp(void) { return sDbgCaveWarp.take(true); } // también fuera de Speedrun
 
 } // extern "C"

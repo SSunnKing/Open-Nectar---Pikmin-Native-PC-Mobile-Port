@@ -262,6 +262,10 @@ void pc_gfx_invalidate_resident_meshes(void);
 /// normalizado sobre la ventana se convierte a ese espacio.
 void pc_gfx_note_menu_tap_space(int graphWidth, int graphHeight);
 bool pc_gfx_menu_tap_to_graph(float nx, float ny, float* x, float* y);
+// Title, main menu, and other pointer menus: last noted tap space plus present letterbox.
+bool pc_gfx_menu_pointer_to_graph(float nx, float ny, float* x, float* y);
+// Peek or take a pending click, or read the armed pointer, in graph pixels.
+bool pc_gfx_menu_graph_point(bool click, float* x, float* y);
 
 /// Live texture count, bytes held, peak bytes, and lifetime created/released.
 void pc_gfx_get_texture_stats(size_t* live, size_t* liveBytes, size_t* peakBytes,
@@ -345,6 +349,9 @@ void pc_gfx_get_drawable_size(int* width, int* height);
 // posición y proyección GX vigentes) a píxeles de ventana. Sirve para
 // colocar sprites de la capa sobre texto o paneles P2D. false si no se puede.
 bool pc_gfx_project_current(float x, float y, float z, float* winX, float* winY);
+// The same projection through an explicit 3x4 position matrix, read the way
+// pc_gfx_load_pos_mtx reads it. Nothing is loaded, so GX state is unchanged.
+bool pc_gfx_project_with_mtx(const float (*mtx)[4], float x, float y, float z, float* winX, float* winY);
 #endif
 
 #endif // PC_GFX_H

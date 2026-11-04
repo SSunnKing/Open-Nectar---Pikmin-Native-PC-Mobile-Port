@@ -312,10 +312,14 @@ set(PC_PORT_SOURCES
     pc_port/pc_window.cpp
     pc_port/pc_keycaps.cpp
     pc_port/pc_gyro.cpp
+    pc_port/pc_xinput_usb.cpp
     pc_port/pc_pad_axis.cpp
     pc_port/pc_menu_pad.cpp
     pc_port/pc_menu_mode.cpp
     pc_port/pc_menu_repeat.cpp
+    pc_port/pc_menu_click.cpp
+    pc_port/pc_button_prompt.cpp
+    pc_port/pc_hand_cursor.cpp
     pc_port/pc_photo_mode.cpp
     pc_port/pc_record.cpp
     pc_port/pc_permadeath.cpp
@@ -394,6 +398,7 @@ set(PC_PORT_SOURCES
     pc_port/audio/pc_dsp_host.cpp
     pc_port/settings/pc_settings.cpp
     pc_port/settings/pc_settings_p2d.cpp
+    pc_port/settings/pc_prompt_pointer.cpp
     src/jaudio/pikiseq.c
     pc_port/dolphin_stubs/os_stubs.cpp
     pc_port/dolphin_stubs/pc_host_readable.cpp
@@ -456,7 +461,14 @@ set(SYSDOLPHIN_SOURCES
     src/sysDolphin/sysNew.cpp
     src/sysDolphin/system.cpp
     src/sysDolphin/texture.cpp
+    # Octagon, dead zone and trigger range. The rest of src/pad stays out;
+    # pad_stubs.cpp still owns the hardware calls.
+    src/pad/Padclamp.c
 )
+# Before the library target, so this translation unit is C++ in every target
+# that links it. pad.h declares PADClamp extern "C"; compiling the decomp as
+# C++ keeps that unmangled symbol.
+set_source_files_properties(src/pad/Padclamp.c PROPERTIES LANGUAGE CXX)
 
 # JAudio uses NextOS's host boundary, never the GameCube DSP boot/mailboxes.
 set(JAUDIO_TARGET_SOURCES "")
@@ -544,7 +556,7 @@ file(GLOB PLUGPIKI_YAMASHITA_SOURCES "src/plugPikiYamashita/*.cpp")
 #   src/os/          — Dolphin OS implementation (replaced by os_stubs)
 #   src/gx/          — GX hardware driver (replaced by gx_stubs)
 #   src/dvd/         — DVD hardware driver (replaced by dvd_stubs)
-#   src/pad/         — PAD hardware driver (replaced by pad_stubs)
+#   src/pad/         — PAD hardware driver (replaced by pad_stubs), except Padclamp.c
 #   src/vi/          — VI hardware driver (replaced by vi_stubs)
 #   src/card/        — Memory card driver (replaced by card_stubs)
 #   src/dsp/         — DSP driver (replaced by audio_stubs)
@@ -636,6 +648,24 @@ if (WIN32)
 endif()
 target_compile_options(${NECTAR_GAME} PRIVATE ${NATIVE_COMPILE_OPTIONS})
 target_link_libraries(${NECTAR_GAME} PRIVATE ${NECTAR_LEGACY} nectar_paths)
+
+# Mandos Xbox 360 (XInput) por USB en macOS, que no trae driver para ellos: se
+# leen con libusb y se presentan a SDL como mando virtual. Apagado por defecto
+# (la dylib de Homebrew no viaja en las releases); scripts/build-macos.sh lo
+# enciende.
+option(PIKMIN_XINPUT_USB "Read USB Xbox 360-protocol controllers with libusb (macOS)" OFF)
+if(PIKMIN_XINPUT_USB)
+    find_path(LIBUSB_INCLUDE_DIR libusb.h HINTS /opt/homebrew /usr/local PATH_SUFFIXES include/libusb-1.0 libusb-1.0)
+    find_library(LIBUSB_LIBRARY NAMES usb-1.0 HINTS /opt/homebrew/lib /usr/local/lib)
+    if(LIBUSB_INCLUDE_DIR AND LIBUSB_LIBRARY)
+        target_include_directories(${NECTAR_GAME} PRIVATE ${LIBUSB_INCLUDE_DIR})
+        target_link_libraries(${NECTAR_GAME} PRIVATE ${LIBUSB_LIBRARY})
+        target_compile_definitions(${NECTAR_GAME} PRIVATE PIKI_XINPUT_USB=1)
+        message(STATUS "USB XInput controllers: libusb ${LIBUSB_LIBRARY}")
+    else()
+        message(WARNING "PIKMIN_XINPUT_USB=ON but libusb was not found (brew install libusb)")
+    endif()
+endif()
 if(NECTAR_ONLINE)
     if(NOT TARGET nectar_net)
         add_subdirectory("${NECTAR_LIBS_DIR}/nectar_net" "${CMAKE_BINARY_DIR}/nectar_net")
@@ -1164,6 +1194,11 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
     target_compile_options(asset_finalize_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME asset_finalize_test COMMAND asset_finalize_test)
 
+    # La comprobacion de instalacion del launcher: paquetes obligatorios por region.
+    add_executable(asset_check_test pc_port/launcher/asset_check_test.cpp)
+    target_compile_options(asset_check_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME asset_check_test COMMAND asset_check_test)
+
     add_executable(prepared_image_test pc_port/launcher/prepared_image_test.cpp ${LAUNCHER_PLATFORM_SOURCE})
     target_compile_options(prepared_image_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     if (WIN32)
@@ -1245,6 +1280,17 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_bundle_compat_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_bundle_compat_test COMMAND pc_bundle_compat_test)
 
+    if(APPLE AND PIKMIN_XINPUT_USB AND LIBUSB_INCLUDE_DIR)
+        # Real SDL virtual controllers with a simulated USB transport: no pad/assets needed.
+        add_executable(pc_xinput_usb_test
+            ../../tests/pc_xinput_usb_test.cpp pc_port/pc_xinput_usb.cpp)
+        target_compile_definitions(pc_xinput_usb_test PRIVATE
+                PIKI_XINPUT_USB=1 SDL_CreateThread=pc_xinput_test_create_thread)
+        target_include_directories(pc_xinput_usb_test PRIVATE pc_port ${SDL2_INCLUDE_DIRS} ${LIBUSB_INCLUDE_DIR})
+        target_link_libraries(pc_xinput_usb_test PRIVATE ${SDL2_LIBRARIES} Threads::Threads)
+        add_test(NAME pc_xinput_usb_test COMMAND pc_xinput_usb_test)
+    endif()
+
     add_executable(pc_generator_cache_validation_test
         pc_port/save/pc_generator_cache_validation_test.cpp)
     target_include_directories(pc_generator_cache_validation_test PRIVATE pc_port/save)
@@ -1278,6 +1324,12 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_menu_pad_test PRIVATE ${SDL2_INCLUDE_DIRS} pc_port)
     target_compile_options(pc_menu_pad_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_menu_pad_test COMMAND pc_menu_pad_test)
+
+    # GameCube PADClamp (no window). Links the decomp translation unit.
+    add_executable(pc_pad_clamp_test pc_port/pc_pad_clamp_test.cpp src/pad/Padclamp.c)
+    target_include_directories(pc_pad_clamp_test PRIVATE include pc_port)
+    target_compile_options(pc_pad_clamp_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_pad_clamp_test COMMAND pc_pad_clamp_test)
 
     # Permadeath save block (no game needed)
     add_executable(pc_permadeath_test pc_port/pc_permadeath_test.cpp pc_port/pc_permadeath.cpp src/sysCommon/stream.cpp src/sysCommon/string.cpp)
@@ -1318,6 +1370,44 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_throw_release_test PRIVATE pc_port)
     target_compile_options(pc_throw_release_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_throw_release_test COMMAND pc_throw_release_test)
+
+    # Sprout landing policy (no map or window)
+    add_executable(pc_seed_landing_test pc_port/pc_seed_landing_test.cpp)
+    target_include_directories(pc_seed_landing_test PRIVATE pc_port)
+    target_compile_options(pc_seed_landing_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_seed_landing_test COMMAND pc_seed_landing_test)
+
+    # Title screen and main menu clicks (no window, no disc)
+    add_executable(pc_menu_click_test pc_port/pc_menu_click_test.cpp pc_port/pc_menu_click.cpp)
+    target_include_directories(pc_menu_click_test PRIVATE pc_port)
+    target_compile_options(pc_menu_click_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_menu_click_test COMMAND pc_menu_click_test)
+
+    add_executable(pc_file_select_pointer_test pc_port/pc_file_select_pointer_test.cpp pc_port/pc_menu_click.cpp)
+    target_include_directories(pc_file_select_pointer_test PRIVATE pc_port)
+    target_compile_options(pc_file_select_pointer_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_file_select_pointer_test COMMAND pc_file_select_pointer_test)
+
+    # Hand cursor over pointer menu targets: hover state to cursor shape, with a stub setter
+    add_executable(pc_hand_cursor_test pc_port/pc_hand_cursor_test.cpp pc_port/pc_hand_cursor.cpp
+                   pc_port/pc_menu_click.cpp)
+    target_include_directories(pc_hand_cursor_test PRIVATE pc_port)
+    target_compile_options(pc_hand_cursor_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_hand_cursor_test COMMAND pc_hand_cursor_test)
+
+    # New Game and Captain prompt mouse targets and their mapping (no window, no disc)
+    add_executable(pc_prompt_pointer_test pc_port/pc_prompt_pointer_test.cpp
+                   pc_port/settings/pc_prompt_pointer.cpp pc_port/pc_menu_click.cpp)
+    target_include_directories(pc_prompt_pointer_test PRIVATE pc_port)
+    target_compile_options(pc_prompt_pointer_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_prompt_pointer_test COMMAND pc_prompt_pointer_test)
+
+    # Drawn button prompts (Y Ship's Log, A Read Diary) as click targets: rows, clicks, hover, log
+    add_executable(pc_button_prompt_test pc_port/pc_button_prompt_test.cpp pc_port/pc_button_prompt.cpp
+                   pc_port/pc_menu_click.cpp)
+    target_include_directories(pc_button_prompt_test PRIVATE pc_port)
+    target_compile_options(pc_button_prompt_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_button_prompt_test COMMAND pc_button_prompt_test)
 
     # Host software DSP test (not linked into main game)
     add_executable(pc_dsp_host_test

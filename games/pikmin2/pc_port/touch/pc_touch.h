@@ -38,6 +38,8 @@ bool pc_touch_merge_pad(u16* button, s8* stickX, s8* stickY, s8* substickX, s8* 
 /** La capa se dibuja solo cuando la última entrada fue táctil. */
 void pc_touch_set_visible(bool visible);
 bool pc_touch_visible(void);
+/// Botón táctil de swarm encendido: el grupo va hacia el cursor (como la acción Swarm).
+bool pc_touch_swarm_active(void);
 /** Estado de mando que vio el juego en el último frame (táctil incluido),
  *  en el formato de GameCube: botones PAD_* y sticks -127..127 (Y arriba). */
 void pc_touch_last_pad(u16* buttons, s8* stickX, s8* stickY, s8* substickX, s8* substickY);

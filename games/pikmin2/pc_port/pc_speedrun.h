@@ -124,8 +124,8 @@ void pc_speedrun_draw(void);
 int pc_speedrun_debug_take_day_end(void);
 int pc_speedrun_debug_take_cave_exit(void);
 int pc_speedrun_debug_take_finish(void);
-// F10: el capitán (y los Pikmin) junto al agujero de Emergence Cave, o de la
-// primera cueva del mapa si no está en él. Se entra con A, como siempre.
+// F10: el capitán (y los Pikmin) junto a la cueva más cercana del mapa. Se
+// entra con A, como siempre. Funciona también fuera del modo Speedrun.
 int pc_speedrun_debug_take_cave_warp(void);
 
 #ifdef __cplusplus

@@ -5,6 +5,7 @@
 #include "P2D/TextBox.h"
 #include "P2D/Window.h"
 #include "sysNew.h"
+#include <cstdio>
 #include <cstring>
 #include "zen/ogSub.h"
 #if defined(PIKI_PC_PORT)
@@ -51,6 +52,15 @@ void P2DScreen::set(const char* bloFileName, bool useAlphaMgr, bool useTexAnimMg
 {
 	char path[PATH_MAX];
 	makeResName(bloFileName, path);
+#if defined(PIKI_PC_PORT)
+	{
+		const char* name = bloFileName ? bloFileName : "";
+		for (const char* p = name; *p; ++p) {
+			if (*p == '/' || *p == '\\') name = p + 1;
+		}
+		std::snprintf(mPcBloName, sizeof(mPcBloName), "%s", name);
+	}
+#endif
 
 	RandomAccessStream* file = gsys->openFile(path, p4);
 	if (file) {
@@ -197,6 +207,7 @@ void P2DScreen::draw(int x, int y, const P2DGrafContext* grafContext)
 	// port se maquetan ya en el ancho real (selector de capitán, ajustes).
 	const bool pcGameLayout = getWidth() == 640 && getScale().x == 1.0f;
 	const int hiddenCount   = pcGameLayout ? pcHideOffscreenPanes(this, 0, hiddenPanes, 0, 512) : 0;
+	const char* pcOuterScreen = P2DPane::pcSetPromptScreen(mPcBloName);
 #endif
 	if (grafContext) {
 		P2DGrafContext context(*grafContext);
@@ -213,6 +224,7 @@ void P2DScreen::draw(int x, int y, const P2DGrafContext* grafContext)
 	}
 #if defined(PIKI_PC_PORT)
 	for (int i = 0; i < hiddenCount; i++) hiddenPanes[i]->show();
+	P2DPane::pcSetPromptScreen(pcOuterScreen);
 #endif
 
 	GXSetNumTexGens(0);

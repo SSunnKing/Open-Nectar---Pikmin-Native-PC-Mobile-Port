@@ -30,6 +30,7 @@ extern "C" bool pc_touch_visible(void);
 extern "C" float pc_window_take_touch_zoom(void);
 #endif
 extern "C" int pc_settings_get_free_camera(void);
+extern "C" int pc_settings_get_face_cursor(void);
 extern "C" int pc_first_person_active_for(int player);
 static f32 sPcPitch[2] = { -0.15f, -0.15f }; // cabeceo neutro, un poco hacia abajo, como en Pikmin 1
 /// Jugador del mando del capitan: P2 con el mando del puerto 2 (co-op, VS).
@@ -489,7 +490,8 @@ u32 PlayCamera::updateCameraMode()
 #ifdef PIKI_PC_PORT
 				// Cámara libre: L la pone detrás del capitán, y el cursor (que
 				// gira con ella) vuelve delante de él.
-				if (pc_settings_get_free_camera() && mTargetObj) {
+				// "Face Forward Aims At: Cursor": L mira al cursor, como el original.
+				if (pc_settings_get_free_camera() && !pc_settings_get_face_cursor() && mTargetObj) {
 					pcNaviCursorToFront(mTargetObj);
 				}
 #endif

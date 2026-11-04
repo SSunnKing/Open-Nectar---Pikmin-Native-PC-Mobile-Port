@@ -24,6 +24,9 @@ DEFINE_PRINT("drawWMPause")
 zen::DrawWMPause::DrawWMPause()
 {
 	mPauseMenu = new DrawMenu("screen/blo/pause_w.blo", false, false);
+#if defined(PIKI_PC_PORT)
+	mPauseMenu->setPointerClicks(true); // mouse rows only; the keyboard and controller path is unchanged
+#endif
 	mPauseMenu->setCancelSelectMenuNo(0);
 	P2DScreen* pause = mPauseMenu->getScreenPtr();
 	mBackPane        = static_cast<P2DPicture*>(pause->search('back', true));

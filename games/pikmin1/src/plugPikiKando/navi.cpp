@@ -4972,7 +4972,15 @@ void Navi::updateHeadMatrix()
 		return;
 	}
 
+#if defined(PIKI_PC_PORT)
+	// Split screen draws each captain once per view: advance the look (head
+	// turn, mLookTimer, end of look) in the first view only, as ViewPiki does.
+	if (pc_coop_first_view_pass()) {
+		updateLook();
+	}
+#else
 	updateLook();
+#endif
 
 	Matrix4f headJointAnimMtx = mNaviShapeObject->mShape->getAnimMatrix(2);
 	Matrix4f headJointAnimInv;
