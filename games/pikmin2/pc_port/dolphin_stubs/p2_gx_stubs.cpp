@@ -311,7 +311,10 @@ void GXSetZMode(GXBool compareEnable, GXCompare func, GXBool updateEnable) {
 // is GX z-after-texture; only "before" can differ.
 void GXSetZCompLoc(GXBool beforeTex)        { if (beforeTex) gx_note_unmodelled("GXSetZCompLoc", beforeTex); }
 void GXSetDither(GXBool dither)             { (void)dither; } // RGBA8 framebuffer: nothing to dither
-void GXSetDstAlpha(GXBool enable, u8 alpha) { if (enable) gx_note_unmodelled("GXSetDstAlpha", alpha); }
+void GXSetDstAlpha(GXBool enable, u8 alpha) {
+    pc_gfx_set_dst_alpha(enable, alpha);
+    if (enable && alpha != 0) gx_note_unmodelled("GXSetDstAlpha", alpha); // only 0 is modelled
+}
 void GXSetPixelFmt(GXPixelFmt pix_fmt, GXZFmt16 z_fmt) { (void)z_fmt; pc_gfx_set_pixel_fmt(pix_fmt); }
 void GXSetFog(GXFogType type, f32 startz, f32 endz, f32 nearz, f32 farz, GXColor color) {
     // The game sets fog per stage, with its own colour and distances, and this
