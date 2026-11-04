@@ -9311,7 +9311,7 @@ void graphicsRowValue(int i, char* value, size_t n) {
         break;
     }
     case 13: {
-        const char* names[4] = { "Off (original)", "Soft", "Normal", "Strong" };
+        const char* names[4] = { "Original", "Soft", "Normal", "Strong" };
         snprintf(value, n, "%s", names[(sPending.shadows >= 0 && sPending.shadows <= 3) ? sPending.shadows : 0]);
         break;
     }
@@ -9476,7 +9476,7 @@ const GroupRow kGraphicsRows[] = {
     { SRC_GFX, 0, "Antialiasing", "Smooths jagged edges on characters and scenery. Small performance cost." },
     { SRC_GFX, 5, "Texture Filtering", "Keeps the ground and walls sharp when seen at an angle. Higher costs a little performance." },
     { SRC_GFX, 12, "Lighting", "Smooth: softer, more detailed light on characters. Original: as on GameCube." },
-    { SRC_GFX, 13, "Shadows", "Real-time shadows cast by characters and objects." },
+    { SRC_GFX, 13, "Shadows", "Original draws the game's own soft shadows under characters and objects. Soft, Normal and Strong replace them with real-time shadows from the sun." },
     { SRC_GFX, 1, "Fog", "The game's own distance fog. On is how the original looks." },
     { SRC_GFX, 2, "Bloom", "Soft glow around bright lights and bright areas." },
     { SRC_GFX, 3, "Ambient Occlusion", "Soft shadows in corners and where objects meet the ground." },
