@@ -346,12 +346,33 @@ void emit_stage(std::string& out, const PcTevShaderKey& key, int index, bool tra
 		         "\t\tfloat aResult = %s + (%s ? %s : 0.0);\n",
 		         aa, ab, ad, isEqual ? "(aqa == aqb)" : "(aqa > aqb)", ac);
 		out += line;
+	} else if (stage.alphaOp >= 8) {
+		// Compare ops 8..13 on the alpha combiner test the colour inputs, as
+		// the colour combiner does, and add alpha C when they pass. Ported
+		// from the ubershader's alpha branch.
+		const bool isEqual = (stage.alphaOp & 1) != 0;
+		const int components = (stage.alphaOp < 10) ? 1 : (stage.alphaOp < 12) ? 2 : 3;
+		auto pack = [components](const char* name) {
+			std::string expr(name);
+			expr += ".r";
+			if (components >= 2) { expr += " + "; expr += name; expr += ".g * 256.0"; }
+			if (components >= 3) { expr += " + "; expr += name; expr += ".b * 65536.0"; }
+			return expr;
+		};
+		snprintf(line, sizeof(line),
+		         "\t\tvec3 aqa3 = floor(clamp(%s, 0.0, 1.0) * 255.0 + 0.5);\n"
+		         "\t\tvec3 aqb3 = floor(clamp(%s, 0.0, 1.0) * 255.0 + 0.5);\n",
+		         ca, cb);
+		out += line;
+		out += "\t\tfloat aav = " + pack("aqa3") + ";\n";
+		out += "\t\tfloat abv = " + pack("aqb3") + ";\n";
+		snprintf(line, sizeof(line), "\t\tfloat aResult = %s + (%s ? %s : 0.0);\n",
+		         ad, isEqual ? "(aav == abv)" : "(aav > abv)", ac);
+		out += line;
 	} else {
 		snprintf(line, sizeof(line), "\t\tfloat aMix = %s * (1.0 - %s) + %s * %s;\n",
 		         aa, ac, ab, ac);
 		out += line;
-		// The ubershader routes alpha ops 8..13 into its subtract branch. That
-		// is reproduced exactly: this generator must not change pixels.
 		snprintf(line, sizeof(line), "\t\tfloat aResult = %s %c aMix;\n",
 		         ad, stage.alphaOp == 0 ? '+' : '-');
 		out += line;

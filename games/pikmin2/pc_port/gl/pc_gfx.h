@@ -151,6 +151,7 @@ PcGfxPipelineState pc_gfx_get_pipeline_state(void);
 void pc_gfx_set_pipeline_state(const PcGfxPipelineState& state);
 void pc_gfx_set_color_update(GXBool updateEnable);
 void pc_gfx_set_alpha_update(GXBool updateEnable);
+void pc_gfx_set_dst_alpha(GXBool enable, u8 alpha);
 void pc_gfx_set_alpha_compare(GXCompare comp0, u8 ref0, GXAlphaOp op, GXCompare comp1, u8 ref1);
 void pc_gfx_set_chan_ctrl(GXChannelID chan, GXBool enable, GXColorSrc ambSrc, GXColorSrc matSrc, u32 lightMask, GXDiffuseFn diffFn, GXAttnFn attnFn);
 void pc_gfx_set_chan_mat_color(GXChannelID chan, GXColor color);
