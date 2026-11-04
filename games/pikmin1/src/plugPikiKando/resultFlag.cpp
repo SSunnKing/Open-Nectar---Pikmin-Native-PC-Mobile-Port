@@ -251,7 +251,7 @@ int ResultFlags::getDayDocument(int dayIndex, int& length)
 /**
  * @todo: Documentation
  */
-int ResultFlags::getDocument(int& pageCount)
+int ResultFlags::getDocument(int& pageCount, int diaryDay)
 {
 	int minimumPriority = 128000;
 	int index           = -1;
@@ -291,7 +291,10 @@ int ResultFlags::getDocument(int& pageCount)
 			}
 		}
 
-		mDaysSeen[playerState->getCurrDay()] = flagTable[index].mScreenId;
+		if (diaryDay < 0) {
+			diaryDay = playerState->getCurrDay();
+		}
+		mDaysSeen[diaryDay] = flagTable[index].mScreenId;
 		return flagTable[index].mScreenId;
 
 	} else {

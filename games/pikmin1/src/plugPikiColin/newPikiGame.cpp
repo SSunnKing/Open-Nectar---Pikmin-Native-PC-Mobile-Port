@@ -1998,14 +1998,15 @@ ModeState* DayOverModeState::initialisePhaseTwo()
 		}
 
 		// advance the day and handle the end-of-day results entries
+		const int endedDay = gameflow.mWorldClock.mCurrentDay;
 #if defined(PIKI_PC_PORT)
 		if (!pc_settings_get_no_day_advance()) // cheat "No Day Limit"
 #endif
-		gameflow.mWorldClock.mCurrentDay++;
+			gameflow.mWorldClock.mCurrentDay++;
 		if (!gameflow.mIsChallengeMode) {
 			// story mode - get a diary entry to show at the end of the day, along with how many pages/screens it has
 			int pageCount              = 0;
-			zen::EnumResult diaryEntry = (zen::EnumResult)playerState->mResultFlags.getDocument(pageCount);
+			zen::EnumResult diaryEntry = (zen::EnumResult)playerState->mResultFlags.getDocument(pageCount, endedDay);
 			if (pageCount == 0) {
 				// bad!
 				ERROR("zero pages!\n");

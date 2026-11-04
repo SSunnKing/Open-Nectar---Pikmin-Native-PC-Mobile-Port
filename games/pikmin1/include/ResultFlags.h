@@ -41,7 +41,7 @@ public:
 	void setOn(int);
 	void setSeen(int);
 	int getDayDocument(int, int&);
-	int getDocument(int& pageCount);
+	int getDocument(int& pageCount, int diaryDay = -1);
 	void dump();
 
 protected:
