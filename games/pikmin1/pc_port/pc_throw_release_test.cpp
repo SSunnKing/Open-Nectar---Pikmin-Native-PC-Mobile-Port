@@ -8,9 +8,11 @@
  * (fpsMode 0, 1, 2). The entry tick starts the motion and does not advance
  * it; the first advance is the next tick.
  *
- * The disc's ThrowWait and Throw keyframe indexes are not in the repo, so
- * the counts below are for chosen indexes. They show how an early release
- * lines up with the keyframe. A Dolphin count needs those indexes.
+ * checkRates and checkMashes use chosen keyframe indexes to show how an
+ * early release lines up with the keyframe. On the disc (GPIE01 traced in
+ * Dolphin) both ThrowWait's and Throw's KEY_Action0 fire on the first
+ * advance at 30 Hz, so they sit at frame 1 or earlier; checkDiscFrames uses
+ * frame 1 for both.
  */
 
 #include "pc_throw_release.h"
@@ -39,10 +41,12 @@ bool referenceLost(bool alive, bool grabReached, bool stateNormal, bool stateHan
 
 void checkDecisions()
 {
-	check(!pc_throw_release_starts_throw(true, false), "an early release does not throw");
-	check(!pc_throw_release_starts_throw(false, true), "holding A after the keyframe keeps charging");
-	check(pc_throw_release_starts_throw(true, true), "a release after the keyframe throws");
-	check(!pc_throw_release_starts_throw(false, false), "a held button before the keyframe waits");
+	check(!pc_throw_release_starts_throw(true, false, true), "an early release does not throw");
+	check(!pc_throw_release_starts_throw(false, true, false), "holding A after the keyframe keeps charging");
+	check(pc_throw_release_starts_throw(true, true, false), "a release after the keyframe throws");
+	check(!pc_throw_release_starts_throw(false, false, true), "a held button before the keyframe waits");
+	check(pc_throw_release_starts_throw(true, false, false), "a Pikmin that walked over throws on arrival");
+	check(!pc_throw_release_starts_throw(false, false, false), "holding A when a Pikmin arrives keeps charging");
 
 	const bool bits[] = { false, true };
 	for (bool alive : bits) {
@@ -79,7 +83,7 @@ enum Phase { PhaseWalk, PhaseWait, PhaseThrow };
 
 enum Policy { PolicyWait, PolicyComplete, PolicyGameCube, PolicyWaitDrop };
 
-enum Writer { WriterTap, WriterAlternate, WriterHold };
+enum Writer { WriterTap, WriterAlternate, WriterHold, WriterAlternate30 };
 
 struct Sim {
 	Phase phase;
@@ -103,6 +107,7 @@ struct Sim {
 	int firstThrowTick;
 	bool threwBeforeKeyframe;
 	bool chainedOnReleaseTick;
+	int queuedChains;
 };
 
 Sim makeSim(Policy policy, Writer writer, double step, double grabFrame, double throwFrame)
@@ -127,6 +132,10 @@ bool desiredDown(const Sim& s, int tick)
 	}
 	if (s.writer == WriterAlternate) {
 		return (tick % 2) == 0;
+	}
+	if (s.writer == WriterAlternate30) {
+		// Down one 30 Hz tick, up the next, at any rate.
+		return (static_cast<int>(tick * s.step + 1e-9) % 2) == 0;
 	}
 	// Hold through the grab. Once the keyframe has latched, let go so the
 	// throw starts, and press again during the throw wind-up.
@@ -214,7 +223,7 @@ void tick(Sim& s, int tickIndex)
 				if (keyUp) {
 					enterThrow(s, tickIndex);
 				}
-			} else if (pc_throw_release_starts_throw(keyUp, s.holding)) {
+			} else if (pc_throw_release_starts_throw(keyUp, s.holding, s.stateNormal)) {
 				enterThrow(s, tickIndex);
 			}
 		}
@@ -225,6 +234,9 @@ void tick(Sim& s, int tickIndex)
 			if (pc_throw_consume_queued_press(s.hasThrown, click, &s.queued)) {
 				if (s.hasThrown) {
 					s.chainedOnReleaseTick = true;
+				}
+				if (!click) {
+					++s.queuedChains;
 				}
 				enterWait(s);
 			}
@@ -350,6 +362,35 @@ void checkMashes()
 	check(holdQueue.throws > holdDrop.throws, "a held mash still throws sooner when the wind-up click is kept");
 }
 
+void checkDiscFrames()
+{
+	const struct {
+		const char* name;
+		double step;
+		int ticks;
+	} modes[] = {
+		{ "30 Hz", 1.0, 300 },
+		{ "60 Hz", 0.5, 600 },
+		{ "120 Hz", 0.25, 1200 },
+	};
+	std::printf("disc keyframes (frame 1), A down and up each 30 Hz tick for 10 s:\n");
+	int at30 = -1;
+	for (const auto& mode : modes) {
+		const Sim queued = run(PolicyWait, WriterAlternate30, mode.step, 1.0, 1.0, mode.ticks);
+		const Sim dropped = run(PolicyWaitDrop, WriterAlternate30, mode.step, 1.0, 1.0, mode.ticks);
+		std::printf("  %-7s queued %d (from the queue %d), click dropped %d\n", mode.name, queued.throws,
+		            queued.queuedChains, dropped.throws);
+		check(!queued.threwBeforeKeyframe, "disc keyframes: no throw before the grab keyframe");
+		if (at30 < 0) {
+			at30 = queued.throws;
+			check(queued.queuedChains == 0, "disc keyframes at 30 Hz never use the queue");
+			check(queued.throws == dropped.throws, "disc keyframes at 30 Hz: the queue changes nothing");
+		} else {
+			check(queued.throws == at30, "disc keyframes: the same throws in real time as 30 Hz");
+		}
+	}
+}
+
 } // namespace
 
 int main()
@@ -357,6 +398,7 @@ int main()
 	checkDecisions();
 	checkRates();
 	checkMashes();
+	checkDiscFrames();
 	if (gFailures != 0) {
 		std::printf("%d failure%s\n", gFailures, gFailures == 1 ? "" : "s");
 		return 1;

@@ -2344,11 +2344,13 @@ void NaviThrowWaitState::exec(Navi* navi)
 	}
 #endif
 #if defined(PIKI_PC_PORT)
-	// keyUp stays true after an early release. The throw waits until KEY_Action0
-	// sets mIsHoldingThrowPiki; hanging the Pikmin on the release skipped that
-	// keyframe. A far Pikmin still walking over stays pending until the same grab.
+	// keyUp stays true after an early release. A nearby Pikmin is still Normal
+	// until KEY_Action0 sets mIsHoldingThrowPiki, so the throw waits for it;
+	// hanging the Pikmin on the release skipped that keyframe. A Pikmin that
+	// walked over (GoHang) throws on its arrival tick, as on the disc.
 	if (pc_throw_release_starts_throw(navi->mKontroller->keyUp(KeyConfig::_instance->mThrowKey.mBind),
-	                                  mIsHoldingThrowPiki))
+	                                  mIsHoldingThrowPiki,
+	                                  !mHeldThrowPiki || mHeldThrowPiki->getState() == PIKISTATE_Normal))
 #else
 	if (navi->mKontroller->keyUp(KeyConfig::_instance->mThrowKey.mBind))
 #endif

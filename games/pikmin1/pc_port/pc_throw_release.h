@@ -14,12 +14,23 @@
  *
  * Navi::update delivers the animation message before Navi::doAI runs the
  * state, so on the keyframe tick the holding flag is already set here.
+ *
+ * On the disc (GPIE01, traced in Dolphin) both KEY_Action0 keys sit at
+ * animation frame 1 or earlier, so at 30 Hz each fires on the first advance
+ * after the state starts.
  */
 
-/// True when this tick leaves ThrowWait and enters Throw.
-inline bool pc_throw_release_starts_throw(bool keyUp, bool grabKeyframeReached)
+/**
+ * @brief True when this tick leaves ThrowWait and enters Throw.
+ *
+ * A nearby Pikmin stays Normal until ThrowWait's KEY_Action0, so a release
+ * before that keyframe waits for it. A Pikmin that walked over (GoHang) is
+ * not Normal: on the disc a release throws it on the tick it arrives, before
+ * the restarted ThrowWait motion reaches its keyframe.
+ */
+inline bool pc_throw_release_starts_throw(bool keyUp, bool grabKeyframeReached, bool heldStateNormal)
 {
-	return keyUp && grabKeyframeReached;
+	return keyUp && (grabKeyframeReached || !heldStateNormal);
 }
 
 /**
@@ -41,7 +52,10 @@ inline bool pc_throw_wait_lost_piki(bool alive, bool grabKeyframeReached, bool s
  * @brief Remember a throw click that lands before the Pikmin leaves the hand.
  *
  * The click is stored and starts the next grab on the tick KEY_Action0 of
- * the throw animation releases the Pikmin. The stored click does not hang
+ * the throw animation releases the Pikmin. At 30 Hz the disc's Throw key
+ * fires on the first tick after Throw starts, so the queue is never used.
+ * At 60 and 120 Hz the key takes two or four ticks; the queue keeps a click
+ * in that window, which 30 Hz would have read on the release tick. The stored click does not hang
  * anyone, and the grab it starts still waits for ThrowWait's own keyframe.
  *
  * @param queued NaviThrowState::mQueuedThrowPress. Cleared when the click is
