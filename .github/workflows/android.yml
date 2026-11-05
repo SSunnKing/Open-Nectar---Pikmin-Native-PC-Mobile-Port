@@ -86,7 +86,25 @@ jobs:
         id: build
         working-directory: ${{ env.ANDROID_DIR }}
         run: |
+          # Stats for this job start at zero. A retry must not wipe hits from
+          # the first attempt.
           ccache --zero-stats
+          log="${RUNNER_TEMP}/gradle-assemble.log"
+          set -o pipefail
+          # ubuntu-latest has failed this step with "Java heap space" while
+          # the native build was running. Retry that flake once; leave every
+          # other failure alone.
+          if ./gradlew assembleRelease -PnectarCompilerLauncher=ccache 2>&1 | tee "$log"; then
+            exit 0
+          else
+            status=$?
+          fi
+          if ! grep -aEq 'OutOfMemoryError|Java heap space' "$log"; then
+            echo "::error::assembleRelease failed without a Java heap OOM; not retrying."
+            exit "$status"
+          fi
+          echo "::warning::assembleRelease ran out of Java heap; retrying once."
+          ./gradlew --stop || true
           ./gradlew assembleRelease -PnectarCompilerLauncher=ccache
 
       - name: ccache stats
