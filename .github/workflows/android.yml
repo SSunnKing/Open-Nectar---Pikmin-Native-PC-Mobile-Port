@@ -52,7 +52,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # setup-gradle validates every gradle-wrapper.jar in the repo, including
+      # the vendored SDL2 sample projects under third_party, whose jar is not a
+      # Gradle release. Our wrappers still go through the check; only that one
+      # checksum is allowed, and the build never runs those wrappers.
+      - uses: gradle/actions/wrapper-validation@v6
+        with:
+          allow-checksums: 2c23278a62dc9f96ab11bee897d9f53e6479d6419135e4560ce822a6431df5e5
+
       - uses: gradle/actions/setup-gradle@v6
+        with:
+          validate-wrappers: false
 
       - name: Install ccache
         run: |
@@ -73,13 +83,14 @@ jobs:
           restore-keys: ccache-android-${{ runner.arch }}-
 
       - name: Build the APK
+        id: build
         working-directory: ${{ env.ANDROID_DIR }}
         run: |
           ccache --zero-stats
           ./gradlew assembleRelease -PnectarCompilerLauncher=ccache
 
       - name: ccache stats
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build.outcome != 'skipped' }}
         run: ccache --show-stats
 
       # A missing library still produces an APK, and the app would only fail
