@@ -1,0 +1,52 @@
+# CodeQL advanced setup. Runs on pushes to main only: not on other branches,
+# not on pull requests, and not on a schedule.
+#
+# This replaces GitHub's default code-scanning setup (dynamic/github-code-scanning/codeql),
+# which also scans pull requests and runs a weekly schedule. Default setup and
+# this file cannot both be active. When merging, turn default setup off under
+# Settings → Code security → CodeQL analysis. That switch leaves these analyses
+# in place; it does not turn CodeQL off.
+#
+# Languages and build-mode: none match the default setup this replaces
+# (c-cpp, java-kotlin, python, actions).
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: c-cpp
+            build-mode: none
+          - language: java-kotlin
+            build-mode: none
+          - language: python
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
