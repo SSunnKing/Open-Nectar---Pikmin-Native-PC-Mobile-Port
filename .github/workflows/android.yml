@@ -1,0 +1,107 @@
+# Build the Android APK (Pikmin 1 and Pikmin 2, USA and PAL, plus the installer
+# and launcher libraries) so a change that breaks the Android build shows up as
+# a red check. Nothing here needs a game disc, and the release variant is
+# signed with the debug key because the runner has no keystore.properties.
+name: Android
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same PR or branch cancels the run it replaces.
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep in sync with ndkVersion and the cmake version in
+  # games/pikmin1/android/app/build.gradle; the "Check pinned versions" step
+  # fails when they drift.
+  NDK_VERSION: 28.2.13676358
+  CMAKE_VERSION: 3.22.1
+  ANDROID_DIR: games/pikmin1/android
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 1G
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_NOHASHDIR: "true"
+  # The pinned NDK version identifies the compiler. The default check hashes
+  # the compiler's mtime, which changes whenever the NDK is installed again.
+  CCACHE_COMPILERCHECK: string:28.2.13676358
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check pinned versions match build.gradle
+        run: |
+          grep -q "ndkVersion '$NDK_VERSION'" "$ANDROID_DIR/app/build.gradle"
+          grep -q "version '$CMAKE_VERSION'" "$ANDROID_DIR/app/build.gradle"
+          test "$CCACHE_COMPILERCHECK" = "string:$NDK_VERSION"
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Install ccache
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ccache
+
+      - name: Install NDK and CMake
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION"
+
+      - name: Restore ccache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: ccache-android-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: ccache-android-${{ runner.arch }}-
+
+      - name: Build the APK
+        working-directory: ${{ env.ANDROID_DIR }}
+        run: |
+          ccache --zero-stats
+          ./gradlew assembleRelease -PnectarCompilerLauncher=ccache
+
+      - name: ccache stats
+        if: ${{ !cancelled() }}
+        run: ccache --show-stats
+
+      # A missing library still produces an APK, and the app would only fail
+      # at install or launch time.
+      - name: Check the APK has every native library
+        run: |
+          apk=$(ls "$ANDROID_DIR"/app/build/outputs/apk/release/*.apk)
+          ls -l "$apk"
+          entries=$(unzip -Z1 "$apk")
+          missing=0
+          for lib in SDL2 nectar nectar-pal nectar2 nectar2-pal nectar_installer nectar_launcher; do
+            if ! grep -Fxq "lib/arm64-v8a/lib$lib.so" <<< "$entries"; then
+              echo "::error::lib$lib.so is missing from $apk"
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: open-nectar-apk
+          path: ${{ env.ANDROID_DIR }}/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
