@@ -4,10 +4,26 @@
 # signed with the debug key because the runner has no keystore.properties.
 name: Android
 
+# Skip when a change cannot affect the APK. Gradle lives in
+# games/pikmin1/android and its CMake build compiles games/pikmin1,
+# games/pikmin2 and libs/ (and reads versions.json). The workflow file is
+# listed so an edit here still runs.
 on:
   pull_request:
+    paths:
+      - '.github/workflows/android.yml'
+      - 'games/pikmin1/**'
+      - 'games/pikmin2/**'
+      - 'libs/**'
+      - 'versions.json'
   push:
     branches: [main]
+    paths:
+      - '.github/workflows/android.yml'
+      - 'games/pikmin1/**'
+      - 'games/pikmin2/**'
+      - 'libs/**'
+      - 'versions.json'
   workflow_dispatch:
 
 permissions:

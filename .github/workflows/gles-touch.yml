@@ -5,10 +5,31 @@
 # emulator. Nothing here needs a game disc.
 name: GLES and touch (Linux)
 
+# Skip when a change cannot affect this Linux GLES/touch build. It configures
+# games/pikmin1 and games/pikmin2 with -DPIKMIN_GLES=ON -DPIKMIN_TOUCH=ON,
+# which also compiles libs/, tools/ (mapmaker and modelmaker default on for
+# desktop), tests/ (the touch suite) and reads versions.json. The workflow
+# file is listed so an edit here still runs.
 on:
   pull_request:
+    paths:
+      - '.github/workflows/gles-touch.yml'
+      - 'games/pikmin1/**'
+      - 'games/pikmin2/**'
+      - 'libs/**'
+      - 'tools/**'
+      - 'tests/**'
+      - 'versions.json'
   push:
     branches: [main]
+    paths:
+      - '.github/workflows/gles-touch.yml'
+      - 'games/pikmin1/**'
+      - 'games/pikmin2/**'
+      - 'libs/**'
+      - 'tools/**'
+      - 'tests/**'
+      - 'versions.json'
   workflow_dispatch:
 
 permissions:
