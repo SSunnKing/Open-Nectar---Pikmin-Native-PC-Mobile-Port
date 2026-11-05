@@ -593,6 +593,23 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
             ${CMAKE_CURRENT_SOURCE_DIR}/../pikmin1/pc_port/dolphin_stubs/pc_host_readable_test.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/../pikmin1/pc_port/dolphin_stubs/pc_host_readable_os.cpp
         )
+        # Touch control layer: simulated fingers in, PAD_* buttons and stick
+        # out. Same test source as Pikmin 1 (../../tests); renderer, window and
+        # settings are stubbed, so it needs no GPU, window or art. The layer is
+        # only built with -DPIKMIN_TOUCH=ON, so the test is too.
+        if(PIKMIN_TOUCH)
+            pikmin2_add_host_test(p2_touch_test
+                ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/pc_touch_test.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/pc_touch_test_stubs.cpp
+                ${PC_PORT_DIR}/touch/pc_touch.cpp
+            )
+            target_include_directories(p2_touch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../tests
+                ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
+            # The layer reads pikmin_touch_layout.conf from the current
+            # directory; a scratch one keeps a player's saved layout out.
+            set_tests_properties(p2_touch_test PROPERTIES
+                WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+        endif()
         pikmin2_add_host_test(p2_randomizer_test
             ${PC_PORT_DIR}/randomizer/pc_randomizer_test.cpp
             ${PC_PORT_DIR}/randomizer/pc_randomizer.cpp

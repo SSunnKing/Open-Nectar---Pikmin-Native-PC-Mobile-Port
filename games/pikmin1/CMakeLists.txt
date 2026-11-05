@@ -1351,6 +1351,25 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_diary_misc_pool_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_diary_misc_pool_test COMMAND pc_diary_misc_pool_test)
 
+    # Touch control layer: simulated fingers in, PAD_* buttons and stick out.
+    # Renderer, window and settings are stubbed (tests/pc_touch_test_stubs.cpp),
+    # so it needs no GPU, window or art. The layer is only built with
+    # -DPIKMIN_TOUCH=ON (Android), so the test is too.
+    if(PIKMIN_TOUCH)
+        add_executable(pc_touch_test
+            ../../tests/pc_touch_test.cpp
+            ../../tests/pc_touch_test_stubs.cpp
+            pc_port/touch/pc_touch.cpp)
+        target_include_directories(pc_touch_test PRIVATE ${SDL2_INCLUDE_DIRS} ../../tests pc_port)
+        target_link_libraries(pc_touch_test PRIVATE ${SDL2_LIBRARIES})
+        target_compile_options(pc_touch_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+        add_test(NAME pc_touch_test COMMAND pc_touch_test)
+        # A scratch working directory: the layer reads pikmin_touch_layout.conf
+        # from the current directory, and a player's saved layout must not leak in.
+        set_tests_properties(pc_touch_test PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
+
     # Photo mode camera convention (no stage needed)
     add_executable(pc_photo_mode_test pc_port/pc_photo_mode_test.cpp pc_port/pc_photo_mode.cpp)
     target_include_directories(pc_photo_mode_test PRIVATE ${SDL2_INCLUDE_DIRS} pc_port)

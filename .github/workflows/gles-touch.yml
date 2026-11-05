@@ -1,0 +1,103 @@
+# Build Pikmin 1 and Pikmin 2 on Linux with the GLES renderer and the touch
+# control layer on, as Android builds them, then run both ctest suites. Desktop
+# builds leave that code out, so this catches most Android-only breakage
+# without a phone or emulator. Nothing here needs a game disc.
+name: GLES and touch (Linux)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same PR or branch cancels the run it replaces.
+concurrency:
+  group: gles-touch-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILD_TYPE: Release
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 500M
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_NOHASHDIR: "true"
+  # pc_jaudio_integration_test runs the game with --audio-self-test and needs
+  # the disc's sound banks (LABELS "game-assets"). CI never has a disc.
+  CTEST_EXCLUDE_LABELS: game-assets
+  # The Android configuration's renderer and input switches.
+  GLES_TOUCH_FLAGS: -DPIKMIN_GLES=ON -DPIKMIN_TOUCH=ON
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build ccache pkg-config libsdl2-dev \
+            libgl1-mesa-dev libgles-dev libegl-dev libx11-dev
+
+      - name: Restore ccache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: ccache-gles-touch-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: ccache-gles-touch-${{ runner.arch }}-
+
+      - name: Configure Pikmin 1
+        run: |
+          ccache --zero-stats
+          cmake -S games/pikmin1 -B build/pikmin1 -G Ninja \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DPIKMIN_BUILD_TESTS=ON -DPIKMIN_NATIVE_JAUDIO=ON \
+            $GLES_TOUCH_FLAGS
+
+      # -k 0: report every compile error in one run, not only the first.
+      - name: Build Pikmin 1
+        id: build-p1
+        run: cmake --build build/pikmin1 --parallel -- -k 0
+
+      - name: Configure Pikmin 2
+        if: ${{ !cancelled() }}
+        run: |
+          cmake -S games/pikmin2 -B build/pikmin2 -G Ninja \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DBUILD_TESTING=ON \
+            $GLES_TOUCH_FLAGS
+
+      - name: Build Pikmin 2
+        id: build-p2
+        if: ${{ !cancelled() }}
+        run: cmake --build build/pikmin2 --parallel -- -k 0
+
+      - name: Test Pikmin 1
+        if: ${{ !cancelled() && steps.build-p1.outcome == 'success' }}
+        run: ctest --test-dir build/pikmin1 --output-on-failure --timeout 300 -LE "$CTEST_EXCLUDE_LABELS"
+
+      - name: Test Pikmin 2
+        if: ${{ !cancelled() && steps.build-p2.outcome == 'success' }}
+        run: ctest --test-dir build/pikmin2 --output-on-failure --timeout 300 -LE "$CTEST_EXCLUDE_LABELS"
+
+      - name: ccache stats
+        if: ${{ !cancelled() }}
+        run: ccache --show-stats
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gles-touch-test-logs
+          path: |
+            build/*/Testing/Temporary/LastTest*.log
+            build/*/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: ignore
