@@ -16,6 +16,8 @@
 #include "zen/Math.h"
 #ifdef PIKI_PC_PORT
 #include "gl/pc_gfx.h"
+#include "pc_cine_skip_order.h"
+#include <vector>
 #include "netplay/pc_netplay_present.h"
 #endif
 
@@ -386,7 +388,8 @@ void CinematicPlayer::skipScene(int sceneSkipFlag)
 		// fotograma que quedaban (en esta escena y en las siguientes) no se
 		// disparaban nunca. Algunos dejan el juego listo para seguir: al
 		// saltar la llegada de la cebolla ya no se podían sacar Pikmin
-		// (issue #73). Se disparan aquí, en orden, como si se hubiera visto.
+		// (issue #73). Se disparan aquí, en orden de fotograma, como si se hubiera
+		// visto: el .cin los guarda por actor, no por fotograma.
 		if (sceneSkipFlag == SCENESKIP_Skip || sceneSkipFlag == SCENESKIP_SkipAll) {
 			if (demoEventMgr) {
 				demoEventMgr->mPcSkipping = true;
@@ -401,11 +404,15 @@ void CinematicPlayer::skipScene(int sceneSkipFlag)
 				const f32 lo = f32(scene->mStartFrame < scene->mEndFrame ? scene->mStartFrame : scene->mEndFrame);
 				const f32 hi = f32(scene->mStartFrame < scene->mEndFrame ? scene->mEndFrame : scene->mStartFrame);
 				const f32 from = current ? (mPreviousSceneFrame > lo ? mPreviousSceneFrame : lo) : lo;
+				std::vector<AnimKey*> keys;
 				for (AnimKey* key = scene->mKey.mNext; key != &scene->mKey; key = key->mNext) {
 					const f32 frame = f32(key->mFrameIndex);
-					if (frame < from || frame > hi) {
-						continue;
+					if (frame >= from && frame <= hi) {
+						keys.push_back(key);
 					}
+				}
+				pc_cine_sort_skip_keys(keys.begin(), keys.end(), [](const AnimKey* key) { return key->mFrameIndex; });
+				for (AnimKey* key : keys) {
 					// Los textos de Olimar se saltan con la escena: abrirlos
 					// todos de golpe al saltar no tiene sentido.
 					if (mIsPlaying && gameflow.mGameInterface && key->mEventType == ANIMEVENT_Notify
@@ -418,9 +425,10 @@ void CinematicPlayer::skipScene(int sceneSkipFlag)
 				past = true;
 			}
 			if (demoEventMgr) {
-				// Boot can already have fired while its animation has not yet
-				// reached the action key that creates the first seed. In that
-				// interval there is no remaining movie event to recover above.
+				// EmitCone recovers a BootInit Onion before it snaps to Wait.
+				// This covers a skip where that key has already played, or the
+				// movie has none left, and the boot animation still has not
+				// reached the action key that creates the first seed.
 				demoEventMgr->finishOnionBootAfterSkip(mTarget);
 				demoEventMgr->mPcSkipping = false;
 			}

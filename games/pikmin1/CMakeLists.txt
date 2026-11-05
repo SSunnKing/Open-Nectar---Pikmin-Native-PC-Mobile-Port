@@ -1331,6 +1331,12 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_pad_clamp_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_pad_clamp_test COMMAND pc_pad_clamp_test)
 
+    # Cutscene skip replays its keys by frame (header only)
+    add_executable(pc_cine_skip_order_test pc_port/pc_cine_skip_order_test.cpp)
+    target_include_directories(pc_cine_skip_order_test PRIVATE pc_port)
+    target_compile_options(pc_cine_skip_order_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_cine_skip_order_test COMMAND pc_cine_skip_order_test)
+
     # Text window presses through the menu translator (no game needed)
     add_executable(pc_text_window_press_test pc_port/pc_text_window_press_test.cpp pc_port/pc_menu_pad.cpp)
     target_include_directories(pc_text_window_press_test PRIVATE ${SDL2_INCLUDE_DIRS} pc_port)
