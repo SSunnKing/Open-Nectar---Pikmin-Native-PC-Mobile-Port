@@ -38,7 +38,10 @@ void check(bool ok, const char* what, long long got = 0, long long want = 0)
 	}
 }
 #define CHECK(cond) check((cond), #cond)
-#define CHECK_EQ(got, want) check((long long)(got) == (long long)(want), #got " == " #want, (long long)(got), (long long)(want))
+// Arguments go through a function, so each is evaluated exactly once: they often
+// advance the layer (CHECK_EQ(frame().buttons, ...)).
+void check_eq(long long got, long long want, const char* what) { check(got == want, what, got, want); }
+#define CHECK_EQ(got, want) check_eq((long long)(got), (long long)(want), #got " == " #want)
 
 bool near(float a, float b, float eps = 0.01f) { return std::fabs(a - b) <= eps; }
 
