@@ -703,6 +703,37 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
             ${PC_PORT_DIR}/timing/pc_render_phase.cpp
         )
 
+        # Touch layer lists vs section heaps (issue #238). Links the real
+        # JKRHeap/JKRExpHeap (and their global operator new/delete) so a section
+        # heap can be made current and torn down around the touch calls.
+        if(PIKMIN_TOUCH)
+            add_library(p2_touch_heap_jkr OBJECT
+                ${PIKMIN2_DECOMP_DIR}/src/JSystem/JKernel/JKRHeap.cpp
+                ${PIKMIN2_DECOMP_DIR}/src/JSystem/JKernel/JKRExpHeap.cpp
+                ${PIKMIN2_DECOMP_DIR}/src/JSystem/JKernel/JKRDisposer.cpp
+                ${PIKMIN2_DECOMP_DIR}/src/JSystem/JSupport/JSUList.cpp
+            )
+            target_compile_options(p2_touch_heap_jkr PRIVATE ${LEGACY_COMPILE_OPTIONS})
+            target_include_directories(p2_touch_heap_jkr PRIVATE ${PC_PORT_DIR})
+            pikmin2_add_host_test(p2_touch_heap_test
+                ${PC_PORT_DIR}/touch/pc_touch_heap_test.cpp
+                ${PC_PORT_DIR}/touch/pc_touch.cpp
+                $<TARGET_OBJECTS:p2_touch_heap_jkr>
+            )
+            target_include_directories(p2_touch_heap_test PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb
+            )
+            # JKRHeap.cpp's heap log names callers with dladdr.
+            target_link_libraries(p2_touch_heap_test PRIVATE ${CMAKE_DL_LIBS})
+            # JKRExpHeap::do_free's own check (PIKMIN_HEAP_CHECK_FREE) reports a
+            # free of a block the heap never handed out instead of corrupting it.
+            set_tests_properties(p2_touch_heap_test PROPERTIES
+                ENVIRONMENT "PIKMIN_HEAP_CHECK_FREE=1"
+                FAIL_REGULAR_EXPRESSION "not in used list"
+                TIMEOUT 30
+            )
+        endif()
+
         # The Health & Safety screen only exists on the USA disc, so its skip
         # option (and this check) only ship in that build. string(JSON) needs 3.19.
         if(PIKMIN_GAME_VERSION STREQUAL "VERSION_GPVE01" AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.19)
