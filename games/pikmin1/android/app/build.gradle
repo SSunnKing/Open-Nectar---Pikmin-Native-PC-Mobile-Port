@@ -74,6 +74,13 @@ android {
                         arguments "-DCMAKE_PREFIX_PATH=${netplayDeps}", "-DCMAKE_FIND_ROOT_PATH=${netplayDeps}"
                     }
                 }
+                // -PnectarCompilerLauncher=ccache: lanzador de compilador para
+                // el CI (.github/workflows/android.yml).
+                def compilerLauncher = project.findProperty('nectarCompilerLauncher')
+                if (compilerLauncher) {
+                    arguments "-DCMAKE_C_COMPILER_LAUNCHER=${compilerLauncher}",
+                              "-DCMAKE_CXX_COMPILER_LAUNCHER=${compilerLauncher}"
+                }
                 // -PnectarOnlyPikmin1: APK de prueba sin Pikmin 2.
                 if (!project.hasProperty('nectarOnlyPikmin1')) targets 'pikmin2_pc', 'pikmin2_pc_pal'
             }
