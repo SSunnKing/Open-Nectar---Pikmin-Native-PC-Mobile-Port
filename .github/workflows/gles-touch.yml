@@ -1,7 +1,8 @@
 # Build Pikmin 1 and Pikmin 2 on Linux with the GLES renderer and the touch
-# control layer on, as Android builds them, then run both ctest suites. Desktop
-# builds leave that code out, so this catches most Android-only breakage
-# without a phone or emulator. Nothing here needs a game disc.
+# control layer on, as Android builds them, then run both ctest suites. The two
+# games are separate jobs so they run at the same time. Desktop builds leave
+# that code out, so this catches most Android-only breakage without a phone or
+# emulator. Nothing here needs a game disc.
 name: GLES and touch (Linux)
 
 on:
@@ -32,8 +33,22 @@ env:
 
 jobs:
   build-and-test:
+    name: ${{ matrix.game == 'p1' && 'Pikmin 1' || 'Pikmin 2' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        game: [p1, p2]
+        include:
+          - game: p1
+            source: games/pikmin1
+            build_dir: build/pikmin1
+            cmake_options: "-DPIKMIN_BUILD_TESTS=ON -DPIKMIN_NATIVE_JAUDIO=ON"
+          - game: p2
+            source: games/pikmin2
+            build_dir: build/pikmin2
+            cmake_options: "-DBUILD_TESTING=ON"
 
     steps:
       - uses: actions/checkout@v7
@@ -49,44 +64,29 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .ccache
-          key: ccache-gles-touch-${{ runner.arch }}-${{ github.sha }}
-          restore-keys: ccache-gles-touch-${{ runner.arch }}-
+          # Separate keys so the two games, which now run together, do not
+          # overwrite each other's cache. The last prefix still matches the
+          # combined cache from before the split.
+          key: ccache-gles-touch-${{ matrix.game }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: |
+            ccache-gles-touch-${{ matrix.game }}-${{ runner.arch }}-
+            ccache-gles-touch-${{ runner.arch }}-
 
-      - name: Configure Pikmin 1
+      - name: Configure
         run: |
           ccache --zero-stats
-          cmake -S games/pikmin1 -B build/pikmin1 -G Ninja \
+          cmake -S "${{ matrix.source }}" -B "${{ matrix.build_dir }}" -G Ninja \
             -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DPIKMIN_BUILD_TESTS=ON -DPIKMIN_NATIVE_JAUDIO=ON \
+            ${{ matrix.cmake_options }} \
             $GLES_TOUCH_FLAGS
 
       # -k 0: report every compile error in one run, not only the first.
-      - name: Build Pikmin 1
-        id: build-p1
-        run: cmake --build build/pikmin1 --parallel -- -k 0
+      - name: Build
+        run: cmake --build "${{ matrix.build_dir }}" --parallel -- -k 0
 
-      - name: Configure Pikmin 2
-        if: ${{ !cancelled() }}
-        run: |
-          cmake -S games/pikmin2 -B build/pikmin2 -G Ninja \
-            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DBUILD_TESTING=ON \
-            $GLES_TOUCH_FLAGS
-
-      - name: Build Pikmin 2
-        id: build-p2
-        if: ${{ !cancelled() }}
-        run: cmake --build build/pikmin2 --parallel -- -k 0
-
-      - name: Test Pikmin 1
-        if: ${{ !cancelled() && steps.build-p1.outcome == 'success' }}
-        run: ctest --test-dir build/pikmin1 --output-on-failure --timeout 300 -LE "$CTEST_EXCLUDE_LABELS"
-
-      - name: Test Pikmin 2
-        if: ${{ !cancelled() && steps.build-p2.outcome == 'success' }}
-        run: ctest --test-dir build/pikmin2 --output-on-failure --timeout 300 -LE "$CTEST_EXCLUDE_LABELS"
+      - name: Test
+        run: ctest --test-dir "${{ matrix.build_dir }}" --output-on-failure --timeout 300 -LE "$CTEST_EXCLUDE_LABELS"
 
       - name: ccache stats
         if: ${{ !cancelled() }}
@@ -96,8 +96,8 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: gles-touch-test-logs
+          name: gles-touch-test-logs-${{ matrix.game }}
           path: |
-            build/*/Testing/Temporary/LastTest*.log
-            build/*/CMakeFiles/CMakeConfigureLog.yaml
+            ${{ matrix.build_dir }}/Testing/Temporary/LastTest*.log
+            ${{ matrix.build_dir }}/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: ignore
