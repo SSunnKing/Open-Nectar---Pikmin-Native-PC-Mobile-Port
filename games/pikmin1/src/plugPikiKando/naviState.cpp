@@ -414,7 +414,8 @@ void NaviBuryState::init(Navi* navi)
 	mPreviousStickInput.set(0.0f, 0.0f, 0.0f);
 	navi->mVelocity.set(0.0f, 0.0f, 0.0f);
 	navi->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
-	mEscapeTimer = 150;
+	// Counts down once per tick: 150 ticks is 5 s at the original 30 Hz.
+	mEscapeTimer = 150 * PC_TICKS30;
 }
 
 /**

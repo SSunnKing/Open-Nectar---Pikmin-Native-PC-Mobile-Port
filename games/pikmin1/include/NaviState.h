@@ -125,7 +125,11 @@ struct NaviBuryState : public NaviState {
 	u8 mBuryState;                // _1C
 	u8 mEscapeAttemptCounter;     // _1D
 	u8 mValidEscapeAttempts;      // _1E
+#if defined(PIKI_PC_PORT)
+	u16 mEscapeTimer; ///< u8 in the original: 150 * PC_TICKS30 is past 255 at 120 FPS
+#else
 	u8 mEscapeTimer;              // _1F
+#endif
 };
 
 /**
