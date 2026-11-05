@@ -90,22 +90,54 @@ jobs:
           # the first attempt.
           ccache --zero-stats
           log="${RUNNER_TEMP}/gradle-assemble.log"
-          set -o pipefail
-          # ubuntu-latest has failed this step with "Java heap space" while
-          # the native build was running. Retry that flake once; leave every
-          # other failure alone.
-          if ./gradlew assembleRelease -PnectarCompilerLauncher=ccache 2>&1 | tee "$log"; then
+          # The native build prints hundreds of thousands of C++ lines.
+          # Streaming them into the Actions log has killed this step before
+          # Gradle could print a result. Keep the transcript in a file.
+          run_assemble() {
+            ./gradlew assembleRelease -PnectarCompilerLauncher=ccache >"$log" 2>&1
+          }
+          show_tail() {
+            echo "::group::Last 200 lines of assembleRelease (exit $1)"
+            tail -n 200 "$log" || true
+            echo "::endgroup::"
+          }
+          # One retry for a Java heap OOM, SIGKILL (137), or a death that
+          # never printed Gradle's failure summary. A normal BUILD FAILED
+          # without an OOM is a real compile error and stops here.
+          should_retry() {
+            if grep -aEq 'OutOfMemoryError|Java heap space' "$log"; then
+              return 0
+            fi
+            if [ "$1" -eq 137 ]; then
+              return 0
+            fi
+            if grep -aEq 'BUILD FAILED|FAILURE:' "$log"; then
+              return 1
+            fi
+            return 0
+          }
+          if run_assemble; then
+            echo "assembleRelease succeeded"
             exit 0
           else
             status=$?
           fi
-          if ! grep -aEq 'OutOfMemoryError|Java heap space' "$log"; then
-            echo "::error::assembleRelease failed without a Java heap OOM; not retrying."
+          show_tail "$status"
+          if ! should_retry "$status"; then
+            echo "::error::assembleRelease failed with a Gradle error and no Java heap OOM; not retrying."
             exit "$status"
           fi
-          echo "::warning::assembleRelease ran out of Java heap; retrying once."
+          echo "::warning::assembleRelease failed (exit ${status}) in a way that looks like a heap OOM or an abrupt kill; retrying once."
           ./gradlew --stop || true
-          ./gradlew assembleRelease -PnectarCompilerLauncher=ccache
+          if run_assemble; then
+            echo "assembleRelease succeeded on retry"
+            exit 0
+          else
+            status=$?
+          fi
+          show_tail "$status"
+          echo "::error::assembleRelease failed again (exit ${status})."
+          exit "$status"
 
       - name: ccache stats
         if: ${{ !cancelled() && steps.build.outcome != 'skipped' }}
