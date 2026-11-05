@@ -2,6 +2,10 @@
 #include "Game/Stickers.h"
 #include "Game/Navi.h" // specifically for the navi scale defines. no other reason to include --EpochFlame
 #include "CollInfo.h"
+#ifdef PIKI_PC_PORT
+#include "Game/Piki.h"
+static_assert(MAX_STICKERS >= MAX_PIKI_COUNT + 10, "MAX_STICKERS must cover every Pikmin the Pikmin Limit setting allows");
+#endif
 
 static const char className[] = "creatureStick";
 
@@ -11,7 +15,7 @@ int Stickers::numBuffer     = 0;
 bool Stickers::mutex        = false;
 Creature** Stickers::buffer = nullptr;
 
-int Stickers::maxBuffer = 110;
+int Stickers::maxBuffer = MAX_STICKERS;
 
 /**
  * @note Address: 0x8019EE94
