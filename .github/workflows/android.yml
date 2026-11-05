@@ -69,11 +69,38 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ccache
 
+      # sdkmanager spends most of this step downloading the pinned NDK and
+      # CMake. Cache those two packages, keyed on the versions above, and
+      # install only when the key misses. A version bump changes the key and
+      # the path, so an old package is never restored in place of a new one.
+      - name: Locate the Android SDK
+        id: android-sdk
+        run: |
+          test -n "${ANDROID_HOME}"
+          test -d "${ANDROID_HOME}"
+          echo "home=${ANDROID_HOME%/}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore NDK and CMake
+        id: ndk-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ steps.android-sdk.outputs.home }}/ndk/${{ env.NDK_VERSION }}
+            ${{ steps.android-sdk.outputs.home }}/cmake/${{ env.CMAKE_VERSION }}
+          key: android-ndk-${{ env.NDK_VERSION }}-cmake-${{ env.CMAKE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
       - name: Install NDK and CMake
+        if: steps.ndk-cache.outputs.cache-hit != 'true'
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION"
+
+      - name: Check NDK and CMake
+        run: |
+          test -d "$ANDROID_HOME/ndk/$NDK_VERSION"
+          test -x "$ANDROID_HOME/cmake/$CMAKE_VERSION/bin/cmake"
+          "$ANDROID_HOME/cmake/$CMAKE_VERSION/bin/cmake" --version
 
       - name: Restore ccache
         uses: actions/cache@v6
