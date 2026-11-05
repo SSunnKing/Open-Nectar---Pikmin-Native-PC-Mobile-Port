@@ -1337,6 +1337,20 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_permadeath_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_permadeath_test COMMAND pc_permadeath_test)
 
+    # No Day Limit: the voyage log's Misc pages never run out (no disc or save)
+    add_executable(pc_diary_misc_pool_test
+        pc_port/pc_diary_misc_pool_test.cpp
+        src/plugPikiKando/resultFlag.cpp)
+    target_include_directories(pc_diary_misc_pool_test BEFORE PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/pc_port/result_flag_stubs)
+    target_include_directories(pc_diary_misc_pool_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Dolphin
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Dolphin/OS
+        ${PC_PORT_DIR})
+    target_compile_options(pc_diary_misc_pool_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_diary_misc_pool_test COMMAND pc_diary_misc_pool_test)
+
     # Photo mode camera convention (no stage needed)
     add_executable(pc_photo_mode_test pc_port/pc_photo_mode_test.cpp pc_port/pc_photo_mode.cpp)
     target_include_directories(pc_photo_mode_test PRIVATE ${SDL2_INCLUDE_DIRS} pc_port)

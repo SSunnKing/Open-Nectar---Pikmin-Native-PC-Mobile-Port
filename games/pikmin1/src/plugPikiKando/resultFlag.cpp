@@ -264,6 +264,26 @@ int ResultFlags::getDocument(int& pageCount, int diaryDay)
 		}
 	}
 
+#if defined(PIKI_PC_PORT)
+	// The 27 auto-set Misc entries are the catch-all pages: each is shown once,
+	// and a 30-day game has at most 27 day ends without an entry of their own
+	// (Day 1 and Day 29 always have one). No Day Limit never reaches Day 30, so
+	// its 28th plain day end found nothing and halted below. Turn the Misc pool
+	// back on and choose again; only an exhausted pool reaches this.
+	if (index == -1) {
+		for (int id = zen::RESFLAG_Misc1; id <= zen::RESFLAG_Misc27; id++) {
+			setFlag(id, true);
+		}
+		for (int i = 0; i < mActiveCount; i++) {
+			int id = flagTable[i].mScreenId;
+			if (getFlag(id) == true && minimumPriority > flagTable[i].mPriority) {
+				minimumPriority = flagTable[i].mPriority;
+				index           = i;
+			}
+		}
+	}
+#endif
+
 	if (index != -1) {
 		if (flagTable[index + 1].mScreenId == -1) {
 			pageCount = 1;
