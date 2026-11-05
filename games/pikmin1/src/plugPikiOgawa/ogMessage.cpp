@@ -15,6 +15,7 @@
 #include <stddef.h>
 #if defined(PIKI_PC_PORT)
 #include "pc_window.h"
+#include "pc_text_window_press.h"
 #endif
 
 #if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01) // these tables aren't here in demo
@@ -625,6 +626,14 @@ zen::ogScrMessageMgr::MessageStatus zen::ogScrMessageMgr::update(Controller* inp
 		return mState;
 	}
 
+#if defined(PIKI_PC_PORT)
+	// B shows the whole page and turns it (below). Menu mode drops a Shift
+	// binding for B on other screens, so say that a text window is open. This
+	// starts before the fade-in, so a Shift already held for the whistle stays
+	// held instead of reading as a fresh press when the page starts typing.
+	pc_window_note_text_window_input();
+#endif
+
 	if (mState == STATE_Exiting) {
 		mState = STATE_Inactive;
 		return mState;
@@ -710,7 +719,17 @@ zen::ogScrMessageMgr::MessageStatus zen::ogScrMessageMgr::update(Controller* inp
 		return mState;
 	}
 
+#if defined(PIKI_PC_PORT)
+	// A (Space, Enter, left click) shows the whole page too, as B does. Holding
+	// A only types one character per tick, which the normal speed already
+	// reaches at 30 Hz. This press is used up here: A on a shown page turns it
+	// above, on the next press.
+	if (!mIsUiInputDisabled
+	    && pc_text_window_press(mIsPageFullyRevealed, input->keyClick(KBBTN_A), input->keyClick(KBBTN_B))
+	           == PC_TEXT_PRESS_SHOW_PAGE) {
+#else
 	if (!mIsUiInputDisabled && input->keyClick(KBBTN_B)) {
+#endif
 		dispAll();
 		return mState;
 	}

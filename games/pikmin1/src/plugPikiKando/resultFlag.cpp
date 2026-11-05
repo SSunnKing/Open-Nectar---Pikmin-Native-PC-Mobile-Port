@@ -264,6 +264,26 @@ int ResultFlags::getDocument(int& pageCount, int diaryDay)
 		}
 	}
 
+#if defined(PIKI_PC_PORT)
+	// The 27 auto-set Misc entries are the catch-all pages: each is shown once,
+	// and a 30-day game has at most 27 day ends without an entry of their own
+	// (Day 1 and Day 29 always have one). No Day Limit never reaches Day 30, so
+	// its 28th plain day end found nothing and halted below. Turn the Misc pool
+	// back on and choose again; only an exhausted pool reaches this.
+	if (index == -1) {
+		for (int id = zen::RESFLAG_Misc1; id <= zen::RESFLAG_Misc27; id++) {
+			setFlag(id, true);
+		}
+		for (int i = 0; i < mActiveCount; i++) {
+			int id = flagTable[i].mScreenId;
+			if (getFlag(id) == true && minimumPriority > flagTable[i].mPriority) {
+				minimumPriority = flagTable[i].mPriority;
+				index           = i;
+			}
+		}
+	}
+#endif
+
 	if (index != -1) {
 		if (flagTable[index + 1].mScreenId == -1) {
 			pageCount = 1;
@@ -305,6 +325,51 @@ int ResultFlags::getDocument(int& pageCount, int diaryDay)
 
 	STACK_PAD_VAR(2);
 }
+
+#if defined(PIKI_PC_PORT)
+/**
+ * @brief Record the day-1 voyage log on the tutorial-skip day end.
+ *
+ * A normal day end increments the clock and then calls `getDocument`, which
+ * stores the entry in `mDaysSeen[getCurrDay()]`. `getCurrDay()` is the clock
+ * minus one, and the log opens day 1 as index 1, so the clock has to already
+ * read 2. Calling `getDocument` earlier writes slot 0 and day 1 stays blank.
+ * A second call would overwrite slot 1 with whatever log is pending now.
+ */
+int ResultFlags::commitTutorialSkipDocument(int clockDay, int& pageCount)
+{
+	pageCount = 0;
+	if (clockDay != 2 || !playerState || playerState->getCurrDay() != 1) {
+		return -1;
+	}
+	if (mDaysSeen[1] != -1) {
+		return getDayDocument(1, pageCount);
+	}
+	return getDocument(pageCount);
+}
+
+/**
+ * @brief Fill day 1 on a save that skipped the tutorial before the log was recorded.
+ *
+ * Only when that entry is still missing and `RESFLAG_EndFirstDay` is still
+ * pending. `getDocument` would also mark every other pending log seen or off,
+ * which drops entries earned on a later day that has not ended yet. A later
+ * day that already absorbed the crash-landing entry is left as it was: the
+ * log that day should have shown was discarded at the time and cannot be rebuilt.
+ */
+bool ResultFlags::repairUnrecordedDayOne(int savedDay)
+{
+	if (savedDay < 2 || mDaysSeen[1] != -1) {
+		return false;
+	}
+	if (getFlag(zen::RESFLAG_EndFirstDay) != 1) {
+		return false;
+	}
+	setSeen(zen::RESFLAG_EndFirstDay);
+	mDaysSeen[1] = zen::RESFLAG_EndFirstDay;
+	return true;
+}
+#endif
 
 /**
  * @todo: Documentation

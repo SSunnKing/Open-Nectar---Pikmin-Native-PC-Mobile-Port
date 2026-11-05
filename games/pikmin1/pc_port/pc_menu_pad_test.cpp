@@ -247,6 +247,38 @@ int main()
 		expect(sy, -20, "gameplay leaves the vertical stick");
 	}
 
+	// Shift bound to B is not B on a menu, but a text window still takes it to
+	// show the whole page and turn it.
+	{
+		expect(pc_menu_pad_b_binding_counts(SDL_SCANCODE_LSHIFT, false), 0, "menu Left Shift B is not B");
+		expect(pc_menu_pad_b_binding_counts(SDL_SCANCODE_RSHIFT, false), 0, "menu Right Shift B is not B");
+		expect(pc_menu_pad_b_binding_counts(SDL_SCANCODE_LSHIFT, true), 1, "text window Left Shift B is B");
+		expect(pc_menu_pad_b_binding_counts(SDL_SCANCODE_RSHIFT, true), 1, "text window Right Shift B is B");
+		expect(pc_menu_pad_b_binding_counts(SDL_SCANCODE_LCTRL, false), 1, "menu Ctrl B is B");
+		expect(pc_menu_pad_b_binding_counts(0, true), 0, "unbound B is never B");
+		expect(pc_menu_pad_b_binding_counts(SDL_NUM_SCANCODES + SDL_BUTTON_RIGHT, true), 0,
+		       "a mouse binding is not a held key");
+
+		expect(pc_menu_pad_text_window_live(false, 0, 0), 0, "no text window yet");
+		expect(pc_menu_pad_text_window_live(true, 1000, 1016), 1, "text window updated last frame");
+		expect(pc_menu_pad_text_window_live(true, 1000, 1000 + PC_MENU_PAD_TEXT_WINDOW_MS), 1,
+		       "text window at the edge of the window");
+		expect(pc_menu_pad_text_window_live(true, 1000, 1001 + PC_MENU_PAD_TEXT_WINDOW_MS), 0,
+		       "closed text window no longer takes Shift");
+		expect(pc_menu_pad_text_window_live(true, 0xFFFFFFF0u, 0x10u), 1, "tick wrap stays live");
+
+		// The B the translator sees is whatever the binding check says.
+		PcMenuPadKeys keys = keysNone();
+		keys.shiftL = true;
+		std::uint16_t button = PC_MENU_PAD_B;
+		std::int8_t sx = 0, sy = 0;
+		apply(keys, true, pc_menu_pad_b_binding_counts(SDL_SCANCODE_LSHIFT, true), startKey, 0, button, sx, sy);
+		expect((button & PC_MENU_PAD_B) != 0, 1, "text window Shift reaches the pad as B");
+		button = PC_MENU_PAD_B;
+		apply(keys, true, pc_menu_pad_b_binding_counts(SDL_SCANCODE_LSHIFT, false), startKey, 0, button, sx, sy);
+		expect((button & PC_MENU_PAD_B) != 0, 0, "menu Shift still does not cancel");
+	}
+
 	if (sFailures == 0) {
 		std::printf("pc_menu_pad_test: all checks passed\n");
 		return 0;

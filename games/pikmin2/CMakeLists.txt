@@ -593,6 +593,23 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
             ${CMAKE_CURRENT_SOURCE_DIR}/../pikmin1/pc_port/dolphin_stubs/pc_host_readable_test.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/../pikmin1/pc_port/dolphin_stubs/pc_host_readable_os.cpp
         )
+        # Touch control layer: simulated fingers in, PAD_* buttons and stick
+        # out. Same test source as Pikmin 1 (../../tests); renderer, window and
+        # settings are stubbed, so it needs no GPU, window or art. The layer is
+        # only built with -DPIKMIN_TOUCH=ON, so the test is too.
+        if(PIKMIN_TOUCH)
+            pikmin2_add_host_test(p2_touch_test
+                ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/pc_touch_test.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/pc_touch_test_stubs.cpp
+                ${PC_PORT_DIR}/touch/pc_touch.cpp
+            )
+            target_include_directories(p2_touch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../tests
+                ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
+            # The layer reads pikmin_touch_layout.conf from the current
+            # directory; a scratch one keeps a player's saved layout out.
+            set_tests_properties(p2_touch_test PROPERTIES
+                WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+        endif()
         pikmin2_add_host_test(p2_randomizer_test
             ${PC_PORT_DIR}/randomizer/pc_randomizer_test.cpp
             ${PC_PORT_DIR}/randomizer/pc_randomizer.cpp
@@ -685,6 +702,37 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
             ${PC_PORT_DIR}/timing/pc_visual_snapshot.cpp
             ${PC_PORT_DIR}/timing/pc_render_phase.cpp
         )
+
+        # Touch layer lists vs section heaps (issue #238). Links the real
+        # JKRHeap/JKRExpHeap (and their global operator new/delete) so a section
+        # heap can be made current and torn down around the touch calls.
+        if(PIKMIN_TOUCH)
+            add_library(p2_touch_heap_jkr OBJECT
+                ${PIKMIN2_DECOMP_DIR}/src/JSystem/JKernel/JKRHeap.cpp
+                ${PIKMIN2_DECOMP_DIR}/src/JSystem/JKernel/JKRExpHeap.cpp
+                ${PIKMIN2_DECOMP_DIR}/src/JSystem/JKernel/JKRDisposer.cpp
+                ${PIKMIN2_DECOMP_DIR}/src/JSystem/JSupport/JSUList.cpp
+            )
+            target_compile_options(p2_touch_heap_jkr PRIVATE ${LEGACY_COMPILE_OPTIONS})
+            target_include_directories(p2_touch_heap_jkr PRIVATE ${PC_PORT_DIR})
+            pikmin2_add_host_test(p2_touch_heap_test
+                ${PC_PORT_DIR}/touch/pc_touch_heap_test.cpp
+                ${PC_PORT_DIR}/touch/pc_touch.cpp
+                $<TARGET_OBJECTS:p2_touch_heap_jkr>
+            )
+            target_include_directories(p2_touch_heap_test PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb
+            )
+            # JKRHeap.cpp's heap log names callers with dladdr.
+            target_link_libraries(p2_touch_heap_test PRIVATE ${CMAKE_DL_LIBS})
+            # JKRExpHeap::do_free's own check (PIKMIN_HEAP_CHECK_FREE) reports a
+            # free of a block the heap never handed out instead of corrupting it.
+            set_tests_properties(p2_touch_heap_test PROPERTIES
+                ENVIRONMENT "PIKMIN_HEAP_CHECK_FREE=1"
+                FAIL_REGULAR_EXPRESSION "not in used list"
+                TIMEOUT 30
+            )
+        endif()
 
         # The Health & Safety screen only exists on the USA disc, so its skip
         # option (and this check) only ship in that build. string(JSON) needs 3.19.

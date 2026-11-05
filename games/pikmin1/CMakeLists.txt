@@ -1337,11 +1337,50 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_cine_skip_order_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_cine_skip_order_test COMMAND pc_cine_skip_order_test)
 
+    # Text window presses through the menu translator (no game needed)
+    add_executable(pc_text_window_press_test pc_port/pc_text_window_press_test.cpp pc_port/pc_menu_pad.cpp)
+    target_include_directories(pc_text_window_press_test PRIVATE ${SDL2_INCLUDE_DIRS} pc_port)
+    target_compile_options(pc_text_window_press_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_text_window_press_test COMMAND pc_text_window_press_test)
+
     # Permadeath save block (no game needed)
     add_executable(pc_permadeath_test pc_port/pc_permadeath_test.cpp pc_port/pc_permadeath.cpp src/sysCommon/stream.cpp src/sysCommon/string.cpp)
     target_include_directories(pc_permadeath_test PRIVATE pc_port include)
     target_compile_options(pc_permadeath_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_permadeath_test COMMAND pc_permadeath_test)
+
+    # No Day Limit: the voyage log's Misc pages never run out (no disc or save)
+    add_executable(pc_diary_misc_pool_test
+        pc_port/pc_diary_misc_pool_test.cpp
+        src/plugPikiKando/resultFlag.cpp)
+    target_include_directories(pc_diary_misc_pool_test BEFORE PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/pc_port/result_flag_stubs)
+    target_include_directories(pc_diary_misc_pool_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Dolphin
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Dolphin/OS
+        ${PC_PORT_DIR})
+    target_compile_options(pc_diary_misc_pool_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_diary_misc_pool_test COMMAND pc_diary_misc_pool_test)
+
+    # Touch control layer: simulated fingers in, PAD_* buttons and stick out.
+    # Renderer, window and settings are stubbed (tests/pc_touch_test_stubs.cpp),
+    # so it needs no GPU, window or art. The layer is only built with
+    # -DPIKMIN_TOUCH=ON (Android), so the test is too.
+    if(PIKMIN_TOUCH)
+        add_executable(pc_touch_test
+            ../../tests/pc_touch_test.cpp
+            ../../tests/pc_touch_test_stubs.cpp
+            pc_port/touch/pc_touch.cpp)
+        target_include_directories(pc_touch_test PRIVATE ${SDL2_INCLUDE_DIRS} ../../tests pc_port)
+        target_link_libraries(pc_touch_test PRIVATE ${SDL2_LIBRARIES})
+        target_compile_options(pc_touch_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+        add_test(NAME pc_touch_test COMMAND pc_touch_test)
+        # A scratch working directory: the layer reads pikmin_touch_layout.conf
+        # from the current directory, and a player's saved layout must not leak in.
+        set_tests_properties(pc_touch_test PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
 
     # Photo mode camera convention (no stage needed)
     add_executable(pc_photo_mode_test pc_port/pc_photo_mode_test.cpp pc_port/pc_photo_mode.cpp)
@@ -1370,6 +1409,12 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_definitions(pc_host_readable_test PRIVATE PC_HOST_READABLE_TEST_P1)
     target_compile_options(pc_host_readable_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_host_readable_test COMMAND pc_host_readable_test)
+
+    # Throw grab: an early release waits for KEY_Action0 (no window needed).
+    add_executable(pc_throw_release_test pc_port/pc_throw_release_test.cpp)
+    target_include_directories(pc_throw_release_test PRIVATE pc_port)
+    target_compile_options(pc_throw_release_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_throw_release_test COMMAND pc_throw_release_test)
 
     # Sprout landing policy (no map or window)
     add_executable(pc_seed_landing_test pc_port/pc_seed_landing_test.cpp)
@@ -1408,6 +1453,22 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_button_prompt_test PRIVATE pc_port)
     target_compile_options(pc_button_prompt_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_button_prompt_test COMMAND pc_button_prompt_test)
+
+    # Day-1 voyage log after Skip tutorial (no disc or save)
+    add_executable(pc_voyage_log_test
+        pc_port/pc_voyage_log_test.cpp
+        src/plugPikiKando/resultFlag.cpp)
+    target_compile_options(pc_voyage_log_test BEFORE PRIVATE
+        -I${CMAKE_CURRENT_SOURCE_DIR}/pc_port/voyage_log_stubs)
+    target_include_directories(pc_voyage_log_test BEFORE PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/pc_port/voyage_log_stubs)
+    target_include_directories(pc_voyage_log_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Dolphin
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Dolphin/OS
+        ${PC_PORT_DIR})
+    target_compile_options(pc_voyage_log_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_voyage_log_test COMMAND pc_voyage_log_test)
 
     # Host software DSP test (not linked into main game)
     add_executable(pc_dsp_host_test
