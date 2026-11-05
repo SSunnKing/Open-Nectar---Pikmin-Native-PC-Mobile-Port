@@ -62,6 +62,21 @@ void pc_menu_pad_apply(const PcMenuPadKeys& keys, bool menuMode, bool nonShiftB,
 	(void)keys.shiftR;
 }
 
+bool pc_menu_pad_text_window_live(bool noted, std::uint32_t notedMs, std::uint32_t nowMs)
+{
+	// Unsigned subtraction keeps this right across the 49-day tick wrap.
+	return noted && static_cast<std::uint32_t>(nowMs - notedMs) <= PC_MENU_PAD_TEXT_WINDOW_MS;
+}
+
+bool pc_menu_pad_b_binding_counts(int bind, bool textWindowLive)
+{
+	if (bind <= 0 || bind >= SDL_NUM_SCANCODES)
+		return false;
+	if (bind == SDL_SCANCODE_LSHIFT || bind == SDL_SCANCODE_RSHIFT)
+		return textWindowLive;
+	return true;
+}
+
 bool pc_menu_pad_click(std::uint32_t held, std::uint32_t pressed, int sdlButton)
 {
 	const std::uint32_t bit = SDL_BUTTON(sdlButton);
