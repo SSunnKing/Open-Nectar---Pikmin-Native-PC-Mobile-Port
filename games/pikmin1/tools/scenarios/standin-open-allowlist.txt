@@ -1,0 +1,208 @@
+# Files a stand-in scenario run may fail to open (#68). One path per line,
+# relative to assets/; a line ending in '/' covers every path under it.
+# run_standin_scenario.cmake fails a run on any other "FAILED to open" line.
+# Each group says why the game tolerates the absence and why no v1 scenario
+# needs the file. Collected from boot_smoke, throw_release and day30_clock at
+# 30 and 60 ticks per second on macOS, 2026-10-27.
+
+# No texture (.bti, .txe), .bun or .anm bundle and no AnimMgr table is
+# allowlisted: the generator writes every one the disc boot opens (#67, #66 and
+# standin_objects.cpp). standin-texture-experiments.md records what happens when
+# a texture or bundle is missing or malformed.
+
+# Sandbox generator files. Every .gen read is guarded (gameCoreSection.cpp
+# initStage): the day file prints NOT FOUND, init and plants are skipped.
+# Scenarios spawn their own Pikmin (#61), so only default.gen is written.
+dataDir/stages/sandbox/0.gen
+dataDir/stages/sandbox/1.gen
+dataDir/stages/sandbox/init.gen
+dataDir/stages/sandbox/plants.gen
+# The object stage (standin_objects_stage.h) writes only default.gen too.
+dataDir/stages/sandbox_objects/0.gen
+dataDir/stages/sandbox_objects/1.gen
+dataDir/stages/sandbox_objects/init.gen
+dataDir/stages/sandbox_objects/plants.gen
+# Flat art showcase stage (standin_showcase_stage.h): default.gen only.
+dataDir/stages/sandbox_showcase/0.gen
+dataDir/stages/sandbox_showcase/1.gen
+dataDir/stages/sandbox_showcase/init.gen
+dataDir/stages/sandbox_showcase/plants.gen
+# The every-object stage (standin_all_objects_stage.h) writes only default.gen too.
+dataDir/stages/sandbox_all_objects/0.gen
+dataDir/stages/sandbox_all_objects/1.gen
+dataDir/stages/sandbox_all_objects/init.gen
+dataDir/stages/sandbox_all_objects/plants.gen
+# The day file is <day - 1>.gen: extinction_day30 starts on Day 30 (sandbox),
+# day_end_day29 on Day 29 (object stage). Guarded like the others.
+dataDir/stages/sandbox/29.gen
+dataDir/stages/sandbox_objects/28.gen
+# ending_happy on Day 12 and ending_happy_skip on Day 13 (sandbox).
+dataDir/stages/sandbox/11.gen
+dataDir/stages/sandbox/12.gen
+# The Onion stage (onion_day3, standin_objects_stage.h) writes only default.gen too;
+# its runs load Day 2 (1.gen) and Day 3 (2.gen).
+dataDir/stages/sandbox_onions/1.gen
+dataDir/stages/sandbox_onions/2.gen
+dataDir/stages/sandbox_onions/init.gen
+dataDir/stages/sandbox_onions/plants.gen
+# The play stage (free_play, standin_objects_stage.h) writes only default.gen; Day 2 opens 1.gen.
+dataDir/stages/sandbox_play/1.gen
+dataDir/stages/sandbox_play/2.gen
+dataDir/stages/sandbox_play/init.gen
+dataDir/stages/sandbox_play/plants.gen
+# Forest of Hope (stage1.ini) after the world map on Day 3 (onion_day3).
+dataDir/stages/stage1/2.gen
+dataDir/stages/stage1/init.gen
+dataDir/stages/stage1/plants.gen
+# throw_flight_{leaf,bud,flower} start a new game on stage1.ini at Day 1, so the day file
+# is 0.gen; the read is guarded like 2.gen and the scenario spawns its own Pikmin.
+dataDir/stages/stage1/0.gen
+# The tutorial stage (standin_practice_stage.h) writes default.gen, init.gen and
+# the Day 1 file 0.gen; plants.gen is guarded like the others.
+dataDir/stages/practice/plants.gen
+
+# Parameter files CoreNode::load skips silently when missing (node.cpp); every
+# value keeps its code default. key.bin: the throw key stays A, which
+# throw_release asserts. sound: no sound constants are read by a scenario.
+# (demo.bin is written since the tutorial scenarios: the disc's trigger radii.)
+dataDir/parms/sound.bin
+dataDir/parms/key.bin
+dataDir/camera/camepara.bin
+
+# The disc's naka1 table names three animations its bundle lacks, so the game
+# opens loose .dck files that do not exist there either (FAILED in the boot
+# manifest). The stand-in naka1 bundle holds all five entries, so these open
+# nothing; the line stays so a future bundle change cannot turn them into
+# failures unnoticed.
+dataDir/objects/ufoparts/mnaka1/
+
+# Native JAudio builds only (PIKMIN_NATIVE_JAUDIO=ON; the OFF facade opens it
+# with fopen, not DVDOpen): Bank_Setup (bankloader.c) returns when the bank is
+# missing, so no wave group exists and every WaveScene_* call is a no-op. The
+# stand-in sequences play no notes, so nothing needs a bank (standin-audio.md).
+dataDir/SndData/Banks/pikibank.bx
+
+# Ghost replay record: gameCoreSection.cpp opens it and checks for null.
+dataDir/ghost/record.gst
+
+# No cinema is allowlisted for the boot: the generator writes demo60 (the
+# post-extinction movie the sandbox plays on Day 1) and every cinema the disc
+# boot opens (standin-cinema.md).
+# captain_death: a missing .cin is a zero-length movie (System::openFile returns
+# null, CinematicPlayer::loadCin returns early; coverage/README.md). The chain
+# needs none of their keys. The results backdrop demo36 is written, because the
+# results screen stays up only while that movie is active.
+dataDir/cinemas/demo52.cin
+dataDir/cinemas/demo32.cin
+dataDir/cinemas/demo56.cin
+dataDir/cinemas/demo84.cin
+# onion_unlock, onion_unlock_whistle: the first-pluck movies (DEMOFLAG_Pluck*Pikmin,
+# movies 9-11) play as zero-length movies, as above. The scenarios assert the
+# state PikiNukareState::cleanup and pcUnlockColourFromAutoPluck write, which the
+# movies do not carry; the text windows their keys would open are not covered.
+dataDir/cinemas/demo09.cin
+dataDir/cinemas/demo10.cin
+dataDir/cinemas/demo11.cin
+# day_end, day_end_day29: the march-in movie (DEMOID_DayEnd, the sandbox stages'
+# translation). The disc's has one Notify key, FadeIn at frame 0; the chain needs it not.
+dataDir/cinemas/demo28.cin
+# save_load, save_load_flags: the scenario sets the yellow and blue container bits
+# so the save carries them; the day end then plays those Onions' take-off movies
+# (EndOfDayYellowOnyon, EndOfDayBlueOnyon) as zero-length movies, as demo84 above.
+# The chain needs none of their keys.
+dataDir/cinemas/demo85.cin
+dataDir/cinemas/demo86.cin
+# onion_day3: the yellow Onion's take-off movie (DEMOID_EndOfDayYellowOnyon), started by
+# DayOverModeState::initialisePhaseTwo when hasContainer(Yellow); zero-length as above. The
+# scenario asserts the predicate, not the movie.
+# onion_day3: on Day 3 the red count is 0 and DEMOFLAG_PostExtinctionSeed is already set
+# (Day 2 played demo60), so GameCoreSection's start plays DEMOID_Unk64Cat instead; zero-length.
+dataDir/cinemas/demo64.cin
+# extinction_day30: the bad ending's first movie (DEMOID_BadEnding, phase one).
+# The disc's has Action keys only (ship and Pikmin actors), no Notify key.
+dataDir/cinemas/demo69.cin
+# ending_neutral_day30: the neutral ending's phase two (DEMOID_NeutralEndingLeaveOK). The
+# disc's has a ship Action and FadeOut, no key the chain needs.
+dataDir/cinemas/demo114.cin
+# ending_happy, ending_happy_skip: the happy ending's phases one to three (GoodEndingWave,
+# GoodEndingTakeOff, GoodEndingOnyons). The disc's carry ship Actions, FadeIn and FadeOut only;
+# the window the chain waits on comes with demo77, which is written.
+dataDir/cinemas/demo75.cin
+dataDir/cinemas/demo113.cin
+dataDir/cinemas/demo76.cin
+# challenge_*: the end-of-day Onion flights for the yellow and blue Onions; in challenge mode
+# PlayerState::setChallengeMode gives every Onion, so phase two starts all three (demo84 above).
+# challenge_*: setChallengeMode sets every demo flag and owns every Onion, so finalSetup plays
+# the post-extinction bonus-seed movie for each Onion colour with no Pikmin (DEMOID_Unk64Cat,
+# Impact Site's demo64; gameCoreSection.cpp). The disc's has BonusPiki Actions only; the
+# scenarios spawn their own Pikmin and need no seeds.
+# The tutorial scenarios (stages/practice.ini). demo03 is the Day 1 wake-up
+# (DEMOID_OlimarWakeUp, NewPikiGameSetupSection); the disc's has one Notify key,
+# the TUT_Awakening text at its end. The runner's intro gate would skip it.
+dataDir/cinemas/demo03.cin
+# tutorial_firsts: the movies of DEMOFLAG_ApproachSeed (demo07) and
+# DEMOFLAG_ApproachEngine (demo16). The scenario asserts the flags and the
+# timer Navi::demoCheck sets, not the movies; the disc's carry one Notify key
+# each, a TextDemo (TUT_FirstSeed, TUT_FoundEngine), not covered.
+dataDir/cinemas/demo07.cin
+dataDir/cinemas/demo16.cin
+# tutorial_day1: the movies of DEMOFLAG_CollectFirstPellet (demo14) and
+# DEMOFLAG_StartBoxPush (demo15), asserted by their flags the same way; the disc's
+# carry a TextDemo each (TUT_Pelette, TUT_StoneHint2), not covered. The day-end
+# movies it reaches (demo28, demo32, demo84) and the waku textures are allowlisted
+# above for the other day ends.
+dataDir/cinemas/demo14.cin
+dataDir/cinemas/demo15.cin
+# title_boot: titles.cpp opening movie (TITLECMD_ShowStartMenu at frame 0).
+dataDir/cinemas/opening.cin
+# IntroGame after a new file on the stand-in tree (card select, skip tutorial).
+dataDir/cinemas/demo01.cin
+dataDir/cinemas/demo02.cin
+# onion_day3 Day 3 landing movie on stages/stage1.ini (stand-in tree).
+dataDir/cinemas/demo65.cin
+
+# captain_death: the three textures EffectMgr2D registers that effects.bun does
+# not hold (the file-select and results screens build the 2D effect manager when
+# ogScrFileSelectMgr is constructed). loadTexture returns null for them; the
+# stand-in particles (effects.bun, standinPcr2dNames) are inert and never draw.
+dataDir/effects/tex/waku.bti
+dataDir/effects/tex/waku02.bti
+dataDir/effects/tex/waku03.bti
+# extinction_day30: the bad-ending achievement (PC_ACH_BAD_ENDING) queues a toast
+# whose icon is screen/tex/end_navi.bti (pc_achievements.cpp). A missing icon is
+# tolerated. Achievements are saved per run in the scratch save folder, so the toast
+# shows on every run (it used to show on the first only, when the file was shared).
+dataDir/screen/eng_tex/end_navi.bti
+# The other ending achievements' toast icons, tolerated the same way: PC_ACH_NORMAL_ENDING
+# (ending_neutral_day30), PC_ACH_BEST_ENDING and PC_ACH_SPEED_DEMON (ending_happy). The toasts
+# queue one after another for 4.5 s of wall-clock time each, so whether the second icon is
+# opened before the run ends depends on the machine's speed.
+dataDir/screen/eng_tex/rocket2.bti
+dataDir/screen/eng_tex/c_star.bti
+dataDir/screen/eng_tex/sun_64.bti
+# tutorial_skip (and the engine carried to the ship): the Main Engine's part
+# achievement (PC_ACH_PART_MAIN_ENGINE) queues a toast whose icon is
+# screen/tex/image012.bti (pc_achievement_icon). Tolerated the same way.
+dataDir/screen/eng_tex/image012.bti
+# ship_part_carry: delivering the Whimsical Radar unlocks the achievement "With This, I'll Be
+# Able to See All Nearby Ship Parts" (pc_achievements.cpp); its toast icon is the part's list
+# image (pc_achievement_icon, kPartImage[5] = image014) from screen.bun on the disc, and the
+# toast asks for it on every frame it is up. A missing icon draws nothing and is opened once
+# (uiTexture in pc_settings.cpp remembers it); the scenario asserts the delivery, not the toast.
+dataDir/screen/eng_tex/image014.bti
+# bomb_firsts: the first bomb a Pikmin brings back (DEMOFLAG_GrabFirstBomb, DEMOID_YellowWithBomb)
+# plays as a zero-length movie, as above. The scenario asserts the flag, not the movie.
+dataDir/cinemas/demo68.cin
+# demo_timers: the NoPikminTimeout and Unk9 hint movies (DF07 demo08, DF09 demo13) play as
+# zero-length movies, as above. The scenario asserts the demo flags, not the movies.
+dataDir/cinemas/demo08.cin
+dataDir/cinemas/demo13.cin
+# world_map_day_end, title_round_trip (#99): the day end goes through the world map to
+# The Impact Site (stages/practice.ini) on Day 3, so its day file is 2.gen (guarded and
+# skipped, as above). The Impact Site landing (DEMOID_LandingPractice, demo40) and the
+# Onion landing with its Pikmin (DEMOID_PikminInOnyonPractice, demo44) are not written:
+# the missing movie ends at once and the scenarios assert the stage, day and course,
+# not the movies.
+dataDir/stages/practice/2.gen
+dataDir/cinemas/demo40.cin
+dataDir/cinemas/demo44.cin

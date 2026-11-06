@@ -2,6 +2,9 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_window.h"
 #endif
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 
 #include "Controller.h"
 #include "DayMgr.h"
@@ -61,6 +64,7 @@
 #include "timing/pc_render_phase.h"
 #include "netplay/pc_netplay_camlead.h"
 #include "netplay/pc_netplay_det.h"
+#include "netplay/pc_input_log.h"
 #include "netplay/pc_netplay_present.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_permadeath.h"
@@ -188,6 +192,23 @@ static bool sGamecoreLive = false;
 
 /// Text ("tutorial") pop-ups/overlays.
 static zen::ogScrTutorialMgr* tutorialWindow;
+
+#if PIKI_SCENARIOS
+// Read access for --scenario (pc_scenario.h); nothing here changes the game.
+static int sScenarioTextWindows = 0;
+static int sScenarioLastTextId  = -1;
+zen::DrawGameOver* pc_scenario_gameover_window(void) { return gameoverWindow; }
+zen::DrawFinalResult* pc_scenario_total_window(void) { return totalWindow; }
+zen::DrawCMresult* pc_scenario_challenge_window(void) { return challengeWindow; }
+int pc_scenario_text_windows_opened(int* lastTextId)
+{
+	if (lastTextId) *lastTextId = sScenarioLastTextId;
+	return sScenarioTextWindows;
+}
+GameCoreSection* pc_scenario_gamecore(void) { return sGamecoreLive ? gamecore : nullptr; }
+zen::DrawCountDown* pc_scenario_countdown_window(void) { return countWindow; }
+zen::ogScrMenuMgr* pc_scenario_menu_window(void) { return menuWindow; }
+#endif
 
 /// Whether or not to play the parts discovery jingle (when walking close to them for the first time).
 static bool hasDemoSound;
@@ -798,6 +819,10 @@ static void createTutorialWindow(int textID, int ufoPartID, bool hasAudio)
 
 	tutorialWindow = new zen::ogScrTutorialMgr;
 	tutorialWindow->start((zen::ogScrTutorialMgr::EnumTutorial)textID);
+#if PIKI_SCENARIOS
+	sScenarioTextWindows++;
+	sScenarioLastTextId = textID;
+#endif
 
 	// restore movie heap settings
 	gsys->getHeap(SYSHEAP_Movie)->setAllocType(oldMovieAlloc);
@@ -2562,9 +2587,17 @@ public:
 
 			gfx.setCamera(&mGameCamera);
 			mGameCamera.update(f32(gfx.mScreenWidth) / f32(gfx.mScreenHeight), mGameCamera.mFov, pc_first_person_active() ? 3.0f : 100.0f, mCameraFarClip);
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+			pc_scenario_apply_debug_camera(&mGameCamera);
+#endif
 		}
 #if defined(PIKI_PC_PORT)
 		}
+#if PIKI_SCENARIOS
+		if (gfx.mCamera) {
+			pc_scenario_apply_debug_camera(gfx.mCamera);
+		}
+#endif
 #endif
 
 #if defined(PIKI_PC_PORT)
@@ -2730,18 +2763,23 @@ public:
 					// still moves. Day 1 is left alone: the tutorial only ends
 					// when its clock reaches sunset after the engine. The last day is left
 					// alone too, so its sunset ends the game and plays the ending.
-					const bool pcClockHeld
-					    = pc_settings_get_infinite_day() != 0 && gameflow.mWorldClock.mCurrentDay != 1
-					   && gameflow.mWorldClock.mCurrentDay != MAX_DAYS;
-					if (!pcClockHeld && !gameflow.mMoviePlayer->mIsActive && (mUpdateFlags & UPDATE_WORLD_CLOCK)
+					// Offline deterministic ticks consume recorded local input. Network
+					// ticks do not fill those slots, so one peer's F1 menu cannot hold
+					// the shared clock. Old recordings have no clock-hold bit.
+					const bool settingsClockHeld = pc_netplay_deterministic()
+					    ? pc_netplay_local_slots_filled() && (pc_netplay_local_flags(0) & pc_input_log::kLocalSettingsClockHold) != 0
+					    : pc_settings_menu_is_open() != 0;
+					const bool pcClockHeld = (pc_settings_get_infinite_day() != 0 && gameflow.mWorldClock.mCurrentDay != 1
+					        && gameflow.mWorldClock.mCurrentDay != MAX_DAYS);
+					if (!settingsClockHeld && !pcClockHeld && !gameflow.mMoviePlayer->mIsActive && (mUpdateFlags & UPDATE_WORLD_CLOCK)
 					    && !playerState->isTutorial()) {
 						f32 tod = gameflow.mWorldClock.mTimeOfDay;
 						gameflow.mWorldClock.update(1.0f);
 						f32 tod2 = gameflow.mWorldClock.mTimeOfDay;
 					}
-					pcWorkClockUpdate(gameflow.mWorldClock, pcClockHeld);
+					if (!settingsClockHeld) pcWorkClockUpdate(gameflow.mWorldClock, pcClockHeld);
 #if defined(PIKI_PC_PORT)
-					pcVisualClockUpdate(gameflow.mWorldClock, pcClockHeld);
+					if (!settingsClockHeld) pcVisualClockUpdate(gameflow.mWorldClock, pcClockHeld);
 #endif
 					// update any children in our list (this will make gamecore update)
 					Node::update();
@@ -2770,6 +2808,9 @@ public:
 			PRINT("final setup!\n");
 			gamecore->finalSetup();
 			mIsInitialSetup = false;
+#if PIKI_SCENARIOS
+			if (pc_scenario_active()) pc_scenario_on_stage_ready();
+#endif
 		}
 		if (mNextModeState) {
 			// force a mode transition if we have one pending
@@ -3260,6 +3301,8 @@ void GameMovieInterface::parse(GameMovieInterface::SimpleMessage& msg)
 		if (pc_settings_get_hide_olimar_text() && data != zen::ogScrTutorialMgr::TUT_FinishUFO
 		    && data != zen::ogScrTutorialMgr::TUT_BadEnding) {
 			if (gameflow.mMoviePlayer->mIsActive) {
+				// Same skipScene path as START; upstream #205 replays keys in frame
+				// order and finishOnionBootAfterSkip keeps the first Onion seed.
 				gameflow.mMoviePlayer->skipScene(SCENESKIP_Skip);
 			} else {
 				sPcHiddenTextSkipTimer = 3.0f; // la escena aún no ha empezado

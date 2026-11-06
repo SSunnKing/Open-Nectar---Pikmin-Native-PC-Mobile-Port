@@ -5,6 +5,14 @@
 #include "UtilityKando.h"
 #include "sysNew.h"
 
+// The fish school is ambient (drawn with drawBatten, read by nothing else), so on
+// PC its draws come from the cosmetic stream and cannot shift the sim sequence.
+#if defined(PIKI_PC_PORT)
+static f32 fishRand() { return pc_cosmetic_randf(1.0f); }
+#else
+static f32 fishRand() { return gsys->getRand(1.0f); }
+#endif
+
 /**
  * @note UNUSED Size: 00009C
  */
@@ -32,12 +40,12 @@ void FishGenerator::startAI(int /*unused*/)
 	for (int i = 0; i < mFishCount; i++) {
 		Fish& fish = mFish[i];
 
-		f32 randMag   = (40.0f * gsys->getRand(1.0f));
-		f32 randAngle = 2.0f * (PI * gsys->getRand(1.0f));
+		f32 randMag   = (40.0f * fishRand());
+		f32 randAngle = 2.0f * (PI * fishRand());
 
 		fish.mPosition = mSRT.t + Vector3f(randMag * sinf(randAngle), 4.0f, randMag * cosf(randAngle));
 		fish.mVelocity.set(0.0f, 0.0f, 0.0f);
-		fish.mDirection = 2.0f * (PI * gsys->getRand(1.0f));
+		fish.mDirection = 2.0f * (PI * fishRand());
 	}
 }
 
@@ -106,7 +114,7 @@ void FishGenerator::moveFish(Fish* fish)
 	}
 
 	// Update fish movement
-	if (nearestFish && gsys->getRand(1.0f) > 0.1f) {
+	if (nearestFish && fishRand() > 0.1f) {
 		// 90% chance to move towards the center of the school
 		Vector3f dir(averageDirection);
 		Vector3f centreDir = mSchoolCentre - fish->mPosition;
@@ -117,7 +125,7 @@ void FishGenerator::moveFish(Fish* fish)
 
 	} else {
 		// No nearby fish - wander and try to return to school
-		f32 randomTurnAngle = (gsys->getRand(1.0f) - 0.5f) * PI * 0.1f;
+		f32 randomTurnAngle = (fishRand() - 0.5f) * PI * 0.1f;
 		fish->mDirection    = roundAng(fish->mDirection + randomTurnAngle);
 
 		Vector3f schoolDirection = mSchoolCentre - fish->mPosition;

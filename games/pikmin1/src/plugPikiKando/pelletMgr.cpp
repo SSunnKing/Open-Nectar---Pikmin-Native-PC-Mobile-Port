@@ -24,6 +24,9 @@
 #include "zen/Math.h"
 #if defined(PIKI_PC_PORT)
 #include "gl/pc_gfx.h"
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 bool pc_night_pellet_glow(Pellet* pel, GXColor* boost); // navi.cpp, Eternal Night
 #endif
 
@@ -1416,7 +1419,13 @@ void Pellet::doRender(Graphics& gfx, Matrix4f& mtx)
 			pc_gfx_set_amb_boost(glowBoost);
 		}
 #endif
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+		pc_scenario_push_creature_unlit_draw(); // disc-free stand-ins: flat material colours (#115)
+#endif
 		mShapeObject->mShape->drawshape(gfx, *gfx.mCamera, &mAnimatedMaterials);
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+		pc_scenario_pop_creature_unlit_draw();
+#endif
 #if defined(PIKI_PC_PORT)
 		if (glowing) {
 			pc_gfx_clear_amb_boost();

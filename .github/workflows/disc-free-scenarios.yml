@@ -1,0 +1,867 @@
+# Disc-free gameplay scenarios (#59): build Pikmin 1 with the scenario option on
+# macOS, Linux and Windows, run the stand-in scenarios (no game disc or game
+# data), and compare their per-tick state hashes across operating systems.
+# Kept apart from ci.yml, which builds and unit-tests both games.
+#
+# Sharding: each OS's scenario tests run in SHARDS jobs (matrix.shards: 2 on macOS, 3 on Linux
+# and Windows), each running `ctest -I <shard>,,SHARDS`, CTest's stride selection over the test
+# numbers. Every scenario test thus runs exactly once per OS. Each shard builds the scenario binary itself: the build
+# is ccache-warm (shard 1 saves the cache) and about as fast as uploading and downloading a
+# build would be, and the shards start at once instead of after a build job. CTest starts
+# the long tests first in each shard (COST in games/pikmin1/CMakeLists.txt).
+# The steps that need the whole set run in scenarios-merge, one job per OS:
+# merge_scenario_shards.py joins the shards' logs and fails unless every test ran in exactly
+# one shard, then the throw_release K summary and the throw-flight check run on the merged
+# logs, which are uploaded as scenario-hash-logs-<OS> (the same artifact and layout as before
+# sharding) for scenario-hash-compare. Golden screenshots come from scenario_screenshot_goldens,
+# which runs in one shard per OS; only that shard writes and uploads golden-update-<OS>
+# (the name refresh_goldens.sh downloads).
+#
+# macOS runner budget: a free account runs about 5 hosted macOS jobs at once, and a job that
+# waits too long for one is cancelled ("not acquired ... capacity constraints"). So macOS has
+# 2 shards, not 3, and macOS shard 1 also runs the GL probe and the native JAudio scenarios
+# (matrix.extras) instead of separate gl-probe and jaudio-scenarios jobs; those steps run
+# whatever the scenario steps did, so their results mean what the separate jobs' did. Linux
+# and Windows keep the separate jobs: folding them in would lengthen a shard on those OSes.
+# scenarios-merge and scenario-hash-compare only read artifacts and run on Linux.
+name: Disc-free scenarios
+
+on:
+  pull_request:
+    # Pikmin 1 only: a pull request that changes nothing but Pikmin 2's own files skips this
+    # workflow. Keep in step with the Pikmin 2 rule in .github/scripts/changed-games.sh.
+    # No status check of this workflow is required on main or the disc-free base branch
+    # (2026-11-04); a required one would stay pending on such a pull request, and would then
+    # need a job-level skip instead.
+    paths-ignore:
+      - 'games/pikmin2/**'
+      - 'PIKMIN2_*.md'
+  push:
+    # golden-refresh/** starts a golden refresh (refresh_goldens.sh pushes one).
+    # A branch push works where workflow_dispatch
+    # does not: GitHub only dispatches a workflow file that exists on the default branch.
+    branches: [main, 'golden-refresh/**']
+  workflow_dispatch:
+    inputs:
+      float_det:
+        description: >-
+          Scenario builds: PIKMIN_SCENARIO_FLOAT_DET. Untick it as a negative control: the
+          builds then keep the platform's floats and the cross-OS comparison must fail.
+        type: boolean
+        default: true
+      update_goldens:
+        description: >-
+          Write fresh golden screenshots instead of comparing (tools/scenarios/refresh_goldens.sh
+          starts this and downloads the golden-update-* artifacts). The scenarios job passes.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# A new push to a pull request cancels the run it replaces. Pushes (main, the listed branches,
+# golden-refresh/**) and manual runs each get their own group (the run id) and are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  BUILD_TYPE: Release
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 500M
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_NOHASHDIR: "true"
+  # Static skip list for scenario runs (see the gl-probe job): runner.os values
+  # whose GL probe failed, each with a linked tracking issue. Empty today.
+  SCENARIO_SKIP_OS: ""
+  # PIKMIN_SCENARIO_FLOAT_DET for the scenario builds; OFF only from a manual run.
+  FLOAT_DET: ${{ github.event.inputs.float_det == 'false' && 'OFF' || 'ON' }}
+  # Golden screenshots (tools/scenarios/README.md, "Golden screenshots"): 1 writes new goldens.
+  GOLDEN_UPDATE: ${{ (github.event.inputs.update_goldens == 'true' || startsWith(github.ref, 'refs/heads/golden-refresh/')) && '1' || '0' }}
+
+jobs:
+  scenarios:
+    name: Scenarios (${{ matrix.target.name }}, shard ${{ matrix.shard }})
+    runs-on: ${{ matrix.target.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # One entry per shard. shards: that OS's shard count (scenarios-merge's matrix must
+        # match). extras: the macOS job that also runs the GL probe and the JAudio scenarios.
+        # All three OSes block on a golden mismatch after the 20-run measurement.
+        # See README, "Golden screenshots", for the rates and refresh procedure.
+        # Linux is ubuntu-24.04, not ubuntu-latest: the goldens are llvmpipe pictures, so the
+        # image (and its Mesa) must not move under them.
+        include:
+          - shard: 1
+            shards: 2
+            extras: true
+            target:
+                name: macOS (arm64)
+                os: macos-26
+                shell: bash
+                golden_advisory: "0"
+          - shard: 2
+            shards: 2
+            extras: false
+            target:
+                name: macOS (arm64)
+                os: macos-26
+                shell: bash
+                golden_advisory: "0"
+          - shard: 1
+            shards: 3
+            extras: false
+            target:
+                name: Linux (x86-64)
+                os: ubuntu-24.04
+                shell: bash
+                golden_advisory: "0"
+          - shard: 2
+            shards: 3
+            extras: false
+            target:
+                name: Linux (x86-64)
+                os: ubuntu-24.04
+                shell: bash
+                golden_advisory: "0"
+          - shard: 3
+            shards: 3
+            extras: false
+            target:
+                name: Linux (x86-64)
+                os: ubuntu-24.04
+                shell: bash
+                golden_advisory: "0"
+          - shard: 1
+            shards: 3
+            extras: false
+            target:
+                name: Windows (x86-64, MinGW-w64)
+                os: windows-latest
+                shell: msys2 {0}
+                golden_advisory: "0"
+          - shard: 2
+            shards: 3
+            extras: false
+            target:
+                name: Windows (x86-64, MinGW-w64)
+                os: windows-latest
+                shell: msys2 {0}
+                golden_advisory: "0"
+          - shard: 3
+            shards: 3
+            extras: false
+            target:
+                name: Windows (x86-64, MinGW-w64)
+                os: windows-latest
+                shell: msys2 {0}
+                golden_advisory: "0"
+    defaults:
+      run:
+        shell: ${{ matrix.target.shell }}
+    env:
+      SHARD: ${{ matrix.shard }}
+      SHARDS: ${{ matrix.shards }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install sdl2 ninja ccache
+
+      # Pins Mesa to the version in golden/linux/MESA_PIN (the version the Linux goldens were
+      # drawn with) through an apt source-package pin, then reports the version in use. If the
+      # archive no longer has that version the pin does nothing and the step warns; the golden
+      # compare then runs on the newer Mesa and its metrics show whether it still matches.
+      # A golden refresh skips the pin and records the Mesa it gets.
+      - name: Pin Mesa (Linux)
+        if: runner.os == 'Linux' && env.GOLDEN_UPDATE != '1'
+        run: |
+          PIN_FILE=games/pikmin1/tools/scenarios/golden/linux/MESA_PIN
+          if [ -s "$PIN_FILE" ]; then
+            PIN=$(tr -d '[:space:]' < "$PIN_FILE")
+            printf 'Package: src:mesa\nPin: version %s\nPin-Priority: 1001\n' "$PIN" | sudo tee /etc/apt/preferences.d/mesa-pin
+            echo "MESA_PIN=$PIN" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends --allow-downgrades \
+            cmake ninja-build ccache pkg-config libsdl2-dev libgl1-mesa-dev libx11-dev \
+            libgl1-mesa-dri libglx-mesa0 libegl-mesa0 xvfb
+          MESA_NOW=$(dpkg-query -W -f='${Version}' libgl1-mesa-dri)
+          echo "Mesa in use: $MESA_NOW"
+          if [ -n "${MESA_PIN:-}" ] && [ "$MESA_NOW" != "$MESA_PIN" ]; then
+            echo "::warning title=Mesa pin not applied::golden/linux/MESA_PIN is $MESA_PIN but the runner has $MESA_NOW; the Linux goldens may need a refresh."
+          fi
+
+      # The release .exe files are built with MinGW-w64 GCC (cross-compiled
+      # from Linux), so Windows uses the same compiler natively through MSYS2
+      # and can run the tests. setup-msys2 caches the packages between runs.
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-ccache
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-mesa
+
+      # MinGW predefines WIN32, which selects the original game's Win32/OpenGL
+      # code paths. cmake/toolchain-mingw64.cmake removes it for the release
+      # cross build; this does the same for the native MSYS2 build.
+      - name: Platform flags
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            echo 'PLATFORM_FLAGS=-DCMAKE_C_FLAGS=-UWIN32 -DCMAKE_CXX_FLAGS=-UWIN32' >> "$GITHUB_ENV"
+          fi
+
+      # Every shard restores the cache; only shard 1 saves it (after the build), so the three
+      # shards of an OS do not race to write the same key.
+      - name: Restore ccache
+        id: ccache
+        uses: actions/cache/restore@v6
+        with:
+          path: .ccache
+          key: ccache-scen-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: ccache-scen-${{ runner.os }}-${{ runner.arch }}-
+
+      # Scenario build (#59): native JAudio off (the legacy audio facade needs no
+      # sound data) and the scenario option on. The scenario tests run on stand-in
+      # assets that a generator writes into the build directory (no game data).
+      # ci.yml builds the native JAudio configuration and runs the unit tests.
+      - name: Configure Pikmin 1
+        run: |
+          cmake -S games/pikmin1 -B build/pikmin1 -G Ninja \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DPIKMIN_BUILD_LAUNCHER=OFF -DPIKMIN_BUILD_TESTS=ON \
+            -DPIKMIN_NATIVE_JAUDIO=OFF -DPIKMIN_BUILD_SCENARIOS=ON \
+            -DPIKMIN_SCENARIO_FLOAT_DET="$FLOAT_DET" \
+            $PLATFORM_FLAGS
+
+      # -k 0: report every compile error in one run, not only the first.
+      - name: Build Pikmin 1
+        id: build-p1
+        run: cmake --build build/pikmin1 --parallel -- -k 0
+
+      - name: Save ccache
+        if: ${{ !cancelled() && matrix.shard == 1 && steps.build-p1.outcome == 'success' && steps.ccache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: ccache-scen-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+
+      # The scenario build's software libm must be complete: the linked binary
+      # may hold no x87 transcendental or fsqrt, no FMA and no CRT math import,
+      # which would give Windows different floats than macOS and Linux in code
+      # the scenarios do not reach. Same gate as the netplay build's
+      # (tools/netplay/fp_gate.py); the msys2 shell has no Python by default.
+      # Every shard builds the same binary, so shard 1 checks it.
+      - name: FP gate on the scenario binary (Windows)
+        if: ${{ !cancelled() && runner.os == 'Windows' && matrix.shard == 1 && steps.build-p1.outcome == 'success' }}
+        run: |
+          pacman -S --noconfirm --needed git mingw-w64-x86_64-python
+          python games/pikmin1/tools/netplay/fp_gate.py --objdump "$(cygpath -m "$(which objdump)")" build/pikmin1/bin/nectar.exe
+
+      # This shard's part of the scenario set (ctest -I <shard>,,SHARDS, a stride over the test
+      # numbers), and whether it holds scenario_screenshot_goldens, the one test that writes
+      # golden-out in a golden refresh. shard/tests.json lists the whole set for the merge job.
+      - name: Select shard
+        if: ${{ !cancelled() && steps.build-p1.outcome == 'success' }}
+        run: |
+          mkdir -p build/pikmin1/shard
+          ctest --test-dir build/pikmin1 --show-only=json-v1 -R ^scenario_ -LE game-assets > build/pikmin1/shard/tests.json
+          ctest --test-dir build/pikmin1 -N -I "$SHARD,,$SHARDS" -R ^scenario_ -LE game-assets | tr -d '\r' | tee build/pikmin1/shard/tests.txt
+          if grep -Eq 'Test +#[0-9]+: scenario_screenshot_goldens$' build/pikmin1/shard/tests.txt; then
+            echo "SHARD_HAS_GOLDENS=1" >> "$GITHUB_ENV"
+          else
+            echo "SHARD_HAS_GOLDENS=0" >> "$GITHUB_ENV"
+          fi
+
+      # Scenarios need a GL context (hidden window). A runner that cannot create
+      # one is on SCENARIO_SKIP_OS with a tracking issue; the scenario binary exits
+      # 4 on a context failure, so it is never read as a failed scenario. Each test
+      # has its own scratch save directory and log names, so they run in parallel.
+      # CTest also runs the FIXTURES_SETUP test scenario_standin_generate (under a second)
+      # in every shard that needs the stand-in tree.
+      - name: Test Pikmin 1 scenarios
+        if: ${{ !cancelled() && steps.build-p1.outcome == 'success' && !contains(env.SCENARIO_SKIP_OS, runner.os) }}
+        env:
+          SDL_AUDIODRIVER: dummy
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER: llvmpipe
+          # One llvmpipe thread per process: with 4 scenarios in parallel on a
+          # 4-core runner, the default (one rasteriser thread per core each) only
+          # adds contention. macOS uses Apple's renderer and keeps -j 3.
+          LP_NUM_THREADS: "1"
+          # scenario_screenshot_goldens: advisory per OS (matrix), or write new goldens.
+          PIKMIN_GOLDEN_ADVISORY: ${{ matrix.target.golden_advisory }}
+          PIKMIN_UPDATE_GOLDENS: ${{ env.GOLDEN_UPDATE }}
+          PIKMIN_GOLDEN_OUT: ${{ github.workspace }}/golden-out
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # Without Mesa beside the exe, Windows returns GDI Generic GL 1.1.
+            cp /mingw64/bin/opengl32.dll /mingw64/bin/libgallium_wgl.dll build/pikmin1/bin/
+            export PIKMIN_GOLDEN_OUT="$(cygpath -m "$PIKMIN_GOLDEN_OUT")"
+          fi
+          JOBS=4
+          if [ "$RUNNER_OS" = "macOS" ]; then JOBS=3; fi
+          # --output-junit is relative to the build directory: build/pikmin1/shard/junit.xml.
+          RUN="ctest --test-dir build/pikmin1 --output-on-failure --timeout 600 -j $JOBS -I $SHARD,,$SHARDS -R ^scenario_ -LE game-assets --output-junit shard/junit.xml"
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a $RUN; else $RUN; fi
+
+      # Retain each shard's raw provenance separately; runner tool versions can differ.
+      - name: Record RNG scenario provenance
+        if: ${{ !cancelled() }}
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            pacman -S --noconfirm --needed git mingw-w64-x86_64-python
+          fi
+          python3 games/pikmin1/tools/scenarios/record_rng_provenance.py build/pikmin1
+
+      # The shard's logs, provenance, test lists and LastTest.log, for scenarios-merge.
+      # The throw_release K summary and the throw-flight check need logs from every shard,
+      # so they run there.
+      - name: Collect shard results
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p shard-out/scenario-logs shard-out/Testing/Temporary
+          for f in build/pikmin1/scenario-logs/*.hash.log \
+                   build/pikmin1/scenario-logs/scenario_throw_release_*.log \
+                   build/pikmin1/scenario-logs/scenario_throw_flight_*.log; do
+            if [ -f "$f" ]; then cp "$f" shard-out/scenario-logs/; fi
+          done
+          if [ -d build/pikmin1/scenario-evidence ]; then cp -R build/pikmin1/scenario-evidence shard-out/; fi
+          if [ -d build/pikmin1/shard ]; then cp -R build/pikmin1/shard shard-out/; fi
+          if [ -f build/pikmin1/Testing/Temporary/LastTest.log ]; then
+            cp build/pikmin1/Testing/Temporary/LastTest.log shard-out/Testing/Temporary/
+          fi
+          echo "$(ls shard-out/scenario-logs | wc -l) log(s) collected"
+
+      - name: Upload shard results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: scenario-shard-${{ runner.os }}-${{ matrix.shard }}
+          path: shard-out/
+          if-no-files-found: warn
+          retention-days: 7
+
+      # A golden refresh (a golden-refresh/** branch push, or workflow_dispatch update_goldens): the new goldens plus where they
+      # came from. refresh_goldens.sh downloads these and copies them into tools/scenarios/golden/.
+      # Only the shard that ran scenario_screenshot_goldens has them (SHARD_HAS_GOLDENS).
+      - name: Golden provenance
+        if: ${{ !cancelled() && env.GOLDEN_UPDATE == '1' && env.SHARD_HAS_GOLDENS == '1' }}
+        run: |
+          mkdir -p golden-out
+          {
+            echo "runner: $RUNNER_OS $RUNNER_ARCH, image ${ImageOS:-?} ${ImageVersion:-?}"
+            echo "commit: $GITHUB_SHA"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            case "$RUNNER_OS" in
+              Linux) echo "mesa: $(dpkg-query -W -f='${Version}' libgl1-mesa-dri)" ;;
+              Windows) echo "mesa: $(pacman -Q mingw-w64-x86_64-mesa)" ;;
+              macOS) echo "macOS: $(sw_vers -productVersion), $(sysctl -n machdep.cpu.brand_string)" ;;
+            esac
+          } > golden-out/PROVENANCE.txt
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            dpkg-query -W -f='${Version}\n' libgl1-mesa-dri > golden-out/MESA_PIN
+          fi
+          cat golden-out/PROVENANCE.txt
+
+      - name: Validate new goldens
+        id: validate-goldens
+        if: ${{ !cancelled() && env.GOLDEN_UPDATE == '1' && env.SHARD_HAS_GOLDENS == '1' }}
+        run: python3 games/pikmin1/tools/scenarios/golden_shots.py validate --dir golden-out
+
+      - name: Upload new goldens
+        if: ${{ !cancelled() && env.GOLDEN_UPDATE == '1' && env.SHARD_HAS_GOLDENS == '1' && steps.validate-goldens.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: golden-update-${{ runner.os }}
+          path: golden-out/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload scenario screenshots
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: scenario-screenshots-${{ runner.os }}-shard${{ matrix.shard }}
+          path: build/pikmin1/scenario-screenshots/**/*.png
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-logs-scenarios-${{ runner.os }}-shard${{ matrix.shard }}
+          path: |
+            build/pikmin1/Testing/Temporary/LastTest*.log
+            build/pikmin1/scenario-logs/
+            build/pikmin1/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: ignore
+
+      # ---- macOS shard 1 only (matrix.extras): the gl-probe and jaudio-scenarios checks ----
+      # The same steps as those jobs run on Linux and Windows. Each runs whatever the scenario
+      # steps above did (!cancelled()), so a failure here or there does not hide the other.
+
+      # GL probe: a hidden-window 4.1 core context, logs GL_VERSION and GL_RENDERER, fails
+      # below that version (see the gl-probe job).
+      - name: GL probe (macOS)
+        if: ${{ !cancelled() && matrix.extras }}
+        env:
+          SDL_AUDIODRIVER: dummy
+        run: |
+          cc games/pikmin1/tools/scenarios/gl_probe.c $(sdl2-config --cflags --libs) -o gl_probe
+          ./gl_probe
+
+      # Native JAudio scenarios (see the jaudio-scenarios job): its own build directory and
+      # ccache, the same configuration, tests and artifact name (scenario-hash-logs-jaudio-macOS).
+      - name: Restore ccache (native JAudio)
+        id: ccache-jaudio
+        if: ${{ !cancelled() && matrix.extras }}
+        uses: actions/cache/restore@v6
+        with:
+          path: .ccache-jaudio
+          key: ccache-jaudio-scen-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: ccache-jaudio-scen-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Configure (native JAudio)
+        id: configure-jaudio
+        if: ${{ !cancelled() && matrix.extras }}
+        run: |
+          cmake -S games/pikmin1 -B build/pikmin1-jaudio -G Ninja \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DPIKMIN_BUILD_LAUNCHER=OFF -DPIKMIN_BUILD_TESTS=ON \
+            -DPIKMIN_NATIVE_JAUDIO=ON -DPIKMIN_BUILD_SCENARIOS=ON \
+            -DPIKMIN_SCENARIO_FLOAT_DET="$FLOAT_DET" \
+            $PLATFORM_FLAGS
+
+      - name: Build (native JAudio)
+        id: build-jaudio
+        if: ${{ !cancelled() && matrix.extras && steps.configure-jaudio.outcome == 'success' }}
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache-jaudio
+          CCACHE_MAXSIZE: 300M
+        run: cmake --build build/pikmin1-jaudio --parallel --target pikmin_pc nectar_standin_generator -- -k 0
+
+      - name: Save ccache (native JAudio)
+        if: ${{ !cancelled() && matrix.extras && steps.build-jaudio.outcome == 'success' && steps.ccache-jaudio.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache-jaudio
+          key: ccache-jaudio-scen-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+
+      - name: Test scenarios (native JAudio)
+        if: ${{ !cancelled() && matrix.extras && steps.build-jaudio.outcome == 'success' }}
+        env:
+          SDL_AUDIODRIVER: dummy
+        run: ctest --test-dir build/pikmin1-jaudio --output-on-failure --timeout 600 -j 3 -R "^scenario_(boot_smoke|throw_release|day30_clock)_" -E _disc
+
+      - name: Scenario calibration summary (native JAudio)
+        if: ${{ !cancelled() && matrix.extras && steps.build-jaudio.outcome == 'success' }}
+        run: bash games/pikmin1/tools/scenarios/ci_k_summary.sh build/pikmin1-jaudio "macOS, native JAudio on"
+
+      - name: Record RNG scenario provenance (native JAudio)
+        if: ${{ !cancelled() && matrix.extras && steps.configure-jaudio.outcome == 'success' }}
+        run: python3 games/pikmin1/tools/scenarios/record_rng_provenance.py build/pikmin1-jaudio
+
+      - name: Upload scenario state-hash logs (native JAudio)
+        if: ${{ !cancelled() && matrix.extras }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: scenario-hash-logs-jaudio-${{ runner.os }}
+          path: |
+            build/pikmin1-jaudio/scenario-logs/*.hash.log
+            build/pikmin1-jaudio/scenario-logs/scenario_throw_release_*.log
+            build/pikmin1-jaudio/scenario-evidence/*
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload test logs (native JAudio)
+        if: ${{ failure() && matrix.extras }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-logs-jaudio-scenarios-${{ runner.os }}
+          path: |
+            build/pikmin1-jaudio/Testing/Temporary/LastTest*.log
+            build/pikmin1-jaudio/scenario-logs/
+          if-no-files-found: ignore
+
+  # One job per OS after its shards: joins their results, fails unless every scenario test
+  # ran in exactly one shard (merge_scenario_shards.py), runs the checks that need the whole
+  # set, and uploads scenario-hash-logs-<OS> for scenario-hash-compare.
+  scenarios-merge:
+    name: Scenarios merged (${{ matrix.name }})
+    needs: scenarios
+    if: ${{ !cancelled() }}
+    # Reads artifacts with Python and bash only, whatever OS the shards ran on.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # shards: the scenarios job's shard count for that OS.
+          - name: macOS (arm64)
+            runner_os: macOS
+            shards: 2
+          - name: Linux (x86-64)
+            runner_os: Linux
+            shards: 3
+          - name: Windows (x86-64, MinGW-w64)
+            runner_os: Windows
+            shards: 3
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: games/pikmin1/tools/scenarios
+
+      - name: Download shard results
+        uses: actions/download-artifact@v8
+        with:
+          pattern: scenario-shard-${{ matrix.runner_os }}-*
+          path: shards
+
+      - name: Verify shard merger regression and negative controls
+        run: python3 -m unittest discover -s games/pikmin1/tools/scenarios -p test_merge_scenario_shards.py
+
+      - name: Merge shards (every scenario test exactly once)
+        id: merge
+        if: ${{ !contains(env.SCENARIO_SKIP_OS, matrix.runner_os) }}
+        run: |
+          python3 games/pikmin1/tools/scenarios/merge_scenario_shards.py --shards "${{ matrix.shards }}" \
+            --out merged --label "(${{ matrix.name }})" shards/scenario-shard-${{ matrix.runner_os }}-*
+
+      # The throw_release calibration K per rate (a tuned fit; printed, not asserted).
+      - name: Scenario calibration summary
+        if: ${{ !cancelled() && !contains(env.SCENARIO_SKIP_OS, matrix.runner_os) }}
+        run: bash games/pikmin1/tools/scenarios/ci_k_summary.sh merged "${{ matrix.name }}, native JAudio off"
+
+      # The throw itself on the stand-in tree, held to the disc: every throw of
+      # throw_flight_{leaf,bud,flower,yellow} at 30 and 60 Hz must have the disc's grab,
+      # release and flight ticks exactly, its peak height within 0.05 and its launch
+      # speed within 0.1 (check_throw_flight.py has the values and where they come
+      # from). The 2.6 s hold and throw_cadence are not asserted yet.
+      - name: Throw flight against the disc (leaf, bud, flower, yellow)
+        if: ${{ !cancelled() && !contains(env.SCENARIO_SKIP_OS, matrix.runner_os) }}
+        run: python3 games/pikmin1/tools/scenarios/check_throw_flight.py merged/scenario-logs --label "(${{ matrix.name }})"
+
+      # Every stand-in scenario's per-tick state-hash log, on every run, for the
+      # scenario-hash-compare job (cross-OS determinism). Same name and layout as an
+      # unsharded run's scenario-logs/; provenance is in scenario-evidence/<shard-name>/.
+      - name: Upload scenario state-hash logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: scenario-hash-logs-${{ matrix.runner_os }}
+          path: |
+            merged/scenario-logs/*
+            merged/scenario-evidence/*
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The stand-in scenarios on a native JAudio build (standin-audio.md): the
+  # stand-in pikiseq.arc lets the engine boot a stage with no disc. A separate
+  # build on every OS, so ci.yml keeps checking the release configuration.
+  # The matrix mirrors the scenarios job (same dependencies, Mesa DLLs and flags).
+  jaudio-scenarios:
+    name: Native JAudio scenarios (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS runs these steps in the scenarios job (macOS shard 1, matrix.extras).
+          - name: Linux
+            os: ubuntu-latest
+            shell: bash
+          - name: Windows
+            os: windows-latest
+            shell: msys2 {0}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    env:
+      BUILD_TYPE: Release
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 300M
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_NOHASHDIR: "true"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install sdl2 ninja ccache
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build ccache pkg-config libsdl2-dev libgl1-mesa-dev libx11-dev \
+            libgl1-mesa-dri libglx-mesa0 libegl-mesa0 xvfb
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-ccache
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-mesa
+
+      # Same as the scenarios job: MinGW predefines WIN32, which selects the
+      # original game's Win32/OpenGL code paths.
+      - name: Platform flags
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            echo 'PLATFORM_FLAGS=-DCMAKE_C_FLAGS=-UWIN32 -DCMAKE_CXX_FLAGS=-UWIN32' >> "$GITHUB_ENV"
+          fi
+
+      - name: Restore ccache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: ccache-jaudio-scen-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: ccache-jaudio-scen-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Configure
+        run: |
+          cmake -S games/pikmin1 -B build/pikmin1 -G Ninja \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DPIKMIN_BUILD_LAUNCHER=OFF -DPIKMIN_BUILD_TESTS=ON \
+            -DPIKMIN_NATIVE_JAUDIO=ON -DPIKMIN_BUILD_SCENARIOS=ON \
+            -DPIKMIN_SCENARIO_FLOAT_DET="$FLOAT_DET" \
+            $PLATFORM_FLAGS
+
+      - name: Build
+        id: build
+        run: cmake --build build/pikmin1 --parallel --target pikmin_pc nectar_standin_generator -- -k 0
+
+      - name: Test scenarios
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          SDL_AUDIODRIVER: dummy
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER: llvmpipe
+          LP_NUM_THREADS: "1"
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # Without Mesa beside the exe, Windows returns GDI Generic GL 1.1.
+            cp /mingw64/bin/opengl32.dll /mingw64/bin/libgallium_wgl.dll build/pikmin1/bin/
+          fi
+          JOBS=4
+          if [ "$RUNNER_OS" = "macOS" ]; then JOBS=3; fi
+          RUN="ctest --test-dir build/pikmin1 --output-on-failure --timeout 600 -j $JOBS -R ^scenario_(boot_smoke|throw_release|day30_clock)_ -E _disc"
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a $RUN; else $RUN; fi
+
+      - name: Scenario calibration summary
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: bash games/pikmin1/tools/scenarios/ci_k_summary.sh build/pikmin1 "${{ matrix.name }}, native JAudio on"
+
+      - name: Record RNG scenario provenance
+        if: ${{ !cancelled() }}
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            pacman -S --noconfirm --needed git mingw-w64-x86_64-python
+          fi
+          python3 games/pikmin1/tools/scenarios/record_rng_provenance.py build/pikmin1
+
+      - name: Upload scenario state-hash logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: scenario-hash-logs-jaudio-${{ runner.os }}
+          path: |
+            build/pikmin1/scenario-logs/*.hash.log
+            build/pikmin1/scenario-logs/scenario_throw_release_*.log
+            build/pikmin1/scenario-evidence/*
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-logs-jaudio-scenarios-${{ runner.os }}
+          path: |
+            build/pikmin1/Testing/Temporary/LastTest*.log
+            build/pikmin1/scenario-logs/
+          if-no-files-found: ignore
+
+  # Cross-OS determinism: the stand-in scenarios' per-tick state-hash logs from
+  # the macOS, Linux and Windows runs must be the same lines (scenario builds
+  # use PIKMIN_SCENARIO_FLOAT_DET; tools/scenarios/README.md, "Cross-platform
+  # floats"). Fails on any differing line (the first one per scenario is
+  # printed), on a scenario with a log on one OS and none on another, and when an
+  # OS's job produced no logs at all (a cancelled job included).
+  scenario-hash-compare:
+    name: Cross-OS scenario state hashes
+    needs: [scenarios-merge, jaudio-scenarios]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: games/pikmin1/tools/scenarios
+
+      - name: Download state-hash logs
+        uses: actions/download-artifact@v8
+        with:
+          pattern: scenario-hash-logs-*
+          path: hash-logs
+
+      - name: Verify timing comparator negative controls
+        run: python3 -m unittest discover -s games/pikmin1/tools/scenarios -p 'test_compare_throw_timing.py' -v
+
+      - name: Verify throw-flight checker negative controls
+        run: python3 -m unittest discover -s games/pikmin1/tools/scenarios -p 'test_check_throw_flight.py' -v
+
+      - name: Require equal throw-release calibration at 30 and 60 Hz
+        run: |
+          python3 games/pikmin1/tools/scenarios/compare_throw_timing.py \
+            macOS=hash-logs/scenario-hash-logs-macOS/scenario-logs \
+            Linux=hash-logs/scenario-hash-logs-Linux/scenario-logs \
+            Windows=hash-logs/scenario-hash-logs-Windows/scenario-logs \
+            macOS-jaudio=hash-logs/scenario-hash-logs-jaudio-macOS/scenario-logs \
+            Linux-jaudio=hash-logs/scenario-hash-logs-jaudio-Linux/scenario-logs \
+            Windows-jaudio=hash-logs/scenario-hash-logs-jaudio-Windows/scenario-logs
+
+      - name: Compare (native JAudio off, every stand-in scenario)
+        run: |
+          echo "scenarios-merge: ${{ needs.scenarios-merge.result }}"
+          python3 games/pikmin1/tools/scenarios/compare_hash_logs.py \
+            --label "state-hash logs, native JAudio off" \
+            macOS=hash-logs/scenario-hash-logs-macOS/scenario-logs \
+            Linux=hash-logs/scenario-hash-logs-Linux/scenario-logs \
+            Windows=hash-logs/scenario-hash-logs-Windows/scenario-logs
+
+      - name: Compare (native JAudio on)
+        if: ${{ !cancelled() }}
+        run: |
+          echo "jaudio-scenarios: ${{ needs.jaudio-scenarios.result }}"
+          python3 games/pikmin1/tools/scenarios/compare_hash_logs.py \
+            --label "state-hash logs, native JAudio on" \
+            macOS=hash-logs/scenario-hash-logs-jaudio-macOS/scenario-logs \
+            Linux=hash-logs/scenario-hash-logs-jaudio-Linux/scenario-logs \
+            Windows=hash-logs/scenario-hash-logs-jaudio-Windows/scenario-logs
+
+      # The native audio engine must not touch the simulation: the JAudio-on
+      # scenarios (boot_smoke, throw_release, day30_clock) equal the JAudio-off
+      # logs of the same scenarios, on every OS.
+      - name: Compare (native JAudio on against off)
+        if: ${{ !cancelled() }}
+        run: |
+          python3 games/pikmin1/tools/scenarios/compare_hash_logs.py --common-only \
+            --label "state-hash logs, native JAudio on against off" \
+            macOS=hash-logs/scenario-hash-logs-macOS/scenario-logs \
+            Linux=hash-logs/scenario-hash-logs-Linux/scenario-logs \
+            Windows=hash-logs/scenario-hash-logs-Windows/scenario-logs \
+            macOS-jaudio=hash-logs/scenario-hash-logs-jaudio-macOS/scenario-logs \
+            Linux-jaudio=hash-logs/scenario-hash-logs-jaudio-Linux/scenario-logs \
+            Windows-jaudio=hash-logs/scenario-hash-logs-jaudio-Windows/scenario-logs
+
+
+  # Reports, per OS, whether a hidden-window GL context of the kind the game
+  # requests can be created (4.1 core on macOS, 3.3 compatibility elsewhere),
+  # logs GL_VERSION and GL_RENDERER, and fails on anything below that version.
+  # Scenario jobs (#63) run only on an OS whose probe passes. An OS whose probe
+  # fails is added to SCENARIO_SKIP_OS below, with a linked tracking issue, in
+  # the same change that shows the failure. Its build and unit tests still run.
+  gl-probe:
+    name: GL probe (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS runs the probe in the scenarios job (macOS shard 1, matrix.extras).
+          - name: Linux (x86-64)
+            os: ubuntu-latest
+            shell: bash
+          - name: Windows (x86-64, MinGW-w64)
+            os: windows-latest
+            shell: msys2 {0}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    env:
+      SDL_AUDIODRIVER: dummy
+      # Static skip list: space-separated runner.os values whose probe failed.
+      # Format: "<OS> (<tracking issue URL>)". Empty until a probe fails.
+      SCENARIO_SKIP_OS: ""
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install sdl2
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libsdl2-dev mesa-utils libgl1-mesa-dri libglx-mesa0 libegl-mesa0 xvfb
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-mesa
+
+      - name: Build probe
+        run: |
+          cc games/pikmin1/tools/scenarios/gl_probe.c $(sdl2-config --cflags --libs) -o gl_probe
+
+      # Windows without Mesa returns a GDI Generic 1.1 context. The Mesa DLLs
+      # go beside the exe, and llvmpipe is selected explicitly.
+      - name: Run probe
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a ./gl_probe
+          elif [ "$RUNNER_OS" = "Windows" ]; then
+            cp /mingw64/bin/opengl32.dll /mingw64/bin/libgallium_wgl.dll . 2>/dev/null || true
+            ls -la opengl32.dll libgallium_wgl.dll || echo "Mesa DLLs not found beside the exe"
+            # A context that hangs is a probe failure, not a stuck job.
+            GALLIUM_DRIVER=llvmpipe timeout 120 ./gl_probe
+          else
+            ./gl_probe
+          fi

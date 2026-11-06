@@ -2,6 +2,9 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
 #include "netplay/pc_netplay_present.h"
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 #endif
 #include "DebugLog.h"
 #include "GameStat.h"
@@ -237,7 +240,14 @@ void PikiHeadItem::refresh(Graphics& gfx)
 		mItemAnimator.updateContext();
 		mItemShapeObject->mShape->updateAnim(gfx, mtx, nullptr, this);
 		gfx.useMatrix(Matrix4f::ident, 0);
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+		// Disc-free stand-ins: vertex-coloured, drawn unlit like the folk (#115).
+		pc_scenario_push_creature_unlit_draw();
+#endif
 		mItemShapeObject->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+		pc_scenario_pop_creature_unlit_draw();
+#endif
 	}
 
 	gfx.useMatrix(mItemShapeObject->mShape->getAnimMatrix(3), 0);
@@ -262,7 +272,13 @@ void PikiHeadItem::refresh(Graphics& gfx)
 	mGlowEffectPos = localPos;
 #endif
 
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+	pc_scenario_push_creature_unlit_draw();
+#endif
 	pikiMgr->mLeafModel[mFlowerStage]->drawshape(gfx, *gfx.mCamera, nullptr);
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+	pc_scenario_pop_creature_unlit_draw();
+#endif
 }
 
 /**

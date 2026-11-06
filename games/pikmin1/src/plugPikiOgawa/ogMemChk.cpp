@@ -11,6 +11,7 @@
 #include "zen/ogMakeDefault.h"
 #include "zen/ogNitaku.h"
 #include "zen/ogSub.h"
+#include "scenarios/pc_scenario_note.h"
 
 /**
  * @todo: Documentation
@@ -573,6 +574,7 @@ zen::ogScrMemChkMgr::MemChkStatus zen::ogScrMemChkMgr::update(Controller* input)
 	if (mStatus == Inactive) {
 		return mStatus;
 	}
+	PC_SCENARIO_NOTE("memchk", mStatus);
 
 	if (mStatus == Starting) {
 		mStatus = Finished;
@@ -862,6 +864,7 @@ zen::ogScrMemChkMgr::MemChkStatus zen::ogScrMemChkMgr::update(Controller* input)
 	}
 
 	setErrorMessage();
+	PC_SCENARIO_NOTE("memchk", mStatus);
 
 	if (mStatus >= ExitFailure) {
 		return mStatus;

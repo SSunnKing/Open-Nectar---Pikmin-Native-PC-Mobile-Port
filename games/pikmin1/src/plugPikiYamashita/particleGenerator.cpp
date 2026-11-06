@@ -8,6 +8,15 @@
 #include "pc_gfx.h"
 #endif
 
+#if defined(PIKI_PC_PORT)
+// PC: every Rand and RandShift in this file is a particle draw (emission count,
+// lifetime, spread, velocity, size, rotation, jitter, drag, alpha, child
+// offset). Route them to the cosmetic RNG stream so that effect content cannot
+// change the sim stream, and with it Pikmin and enemy behaviour.
+#define Rand(max)      zen::CosmeticRand(max)
+#define RandShift(min) zen::CosmeticRandShift(min)
+#endif
+
 /**
  * @todo: Documentation
  * @note UNUSED Size: 00009C

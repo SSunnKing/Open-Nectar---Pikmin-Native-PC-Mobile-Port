@@ -205,11 +205,51 @@ int main()
 		check(dayDocument(flags, 2).id == zen::RESFLAG_EndFirstDay, "the later day keeps the entry it showed");
 	}
 
+	// No Day Limit: the day that ended is still on the clock, so the log slot is
+	// that day (29), not getCurrDay() (28).
+	{
+		ResultFlags flags;
+		flags.setOn(zen::RESFLAG_Misc1);
+		gCurrDay = 28;
+		int pages = 0;
+		const int id = flags.getDocument(pages, 29);
+		check(id == zen::RESFLAG_Misc1 && pages > 0, "No Day Limit records the ended day in slot 29");
+		check(dayDocument(flags, 29).id == zen::RESFLAG_Misc1, "slot 29 holds the misc entry");
+		check(dayDocument(flags, 28).length == 0, "slot 28 is not overwritten");
+	}
+
 	// No day-1 flag was ever set. Do not invent a page.
 	{
 		ResultFlags flags;
 		check(!flags.repairUnrecordedDayOne(5), "a save with no pending day-1 flag is left alone");
 		check(dayDocument(flags, 1).length == 0, "day 1 stays empty when the flag was never set");
+	}
+
+	// No Day Limit: plain day ends past the 27 Misc pages. The original found
+	// no entry on the 28th and halted ("cannot happen !", then "zero pages!").
+	// The pool starts over at Misc1, and an earned entry still comes first.
+	{
+		ResultFlags flags;
+		flags.initGame();
+		gCurrDay = 1;
+		for (int n = 0; n < 27; n++) {
+			int pages = 0;
+			check(flags.getDocument(pages, 1) == zen::RESFLAG_Misc1 + n && pages == 1, "a plain day end shows the next Misc page");
+		}
+		int pages = 0;
+		check(flags.getDocument(pages, 1) == zen::RESFLAG_Misc1 && pages == 1, "the 28th plain day end starts the Misc pages over");
+		pages = 0;
+		check(flags.getDocument(pages, 1) == zen::RESFLAG_Misc2, "and continues in order");
+		flags.setOn(zen::RESFLAG_FirstVisitForest);
+		pages = 0;
+		check(flags.getDocument(pages, 1) == zen::RESFLAG_FirstVisitForest, "an earned entry still comes first");
+		for (int n = 0; n < 200; n++) {
+			pages = 0;
+			if (flags.getDocument(pages, 1) < 0 || pages <= 0) {
+				check(false, "No Day Limit never runs out of diary pages");
+				break;
+			}
+		}
 	}
 
 	if (gFailures != 0) {

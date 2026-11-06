@@ -37,6 +37,9 @@
 #include "../netplay/pc_netplay_present.h"
 #include "../netplay/pc_netplay_loadguard.h"
 #include "../pc_menu_click.h"
+#if PIKI_SCENARIOS
+#include "../scenarios/pc_scenario_screenshot.h"
+#endif
 
 // Netplay keep-alive (pc_netplay_loadguard.h): strong-defined by
 // pc_netplay_session.cpp in netplay builds only, null otherwise.
@@ -746,6 +749,9 @@ static int sRenderWidth = 640;
 static int sRenderHeight = 480;
 static float sRenderScale = 2.0f / 3.0f;
 static bool sRenderScaleSet = false; // true once set by the settings module
+// Smallest internal render size (pc_gfx_set_min_render_size).
+static int sMinRenderWidth = 160;
+static int sMinRenderHeight = 120;
 
 // Aspect ratio support.
 enum AspectRatioMode {
@@ -2527,6 +2533,11 @@ float pc_gfx_get_render_scale(void) {
     return sRenderScale;
 }
 
+void pc_gfx_set_min_render_size(int width, int height) {
+    sMinRenderWidth = std::max(1, width);
+    sMinRenderHeight = std::max(1, height);
+}
+
 static float calculate_aspect_ratio(int mode, float windowAspect) {
     switch (mode) {
         case ASPECT_4_3:   return 4.0f / 3.0f;
@@ -2540,7 +2551,11 @@ static float calculate_aspect_ratio(int mode, float windowAspect) {
 }
 
 void pc_gfx_set_aspect_ratio_mode(int mode) {
-    sAspectRatioMode = std::clamp(mode, 0, (int)ASPECT_COUNT - 1);
+    const int clamped = std::clamp(mode, 0, (int)ASPECT_COUNT - 1);
+    if (clamped != sAspectRatioMode) {
+        sAspectRatioMode = clamped;
+        invalidate_gl_pipeline_guards();
+    }
 }
 
 int pc_gfx_get_aspect_ratio_mode(void) {
@@ -3371,6 +3386,88 @@ void pc_gfx_reset_ui_state(void) {
     }
 }
 
+// Re-read SDL drawable size and resize the native colour/depth target if
+// sRenderResolution* / aspect / scale demand it. Shared by begin_frame and the
+// scenario capture-tick resize (64x36 -> 640x480 mid-run).
+static void sync_native_render_target(void)
+{
+    SDL_Window* window = SDL_GL_GetCurrentWindow();
+    if (window) SDL_GL_GetDrawableSize(window, &sDrawableWidth, &sDrawableHeight);
+#ifdef __ANDROID__
+    pc_android_surface_size(&sDrawableWidth, &sDrawableHeight);
+#endif
+    if (!sNativeFramebufferReady || !glBindFramebuffer_ptr || sDrawableWidth <= 0 || sDrawableHeight <= 0) return;
+
+    float windowAspect = float(sDrawableWidth) / float(sDrawableHeight);
+    sCurrentAspectRatio = calculate_aspect_ratio(sAspectRatioMode, windowAspect);
+
+    GLint outX, outY, outWidth, outHeight;
+    calculate_output_area(sDrawableWidth, sDrawableHeight, sCurrentAspectRatio, outX, outY, outWidth, outHeight);
+    float baseWidth = float(outWidth), baseHeight = float(outHeight);
+    if (sRenderResolutionW > 0 && sRenderResolutionH > 0) {
+        baseHeight = float(sRenderResolutionH);
+        baseWidth = baseHeight * sCurrentAspectRatio;
+        if (baseWidth > float(sRenderResolutionW)) {
+            baseWidth = float(sRenderResolutionW);
+            baseHeight = baseWidth / sCurrentAspectRatio;
+        }
+    }
+    if (sRenderOriginal) {
+        baseHeight = 480.0f;
+        baseWidth  = 480.0f * sCurrentAspectRatio;
+    }
+    const int wantedWidth = std::max(sMinRenderWidth, int(lroundf(baseWidth * sRenderScale)));
+    const int wantedHeight = std::max(sMinRenderHeight, int(lroundf(baseHeight * sRenderScale)));
+    if (wantedWidth != sRenderWidth || wantedHeight != sRenderHeight) {
+        sRenderWidth = wantedWidth;
+        sRenderHeight = wantedHeight;
+        glBindTexture(GL_TEXTURE_2D, sNativeColorTexture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, sRenderWidth, sRenderHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        if (sDepthIsTexture) {
+            glBindTexture(GL_TEXTURE_2D, sNativeDepthTexture);
+            depth_tex_image(sRenderWidth, sRenderHeight);
+        } else if (glBindRenderbuffer_ptr && glRenderbufferStorage_ptr) {
+            glBindRenderbuffer_ptr(GL_RENDERBUFFER, sNativeDepthStencil);
+            glRenderbufferStorage_ptr(GL_RENDERBUFFER, depth_internal_format(), sRenderWidth, sRenderHeight);
+        }
+        glBindTexture(GL_TEXTURE_2D, 0);
+        sBoundTextures[0] = 0;
+        printf("[PC Port] Internal render resolution: %dx%d (aspect %.3f)\n", sRenderWidth, sRenderHeight, sCurrentAspectRatio);
+        invalidate_gl_pipeline_guards();
+    }
+    glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
+}
+
+#if PIKI_SCENARIOS
+static bool sScenarioCaptureResizePending = false;
+
+void pc_gfx_scenario_prepare_capture(int renderW, int renderH)
+{
+    if (renderW > 0 && renderH > 0) {
+        sRenderResolutionW = renderW;
+        sRenderResolutionH = renderH;
+    }
+    sync_native_render_target();
+    sScenarioCaptureResizePending = true;
+    invalidate_gl_pipeline_guards();
+}
+
+void pc_gfx_scenario_presentation_pass_begin(void)
+{
+    if (!sScenarioCaptureResizePending) return;
+    sScenarioCaptureResizePending = false;
+    sync_native_render_target();
+    invalidate_gl_pipeline_guards();
+    if (sRenderWidth <= 0 || sRenderHeight <= 0 || pc_gfx_null_skip()) return;
+    pc_gfx_note_gl_state_change();
+    glViewport(0, 0, sRenderWidth, sRenderHeight);
+    glDisable(GL_SCISSOR_TEST);
+    glEnable(GL_DEPTH_TEST);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+}
+#endif
+
 void pc_gfx_begin_frame(void) {
     // Runs per renderall; the presentation pass owns the frame's GL.
     if (pc_gfx_null_skip()) return;
@@ -3540,54 +3637,7 @@ void pc_gfx_begin_frame(void) {
     // que pidió pc_window (ver pc_android_request_surface_size).
     pc_android_surface_size(&sDrawableWidth, &sDrawableHeight);
 #endif
-    if (sNativeFramebufferReady && sDrawableWidth > 0 && sDrawableHeight > 0) {
-        // Calculate aspect ratio for this frame
-        float windowAspect = float(sDrawableWidth) / float(sDrawableHeight);
-        sCurrentAspectRatio = calculate_aspect_ratio(sAspectRatioMode, windowAspect);
-        
-        // Scale the exact output viewport instead of first quantising the
-        // aspect ratio through a 480-line base. The old calculation turned a
-        // native 1920x1080 target into 1919x1080 and forced needless filtering.
-        GLint outX, outY, outWidth, outHeight;
-        calculate_output_area(sDrawableWidth, sDrawableHeight, sCurrentAspectRatio,
-                              outX, outY, outWidth, outHeight);
-        // Base del render: el área de salida, o la resolución pedida encajada
-        // en su relación de aspecto (Android, donde la ventana no cambia).
-        float baseWidth = float(outWidth), baseHeight = float(outHeight);
-        if (sRenderResolutionW > 0 && sRenderResolutionH > 0) {
-            baseHeight = float(sRenderResolutionH);
-            baseWidth = baseHeight * sCurrentAspectRatio;
-            if (baseWidth > float(sRenderResolutionW)) {
-                baseWidth = float(sRenderResolutionW);
-                baseHeight = baseWidth / sCurrentAspectRatio;
-            }
-        }
-        if (sRenderOriginal) {
-            baseHeight = 480.0f;
-            baseWidth  = 480.0f * sCurrentAspectRatio;
-        }
-        const int wantedWidth = std::max(160, int(lroundf(baseWidth * sRenderScale)));
-        const int wantedHeight = std::max(120, int(lroundf(baseHeight * sRenderScale)));
-        if (wantedWidth != sRenderWidth || wantedHeight != sRenderHeight) {
-            sRenderWidth = wantedWidth;
-            sRenderHeight = wantedHeight;
-            glBindTexture(GL_TEXTURE_2D, sNativeColorTexture);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, sRenderWidth, sRenderHeight,
-                         0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-            if (sDepthIsTexture) {
-                glBindTexture(GL_TEXTURE_2D, sNativeDepthTexture);
-                depth_tex_image(sRenderWidth, sRenderHeight);
-            } else {
-                glBindRenderbuffer_ptr(GL_RENDERBUFFER, sNativeDepthStencil);
-                glRenderbufferStorage_ptr(GL_RENDERBUFFER, depth_internal_format(),
-                                          sRenderWidth, sRenderHeight);
-            }
-            glBindTexture(GL_TEXTURE_2D, 0);
-            sBoundTextures[0] = 0;
-            printf("[PC Port] Internal render resolution: %dx%d (aspect %.3f)\n", sRenderWidth, sRenderHeight, sCurrentAspectRatio);
-        }
-        glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
-    }
+    sync_native_render_target();
 
     if (!sVBO || !glBufferData_ptr) return;
     glBindBuffer_ptr(GL_ARRAY_BUFFER, sVBO);
@@ -4644,6 +4694,30 @@ void pc_gfx_end_swap_framebuffer(unsigned int bound) {
     if (glBindFramebuffer_ptr) glBindFramebuffer_ptr(GL_FRAMEBUFFER, GLuint(bound));
 }
 
+#if PIKI_SCENARIOS
+#include "pc_gfx_png_write.h"
+
+bool pc_gfx_write_scene_png(const char* path, unsigned int sourceFramebuffer, int width, int height, int* outW, int* outH)
+{
+    if (path == nullptr || sourceFramebuffer == 0 || width <= 0 || height <= 0 || !glBindFramebuffer_ptr) return false;
+    std::vector<unsigned char> rgba(size_t(width) * height * 4);
+    glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, sourceFramebuffer);
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    // Scenario PNGs are viewed on white backgrounds; premultiplied or partial alpha
+    // from the GL readback washes the image out. Store opaque RGB.
+    for (size_t i = 3; i < rgba.size(); i += 4) {
+        rgba[i] = 255;
+    }
+    const bool ok = pc_gfx_png_write_rgba_flip_y(path, width, height, rgba.data(), width * 4);
+    if (ok) {
+        if (outW) *outW = width;
+        if (outH) *outH = height;
+        std::printf("[scenario-screenshot] wrote %dx%d PNG to %s\n", width, height, path);
+    }
+    return ok;
+}
+#endif
+
 void pc_gfx_present(void) {
     if (pc_gfx_null_skip()) return;
     if (!sNullDoomedTextures.empty()) {
@@ -4704,6 +4778,11 @@ void pc_gfx_present(void) {
             }
         }
     }
+#if PIKI_SCENARIOS
+    if (sRenderWidth > 0 && sRenderHeight > 0) {
+        pc_scenario_screenshot_present_hook(static_cast<unsigned>(sourceFramebuffer), sRenderWidth, sRenderHeight);
+    }
+#endif
     // Tile-based GPUs write every attachment back to memory at the end of a
     // render pass unless told the contents are dead. Depth is: nothing reads
     // it after the post pass (the game clears it next frame). Colour dies

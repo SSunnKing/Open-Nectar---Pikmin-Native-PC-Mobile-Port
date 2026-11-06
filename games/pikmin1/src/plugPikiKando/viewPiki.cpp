@@ -27,6 +27,9 @@
 #include "pc_coop.h"
 #include "pc_gfx.h"
 #endif
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+#include "scenarios/pc_scenario.h"
+#endif
 #if defined(PIKI_PC_PORT)
 #include "timing/pc_render_phase.h"
 #endif
@@ -548,6 +551,9 @@ void ViewPiki::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 
 #if defined(PIKI_PC_PORT)
 	if (aiCullable() && submit) {
+#if PIKI_SCENARIOS
+		pc_scenario_push_creature_unlit_draw();
+#endif
 #else
 	if (aiCullable()) {
 #endif
@@ -559,6 +565,9 @@ void ViewPiki::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 		    && !pc_hd_model_draw_skinned(gfx, mPikiShape->mShape, hdPikiModel(), hdTint, static_cast<u8>(hdWhiten)))
 #endif
 			mPikiShape->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+		pc_scenario_pop_creature_unlit_draw();
+#endif
 	}
 
 	if (mIsPanicked) {
@@ -588,7 +597,15 @@ void ViewPiki::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 		if (vsP2) pc_gfx_set_mat_color_tint(vsP2Tint);
 		if (!pc_hd_model_draw_rigid(gfx, leafMtx, hdHappaModel(), vsP2 ? vsP2Tint : hdHappaTint))
 #endif
+		{
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+			pc_scenario_push_creature_unlit_draw();
+#endif
 			mHappaModel->drawshape(gfx, *gfx.mCamera, nullptr);
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+			pc_scenario_pop_creature_unlit_draw();
+#endif
+		}
 #if defined(PIKI_PC_PORT)
 		if (vsP2) pc_gfx_clear_mat_color_tint();
 #endif

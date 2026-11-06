@@ -9,6 +9,9 @@
 #include "pc_window.h"
 #include "pc_gfx.h"
 #include "netplay/pc_netplay_present.h"
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 #endif
 
 /**
@@ -1166,6 +1169,29 @@ void DGXGraphics::setMaterial(Material* mat, bool p2)
 		          mLightIntensity * mat->mColourInfo.mColour.a);
 		GXSetChanMatColor(GX_COLOR0A0, reinterpret_cast<GXColor&>(color));
 
+#if defined(PIKI_PC_PORT) && PIKI_SCENARIOS
+		// Stand-in .mod files are flat vertex-lit greys on PC; draw them unlit so
+		// Pikmin/onion colours read on captures (#115). The colour is the material
+		// colour (which the game tints at runtime, e.g. the Pikmin body) times the
+		// vertex colour, where the Blender stand-ins carry their baked shading. A mesh
+		// with no vertex colours reads as white on the PC GX (pc_gfx.cpp), so it keeps
+		// the plain material colour.
+		if (pc_scenario_creature_unlit_draw() && mat->mTexture == nullptr && mat->mEnvMapTexture == nullptr) {
+			GXSetNumTexGens(0);
+			GXSetNumTevStages(1);
+			GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
+			GXSetTevKColor(GX_KCOLOR0, reinterpret_cast<GXColor&>(color));
+			GXSetTevKColorSel(GX_TEVSTAGE0, GX_TEV_KCSEL_K0);
+			GXSetTevKAlphaSel(GX_TEVSTAGE0, GX_TEV_KASEL_K0_A);
+			GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_RASC, GX_CC_KONST, GX_CC_ZERO);
+			GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+			GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_RASA, GX_CA_KONST, GX_CA_ZERO);
+			GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+			GXSetChanCtrl(GX_COLOR0A0, GX_FALSE, GX_SRC_REG, GX_SRC_VTX, 0, GX_DF_NONE, GX_AF_NONE);
+			return;
+		}
+#endif
+
 		if (mLightCam) {
 			return;
 		}
@@ -1423,6 +1449,18 @@ void DGXGraphics::drawSingleMatpoly(Shape* model, Joint::MatPoly* matPoly)
 			}
 
 			VtxMatrix& vtxMtx = model->mVtxMatrixList[depMtxIdx];
+#if defined(PIKI_PC_PORT)
+			// A shape drawn without ever going through updateAnim (the cursor,
+			// for one: Navi::refresh loads its view matrix and calls drawshape)
+			// has no anim matrices. Entry 0 of that null array is a null
+			// pointer, which the GX shim ignores, so the vertices keep the
+			// caller's matrix; any later entry is a small bogus address that
+			// crashed in GXLoadPosMtxImm (#119). Skip every such load, so all
+			// of them keep the caller's matrix the way entry 0 always has.
+			if (model->mCurrentAnimation->mData && !model->mAnimMatrices) {
+				continue;
+			}
+#endif
 			if (model->mCurrentAnimation->mData) {
 				if (vtxMtx.mHasPartialWeights) {
 					useMatrixQuick(model->getAnimMatrix(vtxMtx.mIndex), depListIdx);

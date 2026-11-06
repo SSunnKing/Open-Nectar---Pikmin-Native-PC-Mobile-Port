@@ -8,6 +8,9 @@
 #include "netplay/pc_netplay_camlead.h"
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_input_log.h"
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 #endif
 #include "Creature.h"
 #include "DebugLog.h"
@@ -353,6 +356,12 @@ void PcamCamera::control(Controller& controller)
 		if (detMode && dragRoute == 1) {
 			pc_input_log_local_rotate_add(cameraDrag * 3.2f);
 		}
+		// Offline the drag turns its own captain's cursor through that
+		// captain's per-tick input, which a record keeps and a replay feeds.
+		if (detMode && dragRoute < 0 && pc_netplay_local_slots_filled() && mTargetCreature
+		    && mTargetCreature->mObjType == OBJTYPE_Navi) {
+			pc_input_log_pad_rotate_add(dragPlayer, cameraDrag * 3.2f);
+		}
 		if (!detMode && mTargetCreature && mTargetCreature->mObjType == OBJTYPE_Navi) {
 #else
 		if (mTargetCreature && mTargetCreature->mObjType == OBJTYPE_Navi) {
@@ -490,6 +499,12 @@ void PcamCamera::update()
 	makePosture();
 	makeMatrix();
 	makeCamera();
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+	if (pc_scenario_apply_debug_camera(mCamera)) {
+		mViewpoint.set(mCamera->mPosition.x, mCamera->mPosition.y, mCamera->mPosition.z);
+		mWatchpoint.set(mCamera->mFocus.x, mCamera->mFocus.y, mCamera->mFocus.z);
+	}
+#endif
 }
 
 /**

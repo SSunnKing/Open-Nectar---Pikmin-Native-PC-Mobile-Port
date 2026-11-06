@@ -1,0 +1,57 @@
+# Stand-in art (#115 follow-up): checks that the committed exports in
+# libs/nectar_assets/art/export match a fresh export of the .blend sources, so
+# nobody edits a .blend and forgets to re-export (or edits an export by hand).
+# Blender is the official Linux build, pinned to the version the art was
+# exported with, and cached between runs. Runs only when the art changes.
+name: Stand-in art export
+
+on:
+  pull_request:
+    paths:
+      - 'libs/nectar_assets/art/**'
+      - '.github/workflows/standin-art-export.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'libs/nectar_assets/art/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  BLENDER_VERSION: '5.2.3'
+  BLENDER_SERIES: '5.2'
+
+jobs:
+  check-export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Blender
+        id: cache-blender
+        uses: actions/cache@v4
+        with:
+          path: ~/blender
+          key: blender-${{ env.BLENDER_VERSION }}-linux-x64
+
+      - name: Download Blender
+        if: steps.cache-blender.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/blender
+          curl -fsSL "https://download.blender.org/release/Blender${BLENDER_SERIES}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
+            | tar -xJ -C ~/blender --strip-components=1
+
+      - name: Install Blender's runtime libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libxxf86vm1 libxfixes3 libxi6 libxkbcommon0 libsm6 libgl1 libegl1 libxrender1 libx11-6
+
+      - name: Check the exports
+        run: python3 libs/nectar_assets/art/check_export.py --blender ~/blender/blender

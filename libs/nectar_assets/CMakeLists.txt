@@ -20,6 +20,36 @@ add_library(nectar_assets STATIC
     src/catalog.cpp
     src/mesh_mod.cpp
     src/charpack.cpp
+    # Escritores de los ficheros de relleno de los tests de escenarios.
+    src/parms.cpp
+    src/archive.cpp
+    src/stages_ini.cpp
+    src/mod_writer.cpp
+    src/standin_models.cpp
+    src/standin_art.cpp
+    src/standin_art_meshes.cpp
+    src/standin_terrain.cpp
+    src/blo.cpp
+    src/pcr.cpp
+    src/standin_ui.cpp
+    src/standin_pcr_names.cpp
+    src/texture.cpp
+    src/bundle.cpp
+    src/standin_textures.cpp
+    src/anim.cpp
+    src/standin_anims.cpp
+    src/cinema.cpp
+    src/standin_cinema.cpp
+    src/audio_seq.cpp
+    src/standin_audio.cpp
+    # The scenario sandbox's gate (#68): item generator, platform .mod.
+    src/gen_item_writer.cpp
+    src/mod_platform_writer.cpp
+    src/standin_sandbox.cpp
+    src/standin_objects.cpp
+    src/standin_object_profiles.cpp
+    src/standin_world.cpp
+    src/standin_world_data.cpp
     # Decodificador de texturas del launcher, reutilizado tal cual.
     ${NECTAR_P1_DIR}/pc_port/launcher/bti_decode.cpp
 )

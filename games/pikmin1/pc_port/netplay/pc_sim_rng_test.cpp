@@ -136,6 +136,38 @@ int main()
 	check(pc_sim_randf(3.0f) == simRollExpected, "off-mode sim roll must match rand() / RAND_MAX");
 	check(pc_cosmetic_randf(3.0f) == cosRollExpected, "off-mode cosmetic roll must match rand() / RAND_MAX");
 
+	// Moving a draw between streams must not change off-mode values: whatever
+	// mix of sim and cosmetic calls is made, the n-th draw is the n-th rand().
+	{
+		const unsigned kSeed = 20261028u;
+		const int kDraws     = 64;
+		std::srand(kSeed);
+		float expected[kDraws];
+		for (int i = 0; i < kDraws; ++i) expected[i] = 5.0f * (std::rand() / float(RAND_MAX));
+
+		// All on the sim stream.
+		std::srand(kSeed);
+		bool allSim = true;
+		for (int i = 0; i < kDraws; ++i) allSim = allSim && pc_sim_randf(5.0f) == expected[i];
+		check(allSim, "off-mode all-sim sequence must equal the rand() sequence");
+
+		// Same draws, each site moved to the cosmetic stream.
+		std::srand(kSeed);
+		bool allCos = true;
+		for (int i = 0; i < kDraws; ++i) allCos = allCos && pc_cosmetic_randf(5.0f) == expected[i];
+		check(allCos, "off-mode all-cosmetic sequence must equal the rand() sequence");
+
+		// An arbitrary interleave of the two streams, same call order.
+		std::srand(kSeed);
+		bool mixed = true;
+		for (int i = 0; i < kDraws; ++i) {
+			const bool cosmetic = ((i * 7 + 3) % 5) < 2;
+			const float v       = cosmetic ? pc_cosmetic_randf(5.0f) : pc_sim_randf(5.0f);
+			mixed               = mixed && v == expected[i];
+		}
+		check(mixed, "off-mode interleaved sim/cosmetic sequence must equal the rand() sequence");
+	}
+
 	std::printf("PcSimRng: %s\n", failures ? "FAILED" : "all tests passed");
 	return failures ? 1 : 0;
 }

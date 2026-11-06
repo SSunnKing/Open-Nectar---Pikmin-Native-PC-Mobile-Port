@@ -13,6 +13,7 @@
 #include "pc_gfx.h"
 #include "pc_menu_click.h"
 #endif
+#include "scenarios/pc_scenario_note.h"
 
 /**
  * @todo: Documentation
@@ -183,6 +184,8 @@ zen::ogNitakuMgr::NitakuStatus zen::ogNitakuMgr::update(Controller* input)
 	if (mStatus == 0) {
 		return mStatus;
 	}
+	// Scenarios: an open choice's state (Status_3 takes input) and its cursor, 1 = Yes.
+	if (mStatus < Status_4) PC_SCENARIO_NOTE("nitaku", mStatus * 2 + (mIsYes ? 1 : 0));
 
 	switch (mStatus) {
 	case Status_1:

@@ -11,10 +11,14 @@
 #include "zen/Graphics.h"
 #if defined(PIKI_PC_PORT)
 #include "Geometry.h"
+#include "nectar_assets/standin_layout.h"
 #include "pc_gfx.h"
 #include "pc_art.h"
 #include "pc_coop.h"
 #include "PikiMgr.h"
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 #endif
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
@@ -727,19 +731,36 @@ zen::DrawGameInfo::DrawGameInfo(zen::DrawGameInfo::playModeFlag playMode)
 	}
 
 	pane = mModeScreenMgr->search('w_00', true);
+#if defined(PIKI_PC_PORT) && PIKI_SCENARIOS
+	if (pc_scenario_uses_disc_free_assets()) {
+		pane->hide();
+	} else
+#endif
 	if (pane->getTypeID() == PANETYPE_Picture) {
 		static_cast<P2DPicture*>(pane)->setBlack(COLOUR_TRANSPARENT);
 		static_cast<P2DPicture*>(pane)->setWhite(Colour(153, 255, 153, 255));
 	}
 
 	pane = mModeScreenMgr->search('x_00', true);
+#if defined(PIKI_PC_PORT) && PIKI_SCENARIOS
+	if (pc_scenario_uses_disc_free_assets()) {
+		pane->hide();
+	} else
+#endif
 	if (pane->getTypeID() == PANETYPE_Picture) {
 		static_cast<P2DPicture*>(pane)->setBlack(COLOUR_TRANSPARENT);
 		static_cast<P2DPicture*>(pane)->setWhite(Colour(153, 255, 153, 255));
 	}
 
 	pane = mModeScreenMgr->search('w_01', true);
-	pane->setCallBack(new MapPikminWindowCallBack(pane));
+#if defined(PIKI_PC_PORT) && PIKI_SCENARIOS
+	if (pc_scenario_uses_disc_free_assets()) {
+		pane->hide();
+	} else
+#endif
+	{
+		pane->setCallBack(new MapPikminWindowCallBack(pane));
+	}
 
 	pane = mModeScreenMgr->search('c_ml', true);
 	pane->setCallBack(new NumberPicCallBack<short>(pane, &pGameInfo->mFormationPikiNum, 100, false));
@@ -823,11 +844,16 @@ zen::DrawGameInfo::DrawGameInfo(zen::DrawGameInfo::playModeFlag playMode)
 	pane = mLowerScreenMgr->search('life', true);
 	pane->setCallBack(new LifeIconCallBack(pane));
 
-	pane = mLowerScreenMgr->search('pin1', true);
-	pane->setCallBack(new LifePinchCallBack(pane));
+#if defined(PIKI_PC_PORT) && PIKI_SCENARIOS
+	if (!pc_scenario_uses_disc_free_assets())
+#endif
+	{
+		pane = mLowerScreenMgr->search('pin1', true);
+		pane->setCallBack(new LifePinchCallBack(pane));
 
-	pane = mLowerScreenMgr->search('pin2', true);
-	pane->setCallBack(new LifePinchCallBack(pane));
+		pane = mLowerScreenMgr->search('pin2', true);
+		pane->setCallBack(new LifePinchCallBack(pane));
+	}
 
 	if (playMode == MODE_Story) {
 		pane            = mModeScreenMgr->search('dc_c', true);
@@ -861,6 +887,70 @@ void zen::DrawGameInfo::update()
 /**
  * @todo: Documentation
  */
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+bool zen::DrawGameInfo::checkStandInHudLayout(const char** why) const
+{
+	using nectar::standin_layout::Rect;
+	using nectar::standin_layout::kPlay10Life;
+	using nectar::standin_layout::kPlay10Navi;
+	using nectar::standin_layout::kPlay09Suni;
+	using nectar::standin_layout::kPlayDayCounters;
+	using nectar::standin_layout::kCounterCell;
+	using nectar::standin_layout::kCounterStartX;
+	using nectar::standin_layout::kCounterRow0Y;
+	using nectar::standin_layout::kCounterStep;
+	using nectar::standin_layout::kTopBandMaxY;
+	using nectar::standin_layout::rectInsideScreen;
+	using nectar::standin_layout::rectsOverlap;
+
+	if (!mLowerScreenMgr || !mUpperScreenMgr || !mModeScreenMgr) {
+		if (why) *why = "screen mgr missing";
+		return false;
+	}
+	P2DPane* life = mLowerScreenMgr->search('life', true);
+	P2DPane* navi = mLowerScreenMgr->search('navi', true);
+	if (!life || !navi) {
+		if (why) *why = "life or navi pane missing";
+		return false;
+	}
+	const Rect lifeR { life->getPosH(), life->getPosV(), life->getWidth(), life->getHeight() };
+	const Rect naviR { navi->getPosH(), navi->getPosV(), navi->getWidth(), navi->getHeight() };
+	if (!rectInsideScreen(lifeR)) {
+		if (why) *why = "life pane off screen";
+		return false;
+	}
+	if (!rectInsideScreen(naviR)) {
+		if (why) *why = "navi pane off screen";
+		return false;
+	}
+	P2DPane* suni = mUpperScreenMgr->search('suni', true);
+	if (!suni || suni->getPosV() > kTopBandMaxY) {
+		if (why) *why = "sun track not in top band";
+		return false;
+	}
+	const Rect counterBand = kPlayDayCounters;
+	if (rectsOverlap(lifeR, counterBand)) {
+		if (why) *why = "life overlaps counter band";
+		return false;
+	}
+	const Rect lastDigit { kCounterStartX + 6 * kCounterStep, kCounterRow0Y, kCounterCell, kCounterCell };
+	if (!rectInsideScreen(lastDigit)) {
+		if (why) *why = "last counter digit off screen";
+		return false;
+	}
+	P2DPane* cS1 = mModeScreenMgr->search('c_s1', true);
+	if (cS1) {
+		const Rect d { cS1->getPosH(), cS1->getPosV(), cS1->getWidth(), cS1->getHeight() };
+		if (!rectInsideScreen(d)) {
+			if (why) *why = "c_s1 counter off screen";
+			return false;
+		}
+	}
+	(void)kPlay09Suni;
+	return true;
+}
+#endif
+
 #if defined(PIKI_PC_PORT)
 // play_day.blo es plano: el día (y≈63) y los contadores (y≥390) son hijos
 // directos de ROOT sin agrupar. Se separan por posición vertical, que
@@ -962,24 +1052,38 @@ void zen::DrawGameInfo::draw(Graphics& gfx)
 #if defined(PIKI_PC_PORT)
 	gHudNaviIndex = mNaviIndex;
 	pGameInfo     = &mInfo;
+	const f32 viewAspect = pc_gfx_get_current_aspect_ratio();
+	int virtW = int(lroundf(480.0f * viewAspect));
+	int virtH = 480;
+	if (virtW < 640) {
+		virtW = 640;
+		virtH = int(lroundf(640.0f / viewAspect));
+	}
+	pc_gfx_set_hud_virtual_size(virtW, virtH);
 	pc_gfx_set_hud_wide(1);
-	const int virtW = pc_gfx_get_hud_virtual_width();
-	const int dx    = virtW - 640;
+	const int dx = virtW - 640;
+	const int dy = virtH - 480;
 	Matrix4f ortho;
-	gfx.setOrthogonal(ortho.mMtx, RectArea(0, 0, virtW, gfx.mScreenHeight));
+	gfx.setOrthogonal(ortho.mMtx, RectArea(0, 0, virtW, virtH));
+#else
+	Matrix4f ortho;
+	gfx.setOrthogonal(ortho.mMtx, RectArea(0, 0, 640, gfx.mScreenHeight));
 #endif
 	mDamageEffect.draw(gfx);
 	gfx.setFog(false);
 	GXSetZMode(GX_FALSE, GX_ALWAYS, GX_FALSE);
 
 #if defined(PIKI_PC_PORT)
-	P2DPerspGraph perspGraph(0, 0, virtW, 480, 30.0f, 1.0f, 5000.0f);
+	P2DPerspGraph perspGraph(0, 0, virtW, virtH, 30.0f, 1.0f, 5000.0f);
 	perspGraph.setPort();
 	if (!pc_vs_active()) // VS: sin indicador del sol (el día no avanza)
 		mUpperScreenMgr->draw(&perspGraph, dx / 2);
-	mLowerScreenMgr->draw(&perspGraph, 0);
-	mModeScreenMgr->draw(&perspGraph, dx);
+	mLowerScreenMgr->drawAt(&perspGraph, 0, dy, 1.0f);
+	setDatePanesVisible(false);
+	mModeScreenMgr->drawAt(&perspGraph, dx, dy, 1.0f);
+	setDatePanesVisible(true);
 	pc_gfx_set_hud_wide(0);
+	pc_gfx_set_hud_virtual_size(0, 0);
 #else
 	P2DPerspGraph perspGraph(0, 0, 640, 480, 30.0f, 1.0f, 5000.0f);
 	perspGraph.setPort();

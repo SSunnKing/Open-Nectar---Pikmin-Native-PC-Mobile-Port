@@ -4,6 +4,9 @@
 #include "netplay/pc_netplay_policy.h"
 #include "netplay/pc_netplay_present.h"
 #endif
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 #include "AIConstant.h"
 #include "AIPerf.h"
 #include "BaseInf.h"
@@ -2030,10 +2033,21 @@ void BTeki::drawTekiShape(Graphics& gfx)
 			mAnimatedMaterials.animate(nullptr);
 		}
 
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+		// Disc-free stand-ins (#115): an enemy drawn from Blender art carries its shading in
+		// vertex colours, which the lit path ignores (it draws white). Draw it unlit, as the
+		// pellets and hives are. Only shapes with vertex colours; the boxes of the other
+		// stand-in enemies keep the lit draw. Draw only; nothing here touches the sim.
+		const bool standInUnlit = mTekiShape->mShape->mVtxColorList != nullptr;
+		if (standInUnlit) pc_scenario_push_creature_unlit_draw();
+#endif
 #if defined(PIKI_PC_PORT)
 		if (!pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
 #endif
 			mTekiShape->mShape->drawshape(gfx, *gfx.mCamera, &mAnimatedMaterials);
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+		if (standInUnlit) pc_scenario_pop_creature_unlit_draw();
+#endif
 		if (lightType == 1) {
 			gfx.calcLighting(1.0f);
 		}

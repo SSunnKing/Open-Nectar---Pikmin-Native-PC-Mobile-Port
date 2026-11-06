@@ -6,6 +6,10 @@
 #include "zen/DrawGameInfo.h"
 #include "zen/Math.h"
 
+#if defined(PIKI_PC_PORT) && PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
+
 const f32 zen::DrawLifeCircle::TRI_NUM = 128.0f;
 
 /**
@@ -42,11 +46,81 @@ void zen::zenGraphics::setTevFillPolygon()
 	GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_SET);
 }
 
+#if defined(PIKI_PC_PORT) && PIKI_SCENARIOS
+static void drawRingSegmentFan(immut Vector3f* center, f32 innerR, f32 outerR, f32 angleStart, f32 angleEnd, immut Colour& color, int segments)
+{
+	if (segments < 1 || outerR <= innerR) return;
+	zen::zenGraphics::setTevFillPolygon();
+	const u32 gxColor = *reinterpret_cast<immut u32*>(&color);
+	for (int i = 0; i < segments; i++) {
+		const f32 t0 = angleStart + (angleEnd - angleStart) * f32(i) / f32(segments);
+		const f32 t1 = angleStart + (angleEnd - angleStart) * f32(i + 1) / f32(segments);
+		const f32 c0 = NMathF::cos(t0), s0 = NMathF::sin(t0);
+		const f32 c1 = NMathF::cos(t1), s1 = NMathF::sin(t1);
+		Vector3f v[4] = {
+		    { center->x + c0 * innerR, center->y + s0 * innerR, center->z },
+		    { center->x + c0 * outerR, center->y + s0 * outerR, center->z },
+		    { center->x + c1 * outerR, center->y + s1 * outerR, center->z },
+		    { center->x + c1 * innerR, center->y + s1 * innerR, center->z },
+		};
+		GXBegin(GX_QUADS, GX_VTXFMT0, 4);
+		for (int k = 0; k < 4; k++) {
+			GXPosition3f32(v[k].x, v[k].y, v[k].z);
+			GXColor1u32(gxColor);
+		}
+		GXEnd();
+	}
+}
+
+static void drawStandInLifeRing(f32 healthRatio, immut Vector3f& center, f32 outerR, int displayedSegments, int totalSegments)
+{
+	Colour backing;
+	backing.set(20, 24, 28, 220);
+	drawRingSegmentFan(&center, outerR * 0.58f, outerR, -HALF_PI, TAU - HALF_PI, backing, 48);
+
+	if (displayedSegments <= 0) return;
+
+	Colour fill;
+	if (healthRatio < 0.2f) {
+		fill.set(220, 40, 40, 255);
+	} else if (healthRatio < 0.5f) {
+		fill.set(230, 200, 40, 255);
+	} else {
+		fill.set(60, 190, 70, 255);
+	}
+	const f32 span = TAU * f32(displayedSegments) / f32(totalSegments);
+	drawRingSegmentFan(&center, outerR * 0.62f, outerR * 0.96f, -HALF_PI, -HALF_PI + span, fill, displayedSegments);
+}
+#endif
+
 /**
  * @todo: Documentation
  */
 void zen::DrawLifeCircle::drawLifeCircle(f32 healthRatio)
 {
+#if defined(PIKI_PC_PORT) && PIKI_SCENARIOS
+	if (pc_scenario_uses_disc_free_assets()) {
+		int drawCount = RoundOff(TRI_NUM * healthRatio);
+		if (mDisplayedTriCount != drawCount) {
+			f32 v = drawCount < mDisplayedTriCount ? 0.02f : 0.05f;
+			mUpdateTimer += gsys->getFrameTime();
+			if (mUpdateTimer > v) {
+				int a = RoundOff(gsys->getFrameTime() * 30.0f) * (mDisplayedTriCount < drawCount ? 1 : -1);
+				if (Abs(mDisplayedTriCount - drawCount) < Abs(a)) {
+					a = Abs(mDisplayedTriCount - drawCount) * (mDisplayedTriCount < drawCount ? 1 : -1);
+				}
+				mDisplayedTriCount += a;
+				mUpdateTimer -= v;
+			}
+		}
+		Vector3f center;
+		center.x = mRadius + 0.0f;
+		center.y = mRadius + 0.0f;
+		center.z = 0.0f;
+		drawStandInLifeRing(healthRatio, center, mRadius, mDisplayedTriCount, int(TRI_NUM));
+		return;
+	}
+#endif
 	Vector3f vecs[3];
 	Colour color;
 	zenGraphics::setTevFillPolygon();

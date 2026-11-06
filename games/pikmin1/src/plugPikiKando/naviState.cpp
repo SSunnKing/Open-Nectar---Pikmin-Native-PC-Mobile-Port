@@ -4,6 +4,7 @@
 #include "pc_throw_release.h"
 #include "pc_whistle_pluck.h"
 #include "pc_window.h"
+#include "netplay/pc_netplay_det.h"
 #endif
 #include <cstdlib>
 #include <cstdio>
@@ -524,7 +525,12 @@ void NaviBuryState::procAnimMsg(Navi* navi, MsgAnim* msg)
 		switch (mBuryState) {
 		case 2:
 		{
+#if defined(PIKI_PC_PORT)
+			// Direction of the soil smoke only, so the cosmetic stream.
+			f32 randAngle = 2.0f * (PI * pc_cosmetic_randf(1.0f));
+#else
 			f32 randAngle = 2.0f * (PI * gsys->getRand(1.0f));
+#endif
 			f32 height    = 80.0f;
 			Vector3f dir(40.0f * sinf(randAngle), height, 40.0f * cosf(randAngle));
 			EffectParm parm(navi->mSRT.t, dir);

@@ -23,6 +23,9 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_speedrun.h"
 #include "mods/pc_campaign.h"
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 #include "mods/pc_mission.h"
 #include "mods/pc_vs_arena.h"
 #include "settings/pc_settings.h"
@@ -343,6 +346,25 @@ public:
 				}
 
 				// handle story mode world map screen if we've made a decision
+#if PIKI_SCENARIOS
+				if (mapWindow && mSectionState == Active) {
+					if (const char* scenarioCourse = pc_scenario_consume_map_course()) {
+						FOREACH_NODE(StageInfo, flowCont.mStageList.mChild, stage)
+						{
+							if (std::strcmp(stage->mFileName, scenarioCourse) == 0) {
+								enterCourse(stage);
+								mNextSectionsFlag = PACK_NEXT_ONEPLAYER(ONEPLAYER_NewPikiGame);
+								gameflow.mWorldClock.setTime(gameflow.mParameters->mStartHour());
+								mSectionState     = Exit;
+								gsys->setFade(0.0f);
+								std::printf("[scenario] map select: scenario entered '%s' on day %d after the world map\n", stage->mFileName,
+								            gameflow.mWorldClock.mCurrentDay);
+								break;
+							}
+						}
+					}
+				}
+#endif
 				if (mapWindow && mapWindow->update(mController)) {
 					zen::DrawWorldMap::returnStatusFlag returnStatus = mapWindow->getReturnStatusFlag();
 					if (returnStatus == zen::DrawWorldMap::RET_ReturnToTitle) {

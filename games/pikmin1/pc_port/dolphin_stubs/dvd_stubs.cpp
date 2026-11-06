@@ -34,15 +34,30 @@ void DVDInit() {
     printf("[PC Port] DVDInit() - DVD subsystem initialized\n");
 }
 
+// PIKMIN_LOG_FILE_OPENS=<file>: appends "<game-relative path>\t<OK|FAILED>" per
+// DVDOpen, for tools/scenarios/make_boot_manifest.py. Read once; unset, nothing
+// is written.
+static void logFileOpen(const std::string& gamePath, bool opened) {
+    static FILE* log = [] {
+        const char* path = getenv("PIKMIN_LOG_FILE_OPENS");
+        return (path && *path) ? fopen(path, "a") : nullptr;
+    }();
+    if (!log) return;
+    fprintf(log, "%s\t%s\n", gamePath.c_str(), opened ? "OK" : "FAILED");
+    fflush(log);
+}
+
 BOOL DVDOpen(const char* filename, DVDFileInfo* fileInfo) {
     dvd_netplay_keepalive();
     std::string path = filename;
     if (path.length() > 0 && (path[0] == '/' || path[0] == '\\')) {
         path = path.substr(1);
     }
+    const std::string gamePath = path;
     path = "assets/" + path;
 
     FILE* f = fopen(path.c_str(), "rb");
+    logFileOpen(gamePath, f != nullptr);
     if (!f) {
         printf("[PC Port] DVDOpen(\"%s\") -> FAILED to open %s\n", filename, path.c_str());
         return FALSE;

@@ -14,6 +14,9 @@
 #include "gameflow.h"
 #include "sysNew.h"
 #include "system.h"
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 
 /// Size of controller input recording buffer.
 #define CONTROLLER_INPUT_BUFFER_SIZE (12 * 3000)
@@ -264,6 +267,10 @@ void GameSetupSection::update()
 #else
 	// queue up card select as the next section (either for story mode or challenge mode, doesn't matter)
 	gameflow.mNextOnePlayerSectionID = ONEPLAYER_CardSelect;
+#if PIKI_SCENARIOS
+	// --scenario goes straight to gameplay; nothing is saved.
+	if (pc_scenario_skip_boot_menus()) gameflow.mNextOnePlayerSectionID = ONEPLAYER_NewPikiGame;
+#endif
 #endif
 
 	// force transit to new subsection

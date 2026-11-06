@@ -34,7 +34,8 @@
 //
 // Runtime behaviour:
 //   PIKMIN_STATE_HASH_LOG=<file> (or --state-hash-log <file>): write one
-//     line per tick, flushed every 300 ticks and on exit.
+//     line per tick (LF line ends on every OS), flushed every 300 ticks and
+//     on exit.
 //   PIKMIN_NETPLAY_EXIT_AFTER_TICKS=<n> (or --netplay-exit-after-ticks <n>):
 //     after tick n is hashed, flush every log and push SDL_QUIT so the main
 //     loop exits normally. If it has not exited 600 ticks later, exit(0).

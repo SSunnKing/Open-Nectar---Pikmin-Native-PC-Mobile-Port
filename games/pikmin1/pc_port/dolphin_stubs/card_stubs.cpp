@@ -5,6 +5,9 @@
 #include "Dolphin/dvd.h"
 #include "pc_speedrun.h"
 #include "randomizer/pc_randomizer.h"
+#if PIKI_SCENARIOS
+#include "dolphin_stubs/pc_card_fault.h"
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -253,7 +256,36 @@ bool resolve(const CARDFileInfo* info, std::string& name)
 	name = files[info->fileNo];
 	return true;
 }
+
+#if PIKI_SCENARIOS
+// Scenario fault injection (pc_card_fault.h). 0 means no fault.
+std::atomic<s32> sFault[PC_CARD_FAULT_COUNT] = {};
+std::atomic<s32> sFaultHits[PC_CARD_FAULT_COUNT] = {};
+s32 cardFault(PcCardFault fault)
+{
+	const s32 code = sFault[fault].load();
+	if (code != 0) sFaultHits[fault]++;
+	return code;
+}
+#define CARD_FAULT(name) cardFault(PC_CARD_FAULT_##name)
+#else
+#define CARD_FAULT(name) s32(0)
+#endif
 } // namespace
+
+#if PIKI_SCENARIOS
+void pc_card_fault_set(int fault, int code)
+{
+	if (fault < 0 || fault >= PC_CARD_FAULT_COUNT) return;
+	sFault[fault]     = code;
+	sFaultHits[fault] = 0;
+}
+void pc_card_fault_clear_all(void)
+{
+	for (auto& f : sFault) f = 0;
+}
+int pc_card_fault_hits(int fault) { return fault >= 0 && fault < PC_CARD_FAULT_COUNT ? sFaultHits[fault].load() : 0; }
+#endif
 
 // Carpeta de las tarjetas (F1 > Data > Open Save Folder).
 std::string pc_card_save_dir()
@@ -362,7 +394,11 @@ void CARDInit(void)
 	       (error ? root(0) : shown).string().c_str());
 }
 
-BOOL CARDProbe(s32 channel) { return validChannel(channel) && ensureCard(channel); }
+BOOL CARDProbe(s32 channel)
+{
+	if (CARD_FAULT(PROBE)) return FALSE;
+	return validChannel(channel) && ensureCard(channel);
+}
 s32 CARDProbeEx(s32 channel, s32* memSize, s32* sectorSize)
 {
 	cardtrace("CARDProbeEx", "-");
@@ -373,11 +409,18 @@ s32 CARDProbeEx(s32 channel, s32* memSize, s32* sectorSize)
 s32 CARDMountAsync(s32 channel, CARDMemoryCard*, CARDCallback, CARDCallback callback)
 {
 	cardtrace("CARDMountAsync", "-");
+	if (const s32 fault = CARD_FAULT(MOUNT)) return finish(channel, fault, callback);
+	if (const s32 fault = CARD_FAULT(MOUNT_RESULT)) {
+		finish(channel, fault, callback);
+		return CARD_RESULT_READY;
+	}
 	return finish(channel, ensureCard(channel) ? CARD_RESULT_READY : CARD_RESULT_NOCARD, callback);
 }
 s32 CARDMount(s32 channel, CARDMemoryCard*, CARDCallback)
 {
 	cardtrace("CARDMount", "-");
+	if (const s32 fault = CARD_FAULT(MOUNT)) return finish(channel, fault);
+	if (const s32 fault = CARD_FAULT(MOUNT_RESULT)) return finish(channel, fault);
 	return finish(channel, ensureCard(channel) ? CARD_RESULT_READY : CARD_RESULT_NOCARD);
 }
 s32 CARDUnmount(s32 channel) { return finish(channel, CARD_RESULT_READY); }
@@ -411,6 +454,7 @@ s32 CARDCreate(s32 channel, const char* fileName, u32 size, CARDFileInfo* info)
 {
 	cardtrace("CARDCreate", fileName);
 	const std::string name = safeName(fileName);
+	if (const s32 fault = CARD_FAULT(CREATE)) return finish(channel, fault);
 	if (name.empty() || name.size() >= CARD_FILENAME_MAX) return finish(channel, CARD_RESULT_NAMETOOLONG);
 	if (!ensureCard(channel)) return finish(channel, CARD_RESULT_NOCARD);
 	if (fs::exists(dataPath(channel, name))) return finish(channel, CARD_RESULT_EXIST);
@@ -454,6 +498,7 @@ s32 CARDWrite(CARDFileInfo* info, void* address, s32 length, s32 offset)
 	cardtrace("CARDWrite", info ? info->fileNo : -1);
 	std::string name;
 	if (!address || length < 0 || offset < 0 || !resolve(info, name)) return finish(info ? info->chan : 0, CARD_RESULT_NOFILE);
+	if (const s32 fault = CARD_FAULT(WRITE)) return finish(info->chan, fault);
 	// Copy, patch, swap: a crash or a window close in the middle of a save
 	// must leave either the old file or the new one, never a torn mix (the
 	// game's checksum would then reject the whole card). Save files are a few
@@ -549,7 +594,12 @@ s32 CARDSetStatusAsync(s32 channel, s32 fileNo, CARDStat* stat, CARDCallback cal
 }
 
 s32 CARDGetSerialNo(s32 channel, u64* serial) { if (serial) *serial = 0x50494b4d494e0001ULL; return finish(channel, CARD_RESULT_READY); }
-s32 CARDGetSectorSize(s32 channel, u32* size) { if (size) *size = kSectorSize; return finish(channel, CARD_RESULT_READY); }
+s32 CARDGetSectorSize(s32 channel, u32* size)
+{
+	const s32 fault = CARD_FAULT(SECTOR_SIZE);
+	if (size) *size = fault ? u32(fault) : u32(kSectorSize);
+	return finish(channel, CARD_RESULT_READY);
+}
 s32 CARDFormat(s32 channel)
 {
 	if (!validChannel(channel)) return finish(channel, CARD_RESULT_NOCARD);
@@ -563,11 +613,26 @@ s32 CARDFreeBlocks(s32 channel, s32* bytesUnused, s32* filesUnused)
 	for (const auto& name : files) { used += fs::file_size(dataPath(channel, name), error); error.clear(); }
 	if (bytesUnused) *bytesUnused = static_cast<s32>(used < kCapacity ? kCapacity - used : 0);
 	if (filesUnused) *filesUnused = CARD_MAX_FILE - static_cast<s32>(files.size());
+	if (bytesUnused && CARD_FAULT(NO_FREE_BYTES)) *bytesUnused = 0;
+	if (filesUnused && CARD_FAULT(NO_FREE_FILES)) *filesUnused = 0;
 	return finish(channel, CARD_RESULT_READY);
 }
 s32 CARDGetResultCode(s32 channel) { return validChannel(channel) ? sLastResult[channel].load() : CARD_RESULT_NOCARD; }
-s32 CARDCheck(s32 channel) { return finish(channel, ensureCard(channel) ? CARD_RESULT_READY : CARD_RESULT_NOCARD); }
-s32 CARDCheckAsync(s32 channel, CARDCallback callback) { const s32 result = CARDCheck(channel); if (callback) callback(channel, result); return result; }
+s32 CARDCheck(s32 channel)
+{
+	if (const s32 fault = CARD_FAULT(CHECK_RESULT)) return finish(channel, fault);
+	return finish(channel, ensureCard(channel) ? CARD_RESULT_READY : CARD_RESULT_NOCARD);
+}
+s32 CARDCheckAsync(s32 channel, CARDCallback callback)
+{
+	const s32 result = CARDCheck(channel);
+	if (callback) callback(channel, result);
+#if PIKI_SCENARIOS
+	// An injected check failure arrives as the async result, not the return value.
+	if (result != CARD_RESULT_READY && sFault[PC_CARD_FAULT_CHECK_RESULT].load() != 0) return CARD_RESULT_READY;
+#endif
+	return result;
+}
 s32 CARDCheckExAsync(s32 channel, s32* bytes, CARDCallback callback) { if (bytes) *bytes = 0; return CARDCheckAsync(channel, callback); }
 
 void __CARDSetDiskID(DVDDiskID*) { }

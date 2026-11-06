@@ -66,6 +66,9 @@ __declspec(dllexport) int           AmdPowerXpressRequestHighPerformance = 1;
 #include "netplay/pc_input_log.h"
 #include "netplay/pc_state_hash.h"
 #include "netplay/pc_coop_switch.h"
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 
 // Netplay session switches: strong-defined by pc_netplay_session.cpp in
 // netplay builds only, null otherwise.
@@ -104,6 +107,15 @@ int main(int argc, char* argv[])
         const int settingsResult = pc_settings_cli(argc, argv);
         if (settingsResult >= 0) return settingsResult;
     }
+
+#if PIKI_SCENARIOS
+    // --scenario <name>: argument and data checks, and the determinism, settings
+    // and input overrides, before anything reads them. No window exists yet.
+    {
+        const int scenarioResult = pc_scenario_parse_argv(argc, argv);
+        if (scenarioResult >= 0) return scenarioResult;
+    }
+#endif
 
     // --netplay-host-ice / --netplay-join-ice: the run folder, the private
     // save folder and the joiner's session bundle, before anything reads them.
@@ -193,6 +205,13 @@ int main(int argc, char* argv[])
     if (!pc_window_init("Open Nectar", 1280, 720)) {
         printf("[PC Port Fatal Error] Could not initialize window/OpenGL!\n");
         fflush(stdout);
+#if PIKI_SCENARIOS
+        // A missing GL context must never read as a failed scenario.
+        if (pc_scenario_active()) {
+            pc_scenario_on_no_gl();
+            return PC_SCENARIO_EXIT_NO_GL;
+        }
+#endif
         return 1;
     }
     pc_discord_init("Pikmin 1");
@@ -224,5 +243,8 @@ int main(int argc, char* argv[])
     gsys->run(new PlugPikiApp());
 
     printf("[PC Port] Game exited normally.\n");
+#if PIKI_SCENARIOS
+    if (pc_scenario_active()) return pc_scenario_exit_code();
+#endif
     return 0;
 }
