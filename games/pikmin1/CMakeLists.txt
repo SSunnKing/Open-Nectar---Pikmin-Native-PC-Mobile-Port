@@ -2112,6 +2112,9 @@ if(PIKMIN_BUILD_TESTS)
         pc_port/netplay/pc_sim_rng.cpp)
     target_compile_options(pc_input_log_runtime_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     set(PKNI_TEST_DIR ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME pc_input_log_provider_no_file COMMAND pc_input_log_runtime_test provider unused)
+    set_tests_properties(pc_input_log_provider_no_file PROPERTIES ENVIRONMENT
+        "PIKMIN_INPUT_RECORD=;PIKMIN_INPUT_REPLAY=;PIKMIN_NETPLAY_DETERMINISTIC=")
     add_test(NAME pc_input_log_v4_record
         COMMAND pc_input_log_runtime_test record ${PKNI_TEST_DIR}/pkni_v4_test.pkni)
     add_test(NAME pc_input_log_v4_replay
@@ -2125,7 +2128,6 @@ if(PIKMIN_BUILD_TESTS)
     set_tests_properties(pc_input_log_v4_record pc_input_log_v4_replay pc_input_log_v2_nondet pc_input_log_v3_replay
         PROPERTIES ENVIRONMENT "PIKMIN_INPUT_RECORD=;PIKMIN_INPUT_REPLAY=;PIKMIN_NETPLAY_DETERMINISTIC=")
 
-    # Canonical text and hash of the sim-affecting settings (recording header).
 endif()
 
 # Netplay-only checks. The libm test compares against the platform libm

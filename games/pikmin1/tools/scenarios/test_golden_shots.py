@@ -201,7 +201,8 @@ class RefreshArtifacts(unittest.TestCase):
                         "out = args[args.index('--dir') + 1]\n"
                         "shutil.copytree(os.path.join(source, name), out)\n")
             os.chmod(fake_gh, 0o755)
-            env = dict(os.environ, PATH=bin_dir + os.pathsep + os.environ["PATH"])
+            env = dict(os.environ, PATH=bin_dir + os.pathsep + os.environ["PATH"],
+                       PIKMIN_SCENARIO_REPO="fixture/repo")
             result = subprocess.run(["bash", os.path.join(root, "refresh_goldens.sh"), "--run", "fixture"],
                                     env=env, capture_output=True, text=True)
             if invalid:

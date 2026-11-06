@@ -155,6 +155,34 @@ bool sameLocal(const PcLocalInput& a, const PcLocalInput& b)
 int16_t scriptedTurn(int t) { return (int16_t)((t % 3 == 0) ? t * 17 - 300 : 0); }
 int16_t turnSeenOn(int t) { return t > 0 ? scriptedTurn(t - 1) : 0; }
 
+void scenarioProvider(PcInputPad pads[4])
+{
+	pads[0].button = (uint16_t)(37 + sTick);
+	pads[0].stickX = (int8_t)(20 + sTick);
+	pads[0].flags = pc_input_log::kExtBomb;
+	pads[0].local = pc_input_log::kLocalSettingsClockHold;
+}
+
+int runProvider()
+{
+	std::vector<std::string> args = { "test", "--netplay-deterministic" };
+	start(args);
+	pc_input_log_set_provider(&scenarioProvider);
+	pc_input_log_set_local_capture_fn(&junkHook);
+	for (sTick = 0; sTick < 3; ++sTick) {
+		scriptedPads(0); // real input differs from the provider
+		pc_input_log_tick();
+		check(sStubPads[0].button == 37 + sTick, "provider without files: scripted buttons reach the sim");
+		check(sStubPads[0].stickX == 20 + sTick, "provider without files: scripted stick reaches the sim");
+		check(pc_netplay_ext_bits(0) == pc_input_log::kExtBomb, "provider without files: ext bits survive live capture");
+		check(pc_netplay_local_flags(0) == pc_input_log::kLocalSettingsClockHold,
+		      "provider without files: local flags survive live capture");
+		pc_input_log_tick_end();
+	}
+	check(!pc_input_log_is_record_active() && !pc_input_log_is_replay_active(), "provider: no file opened");
+	return 0;
+}
+
 int runRecord(const char* file)
 {
 	std::vector<std::string> args = { "test", "--netplay-deterministic", "--input-record", file };
@@ -329,7 +357,8 @@ int main(int argc, char** argv)
 		return 2;
 	}
 	const std::string mode = argv[1];
-	if (mode == "record") runRecord(argv[2]);
+	if (mode == "provider") runProvider();
+	else if (mode == "record") runRecord(argv[2]);
 	else if (mode == "replay" && argc >= 4) runReplay(argv[2], argv[3]);
 	else if (mode == "record-nondet") runRecordNondet(argv[2]);
 	else if (mode == "replay-v3" && argc >= 4) runReplayV3(argv[2], argv[3]);

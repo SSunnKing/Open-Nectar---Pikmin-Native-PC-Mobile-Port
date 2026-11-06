@@ -692,7 +692,7 @@ void pc_input_log_tick(void)
 		}
 		// Optional RNG pre-roll (test knob), before the first tick's sim.
 		pc_state_hash_before_first_tick();
-		if (!sRecordActive && !sReplayActive) {
+		if (!sRecordActive && !sReplayActive && sProvider == nullptr) {
 			// Det mode without a record or replay file still needs fresh
 			// input every tick, so clear the slots and run the pre-sim
 			// captures before returning. The hooks themselves check det/record,
@@ -704,7 +704,7 @@ void pc_input_log_tick(void)
 		}
 	}
 
-	if (!sRecordActive && !sReplayActive) {
+	if (!sRecordActive && !sReplayActive && sProvider == nullptr) {
 		clear_tick_slots();
 		if (sYawCaptureFn != nullptr) sYawCaptureFn();
 		capture_local(true);
