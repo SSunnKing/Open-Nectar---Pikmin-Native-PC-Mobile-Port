@@ -2,10 +2,9 @@
 // Runs on the opt-in object stage, stages/sandbox_objects.ini, whose default.gen
 // places a blue Onion the player does not own yet (standin-objects.md). The
 // discovery movie is the stand-in demo06.cin (standin-cinema.md): Boot at movie
-// frame 10, the first seed from the Onion's boot motion KEY_Action0 at motion
-// frame 60 (movie frame about 70), EmitCone at frame 90, 100 frames long. The
-// blue boot motion is our own short one, 100 frames (standin-cinema.md); the
-// scenario's length in ticks is what the CI runners pay for.
+// frame 10, the first seed from the measured Onion boot at motion frame 240
+// (movie frame about 250), EmitCone at 270, 300 frames long. Movie timing is
+// synthetic; the shared blue boot profile has the disc's 360-frame duration.
 //
 // DemoInvoker starts the discovery only on story stages, so the scenario sets
 // DEMOFLAG_DiscoverBlueOnyon itself, as DemoInvoker would (movie 6,
@@ -21,7 +20,7 @@
 //   pre_boot   START at movie frame 5, before Boot
 //   mid_boot   START at movie frame 40, after Boot, before the seed (the window
 //              upstream #205 fixed)
-//   post_seed  START at movie frame 80, after the seed, before EmitCone
+//   post_seed  START at movie frame 260, after the seed, before EmitCone
 //
 // Asserted: the movie starts and ends; the Onion boots (boot bit set) and ends
 // in GOAL_Wait; every case emits exactly one seed. mid_boot is the regression
@@ -58,7 +57,7 @@ const Case kCases[] = {
 	{ "watch", -1, 1 },
 	{ "pre_boot", 5, 1 },
 	{ "mid_boot", 40, 1 },
-	{ "post_seed", 80, 1 },
+	{ "post_seed", 260, 1 },
 };
 constexpr int kCaseCount = int(sizeof(kCases) / sizeof(kCases[0]));
 
@@ -141,8 +140,7 @@ public:
 			return;
 		}
 		case Settle:
-			// Watched to the end, the boot motion (100 frames from Boot at movie frame 10) outlasts the movie by about
-			// 10 frames; wait for Wait, then 1 s more for a late seed.
+			// Watched to the end, the 360-frame boot can outlast the 300-frame movie; wait for Wait, then 1 s more for a late seed.
 			if (goalState() == GoalAI::GOAL_Wait) {
 				if (mWaitTick == 0) mWaitTick = t;
 				if (t - mWaitTick >= unsigned(rate)) {
@@ -195,6 +193,10 @@ private:
 		}
 		if (c.skipFrame >= 0 && !mPressed) {
 			scenarioFailf(t, "START pressed during the movie", "case %s: the movie ended before frame %d", c.name, c.skipFrame);
+			return;
+		}
+		if (c.skipFrame >= 0 && mPressBorn != (c.skipFrame == 260 ? 1 : 0)) {
+			scenarioFailf(t, "the skip actually occurs before/after the first seed as named", "case %s: %d seeds at START", c.name, mPressBorn);
 			return;
 		}
 		if (!boot) {

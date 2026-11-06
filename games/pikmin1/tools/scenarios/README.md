@@ -425,6 +425,7 @@ Which stage each stand-in entry boots:
 `sprout_landing`, `onion_skip`, `container_menu`, `onion_unlock`, `onion_unlock_whistle`, `first_yellow` and `objects_smoke` have no `_disc` entry: their
 stages do not exist on a real install. `coop_smoke` and `coop_look` have none either: they were not run on a real install.
 | `pellet_table`, `ufo_part_discovery`, `nectar_growth`, `bomb_firsts` | `stages/sandbox.ini` |
+| `blue_onion_boot`, `yellow_onion_boot`, `red_onion_boot` | Day 2; blue on object stage / disc Forest Navel; yellow/red on Onion stage / disc Forest of Hope | W2-4: starts the ordinary `startBoot` API on an unbooted Onion with its route closed. No movie skip, `pcSnapLanded`, animator-counter write or waypoint write. Every boot tick checks route closure through the measured effect frame and opening afterward; checks one seed at Action0, natural Wait, then real Pikmin AI carries a pellet to that Onion. Both 30/60 Hz, including `_disc`. Mutation controls disable only the generated blue/yellow value-2 cue and require this exact route assertion to fail. Measurements and scope: [standin-onion-boot.md](standin-onion-boot.md). |
 | `pellet_carry`, `carry_blocked` | `stages/sandbox_objects.ini` |
 | `pikmin_cap`, `pikmin_cap_1`, `pikmin_cap_250`, `pikmin_cap_999` | `stages/sandbox_objects.ini` (its blue Onion) |
 | `day_clock`, `throw_levels`, `whistle_radius`, `navi_invincible`, `whistle_gather_release`, `whistle_pluck_held` | `stages/sandbox.ini` |

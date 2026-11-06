@@ -242,3 +242,14 @@ Next tier (not in the 8): first-flower via nectar (DF26/PL1), noon/quarter bells
 - Randomizer internals (`pc_randomizer_logic.cpp`, `_audit.cpp`) and the full `ResultFlags` list were not read.
 - Per-stage part totals and which part sits in which stage were not read.
 - UFO level thresholds: resolved. The disc's `parms/aiconst.bin` (read-only) gives `p19`=5, `p20`=12, `p21`=29, `p22`=30 against code defaults 6, 12, 29, 30 (`AIConstant.h:45-48`, `AIConstant::Parms`); the stand-in `aiconst.bin` holds only `p00`, so stand-ins run on the defaults. Other disc overrides in the same file: `p00` gravity 560 (default 550), `p01` 0, `p08` 0, `p10` 0, `p13` 0 (defaults 1). `gamePrms.bin` holds no UFO levels.
+
+### W2-4 natural Onion boot route (2026-11-05)
+
+`blue_onion_boot`, `yellow_onion_boot` and the red comparison run at 30/60 Hz
+on stand-ins and the USA Rev1 disc install. They call `startBoot` and allow the
+real animator/GoalAI to emit one seed and return to Wait, then carry a pellet
+without `pcSnapLanded`. Route state is checked before and after the measured
+effect frame. Disabling the generated blue/yellow route effect is the negative
+control. This covers boot animation/profile behavior, not the proximity
+discovery trigger, movies, or the full first-pluck progression (ON1/ON4).
+See [disc evidence and limits](../standin-onion-boot.md).

@@ -334,7 +334,7 @@ void testProfiles()
 				// the disc's one descending list.
 				check(l.infoKeys[k].mFrameIndex >= 0 && l.infoKeys[k].mFrameIndex < int(l.animKeys.size()), who + ": info key points into the anim keys");
 			}
-			// Sound and effect cues are not stand-in data, except the profile's own effect events (the red Onion boot's).
+			// Sound and effect cues are not stand-in data, except the profile's own effect events (the three Onion boots').
 			check(l.eventKeys.size() == p.infos[i].effectKeys.size(), who + ": event keys only where the profile has effect events");
 			for (std::size_t k = 0; k < l.eventKeys.size() && k < p.infos[i].effectKeys.size(); k++) {
 				check(l.eventKeys[k].mFrameIndex == p.infos[i].effectKeys[k].first && l.eventKeys[k].mEventType == 1
@@ -386,17 +386,23 @@ void testProfiles()
 	for (const auto& p : profiles) {
 		if (std::string(p.id) == "goal") {
 			check(p.joints == 13 && p.infos.size() == 13, "goal (the Onion): 13 joints, 13 infos");
-			// The red boot (info 4) carries the disc's effect events; value 2 opens the Onion's way point. No other info has any.
-			bool waypoint = false;
+			// All three boots retain measured disc effects (standin-onion-boot.md).
 			for (std::size_t i = 0; i < p.infos.size(); i++) {
-				if (i != 4) check(p.infos[i].effectKeys.empty(), "goal: only the red boot has event keys");
-				for (const auto& e : p.infos[i].effectKeys) waypoint = waypoint || (i == 4 && e.first == 221 && e.second == 2 && e.first < p.infos[i].frames);
+				const bool boot = i >= 3 && i <= 5;
+				if (!boot) {
+					check(p.infos[i].effectKeys.empty(), "goal: only boot motions have event keys");
+					continue;
+				}
+				const auto& info = p.infos[i];
+				const int routeFrame = i == 4 ? 221 : 194;
+				bool waypoint = false;
+				for (auto k : info.effectKeys) waypoint = waypoint || (k.first == routeFrame && k.second == 2);
+				check(waypoint && info.effectKeys.size() == 5, "goal boot: five disc effects including the measured waypoint cue");
+				check(info.frames == (i == 4 ? 472 : 360), "goal boot: measured disc payload length");
+				const auto& ev = nectar::standInObjectAnims()[2].anims[i].info.eventKeys;
+				check(ev.size() == 5 && ev[2].frame == routeFrame && ev[2].eventType == 1 && ev[2].keyType == 2,
+				      "goal boot: waypoint cue written as an Action event with value 2");
 			}
-			check(waypoint && p.infos[4].effectKeys.size() == 5, "goal info 4 (red boot): five effect events, value 2 (the way point) at frame 221");
-			// Written as action event keys (type 1) with the value in mKeyType, as AnimInfo::doread reads them.
-			const nectar::StandInAnimSet& goal = nectar::standInObjectAnims()[2];
-			const auto& ev = goal.anims[4].info.eventKeys;
-			check(ev.size() == 5 && ev[2].frame == 221 && ev[2].eventType == 1 && ev[2].keyType == 2, "goal info 4: event key 2 written as action, value 2, frame 221");
 		}
 		if (std::string(p.id) == "pikihead") check(p.joints == 4 && p.infos.size() == 7, "pikihead (the sprout): 4 joints, 7 infos");
 		if (std::string(p.id) == "chappy") check(p.joints == 17 && p.infos.size() == 15, "chappy: 17 joints, 15 infos");

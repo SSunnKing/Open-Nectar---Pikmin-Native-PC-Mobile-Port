@@ -10,9 +10,9 @@
 // An info key is { index into the anim-key list, key type } with the types of
 // AnimKeyRecord: 0 loop start, 1 loop end, 2 KEY_Action0, 3 KEY_Action1.
 // Anim keys are the disc's, clamped below N exactly as AnimInfo::checkAnimData
-// does when the table loads. Dropped on purpose: names, event-key records (their
-// counts per info are 0 to 19: sound and effect cues, which no scenario checks)
-// and the curves. Where two infos used one animation on the disc (a bundle entry
+// does when the table loads. Names and curves are omitted. Event-key records
+// (0 to 19 per info) are omitted except the three measured Onion boot effects.
+// Where two infos used one animation on the disc (a bundle entry
 // shared by name), each stand-in info has its own entry; the frame count is the
 // one of the entry the disc's info resolved to, and the three naka1 infos whose
 // entries the disc bundle lacks (it opens loose .dck files that do not exist and
@@ -40,13 +40,12 @@ const std::vector<ObjectAnimProfile>& objectAnimProfiles()
 	      { 60, 1, 30.0f, { 0, 20, 30, 40, 58 }, { { 1, 0 }, { 3, 1 }, { 2, 2 } } },
 	      { 40, 1, 30.0f, { 0, 38 }, { { 0, 0 }, { 1, 1 } } },
 	      { 50, 1, 30.0f, { 0, 48 }, {} },
-	      { 100, 2, 30.0f, { 0, 60, 99 }, { { 1, 2 } } }, // blue boot: our own short motion (the disc's has 360 frames, key 240)
-	      // red boot: the disc's five effect events too (frame, value), in the disc's order. GoalItem::animationKeyUpdated
-	      // (boot motions 3-5): 0 and 1 and 3 are particles, 4 starts the colour fade, 2 opens the Onion's route way point,
-	      // which the boot closed (GoalItem::startAI): without it no Pikmin carries a pellet to a booted red Onion. The blue
-	      // and yellow boots keep none (no scenario boots them and carries; onion_skip's skip opens the point itself).
+	      // USA Rev1 disc measurement: tools/scenarios/standin-onion-boot.md.
+	      // The table's blue/yellow final key 444 is clamped to payload frame 359.
+	      // All five effect cues retain disc order; value 2 opens the route.
+	      { 360, 2, 30.0f, { 0, 240, 359 }, { { 1, 2 } }, { { 20, 0 }, { 126, 1 }, { 194, 2 }, { 200, 3 }, { 25, 4 } } },
 	      { 472, 2, 30.0f, { 0, 270, 471 }, { { 1, 2 } }, { { 31, 0 }, { 153, 1 }, { 221, 2 }, { 227, 3 }, { 32, 4 } } },
-	      { 360, 2, 30.0f, { 0, 240, 359 }, { { 1, 2 } } },
+	      { 360, 2, 30.0f, { 0, 240, 359 }, { { 1, 2 } }, { { 20, 0 }, { 126, 1 }, { 194, 2 }, { 200, 3 }, { 22, 4 } } },
 	      { 399, 2, 30.0f, { 0, 398 }, {} },
 	      { 399, 2, 30.0f, { 0, 398 }, {} },
 	      { 399, 2, 30.0f, { 0, 398 }, {} },

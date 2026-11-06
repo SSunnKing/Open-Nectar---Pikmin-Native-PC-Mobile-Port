@@ -122,15 +122,11 @@ std::vector<Movie> movies()
 	// DEMOFLAG_DiscoverBlueOnyon starts untranslated; the object stage's Onion is
 	// blue). Localized at the Onion. Boot at frame kDiscoveryBoot starts the
 	// Onion's boot motion (info colour + 3), whose KEY_Action0 emits the first
-	// seed: frame 270 (red) of that motion in the stand-in Onion table
-	// (standin_object_profiles.cpp, the disc's key frame), or frame 60 (blue),
-	// which is our own short blue boot motion (100 frames; the disc's has 360 and
-	// the key at 240) so that the onion_skip scenario runs few ticks. So the seed
-	// comes out at movie frame 280 (red) or 70 (blue), and EmitCone follows it,
-	// as on the disc: Boot, seed, EmitCone. That leaves the three skip windows
-	// upstream #205 is about (before Boot, between Boot and the seed, between the
-	// seed and EmitCone). demo04 then opens the red Onion text; demo06 has no
-	// text key (its screen, tu_tx22, is not a stand-in).
+	// seed: frame 270 (red), 240 (blue/yellow), measured on the disc.
+	// These synthetic movies use Boot at 10 and EmitCone after the seed,
+	// preserving the before-Boot, before-seed and after-seed skip windows.
+	// Their movie durations are fixture choices, not disc measurements.
+	// demo04 opens the red Onion text; demo06 has no text key.
 	// Yellow (DEMOID_FindYellowOnyon, demo05, which DEMOFLAG_DiscoverYellowOnyon
 	// starts; scenario onion_day3): the yellow boot motion keeps the disc's numbers
 	// (360 frames, KEY_Action0 at 240), so the seed comes out at movie frame 250 and
@@ -145,7 +141,7 @@ std::vector<Movie> movies()
 		};
 		const Discovery discoveries[] = {
 			{ "dataDir/cinemas/demo04.cin", "cinemas/demo04/demo04_1.dsk", kDemoSenderRedOnion, 300, 330 },
-			{ "dataDir/cinemas/demo06.cin", "cinemas/demo06/demo06_1.dsk", kDemoSenderBluOnion, 90, 100 },
+			{ "dataDir/cinemas/demo06.cin", "cinemas/demo06/demo06_1.dsk", kDemoSenderBluOnion, 270, 300 },
 			{ "dataDir/cinemas/demo05.cin", "cinemas/demo05/demo05_1.dsk", kDemoSenderYelOnion, 270, 300 },
 		};
 		for (const Discovery& d : discoveries) {

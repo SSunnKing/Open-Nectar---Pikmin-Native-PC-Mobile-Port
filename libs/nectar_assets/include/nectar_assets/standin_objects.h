@@ -16,7 +16,7 @@
 // joint count. They are in standin_object_profiles.cpp. No curves, names,
 // event-key records (sound and effect cues) or geometry are copied: every info
 // is a static identity animation on the model's joints, named by this file. The
-// one exception is the red Onion's boot motion, which keeps the disc's five
+// exception is the three Onion boot motions, which keep the disc's five
 // effect events because one of them reopens the Onion's route way point
 // (ObjectAnimInfoProfile::effectKeys). The Main Engine's pellet config is the
 // disc's too (writeStandInPelletTables).
@@ -42,7 +42,7 @@ struct ObjectAnimInfoProfile {
 	std::vector<int> keys; ///< anim-key frames, already clamped below N (the game clamps them on load)
 	std::vector<std::pair<int, int>> infoKeys; ///< (anim-key index, key type): 0 loop start, 1 loop end, 2-5 KEY_Action0-3
 	/// (frame, value) of action event keys (type 1, KEY_PlayEffect with that value), in the disc's order. Event keys are
-	/// otherwise not written; the red Onion's boot carries them because one of them opens its route way point.
+	/// otherwise not written; the Onion boot motions carry them because one of them opens its route way point.
 	std::vector<std::pair<int, int>> effectKeys;
 };
 
