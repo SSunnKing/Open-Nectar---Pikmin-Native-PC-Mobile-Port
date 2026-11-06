@@ -1422,6 +1422,12 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_seed_landing_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_seed_landing_test COMMAND pc_seed_landing_test)
 
+    # Breakable-wall sides stay after the sink animation (no disc or window).
+    add_executable(pc_wall_sides_test pc_port/pc_wall_sides_test.cpp)
+    target_include_directories(pc_wall_sides_test PRIVATE pc_port)
+    target_compile_options(pc_wall_sides_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_wall_sides_test COMMAND pc_wall_sides_test)
+
     # Title screen and main menu clicks (no window, no disc)
     add_executable(pc_menu_click_test pc_port/pc_menu_click_test.cpp pc_port/pc_menu_click.cpp)
     target_include_directories(pc_menu_click_test PRIVATE pc_port)
