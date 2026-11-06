@@ -799,8 +799,8 @@ from `PcScenario` (`pc_scenario.h`):
 
 `scenarioHandOff()` marks the hand-off point: with `--scenario-handoff` the
 player takes over there, otherwise it is a pass. `scenarioApplyDiscKeyBindings()`
-sets the disc's `parms/key.bin` bindings, which the stand-in tree lacks (pluck
-on A, not B).
+sets the disc's `parms/key.bin` bindings (pluck and throw on A). The stand-in
+generator writes that file; the call restores the same six binds.
 | `crossesDays()` | Default false. True lets the run continue past the soft reset that ends a day: the runner stops ticking the scenario from that tick (the stage's objects are gone), waits for the next stage, runs the intro gate again and calls `onStageReady()` once more; `pc_scenario_stage_number()` says which stage (1, 2, ...). Ticks keep counting across stages. Used by `onion_day3`. |
 | `onMapSelect()` | For a `crossesDays()` scenario, when `OnePlayerSection` builds MapSelect: return a `stages.ini` `file` and the runner skips DrawWorldMap (direct `enterCourse`); return `nullptr` to run the real world map (stand-in BLOs or disc) and drive it with `providePadsBetweenStages` and/or `pc_scenario_request_map_course`. |
 | `providePadsBetweenStages(ticks, pad0)` | Pad 0 between the soft reset and the next stage (the real world map). |
@@ -923,8 +923,8 @@ What the run does and does not touch:
   white cross at the cursor always, a yellow ring while B is down. A call reaches only
   Pikmin within the ring, around the cursor (`Navi::callPikis`), so aim at them and hold
   B for a moment (the radius grows from its minimum over `mWhistleExpandTime`).
-- Keys: the disc's game bindings (pluck and throw on A, whistle on B); the
-  stand-in tree has no `parms/key.bin`. Keyboard, mouse and controller bindings
+- Keys: the disc's game bindings (pluck and throw on A, whistle on B). The
+  stand-in generator writes `parms/key.bin` with those binds. Keyboard, mouse and controller bindings
   are the port's defaults.
 - No audio: the run uses SDL's dummy audio driver, and a
   `PIKMIN_NATIVE_JAUDIO=OFF` build has the legacy facade anyway.

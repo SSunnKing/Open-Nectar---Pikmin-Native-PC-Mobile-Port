@@ -184,8 +184,9 @@ bool pc_scenario_handed_off(void);
 // Scenario tick index during the sim (after intro, before on_tick_end increments).
 unsigned pc_scenario_sim_tick(void);
 // The disc's parms/key.bin bindings (throw A, cursor B, pluck A, attack A,
-// disband X, menu Y). The stand-in tree has no key.bin, and KeyConfig's code
-// defaults put pluck on B. Read from the disc 2026-10-28 (scenario_onion_unlock.cpp).
+// disband X, menu Y). The stand-in generator writes that file. Read from the
+// disc 2026-10-28 (scenario_onion_unlock.cpp). KeyConfig's code default puts
+// pluck on B when the file is missing.
 void scenarioApplyDiscKeyBindings(void);
 
 // Scenario preconditions (issue #66), run against the game's own objects.

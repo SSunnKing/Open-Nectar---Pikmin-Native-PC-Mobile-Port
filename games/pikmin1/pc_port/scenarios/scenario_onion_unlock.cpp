@@ -58,8 +58,8 @@
 // except NoPikminTimeout, which only the hand path sets, and the pluck counter,
 // which the whistle path does not raise (printed, not asserted).
 //
-// Both scenarios apply the disc's key bindings first (applyDiscKeys): the
-// stand-in tree has no parms/key.bin. Achievements: pc_achievements writes into
+// Both scenarios apply the disc's key bindings first (applyDiscKeys). The
+// stand-in generator writes parms/key.bin with the same binds. Achievements: pc_achievements writes into
 // the run's own NECTAR_SAVE_DIR in a scenario run (pc_achievements.cpp), so each
 // run starts with none unlocked and nothing is written into the data folder.
 #include "scenarios/pc_scenario_list.h"

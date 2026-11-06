@@ -170,10 +170,9 @@ inline bool checkPluck(unsigned t, Path path, int colour, const Snap& b, const S
 	return true;
 }
 
-/// The disc's parms/key.bin bindings. The stand-in tree has no key.bin, so KeyConfig keeps its code defaults, where
-/// extract (pluck) is B, the whistle's button: a press of B then runs NaviWalkState's shared-key branch, which no disc
-/// run takes. The disc's file (six big-endian ints, read 2026-10-28) binds throw A, set cursor B, extract A, attack A,
-/// disband X, menu Y. Setting them here makes A pluck and B whistle on either tree and changes no other scenario.
+/// The disc's parms/key.bin bindings. The stand-in generator writes that file (six big-endian ints, read 2026-10-28):
+/// throw A, set cursor B, extract A, attack A, disband X, menu Y. This call sets the same six, so a scenario that
+/// changed a bind can put them back, and a stand-in run matches a disc run. Without the file, extract stays B.
 inline void applyDiscKeys()
 {
 	KeyConfig* k = KeyConfig::_instance;

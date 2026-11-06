@@ -62,11 +62,10 @@ dataDir/stages/stage1/0.gen
 dataDir/stages/practice/plants.gen
 
 # Parameter files CoreNode::load skips silently when missing (node.cpp); every
-# value keeps its code default. key.bin: the throw key stays A, which
-# throw_release asserts. sound: no sound constants are read by a scenario.
-# (demo.bin is written since the tutorial scenarios: the disc's trigger radii.)
+# value keeps its code default. sound: no sound constants are read by a scenario.
+# key.bin is written (the disc's six binds; throw_release asserts throw and
+# extract are both A). demo.bin is written since the tutorial scenarios.
 dataDir/parms/sound.bin
-dataDir/parms/key.bin
 dataDir/camera/camepara.bin
 
 # The disc's naka1 table names three animations its bundle lacks, so the game

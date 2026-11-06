@@ -67,7 +67,7 @@ inline int currentMovie()
 	return info ? int(info->mMovieIndex) : -1;
 }
 
-/// The disc's parms/key.bin bindings (onion_unlock): A throws and plucks, B whistles. The stand-in tree has no key.bin.
+/// The disc's parms/key.bin bindings (onion_unlock): A throws and plucks, B whistles. The stand-in generator writes that file.
 inline void applyDiscKeys()
 {
 	KeyConfig* k           = KeyConfig::_instance;

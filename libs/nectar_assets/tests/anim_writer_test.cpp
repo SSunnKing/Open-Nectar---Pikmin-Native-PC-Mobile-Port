@@ -618,7 +618,7 @@ void testStandInSet()
 		check(info.animKeys == std::vector<int>({ 0, w.k, w.n - 1 }), std::string(w.label) + ": anim keys [0, K, N-1]");
 		const LoadedEntry& e = loaded[std::size_t(w.info)];
 		check(e.anim.frames == w.n, std::string(w.label) + ": totalFrameCount == N");
-		check(info.flags == 2 && info.speed == 30.0f, std::string(w.label) + ": code-default flags and speed (the disc's speed is 30 as well)");
+		check(info.flags == 5 && info.speed == 30.0f, std::string(w.label) + ": disc flags 5 (constant speed) and speed 30");
 	}
 
 	// PickLoop (info 68): the disc's timing, read back as the game reads it. ActTransport lifts on its KEY_Action0.

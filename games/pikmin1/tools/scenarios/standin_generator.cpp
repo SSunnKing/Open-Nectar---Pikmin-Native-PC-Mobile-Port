@@ -461,6 +461,23 @@ bool parmFiles(Tree& tree, std::string& error)
 		if (!nectar::writeParmFile(pf, bytes, error)) return fail(error, std::string(f.path) + ": " + error);
 		tree[f.path] = bytes;
 	}
+	// parms/key.bin: six big-endian ints, one per KeyConfig::Key::read (keyConfig.cpp).
+	// The VERSION_GPIE01_01 file, read 2026-10-28 (scenario_progress.h): throw A,
+	// set cursor B, extract A, attack A, disband X, menu Y. The constructor's
+	// defaults match except extract, which is B, so throw and extract differ and
+	// NaviWalkState skips the shared-key pluck check. KBBTN values are Controller.h.
+	{
+		const std::uint32_t binds[] = { 0x1000u, 0x2000u, 0x1000u, 0x1000u, 0x4000u, 0x8000u };
+		Bytes key;
+		key.reserve(sizeof binds);
+		for (std::uint32_t v : binds) {
+			key.push_back(std::uint8_t(v >> 24));
+			key.push_back(std::uint8_t(v >> 16));
+			key.push_back(std::uint8_t(v >> 8));
+			key.push_back(std::uint8_t(v));
+		}
+		tree["dataDir/parms/key.bin"] = std::move(key);
+	}
 	return true;
 }
 
@@ -595,7 +612,6 @@ const Allowed kManifestAllowlist[] = {
 	// Silent when missing: CoreNode::load and the null-checked opens keep the
 	// code defaults (see standin-open-allowlist.txt for each).
 	{ "dataDir/parms/sound.bin", "sound constants, skipped when missing" },
-	{ "dataDir/parms/key.bin", "key config, skipped when missing; the throw key stays A" },
 	{ "dataDir/camera/camepara.bin", "camera parameters, skipped when missing" },
 	{ "dataDir/ghost/record.gst", "ghost replay, null-checked" },
 	// The disc's naka1 table names three animations its bundle lacks, so the

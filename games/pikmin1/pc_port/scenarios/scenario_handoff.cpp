@@ -24,8 +24,8 @@
 // tree has no yellow Onion and no yellow discovery movie (demo05), so the
 // GameCube's Onion discovery is not part of it.
 //
-// Both apply the disc's key bindings first (scenarioApplyDiscKeyBindings): the
-// stand-in tree has no parms/key.bin, and its code defaults put pluck on B.
+// Both apply the disc's key bindings first (scenarioApplyDiscKeyBindings). The
+// stand-in generator writes parms/key.bin with the same binds (pluck on A).
 #include "scenarios/pc_scenario_list.h"
 
 #if PIKI_SCENARIOS
