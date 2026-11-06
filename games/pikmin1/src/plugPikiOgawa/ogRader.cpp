@@ -1,3 +1,6 @@
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 #include "DebugLog.h"
 #include "FlowController.h"
 #include "GoalItem.h"
@@ -81,13 +84,14 @@ zen::ogRaderMgr::ogRaderMgr()
 	switch (flowCont.mCurrentStage->mStageID)
 #else
 	s16 stage = flowCont.mCurrentStage->mStageID;
-#if defined(PIKI_PC_PORT)
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
 	// The table has STAGE_COUNT rows. A stage with no `id` in stages.ini is
 	// STAGE_TESTMAP (= STAGE_COUNT), and reading past the table picks whatever
 	// follows it. The switch below already shows Impact Site's map for such a
 	// stage, so take the Impact Site row too (same fallback as
 	// MoviePlayer::translateIndex).
-	const int areaRow = (stage < 0 || stage >= STAGE_COUNT) ? int(STAGE_Practice) : int(stage);
+	const int areaRow = pc_scenario_uses_disc_free_assets() && (stage < 0 || stage >= STAGE_COUNT)
+	    ? int(STAGE_Practice) : int(stage);
 #else
 	const int areaRow = stage;
 #endif

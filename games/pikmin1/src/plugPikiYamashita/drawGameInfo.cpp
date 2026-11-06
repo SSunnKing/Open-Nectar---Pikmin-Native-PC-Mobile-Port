@@ -1052,19 +1052,26 @@ void zen::DrawGameInfo::draw(Graphics& gfx)
 #if defined(PIKI_PC_PORT)
 	gHudNaviIndex = mNaviIndex;
 	pGameInfo     = &mInfo;
-	const f32 viewAspect = pc_gfx_get_current_aspect_ratio();
-	int virtW = int(lroundf(480.0f * viewAspect));
+	bool standinHud = false;
+#if PIKI_SCENARIOS
+	standinHud = pc_scenario_uses_disc_free_assets();
+#endif
 	int virtH = 480;
-	if (virtW < 640) {
-		virtW = 640;
-		virtH = int(lroundf(640.0f / viewAspect));
+	if (standinHud) {
+		const f32 viewAspect = pc_gfx_get_current_aspect_ratio();
+		int width = int(lroundf(480.0f * viewAspect));
+		if (width < 640) {
+			width = 640;
+			virtH = int(lroundf(640.0f / viewAspect));
+		}
+		pc_gfx_set_hud_virtual_size(width, virtH);
 	}
-	pc_gfx_set_hud_virtual_size(virtW, virtH);
 	pc_gfx_set_hud_wide(1);
+	const int virtW = pc_gfx_get_hud_virtual_width();
 	const int dx = virtW - 640;
 	const int dy = virtH - 480;
 	Matrix4f ortho;
-	gfx.setOrthogonal(ortho.mMtx, RectArea(0, 0, virtW, virtH));
+	gfx.setOrthogonal(ortho.mMtx, RectArea(0, 0, virtW, standinHud ? virtH : gfx.mScreenHeight));
 #else
 	Matrix4f ortho;
 	gfx.setOrthogonal(ortho.mMtx, RectArea(0, 0, 640, gfx.mScreenHeight));
@@ -1078,12 +1085,17 @@ void zen::DrawGameInfo::draw(Graphics& gfx)
 	perspGraph.setPort();
 	if (!pc_vs_active()) // VS: sin indicador del sol (el día no avanza)
 		mUpperScreenMgr->draw(&perspGraph, dx / 2);
-	mLowerScreenMgr->drawAt(&perspGraph, 0, dy, 1.0f);
-	setDatePanesVisible(false);
-	mModeScreenMgr->drawAt(&perspGraph, dx, dy, 1.0f);
-	setDatePanesVisible(true);
+	if (standinHud) {
+		mLowerScreenMgr->drawAt(&perspGraph, 0, dy, 1.0f);
+		setDatePanesVisible(false);
+		mModeScreenMgr->drawAt(&perspGraph, dx, dy, 1.0f);
+		setDatePanesVisible(true);
+	} else {
+		mLowerScreenMgr->draw(&perspGraph, 0);
+		mModeScreenMgr->draw(&perspGraph, dx);
+	}
 	pc_gfx_set_hud_wide(0);
-	pc_gfx_set_hud_virtual_size(0, 0);
+	if (standinHud) pc_gfx_set_hud_virtual_size(0, 0);
 #else
 	P2DPerspGraph perspGraph(0, 0, 640, 480, 30.0f, 1.0f, 5000.0f);
 	perspGraph.setPort();

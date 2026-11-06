@@ -128,7 +128,7 @@ const std::vector<PcScenario*>& pc_scenario_all(void)
 		pc_scenario_make_settings_invincible_off(),
 		pc_scenario_make_speedrun_cheats(),
 		pc_scenario_make_unlock_zones(),
-		pc_scenario_make_settings_menu_pause(),
+		pc_scenario_make_settings_menu_clock(),
 		pc_scenario_make_throw_release_quick_grab(),
 		pc_scenario_make_throw_cadence_hold(),
 		pc_scenario_make_throw_cadence_tap1(),

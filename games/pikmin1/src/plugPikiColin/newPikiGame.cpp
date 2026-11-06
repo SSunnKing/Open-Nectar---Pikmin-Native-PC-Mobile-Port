@@ -2763,23 +2763,18 @@ public:
 					// still moves. Day 1 is left alone: the tutorial only ends
 					// when its clock reaches sunset after the engine. The last day is left
 					// alone too, so its sunset ends the game and plays the ending.
-					// Offline deterministic ticks consume recorded local input. Network
-					// ticks do not fill those slots, so one peer's F1 menu cannot hold
-					// the shared clock. Old recordings have no clock-hold bit.
-					const bool settingsClockHeld = pc_netplay_deterministic()
-					    ? pc_netplay_local_slots_filled() && (pc_netplay_local_flags(0) & pc_input_log::kLocalSettingsClockHold) != 0
-					    : pc_settings_menu_is_open() != 0;
-					const bool pcClockHeld = (pc_settings_get_infinite_day() != 0 && gameflow.mWorldClock.mCurrentDay != 1
-					        && gameflow.mWorldClock.mCurrentDay != MAX_DAYS);
-					if (!settingsClockHeld && !pcClockHeld && !gameflow.mMoviePlayer->mIsActive && (mUpdateFlags & UPDATE_WORLD_CLOCK)
+					const bool pcClockHeld
+					    = pc_settings_get_infinite_day() != 0 && gameflow.mWorldClock.mCurrentDay != 1
+					   && gameflow.mWorldClock.mCurrentDay != MAX_DAYS;
+					if (!pcClockHeld && !gameflow.mMoviePlayer->mIsActive && (mUpdateFlags & UPDATE_WORLD_CLOCK)
 					    && !playerState->isTutorial()) {
 						f32 tod = gameflow.mWorldClock.mTimeOfDay;
 						gameflow.mWorldClock.update(1.0f);
 						f32 tod2 = gameflow.mWorldClock.mTimeOfDay;
 					}
-					if (!settingsClockHeld) pcWorkClockUpdate(gameflow.mWorldClock, pcClockHeld);
+					pcWorkClockUpdate(gameflow.mWorldClock, pcClockHeld);
 #if defined(PIKI_PC_PORT)
-					if (!settingsClockHeld) pcVisualClockUpdate(gameflow.mWorldClock, pcClockHeld);
+					pcVisualClockUpdate(gameflow.mWorldClock, pcClockHeld);
 #endif
 					// update any children in our list (this will make gamecore update)
 					Node::update();

@@ -15,7 +15,6 @@
 #include "Stickers.h"
 #include "sysNew.h"
 #if defined(PIKI_PC_PORT)
-#include "pc_permadeath.h"
 #include "settings/pc_settings.h"
 #include "netplay/pc_netplay_policy.h"
 #include "netplay/pc_netplay_present.h"
@@ -71,9 +70,6 @@ void Boss::initBoss(BirthInfo& birthInfo, int objType)
 	mIsOnWall          = false;
 	mDamage            = 0.0f;
 	f32 maxHealth      = BOSS_PARM(mMaxHealth);
-#if defined(PIKI_PC_PORT)
-	maxHealth          = pc_hardmode_teki_life(maxHealth);
-#endif
 	mMaxLife           = maxHealth;
 	mCurrentLife       = maxHealth;
 	mAnimTimer         = 0.0f;

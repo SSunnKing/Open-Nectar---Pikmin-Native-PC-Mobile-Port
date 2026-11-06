@@ -111,7 +111,7 @@ PcScenario* pc_scenario_make_settings_invincible(void);
 PcScenario* pc_scenario_make_settings_invincible_off(void);
 PcScenario* pc_scenario_make_speedrun_cheats(void);
 PcScenario* pc_scenario_make_unlock_zones(void);
-PcScenario* pc_scenario_make_settings_menu_pause(void);
+PcScenario* pc_scenario_make_settings_menu_clock(void);
 PcScenario* pc_scenario_make_throw_release_quick_grab(void);
 PcScenario* pc_scenario_make_throw_cadence_hold(void);
 PcScenario* pc_scenario_make_throw_cadence_tap1(void);

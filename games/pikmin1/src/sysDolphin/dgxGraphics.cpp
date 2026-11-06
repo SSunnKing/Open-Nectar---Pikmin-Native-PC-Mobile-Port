@@ -1449,15 +1449,15 @@ void DGXGraphics::drawSingleMatpoly(Shape* model, Joint::MatPoly* matPoly)
 			}
 
 			VtxMatrix& vtxMtx = model->mVtxMatrixList[depMtxIdx];
-#if defined(PIKI_PC_PORT)
-			// A shape drawn without ever going through updateAnim (the cursor,
+#if defined(PIKI_PC_PORT) && PIKI_SCENARIOS
+			// A stand-in shape drawn without ever going through updateAnim (the cursor,
 			// for one: Navi::refresh loads its view matrix and calls drawshape)
 			// has no anim matrices. Entry 0 of that null array is a null
 			// pointer, which the GX shim ignores, so the vertices keep the
 			// caller's matrix; any later entry is a small bogus address that
 			// crashed in GXLoadPosMtxImm (#119). Skip every such load, so all
 			// of them keep the caller's matrix the way entry 0 always has.
-			if (model->mCurrentAnimation->mData && !model->mAnimMatrices) {
+			if (pc_scenario_uses_disc_free_assets() && model->mCurrentAnimation->mData && !model->mAnimMatrices) {
 				continue;
 			}
 #endif
