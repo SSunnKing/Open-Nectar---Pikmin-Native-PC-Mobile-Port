@@ -1054,9 +1054,32 @@ BuildingItem::BuildingItem(int objType, CreatureProp* props, ItemShapeObject* it
 	mLifeGauge.mRenderStyle = LifeGauge::Wheel;
 }
 
+#if defined(PIKI_PC_PORT)
 /**
- * @todo: Documentation
+ * @brief Rebuild the clip a save or a suspend left this wall in.
+ *
+ * Called after startAI, which has parked motion 0 at its first frame. Intact
+ * and partial walls stay on that GameCube hold: the start of clip mCurrStage.
+ * A destroyed wall is moved to the playback end key of the last stage clip and
+ * marked finished, which is the state WaitInit leaves after the sink.
  */
+static void pcApplyRestoredWallPose(BuildingItem* wall)
+{
+	const PcWallRestoredPose pose = pc_wall_restored_pose(wall->mCurrStage, wall->mNumStages);
+	wall->startMotion(pose.motionId);
+	if (pose.holdAtEnd && wall->mItemAnimator.mAnimInfo) {
+		const int keyCount = wall->mItemAnimator.mAnimInfo->countAKeys();
+		const int endKey   = pc_wall_playback_end_key_index(keyCount);
+		wall->mItemAnimator.mAnimationCounter = wall->mItemAnimator.mAnimInfo->getKeyValue(endKey);
+		if (pose.markFinished) {
+			wall->mItemAnimator.mCurrentKeyIndex = -1;
+		}
+	}
+	wall->stopMotion();
+	wall->mWayPoint->setFlag(pose.waypointOpen);
+}
+#endif
+
 f32 BuildingItem::getBoundingSphereRadius()
 {
 	if (mCollInfo && mCollInfo->hasInfo()) {
@@ -1258,6 +1281,12 @@ void BuildingItem::doLoad(RandomAccessStream& input)
 
 	PRINT_KANDO("currStage %d numStages %d\n", mCurrStage, mNumStages);
 
+#if defined(PIKI_PC_PORT)
+	// Next-day generator cache comes through here (Generator::loadCreature).
+	// The live sink has already stopped on the playback end key with the
+	// animator finished. Seeking lastKey-1 left a different sample on screen.
+	pcApplyRestoredWallPose(this);
+#else
 	if (mCurrStage < mNumStages) {
 		startMotion(mCurrStage);
 		mWayPoint->setFlag(false);
@@ -1269,6 +1298,7 @@ void BuildingItem::doLoad(RandomAccessStream& input)
 	}
 
 	stopMotion();
+#endif
 	C_SAI(this)->start(this, SluiceAI::Sluice_WaitInit);
 	PRINT_KANDO("* DONE\n");
 }
@@ -1296,6 +1326,10 @@ void BuildingItem::doRestore(CreatureInf* info)
 	mCurrStage = info->mObjInfo1;
 	mNumStages = info->mObjInfo2;
 
+#if defined(PIKI_PC_PORT)
+	// startAI parked motion 0. Read the end key from the stage clip itself.
+	pcApplyRestoredWallPose(this);
+#else
 	// Wall still exists and isn't completely destroyed, so block off the waypoint
 	if (mCurrStage < mNumStages) {
 		startMotion(mCurrStage);
@@ -1313,6 +1347,7 @@ void BuildingItem::doRestore(CreatureInf* info)
 
 	// Don't actually animate, just start it to apply the transformation
 	stopMotion();
+#endif
 
 	// Begin the AI
 	C_SAI(this)->start(this, SluiceAI::Sluice_WaitInit);
