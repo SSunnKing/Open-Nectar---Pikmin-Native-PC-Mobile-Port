@@ -159,6 +159,24 @@ option(NECTAR_ONLINE "Build the experimental direct online co-op layer" OFF)
 
 if(PIKMIN_BUILD_TESTS)
     enable_testing()
+    add_executable(texture_pack_catalog_test pc_port/mods/texture_pack_catalog_test.cpp)
+    target_compile_features(texture_pack_catalog_test PRIVATE cxx_std_17)
+    add_test(NAME texture_pack_catalog_test COMMAND texture_pack_catalog_test)
+    add_executable(toast_layout_test pc_port/launcher/toast_layout_test.cpp)
+    target_compile_features(toast_layout_test PRIVATE cxx_std_17)
+    add_test(NAME toast_layout_test COMMAND toast_layout_test)
+    add_executable(settings_pack_test pc_port/launcher/settings_pack_test.cpp pc_port/launcher/settings_model.cpp)
+    target_compile_features(settings_pack_test PRIVATE cxx_std_17)
+    add_test(NAME settings_pack_test COMMAND settings_pack_test)
+    foreach(pack_test texture_pack_catalog_test toast_layout_test settings_pack_test)
+        if(MSVC)
+            target_compile_options(${pack_test} PRIVATE /UNDEBUG)
+        else()
+            target_compile_options(${pack_test} PRIVATE -UNDEBUG)
+        endif()
+    endforeach()
+
+
 endif()
 
 # ─── Which release of the game this binary is built for ───
@@ -956,6 +974,15 @@ if (NOT ANDROID AND PIKMIN_GAME_VERSION STREQUAL "VERSION_GPIP01_00")
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${NECTAR_GAME}>"
                 "$<TARGET_FILE_DIR:${NECTAR_GAME}>/nectar-pal$<TARGET_FILE_SUFFIX:${NECTAR_GAME}>"
         COMMENT "Copying the PAL game as nectar-pal for the launcher")
+endif()
+
+if(PIKMIN_BUILD_TESTS AND NOT ANDROID)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME texture_pack_cli_test COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/texture_pack_cli_test.py" "$<TARGET_FILE:${NECTAR_GAME}>")
+        set_tests_properties(texture_pack_cli_test PROPERTIES TIMEOUT 60)
+    endif()
 endif()
 
 # Standalone first-run launcher. It accepts an original, uncompressed

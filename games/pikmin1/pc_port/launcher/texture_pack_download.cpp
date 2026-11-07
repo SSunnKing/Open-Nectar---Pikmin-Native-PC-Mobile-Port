@@ -53,28 +53,7 @@ void runTexturePackDownload(HubWindow& hub, int game, const fs::path& gameDirect
     if (packs.empty()) return;
     const std::string gameName = game == 0 ? "Pikmin" : "Pikmin 2";
     const fs::path textures = gameDirectory / "Load" / "Textures";
-    const fs::path folder = textures / texturePackFolder(game);
-    // Qué pack dejó instalado el botón (4K, 1080p o HD), para no volver a
-    // ofrecer la descarga como si no hubiera nada.
-    const fs::path installedMarker = folder / ".nectar-pack";
     std::error_code ec;
-
-    if (fs::is_directory(folder, ec)) {
-        std::string installedLabel;
-        {
-            std::ifstream in(installedMarker);
-            if (in) std::getline(in, installedLabel);
-        }
-        const std::string text = installedLabel.empty()
-            ? "A texture pack for " + gameName + " is already installed."
-            : "The " + installedLabel + " pack for " + gameName + " is already installed.";
-        if (hub.ask("HD textures installed",
-                    text + "\nTurn it on or off in the game's settings (Graphics > Texture packs). "
-                           "If it looks wrong or the install failed, download it again.",
-                    "OK", "Download again") != 1) {
-            return;
-        }
-    }
 
     std::size_t pick = 0;
     if (packs.size() > 1) {
@@ -89,6 +68,20 @@ void runTexturePackDownload(HubWindow& hub, int game, const fs::path& gameDirect
         pick = std::size_t(choice);
     }
     const TexturePackDownload& pack = packs[pick];
+    std::string variant;
+#ifndef __ANDROID__
+    if (game == 0) variant = std::string(pack.label).find("4K") != std::string::npos ? "hd-4k" : "hd-1080p";
+#endif
+    const std::string folderId = variant.empty() ? texturePackFolder(game) : variant;
+    const fs::path folder = textures / folderId;
+    const fs::path installedMarker = folder / ".nectar-pack";
+    if (fs::exists(folder, ec)) {
+        hub.ask("HD textures installed", "The " + std::string(pack.label)
+            + " pack is already installed. Choose it in Settings > Texture packs. "
+              "To replace it, delete that pack there first; other installed packs stay.", "OK");
+        return;
+    }
+
 
     // Hace falta sitio para el zip y lo extraído a la vez.
     const std::uint64_t needed = pack.bytes * 2 + (256ull << 20);
@@ -116,7 +109,7 @@ void runTexturePackDownload(HubWindow& hub, int game, const fs::path& gameDirect
         if (local.empty()) return;
         std::string localError;
         const bool done = runPainting(hub, "Installing HD textures", [&] {
-            return install(local, localError);
+            return install(local, variant, localError);
         }, [](std::string&) { return std::uint32_t(101); });
         if (!done) {
             hub.ask("Install failed",
@@ -127,7 +120,7 @@ void runTexturePackDownload(HubWindow& hub, int game, const fs::path& gameDirect
         std::error_code markEc;
         if (fs::is_directory(folder, markEc)) {
             std::ofstream(installedMarker) << pack.label << '\n';
-            std::ofstream(textures / ".activate") << texturePackFolder(game) << '\n';
+            std::ofstream(textures / ".activate") << folderId << '\n';
         }
         hub.ask("HD textures installed",
                 "The pack is active the next time you play " + gameName
@@ -175,10 +168,9 @@ void runTexturePackDownload(HubWindow& hub, int game, const fs::path& gameDirect
         return;
     }
 
-    // 4K y 1080p usan la misma carpeta: fuera la versión anterior.
-    fs::remove_all(folder, ec);
+    // Each desktop variant installs separately; never delete another resolution.
     ok = runPainting(hub, "Installing HD textures", [&] {
-        return install(zip, error);
+        return install(zip, variant, error);
     }, [](std::string&) { return std::uint32_t(101); });
     fs::remove(zip, ec);
     if (!ok || !fs::is_directory(folder, ec)) {
@@ -189,7 +181,7 @@ void runTexturePackDownload(HubWindow& hub, int game, const fs::path& gameDirect
     }
     std::ofstream(installedMarker) << pack.label << '\n';
     // El juego lo activa al arrancar (pc_settings) y borra el aviso.
-    std::ofstream(textures / ".activate") << texturePackFolder(game) << '\n';
+    std::ofstream(textures / ".activate") << folderId << '\n';
     hub.ask("HD textures installed",
             "The " + std::string(pack.label) + " pack is active the next time you play " + gameName
                 + ". You can turn it off in the game's settings (Graphics > Texture packs).",

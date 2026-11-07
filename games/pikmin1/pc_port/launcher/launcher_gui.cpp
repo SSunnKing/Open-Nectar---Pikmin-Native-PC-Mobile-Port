@@ -33,6 +33,7 @@
 #include "launcher_sidebar_layout.h"
 #include "launcher_scroll.h"
 #include "settings_model.h"
+#include "toast_layout.h"
 #include "release_update.h"
 
 #include "imgui.h"
@@ -510,8 +511,12 @@ struct SettingsClient {
     {
         std::string output, failure;
         SettingsSnapshot parsed;
-        const bool ok = platform::runAndCapture(self->game, arguments, self->directory, output, failure)
-                     && parseSettingsDump(output, parsed, failure);
+        const bool executed = platform::runAndCapture(self->game, arguments, self->directory, output, failure);
+        // A rejected install/delete still returns a settings snapshot with a
+        // useful error message. Do not replace it with "exit status 1".
+        std::string parseFailure;
+        const bool ok = parseSettingsDump(output, parsed, parseFailure);
+        if (!ok && executed) failure = parseFailure;
         std::lock_guard<std::mutex> lock(self->mutex);
         if (ok) {
             self->snapshot = std::move(parsed);
@@ -665,6 +670,8 @@ struct Hub {
     std::string moveTarget;  // carpeta nueva elegida
     std::string moveNote;    // aviso bajo el formulario
     std::shared_ptr<MoveJob> moveJob;
+    TexturePackInfo deletingPack;
+    bool awaitingPackResult = false;
     std::string toast;
     float toastTime = 0.0f;
     bool chosen = false;
@@ -1393,6 +1400,7 @@ struct Hub {
 
     void queue(std::vector<std::string> arguments, const char* label = "Saving...")
     {
+        if (!arguments.empty() && arguments[0].find("--texpack-") == 0) awaitingPackResult = true;
         pendingRequest = std::move(arguments);
         pendingLabel = label;
         messageGame = settingsGame;
@@ -1413,15 +1421,19 @@ struct Hub {
     // desde su zip. Se aplica la próxima vez que arranca el juego.
     void drawTexturePacks(const SettingsSnapshot& snap, bool busy)
     {
-        ImGui::PushFont(fonts.caption);
-        ImGui::TextColored(kOrangeDeep, "TEXTURE PACKS");
-        ImGui::PopFont();
-        ImGui::Separator();
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextColored(ImVec4(1.0f, 0.93f, 0.80f, 0.85f),
-                           "Replacement textures for the whole game. Pick the one to use; it applies the next time the game starts.");
-        ImGui::PopTextWrapPos();
-        ImGui::Dummy(ImVec2(0, 6));
+        const bool compact = ImGui::GetContentRegionAvail().x < 420.0f;
+        if (compact) {
+            ImGui::PushFont(fonts.caption);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6, 3));
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 4));
+        } else {
+            ImGui::PushFont(fonts.caption);
+            ImGui::TextColored(kOrangeDeep, "TEXTURE PACKS");
+            ImGui::PopFont();
+            ImGui::Separator();
+        }
+        ImGui::TextUnformatted(busy ? "Updating texture packs..." : "Applies next time the game starts.");
+        ImGui::Dummy(ImVec2(0, compact ? 2.0f : 6.0f));
         ImGui::BeginDisabled(busy);
         const auto option = [&](const char* label, const std::string& name) {
             const bool active = snap.activePack == name;
@@ -1429,16 +1441,76 @@ struct Hub {
                 queue({ "--texpack-activate", name });
             }
         };
-        option("None (original textures)", "");
-        for (const std::string& pack : snap.texturePacks) option(pack.c_str(), pack);
+        option("Off (original textures)", "");
+        if (snap.texturePackDetails.empty()) {
+            for (const std::string& pack : snap.texturePacks) option(pack.c_str(), pack);
+        } else for (const auto& pack : snap.texturePackDetails) {
+            ImGui::PushID(pack.id.c_str());
+            const std::string label = pack.name + " (" + pack.size + ")";
+            option(label.c_str(), pack.id);
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::BeginTooltip();
+                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                ImGui::Text("%s\n%s\nApplies next time the game starts.", pack.path.c_str(), pack.size.c_str());
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
+            }
+            // Stack the delete action at narrow widths, rather than overlap or
+            // truncate the pack name. Disabled unsafe packs explain why.
+            const float deleteWidth = compact ? 76.0f : 100.0f;
+            if (ImGui::GetContentRegionAvail().x > ImGui::GetItemRectSize().x + deleteWidth + 12.0f)
+                ImGui::SameLine(ImGui::GetContentRegionMax().x - deleteWidth);
+            if (glassButton("Delete...", ImVec2(deleteWidth, compact ? 26.0f : 34.0f), false, busy || !pack.removable)) {
+                deletingPack = pack;
+                ImGui::OpenPopup("Delete texture pack?");
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::BeginTooltip();
+                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                ImGui::Text("%s\n%s\n%s", pack.path.c_str(), pack.size.c_str(),
+                    pack.removable ? "Deletes only this pack. You can download it again." : "Deletion unavailable: unsafe links or unreadable files.");
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
+            }
+            ImGui::SetNextWindowSize(ImVec2(std::min(560.0f, ImGui::GetIO().DisplaySize.x - 32.0f), 0), ImGuiCond_Always);
+            if (ImGui::BeginPopupModal("Delete texture pack?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
+                ImGui::Text("Delete %s (%s)?", deletingPack.name.c_str(), deletingPack.size.c_str());
+                ImGui::TextUnformatted("Folder to permanently delete:");
+                // Read-only, selectable path: long paths remain accessible by
+                // scrolling/copying and in the full-path tooltip.
+                ImGui::SetNextItemWidth(-1);
+                std::vector<char> path(deletingPack.path.begin(), deletingPack.path.end()); path.push_back(0);
+                ImGui::InputText("##deletePath", path.data(), path.size(), ImGuiInputTextFlags_ReadOnly);
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                    ImGui::SetTooltip("%s", deletingPack.path.c_str());
+                }
+                ImGui::TextUnformatted(snap.activePack == deletingPack.id
+                    ? "This pack is selected. Textures will switch to Off." : "Other installed packs will stay.");
+                ImGui::TextUnformatted("Close the game first. Saves and discs stay.");
+                if (glassButton("Cancel", ImVec2(110, 38))) ImGui::CloseCurrentPopup();
+                ImGui::SameLine();
+                if (glassButton("Delete pack", ImVec2(130, 38), true)) {
+                    queue({ "--texpack-delete", deletingPack.id }, "Deleting the pack...");
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+            ImGui::PopID();
+        }
         if (snap.texturePacks.empty()) ImGui::TextColored(ImVec4(0.62f, 0.58f, 0.44f, 1.0f), "No packs installed yet.");
         ImGui::EndDisabled();
         ImGui::Dummy(ImVec2(0, 10));
-        if (glassButton(filePickLabel("texpack", "Install a pack from a .zip").c_str(), role::kWide, 46.0f, false,
+        if (glassButton(filePickLabel("texpack", "Install a pack from a .zip").c_str(),
+                        ImVec2(std::min(buttons::buttonWidth(role::kWide), ImGui::GetContentRegionAvail().x), compact ? 34.0f : 46.0f), false,
                         busy || filePickOpen())) {
             startFilePick("texpack", "Choose the texture pack zip", "Texture pack zip", "*.zip *.ZIP",
                           [this](const fs::path& zip) { queue({ "--texpack-install", zip.string() }, "Installing the pack..."); });
+        }        if (compact) {
+            ImGui::PopStyleVar(2);
+            ImGui::PopFont();
         }
+
     }
 
     // Modelos HD: uno por fila, cada uno se instala desde su zip.
@@ -1943,6 +2015,12 @@ struct Hub {
             return;
         }
         const SettingsSnapshot& snap = settings->snapshot;
+        if (awaitingPackResult && !busy && pendingRequest.empty()) {
+            if (!snap.message.empty()) notify(snap.message);
+            else if (!settings->error.empty()) notify(settings->error);
+            toastTime = 8.0f;
+            awaitingPackResult = false;
+        }
         const std::vector<SettingsGroup>& groups = snap.groups;
         if (groups.empty()) return;
         // Los paquetes antiguos de Pikmin 1 añaden dos páginas administrativas.
@@ -1966,7 +2044,11 @@ struct Hub {
         const float bottom = size.y - 64.0f;
         // Algunas opciones de desarrollo documentan varias teclas: con sitio
         // caben cuatro líneas. En ventanas bajas la caja cede ante las filas.
-        const SettingsPanelFit panelFit = fitSettingsPanel(bottom - (top + 24.0f));
+        SettingsPanelFit panelFit = fitSettingsPanel(bottom - (top + 24.0f));
+        if (!snap.exactF1 && settingsGroup == packsPage) {
+            panelFit.helpH = 0;
+            panelFit.rowsH = std::max(1.0f, bottom - (top + 24.0f));
+        }
         const float helpH = panelFit.helpH;
 
         // Grupos a la izquierda, como pestañas verticales. Tienen que acabar por
@@ -2566,12 +2648,27 @@ struct Hub {
         ImDrawList* dl = ImGui::GetForegroundDrawList();
         if (toastTime > 0.0f) {
             const float alpha = std::min(1.0f, toastTime);
-            const ImVec2 t = fonts.body->CalcTextSizeA(19.0f, FLT_MAX, 0.0f, toast.c_str());
-            const ImVec2 a((size.x - t.x) * 0.5f - 20.0f, size.y - 96.0f);
-            const ImVec2 b((size.x + t.x) * 0.5f + 20.0f, size.y - 56.0f);
-            dl->AddRectFilled(a, b, col(ImVec4(0.04f, 0.16f, 0.06f, 0.95f), alpha), 20.0f);
-            dl->AddRect(a, b, col(kOrange, alpha), 20.0f, 0, 2.0f);
-            dl->AddText(fonts.body, 19.0f, ImVec2(a.x + 20.0f, a.y + 9.0f), col(kOrange, alpha), toast.c_str());
+            const float padding = std::min(20.0f, size.x * 0.04f);
+            const float width = std::max(1.0f, size.x - padding * 2.0f - 24.0f);
+            const auto measure = [&](const std::string& text) {
+                return fonts.body->CalcTextSizeA(19.0f, FLT_MAX, 0.0f, text.c_str()).x;
+            };
+            const std::string shown = fitToast(toast, width, measure);
+            const ImVec2 t = fonts.body->CalcTextSizeA(19.0f, FLT_MAX, 0.0f, shown.c_str());
+            const ImVec2 a(std::max(4.0f, (size.x - t.x) * 0.5f - padding), size.y - 58.0f - t.y - 18.0f);
+            const ImVec2 b(std::min(size.x - 4.0f, a.x + t.x + padding * 2.0f), a.y + t.y + 18.0f);
+            dl->AddRectFilled(a, b, col(ImVec4(0.04f, 0.16f, 0.06f, 0.95f), alpha), 16.0f);
+            dl->AddRect(a, b, col(kOrange, alpha), 16.0f, 0, 2.0f);
+            dl->PushClipRect(a, b, true);
+            dl->AddText(fonts.body, 19.0f, ImVec2(a.x + padding, a.y + 9.0f), col(kOrange, alpha), shown.c_str());
+            dl->PopClipRect();
+            if (ImGui::IsMouseHoveringRect(a, b)) {
+                ImGui::BeginTooltip();
+                ImGui::PushTextWrapPos(std::min(600.0f, size.x - 32.0f));
+                ImGui::TextUnformatted(toast.c_str());
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
+            }
         }
     }
 

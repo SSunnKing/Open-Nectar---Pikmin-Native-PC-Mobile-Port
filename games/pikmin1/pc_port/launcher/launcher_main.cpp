@@ -1526,9 +1526,9 @@ int main(int argc, char** argv)
                         const pikmin::launcher::GameInstall game = hubState.games[int(choice.game)];
                         if (!game.installed || game.executable.empty()) continue;
                         pikmin::launcher::runTexturePackDownload(*home, int(choice.game), game.directory,
-                            [&game](const fs::path& zip, std::string& error) {
+                            [&game](const fs::path& zip, const std::string& variant, std::string& error) {
                                 std::string output;
-                                return platform::runAndCapture(game.executable, { "--texpack-install", zip.string() },
+                                return platform::runAndCapture(game.executable, { "--texpack-install", zip.string(), variant },
                                                                game.directory, output, error);
                             });
                         continue;

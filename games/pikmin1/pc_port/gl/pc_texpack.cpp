@@ -1,5 +1,6 @@
 #include "pc_texpack.h"
 #include "pc_texture_mips.h"
+#include "../mods/texture_pack_catalog.h"
 
 #include <algorithm>
 #include <cctype>
@@ -65,14 +66,6 @@ namespace fs = std::filesystem;
 #ifndef GL_TEXTURE_MAX_LEVEL
 #define GL_TEXTURE_MAX_LEVEL 0x813D
 #endif
-
-// GameIDs de Pikmin 1: el launcher conoce la región; aquí se admite el id de 6
-// letras, el de 3 (el prefijo de región libre que Dolphin acepta, incluyendo
-// el "GPI" a secas que usan los packs de la calle) y "all" (comodín), sin
-// distinguir mayúsculas/minúsculas.
-static const char* const kGameIdCandidates[] = {
-    "GPIE01", "GPIP01", "GPIJ01", "GPIE", "GPIP", "GPIJ", "GPI", "all",
-};
 
 static bool sRequested = false;
 static bool sEnabled = false;
@@ -192,22 +185,8 @@ const std::string& pc_texpack_selected_pack(void)
 std::vector<std::string> pc_texpack_list_packs(void)
 {
     std::vector<std::string> packs;
-    std::error_code ec;
-    const fs::path root = fs::path("Load") / "Textures";
-    if (!fs::is_directory(root, ec)) return packs;
-    fs::directory_iterator dit(root, ec);
-    for (; dit != fs::directory_iterator(); dit.increment(ec)) {
-        if (ec) { ec.clear(); continue; }
-        if (!dit->is_directory()) continue;
-        std::string name = dit->path().filename().string();
-        std::string lower = name;
-        for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        for (const char* cand : kGameIdCandidates) {
-            std::string candidate = cand;
-            for (char& c : candidate) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            if (lower == candidate) { packs.push_back(name); break; }
-        }
-    }
+    for (const auto& pack : nectar::textures::discover(fs::path("Load") / "Textures", false))
+        packs.push_back(pack.id);
     return packs;
 }
 
@@ -255,27 +234,20 @@ void pc_texpack_init(void)
         return;
     }
 
-    // Cada carpeta de primer nivel es un candidato de GameID. Con un pack
-    // elegido en el menú F1 (sSelectedPack), solo ese se indexa: activar un
-    // pack desactiva cualquier otro, y así la opción significa lo que dice.
-    std::string selectedLower = sSelectedPack;
-    for (char& c : selectedLower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     std::vector<fs::path> packDirs;
-    fs::directory_iterator dit(root, ec);
-    for (; dit != fs::directory_iterator(); dit.increment(ec)) {
-        if (ec) { ec.clear(); continue; }
-        if (!dit->is_directory()) continue;
-        std::string name = dit->path().filename().string();
-        std::string lower = name;
-        for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        const bool matchesSelected = selectedLower.empty() || lower == selectedLower;
-        for (const char* cand : kGameIdCandidates) {
-            std::string candidate = cand;
-            for (char& c : candidate) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            if (lower != candidate || !matchesSelected) continue;
-            packDirs.push_back(dit->path());
-            break;
-        }
+    for (const auto& pack : nectar::textures::discover(root, false)) {
+        if (!sSelectedPack.empty() && nectar::textures::lower(pack.id) != nectar::textures::lower(sSelectedPack)) continue;
+        // Managed variants contain the original GameID folders; legacy packs
+        // already are GameID folders. Never merge two managed variants.
+        if (nectar::textures::managedId(pack.id)) {
+            if (sSelectedPack.empty()) continue;
+            fs::directory_iterator it(pack.path, ec), end;
+            for (; !ec && it != end; it.increment(ec)) {
+                if (nectar::textures::gameId(it->path().filename().string())
+                    && it->symlink_status(ec).type() == fs::file_type::directory)
+                    packDirs.push_back(it->path());
+            }
+        } else packDirs.push_back(pack.path);
     }
     if (packDirs.empty()) {
         printf("[PC TexPack] no GPIE01/GPI*/all folder under %s\n", root.string().c_str());
@@ -289,7 +261,7 @@ void pc_texpack_init(void)
         fs::recursive_directory_iterator rit(dir, fs::directory_options::skip_permission_denied, ec);
         for (; rit != fs::recursive_directory_iterator(); rit.increment(ec)) {
             if (ec) { ec.clear(); continue; }
-            if (!rit->is_regular_file()) continue;
+            if (rit->symlink_status(ec).type() != fs::file_type::regular || ec) continue;
             const std::string ext = lower_ext(rit->path());
             if (ext == ".dds" || ext == ".png")
                 index_texture_file(rit->path());
