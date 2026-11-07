@@ -1457,10 +1457,12 @@ struct Hub {
             }
             // Stack the delete action at narrow widths, rather than overlap or
             // truncate the pack name. Disabled unsafe packs explain why.
-            const float deleteWidth = compact ? 76.0f : 100.0f;
+            const float deleteHeight = compact ? 30.0f : 34.0f;
+            const float deleteWidth = std::max(buttons::buttonWidth(role::kTexturePackDelete),
+                buttons::fitWidth("Delete...", deleteHeight, buttons::kLabelSize, measureLabel()));
             if (ImGui::GetContentRegionAvail().x > ImGui::GetItemRectSize().x + deleteWidth + 12.0f)
                 ImGui::SameLine(ImGui::GetContentRegionMax().x - deleteWidth);
-            if (glassButton("Delete...", ImVec2(deleteWidth, compact ? 26.0f : 34.0f), false, busy || !pack.removable)) {
+            if (glassButton("Delete...", ImVec2(deleteWidth, deleteHeight), false, busy || !pack.removable)) {
                 deletingPack = pack;
                 ImGui::OpenPopup("Delete texture pack?");
             }
@@ -1474,6 +1476,7 @@ struct Hub {
             }
             ImGui::SetNextWindowSize(ImVec2(std::min(560.0f, ImGui::GetIO().DisplaySize.x - 32.0f), 0), ImGuiCond_Always);
             if (ImGui::BeginPopupModal("Delete texture pack?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
+                ImGui::PushFont(fonts.caption);
                 ImGui::Text("Delete %s (%s)?", deletingPack.name.c_str(), deletingPack.size.c_str());
                 ImGui::TextUnformatted("Folder to permanently delete:");
                 // Read-only, selectable path: long paths remain accessible by
@@ -1494,6 +1497,7 @@ struct Hub {
                     queue({ "--texpack-delete", deletingPack.id }, "Deleting the pack...");
                     ImGui::CloseCurrentPopup();
                 }
+                ImGui::PopFont();
                 ImGui::EndPopup();
             }
             ImGui::PopID();

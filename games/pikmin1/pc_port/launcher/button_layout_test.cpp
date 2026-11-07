@@ -57,6 +57,9 @@ const std::vector<Use>& launcherButtons()
         { "Reset all", role::kSettingsGroup, 44 }, { "Sure? Click", role::kSettingsGroup, 44 },
         { "Retry", role::kSmallAction, 44 },
         { "Install a pack from a .zip", role::kWide, 46 },
+        { "Install a pack from a .zip", role::kWide, 34 },
+        { "Delete...", role::kTexturePackDelete, 30 },
+        { "Delete...", role::kTexturePackDelete, 34 },
         { "On", role::kToggle, 40 }, { "Off", role::kToggle, 40 },
         { "Replace...", role::kSettingsRow, 40 }, { "Install...", role::kSettingsRow, 40 },
         // Move Install.
