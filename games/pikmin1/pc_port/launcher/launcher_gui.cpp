@@ -34,6 +34,7 @@
 #include "launcher_scroll.h"
 #include "settings_model.h"
 #include "toast_layout.h"
+#include "texture_pack_row.h"
 #include "release_update.h"
 
 #include "imgui.h"
@@ -1441,39 +1442,41 @@ struct Hub {
                 queue({ "--texpack-activate", name });
             }
         };
-        option("Off (original textures)", "");
+        const float rowWidth = ImGui::GetContentRegionAvail().x;
+        const float deleteHeight = compact ? 30.0f : 34.0f;
+        const float deleteWidth = std::max(buttons::buttonWidth(role::kTexturePackDelete),
+            buttons::fitWidth("Delete...", deleteHeight, buttons::kLabelSize, measureLabel()));
+        const ImVec2 actionSize(deleteWidth, deleteHeight);
+        texturePackRow(rowWidth, actionSize, [&] { option("Off (original textures)", ""); }, [] {});
         if (snap.texturePackDetails.empty()) {
-            for (const std::string& pack : snap.texturePacks) option(pack.c_str(), pack);
+            for (const std::string& pack : snap.texturePacks)
+                texturePackRow(rowWidth, actionSize, [&] { option(pack.c_str(), pack); }, [] {});
         } else for (const auto& pack : snap.texturePackDetails) {
             ImGui::PushID(pack.id.c_str());
             const std::string label = pack.name + " (" + pack.size + ")";
-            option(label.c_str(), pack.id);
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                ImGui::BeginTooltip();
-                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
-                ImGui::Text("%s\n%s\nApplies next time the game starts.", pack.path.c_str(), pack.size.c_str());
-                ImGui::PopTextWrapPos();
-                ImGui::EndTooltip();
-            }
-            // Stack the delete action at narrow widths, rather than overlap or
-            // truncate the pack name. Disabled unsafe packs explain why.
-            const float deleteHeight = compact ? 30.0f : 34.0f;
-            const float deleteWidth = std::max(buttons::buttonWidth(role::kTexturePackDelete),
-                buttons::fitWidth("Delete...", deleteHeight, buttons::kLabelSize, measureLabel()));
-            if (ImGui::GetContentRegionAvail().x > ImGui::GetItemRectSize().x + deleteWidth + 12.0f)
-                ImGui::SameLine(ImGui::GetContentRegionMax().x - deleteWidth);
-            if (glassButton("Delete...", ImVec2(deleteWidth, deleteHeight), false, busy || !pack.removable)) {
-                deletingPack = pack;
-                ImGui::OpenPopup("Delete texture pack?");
-            }
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                ImGui::BeginTooltip();
-                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
-                ImGui::Text("%s\n%s\n%s", pack.path.c_str(), pack.size.c_str(),
-                    pack.removable ? "Deletes only this pack. You can download it again." : "Deletion unavailable: unsafe links or unreadable files.");
-                ImGui::PopTextWrapPos();
-                ImGui::EndTooltip();
-            }
+            texturePackRow(rowWidth, actionSize, [&] {
+                option(label.c_str(), pack.id);
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    ImGui::BeginTooltip();
+                    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                    ImGui::Text("%s\n%s\nApplies next time the game starts.", pack.path.c_str(), pack.size.c_str());
+                    ImGui::PopTextWrapPos();
+                    ImGui::EndTooltip();
+                }
+            }, [&] {
+                if (glassButton("Delete...", ImVec2(deleteWidth, deleteHeight), false, busy || !pack.removable)) {
+                    deletingPack = pack;
+                    ImGui::OpenPopup("Delete texture pack?");
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    ImGui::BeginTooltip();
+                    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                    ImGui::Text("%s\n%s\n%s", pack.path.c_str(), pack.size.c_str(),
+                        pack.removable ? "Deletes only this pack. You can download it again." : "Deletion unavailable: unsafe links or unreadable files.");
+                    ImGui::PopTextWrapPos();
+                    ImGui::EndTooltip();
+                }
+            });
             ImGui::SetNextWindowSize(ImVec2(std::min(560.0f, ImGui::GetIO().DisplaySize.x - 32.0f), 0), ImGuiCond_Always);
             if (ImGui::BeginPopupModal("Delete texture pack?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
                 ImGui::PushFont(fonts.caption);

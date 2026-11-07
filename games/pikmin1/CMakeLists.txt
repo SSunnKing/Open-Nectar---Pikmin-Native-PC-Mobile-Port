@@ -1331,6 +1331,14 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
         target_compile_options(launcher_cursor_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
         target_link_libraries(launcher_cursor_test PRIVATE launcher_imgui)
         add_test(NAME launcher_cursor_test COMMAND launcher_cursor_test)
+
+        add_executable(texture_pack_row_test pc_port/launcher/texture_pack_row_test.cpp
+            "${LAUNCHER_EMBED_DIR}/font_fredoka.h")
+        set_property(TARGET texture_pack_row_test PROPERTY INCLUDE_DIRECTORIES "")
+        target_include_directories(texture_pack_row_test PRIVATE "${LAUNCHER_EMBED_DIR}")
+        target_compile_options(texture_pack_row_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+        target_link_libraries(texture_pack_row_test PRIVATE launcher_imgui)
+        add_test(NAME texture_pack_row_test COMMAND texture_pack_row_test)
     endif()
 
     add_executable(launcher_scroll_test pc_port/launcher/launcher_scroll_test.cpp)
