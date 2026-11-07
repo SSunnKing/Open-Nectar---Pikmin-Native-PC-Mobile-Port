@@ -13,6 +13,7 @@
 #include "PlayerState.h"
 #include "gameflow.h"
 #include "teki.h"
+#include "sysNew.h"
 
 #include <cstdio>
 #include <cstring>
@@ -99,6 +100,14 @@ void mix_motion(Buf& b, Creature* c)
 // Fields every Creature carries that the seven columns do not mix.
 void creature_extra(Buf& x, Creature* c)
 {
+	// These fields affect future high-rate motion even when current position
+	// and velocity agree. Keep the original 30 Hz diagnostic schema intact.
+	if (PcBallisticClock::enabled(gsys->getFrameTime())) {
+		x.f32(c->mPcBallisticClock.elapsed());
+		x.vec(c->mPcVolatileTransport);
+		x.vec(c->mPcVolatileInput);
+		x.u32(c->mPcVolatileMode);
+	}
 	x.u32(c->mCreatureFlags);
 	x.f32(c->mHealth);
 	x.vec(c->mVolatileVelocity);
@@ -164,6 +173,7 @@ uint64_t xhash_piki(Piki* p)
 uint64_t xhash_teki(Teki* t)
 {
 	Buf x;
+	if (PcBallisticClock::enabled(gsys->getFrameTime())) x.f32(t->mPcActionBallisticClock.elapsed());
 	creature_extra(x, t);
 	x.s32(t->mDeadState);
 	x.s32(t->mReturnStateID);

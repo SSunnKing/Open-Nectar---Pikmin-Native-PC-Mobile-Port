@@ -29,11 +29,11 @@ class CheckerTests(unittest.TestCase):
 
     def test_disc_values_pass(self):
         for case in EXPECTED:
-            for rate in (30, 60):
+            for rate in (30, 60, 120):
                 self.assertEqual(self.write(case, rate), [], (case, rate))
 
     def test_float_noise_within_tolerance(self):
-        self.assertEqual(self.write(change={'peak': 68.04, 'vs': 289.91}), [])
+        self.assertEqual(self.write(change={'peak': 61.33, 'vs': 289.91}), [])
 
     def test_flight_tick_off_by_one(self):
         self.assertRegex(' '.join(self.write(change={'f': 70})), r'throw 3 .*grab/release/flight \(2, 3, 70\)')
@@ -62,7 +62,7 @@ class CheckerTests(unittest.TestCase):
         self.assertEqual(self.write('yellow', 30), [])
         self.assertTrue(self.write('yellow', 30, change={'f': 27, 'yg': 107.62}))
         self.assertTrue(self.write('yellow', 30, change={'f': 22}))
-        self.assertTrue(self.write('yellow', 60, change={'peak': 104.40}))
+        self.assertTrue(self.write('yellow', 60, change={'peak': 113.16}))
         self.assertTrue(self.write('yellow', 60, change={'vs': 290.0}))
 
 

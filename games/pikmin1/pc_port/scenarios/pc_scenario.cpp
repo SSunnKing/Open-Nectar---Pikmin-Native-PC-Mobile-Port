@@ -274,7 +274,7 @@ void startWatchdog(const char* name)
 void usage(const char* msg)
 {
 	std::fprintf(stderr, "[scenario] %s\n", msg);
-	std::fprintf(stderr, "usage: nectar --scenario <name> [--scenario-tick-rate 30|60] [--scenario-visible] [--scenario-realtime] [--scenario-handoff] [--scenario-screenshot [boot:|between:]tick:path]... [--scenario-card-delay-ms ms] [--scenario-card-async]\n");
+	std::fprintf(stderr, "usage: nectar --scenario <name> [--scenario-tick-rate 30|60|120] [--scenario-visible] [--scenario-realtime] [--scenario-handoff] [--scenario-screenshot [boot:|between:]tick:path]... [--scenario-card-delay-ms ms] [--scenario-card-async]\n");
 	std::fprintf(stderr, "scenarios:");
 	for (PcScenario* s : pc_scenario_all()) {
 		if (!s->testOnly()) std::fprintf(stderr, " %s", s->name());
@@ -646,12 +646,12 @@ int pc_scenario_parse_argv(int argc, char** argv)
 			name = argv[++i];
 		} else if (std::strcmp(argv[i], "--scenario-tick-rate") == 0) {
 			if (i + 1 >= argc) {
-				usage("--scenario-tick-rate needs 30 or 60");
+				usage("--scenario-tick-rate needs 30, 60 or 120");
 				return PC_SCENARIO_EXIT_USAGE;
 			}
 			rate = std::atoi(argv[++i]);
-			if (rate != 30 && rate != 60) {
-				usage("--scenario-tick-rate must be 30 or 60");
+			if (rate != 30 && rate != 60 && rate != 120) {
+				usage("--scenario-tick-rate must be 30, 60 or 120");
 				return PC_SCENARIO_EXIT_USAGE;
 			}
 		} else if (std::strcmp(argv[i], "--scenario-visible") == 0) {
@@ -802,7 +802,7 @@ int pc_scenario_parse_argv(int argc, char** argv)
 	// unfocused application unless told otherwise.
 	if (sProbe.active) SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 	pc_settings_scenario_enable();
-	pc_settings_scenario_set_fps_mode(rate == 60 ? 1 : 0);
+	pc_settings_scenario_set_fps_mode(rate == 120 ? 2 : (rate == 60 ? 1 : 0));
 	// Before the stage build: GameCoreSection sizes PikiMgr, PikiHeadMgr and CPlate from it.
 	if (sScenario->pikiLimit() > 0) pc_settings_scenario_set_piki_limit(sScenario->pikiLimit());
 	if (windowWidth > 0) pc_settings_scenario_set_window_size(windowWidth, windowHeight);

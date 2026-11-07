@@ -497,6 +497,7 @@ if (PIKMIN_BUILD_SCENARIOS)
         pc_port/scenarios/scenario_day_clock.cpp
         pc_port/scenarios/scenario_demo_timers.cpp
         pc_port/scenarios/scenario_throw_levels.cpp
+        pc_port/scenarios/scenario_ballistic.cpp
         pc_port/scenarios/scenario_whistle_radius.cpp
         pc_port/scenarios/scenario_navi_invincible.cpp
         pc_port/scenarios/scenario_whistle_gather_release.cpp
@@ -1309,6 +1310,7 @@ install(TARGETS ${NECTAR_GAME} RUNTIME DESTINATION bin)
 
 # Tests del launcher: necesitan tanto los tests habilitados como el launcher.
 if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
+
     add_executable(gamecube_image_test
         pc_port/launcher/gamecube_image_test.cpp)
     target_link_libraries(gamecube_image_test PRIVATE pikmin_disc_image)
@@ -1482,6 +1484,10 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
 endif()
 
 if(PIKMIN_BUILD_TESTS)
+    add_executable(pc_ballistic_test pc_port/timing/pc_ballistic_test.cpp)
+    target_include_directories(pc_ballistic_test PRIVATE pc_port/timing)
+    target_compile_options(pc_ballistic_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_ballistic_test COMMAND pc_ballistic_test)
     add_executable(pc_bundle_compat_test pc_port/pc_bundle_compat_test.cpp)
     target_include_directories(pc_bundle_compat_test PRIVATE pc_port)
     target_compile_options(pc_bundle_compat_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
@@ -2505,7 +2511,7 @@ if(PIKMIN_BUILD_SCENARIOS)
     # Disc-free W3 scenarios (coverage/milestones.md, issue #95), name:stage:rates.
     foreach(entry pikmin_cap:sandbox_objects:30,60 pikmin_cap_1:sandbox_objects:30,60
         pikmin_cap_250:sandbox_objects:30,60 pikmin_cap_999:sandbox_objects:30,60
-        day_clock:sandbox:30,60 demo_timers:practice:30,60 throw_levels:sandbox:30,60
+        day_clock:sandbox:30,60 demo_timers:practice:30,60 throw_levels:sandbox:30,60,120
         whistle_radius:sandbox:30,60 navi_invincible:sandbox:30,60
         # Disc-free W4 (issue #96): the real whistle, gather and release paths.
         whistle_gather_release:sandbox:30,60 whistle_pluck_held:sandbox:30,60 whistle_delay:sandbox:30,60 bulborb_fight:sandbox_objects:30,60
@@ -2536,6 +2542,60 @@ if(PIKMIN_BUILD_SCENARIOS)
         endforeach()
     endforeach()
 
+    # Controlled real movement probes (#157), compared at shared reference times.
+    foreach(scenario ballistic_flower_negative ballistic_flower_apex_impulse ballistic_fall ballistic_flick ballistic_launch ballistic_impulse ballistic_zero_gravity ballistic_drag ballistic_volatile ballistic_scripted ballistic_enemy)
+        foreach(rate 30 60 120)
+            add_test(NAME scenario_${scenario}_${rate}
+                COMMAND ${CMAKE_COMMAND} -DGAME=$<TARGET_FILE:${NECTAR_GAME}>
+                    -DSCENARIO=${scenario} -DRATE=${rate}
+                    -DALLOWLIST=${CMAKE_CURRENT_SOURCE_DIR}/tools/scenarios/standin-open-allowlist.txt
+                    -DLOG_DIR=${CMAKE_CURRENT_BINARY_DIR}/scenario-logs
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/scenarios/run_standin_scenario.cmake)
+            set_tests_properties(scenario_${scenario}_${rate} PROPERTIES
+                FIXTURES_REQUIRED scenario_standin_tree
+                WORKING_DIRECTORY "${PIKMIN_STANDIN_DATA}"
+                ENVIRONMENT "PIKMIN_SCENARIO_DATA_DIR=${PIKMIN_STANDIN_DATA};PIKMIN_SCENARIO_STAGE=stages/sandbox_objects.ini;PIKMIN_BALLISTIC_SPOT=-350,350"
+                TIMEOUT 600)
+            if(scenario MATCHES "^ballistic_flower_")
+                set_property(TEST scenario_${scenario}_${rate} APPEND PROPERTY ENVIRONMENT
+                    "PIKMIN_BALLISTIC_GLIDE_NOISE_ZERO=1")
+            endif()
+        endforeach()
+    endforeach()
+
+    # These events occur inside an original interval and assert their own segment oracle.
+    # A30Hz run cannot place the event at a half/quarter reference tick.
+    foreach(scenario ballistic_gravity_toggle ballistic_subtick_impulse)
+        foreach(rate 60 120)
+            add_test(NAME scenario_${scenario}_${rate}
+                COMMAND ${CMAKE_COMMAND} -DGAME=$<TARGET_FILE:${NECTAR_GAME}>
+                    -DSCENARIO=${scenario} -DRATE=${rate}
+                    -DALLOWLIST=${CMAKE_CURRENT_SOURCE_DIR}/tools/scenarios/standin-open-allowlist.txt
+                    -DLOG_DIR=${CMAKE_CURRENT_BINARY_DIR}/scenario-logs
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/scenarios/run_standin_scenario.cmake)
+            set_tests_properties(scenario_${scenario}_${rate} PROPERTIES
+                FIXTURES_REQUIRED scenario_standin_tree
+                WORKING_DIRECTORY "${PIKMIN_STANDIN_DATA}"
+                ENVIRONMENT "PIKMIN_SCENARIO_DATA_DIR=${PIKMIN_STANDIN_DATA};PIKMIN_SCENARIO_STAGE=stages/sandbox_objects.ini;PIKMIN_BALLISTIC_SPOT=-350,350"
+                TIMEOUT 600)
+        endforeach()
+    endforeach()
+
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME scenario_ballistic_checker_self
+        COMMAND ${Python3_EXECUTABLE} -m unittest discover
+            -s ${CMAKE_CURRENT_SOURCE_DIR}/tools/scenarios -p test_check_ballistic.py)
+    set(ballistic_probe_tests "")
+    foreach(probe flower_negative flower_apex_impulse fall flick launch impulse zero_gravity drag volatile scripted enemy)
+        foreach(rate 30 60 120)
+            list(APPEND ballistic_probe_tests scenario_ballistic_${probe}_${rate})
+        endforeach()
+    endforeach()
+    add_test(NAME ballistic_cross_rate
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scenarios/check_ballistic.py
+            ${CMAKE_CURRENT_BINARY_DIR}/scenario-logs)
+    set_tests_properties(ballistic_cross_rate PROPERTIES DEPENDS "${ballistic_probe_tests}")
+
     # Disc-free W7 scenarios (coverage/milestones.md, issue #98), name:stage:rates.
     foreach(entry enemy_kills:sandbox_all_objects:30,60 onion_menu_transfer:sandbox_objects:30,60 navi_states:sandbox:30,60 gate_break:sandbox_all_objects:30,60)
         string(REPLACE ":" ";" parts "${entry}")
@@ -2564,7 +2624,7 @@ if(PIKMIN_BUILD_SCENARIOS)
     # tools/scenarios/check_throw_flight.py asserts every throw of these logs against the
     # disc-verified grab, release and flight ticks, peak height and launch speed.
     foreach(scenario throw_flight_leaf throw_flight_bud throw_flight_flower throw_flight_yellow)
-        foreach(rate 30 60)
+        foreach(rate 30 60 120)
             add_test(NAME scenario_${scenario}_${rate}
                 COMMAND ${CMAKE_COMMAND}
                     -DGAME=$<TARGET_FILE:${NECTAR_GAME}>

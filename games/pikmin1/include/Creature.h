@@ -13,6 +13,7 @@
 #include "types.h"
 #if defined(PIKI_PC_PORT)
 #include "timing/pc_render_phase.h"
+#include "timing/pc_ballistic.h"
 #include "netplay/pc_netplay_det.h"
 #endif
 
@@ -203,6 +204,14 @@ public:
 	bool getAvoid(immut Vector3f&, immut Vector3f&);
 	void moveRotation(f32);
 	void moveNew(f32);
+	void moveNewStep(f32, f32);
+	bool usesGravity();
+#if defined(PIKI_PC_PORT)
+	PcBallisticClock mPcBallisticClock;
+	Vector3f mPcVolatileTransport { 0.0f, 0.0f, 0.0f };
+	Vector3f mPcVolatileInput { 0.0f, 0.0f, 0.0f };
+	u32 mPcVolatileMode = 0;
+#endif
 	Plane* getNearestPlane(CollTriInfo*);
 	void interactStickers(Creature*, immut Interaction&, immut Condition*);
 	void killStickers(Creature*, immut Condition*, int);

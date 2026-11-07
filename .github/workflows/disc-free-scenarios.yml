@@ -341,11 +341,17 @@ jobs:
         run: |
           mkdir -p shard-out/scenario-logs shard-out/Testing/Temporary
           for f in build/pikmin1/scenario-logs/*.hash.log \
+                   build/pikmin1/scenario-logs/scenario_ballistic_*.log \
                    build/pikmin1/scenario-logs/scenario_throw_release_*.log \
                    build/pikmin1/scenario-logs/scenario_throw_flight_*.log; do
             if [ -f "$f" ]; then cp "$f" shard-out/scenario-logs/; fi
           done
           if [ -d build/pikmin1/scenario-evidence ]; then cp -R build/pikmin1/scenario-evidence shard-out/; fi
+          # Hosted tool patch versions can differ between runners. Retain each
+          # shard's original cache without treating it as a shared simulation log.
+          if [ -f shard-out/scenario-evidence/CMakeCache.txt ]; then
+            mv shard-out/scenario-evidence/CMakeCache.txt "shard-out/scenario-evidence/CMakeCache_shard${SHARD}.txt"
+          fi
           if [ -d build/pikmin1/shard ]; then cp -R build/pikmin1/shard shard-out/; fi
           if [ -f build/pikmin1/Testing/Temporary/LastTest.log ]; then
             cp build/pikmin1/Testing/Temporary/LastTest.log shard-out/Testing/Temporary/
@@ -555,8 +561,13 @@ jobs:
         if: ${{ !cancelled() && !contains(env.SCENARIO_SKIP_OS, matrix.runner_os) }}
         run: bash games/pikmin1/tools/scenarios/ci_k_summary.sh merged "${{ matrix.name }}, native JAudio off"
 
+      # Aggregate comparisons need the complete log set, not one CTest shard.
+      - name: Ballistic parity against the 30 Hz reference
+        if: ${{ !cancelled() && !contains(env.SCENARIO_SKIP_OS, matrix.runner_os) }}
+        run: python3 games/pikmin1/tools/scenarios/check_ballistic.py merged/scenario-logs
+
       # The throw itself on the stand-in tree, held to the disc: every throw of
-      # throw_flight_{leaf,bud,flower,yellow} at 30 and 60 Hz must have the disc's grab,
+      # throw_flight_{leaf,bud,flower,yellow} at 30/60/120 Hz must retain the measured grab,
       # release and flight ticks exactly, its peak height within 0.05 and its launch
       # speed within 0.1 (check_throw_flight.py has the values and where they come
       # from). The 2.6 s hold and throw_cadence are not asserted yet.

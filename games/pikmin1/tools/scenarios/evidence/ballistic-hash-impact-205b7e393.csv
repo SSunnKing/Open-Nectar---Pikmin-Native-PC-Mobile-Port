@@ -1,0 +1,183 @@
+scenario,rate_hz,first_changed_tick,first_changed_columns,traced_reason
+blue_onion_boot,30,,,Byte-identical to unmodified base
+blue_onion_boot,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+bomb_firsts,30,,,Byte-identical to unmodified base
+bomb_firsts,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+boot_smoke,30,,,Byte-identical to unmodified base
+boot_smoke,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+bulborb_fight,30,,,Byte-identical to unmodified base
+bulborb_fight,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+captain_damage,30,,,Byte-identical to unmodified base
+captain_damage,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+captain_death,30,,,Byte-identical to unmodified base
+captain_death,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+captain_death_day30,30,,,Byte-identical to unmodified base
+captain_death_day30,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+card_errors,30,,,Byte-identical to unmodified base
+card_errors_saved,30,,,Byte-identical to unmodified base
+carry_blocked,30,,,Byte-identical to unmodified base
+carry_blocked,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+challenge_captain_death,30,,,Byte-identical to unmodified base
+challenge_captain_death,60,8,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+challenge_day_end,30,,,Byte-identical to unmodified base
+challenge_day_end,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+challenge_extinction,30,,,Byte-identical to unmodified base
+challenge_extinction,60,8,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+container_menu,30,,,Byte-identical to unmodified base
+container_menu,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+coop_look,30,,,Byte-identical to unmodified base
+coop_smoke,30,,,Byte-identical to unmodified base
+coop_smoke,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+day30_clock,30,,,Byte-identical to unmodified base
+day30_clock,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+day_clock,30,,,Byte-identical to unmodified base
+day_clock,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+day_end,30,,,Byte-identical to unmodified base
+day_end,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+day_end_day29,30,,,Byte-identical to unmodified base
+day_end_no_day_limit,30,,,Byte-identical to unmodified base
+day_end_no_day_limit,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+demo_timers,30,,,Byte-identical to unmodified base
+demo_timers,60,7,total navi item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated objects/seeds use the changed gravity path
+ending_bad_day30,30,,,Byte-identical to unmodified base
+ending_bad_day30,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+ending_happy,30,,,Byte-identical to unmodified base
+ending_happy,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+ending_happy_skip,30,,,Byte-identical to unmodified base
+ending_happy_skip,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+ending_neutral_day30,30,,,Byte-identical to unmodified base
+ending_neutral_day30,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+enemy_kills,30,,,Byte-identical to unmodified base
+enemy_kills,60,21,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+extinction,30,,,Byte-identical to unmodified base
+extinction,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+extinction_day30,30,,,Byte-identical to unmodified base
+extinction_day30,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+first_yellow,30,,,Byte-identical to unmodified base
+first_yellow,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+flick_out_of_range,30,,,Byte-identical to unmodified base
+flick_out_of_range,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+gate_break,30,,,Byte-identical to unmodified base
+gate_break,60,21,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+hardmode_boss_life,30,,,Byte-identical to unmodified base
+hardmode_boss_life_off,30,,,Byte-identical to unmodified base
+hardmode_cheats,30,,,Byte-identical to unmodified base
+hardmode_teki_life,30,,,Byte-identical to unmodified base
+hardmode_teki_life_off,30,,,Byte-identical to unmodified base
+hud_layout,30,,,Byte-identical to unmodified base
+hud_layout,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+map_menu,30,,,Byte-identical to unmodified base
+map_menu,60,7,total navi item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated objects/seeds use the changed gravity path
+map_menu_lockout,30,,,Byte-identical to unmodified base
+map_menu_lockout,60,7,total navi item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated objects/seeds use the changed gravity path
+navi_invincible,30,,,Byte-identical to unmodified base
+navi_invincible,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+navi_states,30,,,Byte-identical to unmodified base
+navi_states,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+nectar_growth,30,,,Byte-identical to unmodified base
+nectar_growth,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+objects_smoke,30,,,Byte-identical to unmodified base
+onion_day3,30,,,Byte-identical to unmodified base
+onion_day3,60,7,total item,generated objects/seeds use the changed gravity path
+onion_day3_hidetext,30,,,Byte-identical to unmodified base
+onion_day3_hidetext,60,7,total item,generated objects/seeds use the changed gravity path
+onion_day3_reload,30,,,Byte-identical to unmodified base
+onion_day3_reload,60,7,total item,generated objects/seeds use the changed gravity path
+onion_day3_skip,30,,,Byte-identical to unmodified base
+onion_day3_skip,60,7,total item,generated objects/seeds use the changed gravity path
+onion_day3_unplucked,30,,,Byte-identical to unmodified base
+onion_day3_unplucked,60,7,total item,generated objects/seeds use the changed gravity path
+onion_day3_whistle,30,,,Byte-identical to unmodified base
+onion_day3_whistle,60,7,total item,generated objects/seeds use the changed gravity path
+onion_menu_transfer,30,,,Byte-identical to unmodified base
+onion_menu_transfer,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+onion_skip,30,,,Byte-identical to unmodified base
+onion_skip,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+onion_unlock,30,,,Byte-identical to unmodified base
+onion_unlock,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+onion_unlock_whistle,30,,,Byte-identical to unmodified base
+onion_unlock_whistle,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+pause_continue,30,,,Byte-identical to unmodified base
+pause_continue,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+pellet_carry,30,,,Byte-identical to unmodified base
+pellet_carry,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+pellet_table,30,,,Byte-identical to unmodified base
+pellet_table,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+permadeath_bad_slot,30,,,Byte-identical to unmodified base
+permadeath_erase,30,,,Byte-identical to unmodified base
+permadeath_erase,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+permadeath_off,30,,,Byte-identical to unmodified base
+permadeath_unsaved,30,,,Byte-identical to unmodified base
+piki_drown,30,,,Byte-identical to unmodified base
+piki_drown,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+piki_hazard_deaths,30,,,Byte-identical to unmodified base
+piki_hazard_deaths,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+piki_throw_water,30,,,Byte-identical to unmodified base
+piki_throw_water,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+pikmin_cap_1,30,,,Byte-identical to unmodified base
+pikmin_cap_1,60,7,total item,generated objects/seeds use the changed gravity path
+pikmin_cap_250,30,,,Byte-identical to unmodified base
+pikmin_cap_250,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+pikmin_cap,30,,,Byte-identical to unmodified base
+pikmin_cap,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+pikmin_cap_999,30,,,Byte-identical to unmodified base
+pikmin_cap_999,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+red_onion_boot,30,,,Byte-identical to unmodified base
+red_onion_boot,60,7,total item,generated objects/seeds use the changed gravity path
+results_nosave_cardselect,30,,,Byte-identical to unmodified base
+results_nosave_map,30,,,Byte-identical to unmodified base
+save_load,30,,,Byte-identical to unmodified base
+save_load,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+save_load_flags,30,,,Byte-identical to unmodified base
+save_load_flags,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+settings_health_pct,30,,,Byte-identical to unmodified base
+settings_health_pct_off,30,,,Byte-identical to unmodified base
+settings_invincible,30,,,Byte-identical to unmodified base
+settings_invincible_off,30,,,Byte-identical to unmodified base
+settings_menu_pause,30,,,Byte-identical to unmodified base
+settings_menu_pause,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+ship_part_carry,30,,,Byte-identical to unmodified base
+ship_part_carry,60,7,total navi item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated objects/seeds use the changed gravity path
+ship_parts,30,,,Byte-identical to unmodified base
+ship_parts,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+speedrun_cheats,30,,,Byte-identical to unmodified base
+sprout_landing,30,,,Byte-identical to unmodified base
+sprout_landing,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+standin_showcase,30,,,Byte-identical to unmodified base
+throw_flight_bud,30,,,Byte-identical to unmodified base
+throw_flight_bud,60,7,total item,generated objects/seeds use the changed gravity path
+throw_flight_flower,30,,,Byte-identical to unmodified base
+throw_flight_flower,60,7,total item,generated objects/seeds use the changed gravity path
+throw_flight_leaf,30,,,Byte-identical to unmodified base
+throw_flight_leaf,60,7,total item,generated objects/seeds use the changed gravity path
+throw_flight_yellow,30,,,Byte-identical to unmodified base
+throw_flight_yellow,60,7,total item,generated objects/seeds use the changed gravity path
+throw_levels,30,,,Byte-identical to unmodified base
+throw_levels,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+throw_release,30,,,Byte-identical to unmodified base
+throw_release,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+throw_release_quick_grab,30,,,Byte-identical to unmodified base
+throw_release_quick_grab,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+title_boot,30,,,Byte-identical to unmodified base
+title_boot,60,593,total navi,Captain reference gravity first runs after title/new-game boot reaches gameplay
+title_round_trip,30,,,Byte-identical to unmodified base
+title_round_trip,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+tutorial_day1,30,,,Byte-identical to unmodified base
+tutorial_day1,60,7,total navi item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated objects/seeds use the changed gravity path
+tutorial_firsts,30,,,Byte-identical to unmodified base
+tutorial_firsts,60,7,total navi item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated objects/seeds use the changed gravity path
+tutorial_skip,30,,,Byte-identical to unmodified base
+tutorial_skip,60,7,total navi item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated objects/seeds use the changed gravity path
+unlock_zones,30,,,Byte-identical to unmodified base
+whistle_delay,30,,,Byte-identical to unmodified base
+whistle_delay,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+whistle_gather_release,30,,,Byte-identical to unmodified base
+whistle_gather_release,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+whistle_pluck_held,30,,,Byte-identical to unmodified base
+whistle_pluck_held,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+whistle_radius,30,,,Byte-identical to unmodified base
+whistle_radius,60,21,total navi,Reference gravity changes captain movement/velocity when gameplay updates begin
+world_map_day_end,30,,,Byte-identical to unmodified base
+world_map_day_end,60,7,total navi teki item,Reference gravity changes captain movement/velocity when gameplay updates begin; generated enemy gravity shares the changed path; generated objects/seeds use the changed gravity path
+yellow_onion_boot,30,,,Byte-identical to unmodified base
+yellow_onion_boot,60,7,total item,generated objects/seeds use the changed gravity path

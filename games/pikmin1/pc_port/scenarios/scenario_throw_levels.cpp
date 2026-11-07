@@ -32,8 +32,8 @@
 // where the captain stands), water (EC-41: piki_throw_water, on sandbox_water), Chain Actions timing (EC-43), and
 // a yellow Pikmin (its fixed mYellowThrowHeight).
 //
-// The peak differs by tick rate (+61.3 at 30 Hz, +68.0 at 60 Hz) but is the same across levels at
-// each rate; the checks compare within one run.
+// Each rate must reproduce the measured 30 Hz port peak (+61.29), which matches the
+// original-disc Dolphin capture (+61.22..61.28) within 0.1 world unit.
 //
 // Negative controls: Empty is the contrast to the throws (A with Pikmin does enter Throw), and
 // throws 4-5 are the contrast to EC-42's equal peaks. Manual (2026-10-31, local, not committed):
@@ -255,6 +255,10 @@ public:
 					fail(t, "EC-40: the Pikmin lands on the ground at the cursor", "%.1f from the cursor, y %.2f, ground %.2f", flat(at, mCursor), at.y, ground);
 					return;
 				}
+                if ((!kRaised[mThrow] || mLevel == 0) && std::fabs(rise - 61.29f) > 0.1f) {
+                    fail(t, "cross-rate peak matches the disc-verified 30 Hz arc within 0.1", "rate %u, peak %.6f, reference 61.29", mRate, rise);
+                    return;
+                }
 				if (!kRaised[mThrow] && mThrow > 0 && std::fabs(rise - mRise[0]) > kSamePeak) {
 					fail(t, "EC-42: with the disc's parms the peak is the same at every charge level", "level %d +%.1f, level 0 +%.1f", mLevel, rise, mRise[0]);
 					return;

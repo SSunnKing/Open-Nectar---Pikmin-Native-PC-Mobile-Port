@@ -7,6 +7,9 @@
 #include "nlib/Geometry.h"
 #include "nlib/Spline.h"
 #include "types.h"
+#if defined(PIKI_PC_PORT)
+#include "timing/pc_ballistic.h"
+#endif
 
 class NFunction3D;
 class NPosture3DIO;
@@ -22,6 +25,9 @@ class Vector3f;
  */
 struct PeveAccelerationEvent : public PeveEvent {
 	PeveAccelerationEvent();
+#if defined(PIKI_PC_PORT)
+	virtual void reset();
+#endif
 
 	virtual void update(); // _24
 
@@ -32,6 +38,10 @@ struct PeveAccelerationEvent : public PeveEvent {
 	NVector3fIO* mPositionIO; // _10
 	NVector3fIO* mVelocityIO; // _14
 	NVector3fIO* mAccelIO;    // _18
+#if defined(PIKI_PC_PORT)
+	PcBallisticClock mPcBallisticClock;
+	NVector3f mPcReferenceAcceleration;
+#endif
 };
 
 /**
