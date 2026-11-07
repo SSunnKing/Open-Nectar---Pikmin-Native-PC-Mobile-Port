@@ -62,8 +62,8 @@ const std::vector<Use>& launcherButtons()
         { "Install", role::kTexturePackDelete, 34 },
         { "Working...", role::kTexturePackDelete, 30 },
         { "Working...", role::kTexturePackDelete, 34 },
-        { "Delete...", role::kTexturePackDelete, 30 },
-        { "Delete...", role::kTexturePackDelete, 34 },
+        { "Delete", role::kTexturePackDelete, 30 },
+        { "Delete", role::kTexturePackDelete, 34 },
         { "On", role::kToggle, 40 }, { "Off", role::kToggle, 40 },
         { "Replace...", role::kSettingsRow, 40 }, { "Install...", role::kSettingsRow, 40 },
         // Move Install.

@@ -39,7 +39,7 @@ int main() {
                 }, [&] {
                     if (i==0 || i==3) return;
                     ImGui::BeginDisabled(i==2);
-                    ImGui::InvisibleButton("Delete...",ImVec2(120,compact ? 30:34));
+                    ImGui::InvisibleButton("Delete",ImVec2(120,compact ? 30:34));
                     check(near(centers[i],(ImGui::GetItemRectMin().y+ImGui::GetItemRectMax().y)*0.5f),
                           "Delete vertically centered on radio row");
                     check(ImGui::GetItemRectMax().x <= left+width, "action stays inside row");

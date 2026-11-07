@@ -1504,7 +1504,7 @@ struct Hub {
         const float rowWidth = ImGui::GetContentRegionAvail().x;
         const float deleteHeight = compact ? 30.0f : 34.0f;
         const float deleteWidth = std::max(buttons::buttonWidth(role::kTexturePackDelete),
-            buttons::fitWidth("Delete...", deleteHeight, buttons::kLabelSize, measureLabel()));
+            buttons::fitWidth("Delete", deleteHeight, buttons::kLabelSize, measureLabel()));
         const ImVec2 actionSize(deleteWidth, deleteHeight);
         texturePackRow(rowWidth, actionSize, [&] { option("Off (original textures)", ""); }, [] {});
         if (snap.texturePackDetails.empty()) {
@@ -1516,7 +1516,7 @@ struct Hub {
             const bool working = settings && settings->downloadingPack == pack.id;
             const auto action = texturePackAction(pack, working);
             const char* actionLabel = action == TexturePackAction::Working ? "Working..."
-                : action == TexturePackAction::Install ? "Install" : "Delete...";
+                : action == TexturePackAction::Install ? "Install" : "Delete";
             std::optional<TexturePackDownload> downloadable;
             for (const auto& candidate : texturePackDownloads(settingsGame)) {
                 const std::string id = std::string(candidate.label) == "4K" ? "hd-4k" : "hd-1080p";
