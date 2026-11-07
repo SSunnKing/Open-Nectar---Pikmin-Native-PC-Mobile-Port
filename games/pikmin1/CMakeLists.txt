@@ -1545,6 +1545,16 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_visual_runtime_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_visual_runtime_test COMMAND pc_visual_runtime_test)
 
+    # Real replacement loader with GL dispatch stubs: no GPU, disc or pack download.
+    foreach(test pc_texpack_test pc_texpack_gles_test)
+        add_executable(${test} pc_port/gl/pc_texpack_test.cpp)
+        target_include_directories(${test} PRIVATE ${SDL2_INCLUDE_DIRS}
+            third_party/stb third_party/bcdec)
+        target_compile_options(${test} PRIVATE ${NATIVE_COMPILE_OPTIONS})
+        add_test(NAME ${test} COMMAND ${test})
+    endforeach()
+    target_compile_definitions(pc_texpack_gles_test PRIVATE PIKI_USE_GLES=1)
+
     add_executable(pc_tev_shader_test
         pc_port/gl/pc_tev_shader_test.cpp
         pc_port/gl/pc_tev_shader.cpp
