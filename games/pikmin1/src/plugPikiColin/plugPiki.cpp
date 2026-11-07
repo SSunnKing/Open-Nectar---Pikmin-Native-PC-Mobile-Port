@@ -337,6 +337,10 @@ int PlugPikiApp::idle()
 		// exitStage, then softReset) leaves nothing to present: the stage
 		// managers are gone until the next idle builds the new section.
 		if (!pc_netplay_present_skip_presentation() && !gsys->mSoftResetPending) {
+			// Catch-up still needs this pass's CPU side effects for replay
+			// parity, but its world graphics are hidden by the load screen.
+			const bool suppressGx = pc_netplay_det_catchup();
+			if (suppressGx) pc_netplay_present_set_null_gx(1);
 			pc_render_begin_presentation(1.0);
 			gsys->mDGXGfx->resetPresentBuffer();
 			pc_netplay_present_begin_presentation(*gsys->mDGXGfx);
@@ -359,6 +363,12 @@ int PlugPikiApp::idle()
 			pc_netplay_present_restore_all_shapes();
 			pc_netplay_present_end_presentation(*gsys->mDGXGfx);
 			pc_netplay_camlead_end_presentation(*gsys->mDGXGfx);
+			if (suppressGx) {
+				// Discard deferred world geometry before restoring real GL for
+				// doneRender, the loading overlay and the next live frame.
+				pc_gfx_flush_batch();
+				pc_netplay_present_set_null_gx(0);
+			}
 			// Back to authoritative for doneRender, messages and the hash.
 			pc_render_end_presentation();
 		}

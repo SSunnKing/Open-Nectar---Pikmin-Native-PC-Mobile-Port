@@ -56,6 +56,12 @@
 #include "mods/pc_campaign.h"
 #include "nectar_mapcore/pack.h"
 #include "netplay/pc_netplay_det.h"
+#include "quicksave/pc_quicksave.h"
+// Quick Load confirm (defined at the end of this file).
+int quickLoadRow();
+void armQuickLoad();
+#include "quicksave/pc_quicksave_progress.h"
+#include "settings/pc_sim_settings_text.h"
 #include "pc_achievements.h"
 #include "pc_speedrun.h"
 #include "pc_livesplit.h"
@@ -237,6 +243,11 @@ struct PcConfig {
     // Cámara cooperativa dinámica: una sola cámara con los Olimar cerca y
     // división fluida al alejarse. 0 = pantalla partida fija.
     int coopMergeCamera = 0;
+    // Quick Save (experimental): deterministic mode from launch and a
+    // recording of each day, so a day can be saved mid-way and loaded again
+    // (pc_quicksave.h). The Data page has the row. Read once at launch; a
+    // change takes effect at the next launch.
+    int quickSave = 0;
     // Colour grading. Neutral by default: the port should look like the game
     // until someone asks otherwise.
     int antialiasing = 0;   // 0 off, 1 FXAA
@@ -343,6 +354,7 @@ struct PcConfig {
         coopSplit = 0;
 #endif
         coopMergeCamera = 0;
+        quickSave = 0;
         antialiasing  = 0;
         fog           = 1;
         perPixelLighting = 0;
@@ -556,6 +568,11 @@ bool sWaitingForButton = false;
 // de la columna izquierda (cuenta también las cabeceras).
 int sOpenGroup = -1;
 int sGroupSel = 0;
+// Quick Load confirm: F7 (or the first A on the row) arms Data > Quick Load
+// now with the text of what it replaces; the next A on that row loads.
+bool sQuickLoadOpenRequested = false;
+bool sQuickLoadArmed         = false;
+char sQuickLoadConfirm[400]  = {};
 int sF1Scroll = 0;
 // Mientras se sondean las opciones de una fila (columna derecha) los cambios
 // solo tocan sPending: nada se aplica al vídeo ni al render.
@@ -1011,6 +1028,7 @@ void closeMenu() {
     sWaitingForButton = false;
     sCaptureWaitRelease = false;
     sOpenGroup = -1;
+    sQuickLoadArmed = false;
     sMenuOpen = false;
     pc_window_set_settings_menu_open(false);
 }
@@ -1113,10 +1131,11 @@ void pc_settings_set_language(unsigned char language) {
 
 namespace {
 
-#if PIKI_NETPLAY_BUILD
-// Netplay: every setting that changes the simulation. Both peers hash these
-// in the handshake and they are locked for the session. Window, graphics,
-// audio, bindings, camera feel and other local-only rows are not here.
+// Every setting that changes the simulation. A netplay session hashes them in
+// the handshake and locks them for the session (netplay builds); a
+// deterministic recording locks them for the recorded day (below). Window,
+// graphics, audio, bindings, camera feel and other local-only rows are not
+// here: what they change reaches the sim, if at all, as recorded input.
 #define PC_NETPLAY_SESSION_FIELDS(X)                                                          \
     X(fpsMode) X(chainActions) X(holdToPluck) X(betterPathfinding) X(bluesOnlyWater)         \
     X(idleCounter) X(naviHealthPct) X(tekiHealthPct) X(infiniteDay) X(freeCamera)            \
@@ -1128,6 +1147,44 @@ namespace {
     X(vsPellets) X(lockOn) X(charge) X(throwWhileMoving) X(firstPerson) X(pikiLimit)         \
     X(dayMinutes) X(coopSplit) X(coopMergeCamera) X(debugKeys) X(gyroEnabled)
 
+// Deterministic recording (quick save): the settings a recorded day depends
+// on, fixed for the day and written into the recording's header text
+// (pc_settings_sim_config_text). The session list, plus the wheel's job
+// (colour or zoom). In deterministic mode the sim reads the wheel's notches
+// from the recorded input whatever the job, so this one is fixed for
+// clarity, not for the replay's sake.
+#define PC_SIM_RECORD_FIELDS(X) PC_NETPLAY_SESSION_FIELDS(X) X(mouseWheelAction)
+
+// From the start of a day in deterministic mode until the game leaves it,
+// the sim settings keep the values the day started with, so the day's input
+// replays against the same settings: the F1 rows that change them are greyed
+// (disabledReason) and any other change is undone when the settings save.
+// A netplay session has its own lock and never arms this one.
+bool sSimLockArmed = false;
+PcConfig sSimLockConfig;
+
+bool simLockStillInDay() {
+    return gameflow.mCurrGameSectionID == SECTION_OnePlayer
+        && gameflow.mNextOnePlayerSectionID == ONEPLAYER_NewPikiGame;
+}
+
+bool simLocked() {
+    if (!sSimLockArmed) return false;
+    if (simLockStillInDay()) return true;
+    sSimLockArmed = false;
+    printf("[PC Settings] deterministic recording: day over, sim-relevant settings unlocked\n");
+    fflush(stdout);
+    return false;
+}
+
+void simLockRelock() {
+    if (!simLocked()) return;
+#define PC_SIM_RELOCK(f) sConfig.f = sSimLockConfig.f; sPending.f = sSimLockConfig.f;
+    PC_SIM_RECORD_FIELDS(PC_SIM_RELOCK)
+#undef PC_SIM_RELOCK
+}
+
+#if PIKI_NETPLAY_BUILD
 bool sNetplaySessionLocked = false;
 PcConfig sNetplaySessionConfig;
 // The joiner of a launcher session adopted the host's values: the file keeps
@@ -1193,6 +1250,7 @@ int netplayApplyConfigText(const char* text) {
 #endif
 
 void saveConfig() {
+    simLockRelock();
 #if PIKI_NETPLAY_BUILD
     netplayRelockSessionFields();
     NetplayDiskValuesScope netplayDiskValues;
@@ -1278,6 +1336,7 @@ void saveConfig() {
     out << "coopPlayers = " << sConfig.coopPlayers << "\n";
     out << "coopSplit = " << sConfig.coopSplit << "\n";
     out << "coopMergeCamera = " << sConfig.coopMergeCamera << "\n";
+    out << "quickSave = " << sConfig.quickSave << "\n";
     out << "antialiasing = " << sConfig.antialiasing << "\n";
     out << "fog = " << sConfig.fog << "\n";
     out << "perPixelLighting = " << sConfig.perPixelLighting << "\n";
@@ -1608,6 +1667,9 @@ void loadConfig() {
         }
         else if (key == "coopMergeCamera") {
             sConfig.coopMergeCamera = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "quickSave") {
+            sConfig.quickSave = atoi(val.c_str()) ? 1 : 0;
         }
         else if (key == "debugKeys") {
             sConfig.debugKeys = atoi(val.c_str()) ? 1 : 0;
@@ -2178,6 +2240,19 @@ void pollMenuInput() {
         openMenu();
         return;
     }
+    if (sQuickLoadOpenRequested) {
+        sQuickLoadOpenRequested = false;
+        if (!sMenuOpen) {
+            sMenuPlayer = 0;
+            openMenu();
+        }
+        sOpenGroup = PC_SET_GROUP_DATA;
+        sGroupSel  = quickLoadRow();
+        armQuickLoad();
+        return;
+    }
+    // Moving off the armed row (or to another page) takes the confirm back.
+    if (sQuickLoadArmed && (sOpenGroup != PC_SET_GROUP_DATA || sGroupSel != quickLoadRow())) sQuickLoadArmed = false;
 
     if (!sMenuOpen) {
         // No arrastrar a un menú futuro un toque hecho durante el juego.
@@ -8463,6 +8538,95 @@ static void pollFilePicker()
 }
 #endif
 
+// Quick Save (pc_quicksave.h). While a quick load runs: the same panel as the
+// other menus, over the replay (whose world graphics are suppressed), with
+// the progress, the time so far and an estimate of the time left. Otherwise
+// the last save or load result for a few seconds, unless a menu (which shows
+// it as its notice) is open.
+void pc_settings_draw_quick_load(void) {
+    if (!pc_quicksave_enabled() || !gsys || !gsys->mDGXGfx) return;
+    PcQuickLoadStatus st;
+    const bool loading = pc_quicksave_load_status(&st);
+    char toast[192];
+    bool toastError = false;
+    float toastAge  = 0.0f;
+    const bool showToast = !loading && !sMenuOpen && !pc_glass_menu_active()
+                        && pc_quicksave_toast(toast, sizeof(toast), &toastError, &toastAge);
+    if (!loading && !showToast) return;
+    DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+    ensureFont();
+    if (!sFont) return;
+    const int screenW = gfx->mScreenWidth, screenH = gfx->mScreenHeight;
+    Matrix4f ortho;
+    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
+    auto fill = [&](int x, int y, int w, int h, Colour c) {
+        gfx->setColour(c, true);
+        gfx->setAuxColour(c);
+        gfx->fillRectangle(RectArea(x, y, x + w, y + h));
+    };
+    const int cx = screenW / 2;
+
+    if (showToast) {
+        PcSettingsP2DFrame nativeFrame(screenW, screenH);
+        // Laid out on a 480-high canvas, scaled to the window.
+        const float s = screenH / 480.0f;
+        auto px = [s](float v) { return int(v * s + 0.5f); };
+        const bool p2d = pc_settings_p2d_active();
+        auto textW = [&](const char* t, float fw) { return p2d ? pc_settings_p2d_text_width(t, px(fw)) : menuTextWidth(t); };
+        auto text = [&](int x, int y, const char* t, Colour c, float fw, float fh) {
+            if (p2d) pc_settings_p2d_text(x, y, t, c, std::max(1, px(fw)), std::max(1, px(fh)));
+            else drawTextOutline(x, y, "%s", c, Colour(0, 0, 0, c.a), t);
+        };
+        const float fade = std::min(1.0f, std::min(toastAge / 0.2f, (4.0f - toastAge) / 0.5f));
+        const u8 a       = u8(255.0f * std::max(0.0f, fade));
+        const int tw = textW(toast, 9), w = tw + px(28), h = px(26);
+        fill(cx - w / 2, px(14), w, h, Colour(8, 12, 28, u8(a * 0.8f)));
+        const Colour c = toastError ? Colour(255, 150, 150, a) : Colour(160, 240, 180, a);
+        text(cx - tw / 2, px(14) + (h - px(14)) / 2, toast, c, 9, 14);
+        return;
+    }
+
+    // Catch-up does not submit the world's graphics, so the frame behind the
+    // panel is covered. The panel is the one the other menus use.
+    fill(0, 0, screenW, screenH, Colour(0, 0, 0, 255));
+    const int panelW = std::min(560, std::max(280, screenW - 48));
+    const int panelH = std::min(220, std::max(200, screenH - 96));
+    const int panelX = cx - panelW / 2;
+    const int panelY = std::max(40, screenH / 2 - panelH / 2);
+    const Colour kBody(214, 224, 245, 255), kDim(150, 165, 195, 255), kGold(255, 205, 60, 255);
+    char dayLine[32], status[160];
+    std::snprintf(dayLine, sizeof(dayLine), "Day %d", st.day);
+    const pc_quicksave::LoadProgress p = pc_quicksave::load_progress(st.fed, st.total, st.replaySecs);
+    char elapsed[16], left[16];
+    pc_quicksave::format_clock(st.secs, elapsed, sizeof(elapsed));
+    if (!st.replaying) {
+        std::snprintf(status, sizeof(status), "Preparing the day...   %s", elapsed);
+    } else if (p.remainingKnown) {
+        pc_quicksave::format_clock(p.remaining, left, sizeof(left));
+        std::snprintf(status, sizeof(status), "%d%%   Elapsed %s   About %s left", p.percent, elapsed, left);
+    } else {
+        std::snprintf(status, sizeof(status), "%d%%   Elapsed %s   Estimating the time left...", p.percent, elapsed);
+    }
+    {
+        PcSettingsP2DFrame nativeFrame(screenW, screenH);
+        GlassTextScope glassText;
+        drawPikminPanel(gfx, panelX, panelY, panelW, panelH, 22);
+        drawPikminHeader(gfx, panelX, panelY, panelW, "Loading quick save");
+        drawTextOutline(cx - menuTextWidth(dayLine) / 2, panelY + 40, "%s", kDim, Colour(8, 12, 28, 255), dayLine);
+        drawTextOutline(cx - menuTextWidth(status) / 2, panelY + 108, "%s", kBody, Colour(8, 12, 28, 255), status);
+        const char* hint = st.cancelling ? "Cancelling..." : "Esc / B: cancel";
+        drawHelpLine(cx, panelY + panelH - 36, hint, kDim, panelW - 48);
+    }
+    // After the glass plate, so the bar stays visible on top of it.
+    const int barW = panelW - 80, barH = 14, barX = panelX + 40, barY = panelY + 74;
+    fill(barX - 2, barY - 2, barW + 4, barH + 4, Colour(70, 85, 120, 255));
+    fill(barX, barY, barW, barH, Colour(8, 10, 16, 255));
+    if (st.replaying) {
+        const int filled = int(barW * (p.percent / 100.0f));
+        if (filled > 0) fill(barX, barY, filled, barH, kGold);
+    }
+}
+
 void pc_settings_draw(void) {
 #ifndef __ANDROID__
     pollFilePicker();
@@ -9070,6 +9234,11 @@ void pc_first_person_toggle_for(int player) {
     fp = !fp;
 }
 
+void pc_first_person_set_active_for(int player, int on) {
+    if (!sConfig.firstPerson) on = 0;
+    sFirstPersonActive[player == 1 ? 1 : 0] = on ? 1 : 0;
+}
+
 int pc_first_person_active(void) { return pc_first_person_active_for(0); }
 void pc_first_person_toggle(void) { pc_first_person_toggle_for(0); }
 
@@ -9112,6 +9281,8 @@ int pc_settings_get_coop_merge_camera(void) {
     if (pc_vs_active()) return 0;
     return sConfig.coopMergeCamera;
 }
+
+int pc_settings_get_quick_save(void) { return sConfig.quickSave; }
 
 int pcGameLanguageFromOs(unsigned char osLanguage) {
     static const int kGame[] = { 0, 2, 1, 3, 4 }; // en de fr es it -> en fr de es it
@@ -9176,6 +9347,36 @@ void pc_settings_record_original_look(int original) {
     fflush(stderr);
 }
 
+void pc_settings_sim_lock_day_begin(void) {
+#if PIKI_NETPLAY_BUILD
+    if (sNetplaySessionLocked) return; // the session's own lock holds
+#endif
+    sSimLockConfig = sConfig;
+    sSimLockArmed  = true;
+    printf("[PC Settings] deterministic recording: sim-relevant settings fixed for this day (hash %016llx)\n",
+           pc_settings_sim_config_hash());
+    fflush(stdout);
+}
+
+int pc_settings_sim_locked(void) { return simLocked() ? 1 : 0; }
+
+const char* pc_settings_sim_config_text(void) {
+    static std::string text;
+    pc_sim_settings_text::begin(text);
+#define PC_SIM_TEXT_FIELD(f) pc_sim_settings_text::add_int(text, #f, (long)sConfig.f);
+    PC_SIM_RECORD_FIELDS(PC_SIM_TEXT_FIELD)
+#undef PC_SIM_TEXT_FIELD
+    // Chosen before a day starts, outside the F1 rows; the day depends on them.
+    pc_sim_settings_text::add_int(text, "coopPlayers", sConfig.coopPlayers);
+    pc_sim_settings_text::add_int(text, "language", pc_settings_get_language());
+    pc_sim_settings_text::add_str(text, "vsMap", sConfig.vsMap);
+    return text.c_str();
+}
+
+unsigned long long pc_settings_sim_config_hash(void) {
+    return pc_sim_settings_text::hash(pc_settings_sim_config_text());
+}
+
 #if PIKI_NETPLAY_BUILD
 const char* pc_settings_netplay_config_text(void) {
     static std::string text;
@@ -9192,6 +9393,8 @@ const char* pc_settings_netplay_config_text(void) {
 
 void pc_settings_netplay_session_begin(const char* adoptConfigText) {
     if (sNetplaySessionLocked) return;
+    // The session's lock replaces a recorded day's (pc_settings_sim_lock_day_begin).
+    sSimLockArmed = false;
     if (adoptConfigText != nullptr) {
         sNetplayDiskConfig = sConfig;
         const std::string own = pc_settings_netplay_config_text();
@@ -9455,7 +9658,7 @@ namespace {
 // página de vídeo, de Advanced, de Graphics, de Mods...), así que reordenar
 // aquí no toca qué hace cada ajuste ni cómo se guarda: el .conf va por nombre.
 // ---------------------------------------------------------------------------
-enum RowSrc { SRC_MAIN, SRC_ADV, SRC_GFX, SRC_MODS, SRC_DATA, SRC_KEYS, SRC_PADS, SRC_RECENTER, SRC_ACH, SRC_PADGUIDE, SRC_AIMBTN };
+enum RowSrc { SRC_MAIN, SRC_ADV, SRC_GFX, SRC_MODS, SRC_DATA, SRC_KEYS, SRC_PADS, SRC_RECENTER, SRC_ACH, SRC_PADGUIDE, SRC_AIMBTN, SRC_QUICKSAVE };
 struct GroupRow {
     RowSrc src;
     int idx;
@@ -9567,7 +9770,8 @@ const GroupRow kCheatsRows[] = {
       "F5: add up to 20 red leaf Pikmin to the red Onion (requires an Onion and respects the Pikmin limit).\n"
       "F6: advance the clock by one in-game hour, capped just before sunset (with Infinite Day it only moves the lighting, except on the last day).\n"
       "F7: grant the Main Engine, top red Onion stock up to 20, and trigger the normal end-of-day sequence.\n"
-      "F8 (VS only): append both captains' XYZ coordinates to vs_positions.txt." },
+      "F8 (VS only): append both captains' XYZ coordinates to vs_positions.txt.\n"
+      "With Quick Save on, F6 is Quick Save and F7 is Quick Load." },
 #endif
 };
 
@@ -9583,6 +9787,11 @@ const GroupRow kDataRows[] = {
     { SRC_DATA, 3, "Online co-op: leave / rejoin", "As an online guest: stop playing and watch the host's captain while keeping your place. Choose it again, or press Start, to ask to rejoin; the host lets you back in outside menus and cutscenes." },
     { SRC_DATA, 4, "Online over the Internet", "On: when you create or join an online room, the game asks a free public server (Google or Cloudflare STUN) for this connection's Internet address, so a friend on another network can connect. Only that address is exchanged; the game itself goes directly between the two players. Some networks still block it (often mobile data on both sides). Off: no outside server is contacted, and only players on the same network or a VPN can connect." },
 #endif
+    // Quick Save (pc_quicksave.h). The F-keys need Fn on many laptops, so the
+    // two actions are rows too.
+    { SRC_QUICKSAVE, 0, "Quick Save (experimental)", "Save at any point of a day with Quick Save (F6) and go back to that point with Quick Load (F7). Loading replays the day, muted, behind a progress screen. F7 asks before it loads. Not in Challenge Mode, Permadeath, Speedrun, the Randomizer or online play. Any update of the game makes older quick saves unloadable. Takes effect after a restart." },
+    { SRC_QUICKSAVE, 1, "Quick Save now", "Saves this point of the day, as the Quick Save key (F6) does." },
+    { SRC_QUICKSAVE, 2, "Quick Load now", "Goes back to this file's quick save, as the Quick Load key (F7) does. On the title screen or in the file select: the newest quick save. Escape cancels the load." },
 };
 
 template <size_t N> constexpr int countOf(const GroupRow (&)[N]) { return (int)N; }
@@ -9713,6 +9922,7 @@ const GroupSection kSections[] = {
 #endif
     { PC_SET_GROUP_DATA, 0, "SAVE FILE" },
     { PC_SET_GROUP_DATA, 2, "SETTINGS" },
+    { PC_SET_GROUP_DATA, countOf(kDataRows) - 3, "QUICK SAVE" },
 };
 
 const char* rowSection(int group, int row) {
@@ -9746,6 +9956,7 @@ bool rowProbeable(int group, int row) {
     case SRC_ADV: return r->idx != 7;
     case SRC_GFX: return r->idx != 10 && r->idx != 11;
     case SRC_MODS: return true;
+    case SRC_QUICKSAVE: return r->idx == 0;
     default: return false;
     }
 }
@@ -9753,6 +9964,18 @@ bool rowProbeable(int group, int row) {
 bool hardLocked(const GroupRow& r) {
     return r.src == SRC_MODS && pc_hardmode_active()
         && (r.idx == 4 || r.idx == 5 || r.idx == 11 || r.idx == 12 || r.idx == 13);
+}
+
+// Whether a row changes a setting of PC_SIM_RECORD_FIELDS. Every mods row does,
+// except the control scheme (0) and the free camera stick speed (38), which
+// only shape input that is recorded anyway.
+bool rowChangesSimSetting(const GroupRow& r) {
+    switch (r.src) {
+    case SRC_MAIN: return r.idx == ROW_FPS_MODE;
+    case SRC_ADV: return r.idx == 4; // Gyro Aiming (gyroEnabled)
+    case SRC_MODS: return r.idx != 0 && r.idx != 38;
+    default: return false;
+    }
 }
 
 // Motivo por el que una fila no se puede cambiar ahora, o nullptr si se puede.
@@ -9769,6 +9992,8 @@ bool online_spectating() { return pc_netplay_online_spectating != nullptr && pc_
 
 const char* disabledReason(const GroupRow& r) {
     if (hardLocked(r)) return "Locked by Hard mode for this save file.";
+    if (rowChangesSimSetting(r) && simLocked())
+        return "Fixed until this day ends: the day is being recorded, and this setting changes the game.";
     switch (r.src) {
     case SRC_MAIN:
         if (r.idx == ROW_RESOLUTION && sPending.displayMode == PC_WINDOW_FULLSCREEN_BORDERLESS)
@@ -9801,6 +10026,11 @@ const char* disabledReason(const GroupRow& r) {
     case SRC_DATA:
         if (r.idx == 3 && !online_guest()) return "Only while you are the guest of an online co-op session.";
         break;
+    case SRC_QUICKSAVE: {
+        const char* why = r.idx == 1 ? pc_quicksave_save_unavailable() : r.idx == 2 ? pc_quicksave_load_unavailable() : "";
+        if (why[0] != '\0') return why;
+        break;
+    }
     default:
         break;
     }
@@ -9971,7 +10201,7 @@ bool pc_settings_row_enabled(int group, int row) {
 bool pc_settings_row_is_action(int group, int row) {
     if (group == PC_SET_PICKER_TEXPACKS || group == PC_SET_PICKER_HDMODELS) return true;
     const GroupRow* r = groupRow(group, row);
-    return r && ((r->src == SRC_DATA && r->idx != 4) || (r->src == SRC_ADV && r->idx == 7));
+    return r && ((r->src == SRC_DATA && r->idx != 4) || (r->src == SRC_ADV && r->idx == 7) || (r->src == SRC_QUICKSAVE && r->idx != 0));
 }
 
 const char* pc_settings_row_help(int group, int row) {
@@ -9985,6 +10215,7 @@ const char* pc_settings_row_help(int group, int row) {
         return help;
     }
     if (const GroupRow* r = groupRow(group, row)) {
+        if (r->src == SRC_QUICKSAVE && r->idx == 2 && sQuickLoadArmed) return sQuickLoadConfirm;
         const char* reason = disabledReason(*r);
         return reason ? reason : r->help;
     }
@@ -10072,6 +10303,16 @@ void pc_settings_row_value(int group, int row, char* out, unsigned long n) {
             else snprintf(out, n, "%s", online_guest() ? (online_spectating() ? "A: rejoin" : "A: leave") : "-");
             break;
         case SRC_ACH: break;
+        case SRC_QUICKSAVE:
+            if (r->idx == 0) {
+                // The game reads the setting at launch: say so while the
+                // running state is not the one chosen here.
+                const bool on = sPending.quickSave != 0;
+                snprintf(out, n, "%s%s", on ? "On" : "Off", on != pc_quicksave_enabled() ? "  (restart required)" : "");
+            } else {
+                snprintf(out, n, "%s", r->idx == 1 ? "A: save" : sQuickLoadArmed ? "A: confirm" : "A: load");
+            }
+            break;
         case SRC_KEYS:
         case SRC_PADS:
         case SRC_PADGUIDE: snprintf(out, n, "Open  >"); break;
@@ -10159,6 +10400,23 @@ void pc_settings_row_change(int group, int row, int dir, bool ok) {
                 else pc_netplay_online_request_leave();
             }
             break;
+        case SRC_QUICKSAVE:
+            if (r->idx == 0) {
+                if (ok || left || right) sPending.quickSave = sPending.quickSave ? 0 : 1;
+            } else if (ok && r->idx == 1) {
+                pc_quicksave_request_save(); // the result shows as the menu's notice
+            } else if (ok && r->idx == 2 && !sQuickLoadArmed) {
+                armQuickLoad(); // the first A shows what the load replaces
+            } else if (ok && r->idx == 2) {
+                sQuickLoadArmed = false;
+                pc_quicksave_request_load();
+                // A load under way: the menus get out of the load screen's way.
+                if (pc_quicksave_load_active()) {
+                    if (sMenuOpen) closeMenu();
+                    if (pc_glass_menu_active()) pc_glass_menu_close();
+                }
+            }
+            break;
         default: break; // selectores
         }
         return;
@@ -10199,6 +10457,8 @@ void pc_settings_capture_poll(void) {
     if (sWaitingForKey) { pollKeyCapture(ctl); return; }
     if (sWaitingForButton || sCaptureWaitRelease) pollButtonCapture(ctl);
 }
+
+void pc_settings_post_notice(int isError, const char* message) { texturePackNotice(isError != 0, message); }
 
 bool pc_settings_notice(char* out, unsigned long n, bool* isError) {
     std::lock_guard<std::mutex> lock(sTexturePackNoticeMutex);
@@ -10519,3 +10779,28 @@ int pc_settings_cli(int argc, char** argv) {
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
     return result;
 }
+
+void pc_settings_request_quick_load_confirm(void) { sQuickLoadOpenRequested = true; }
+
+// The Data page's "Quick Load now" row.
+int quickLoadRow() {
+    int count = 0;
+    const GroupRow* rows = groupRows(PC_SET_GROUP_DATA, &count);
+    for (int i = 0; i < count; i++) {
+        if (rows[i].src == SRC_QUICKSAVE && rows[i].idx == 2) return i;
+    }
+    return 0;
+}
+
+void armQuickLoad() {
+    char text[sizeof(sQuickLoadConfirm)];
+    if (!pc_quicksave_load_confirm_text(text, sizeof(text))) {
+        sQuickLoadArmed = false;
+        pc_settings_post_notice(1, text);
+        return;
+    }
+    snprintf(sQuickLoadConfirm, sizeof(sQuickLoadConfirm), "%s", text);
+    sQuickLoadArmed = true;
+    pc_settings_post_notice(0, "Quick Load: press A again to load, or move away to keep playing.");
+}
+
