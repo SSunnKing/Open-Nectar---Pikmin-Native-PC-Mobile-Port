@@ -10049,7 +10049,7 @@ const char* pc_settings_row_label(int group, int row) {
         return (row >= 0 && row < PC_KEY_ACT_COUNT) ? pc_window_get_key_action_name(row) : "";
     if (group == PC_SET_PICKER_TEXPACKS) {
         if (row == 0) return "Off (original textures)";
-        if (row == kTexturePackInstallRow) return "Install pack...";
+        if (row == kTexturePackInstallRow) return "Install pack";
         std::vector<std::string> packs = pc_texpack_list_packs();
         if (row - 2 < 0 || row - 2 >= (int)packs.size()) return "";
         snprintf(label, sizeof(label), "%s", nectar::textures::display(std::filesystem::path("Load") / "Textures", packs[row - 2]).c_str());
