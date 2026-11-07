@@ -49,7 +49,16 @@ struct PikminModelChoice {
 struct TexturePackInfo {
     std::string id, name, path, size;
     bool removable = false;
+    bool installed = true;
 };
+
+enum class TexturePackAction { Install, Delete, Working, Unavailable };
+inline TexturePackAction texturePackAction(const TexturePackInfo& pack, bool working) {
+    if (working) return TexturePackAction::Working;
+    if (pack.installed) return TexturePackAction::Delete;
+    if (pack.id == "hd-1080p" || pack.id == "hd-4k") return TexturePackAction::Install;
+    return TexturePackAction::Unavailable;
+}
 
 struct SettingsSnapshot {
     // True cuando el juego pide que el launcher reproduzca exactamente su F1,

@@ -29,6 +29,7 @@ struct Pack {
     fs::path path;
     std::uintmax_t bytes = 0;
     bool removable = false;
+    bool installed = true;
 };
 inline std::string lower(std::string s) {
     for (char& c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
@@ -123,6 +124,32 @@ inline std::vector<Pack> discover(const fs::path& root, bool sizes = true) {
         return ar == br ? a.id < b.id : ar < br;
     });
     return packs;
+}
+// Settings includes known downloadable variants even after deletion. Keep
+// discover() installed-only: renderer and selection must never use placeholders.
+inline std::vector<Pack> catalog(const fs::path& root) {
+#ifdef __ANDROID__
+    // Android offers one generic PNG download, not the desktop DDS variants.
+    return discover(root);
+#else
+    auto installed = discover(root);
+    std::vector<Pack> all;
+    for (const char* id : { "hd-1080p", "hd-4k" }) {
+        auto found = std::find_if(installed.begin(), installed.end(), [&](const Pack& p) { return p.id == id; });
+        if (found != installed.end()) all.push_back(*found);
+        else {
+            std::error_code ec;
+            Pack p;
+            p.id = id;
+            p.name = p.id == "hd-1080p" ? "HD 1080p" : "HD 4K";
+            p.path = fs::absolute(root / id, ec).lexically_normal();
+            p.installed = false;
+            all.push_back(std::move(p));
+        }
+    }
+    for (const auto& p : installed) if (!managedId(p.id)) all.push_back(p);
+    return all;
+#endif
 }
 inline std::string resolveSelection(const fs::path& root, const std::string& old) {
     for (const auto& pack : discover(root, false)) if (lower(pack.id) == lower(old)) return pack.id;

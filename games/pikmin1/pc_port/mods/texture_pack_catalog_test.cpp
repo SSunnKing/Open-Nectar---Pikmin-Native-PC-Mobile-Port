@@ -13,6 +13,10 @@ int main() {
     file(root / "GPI" / ".nectar-pack", "1080p\n");
     file(root / "GPI" / "tex1_b.png", "legacy");
     file(root / "unrelated" / "save.dat", "keep");
+    auto absent = catalog(root / "not-created");
+    assert(absent.size() == 2 && !absent[0].installed && !absent[1].installed);
+    assert(absent[0].id == "hd-1080p" && absent[1].id == "hd-4k");
+    assert(!absent[0].removable && absent[0].path.is_absolute());
     auto packs = discover(root);
     assert(packs.size() == 3);
     assert(packs[0].id == "hd-1080p" && packs[0].name == "HD 1080p" && packs[0].bytes == 3);
@@ -40,6 +44,11 @@ int main() {
 #endif
     assert(removePack(root, "hd-4k", freed, error));
     assert(freed == 5 && !fs::exists(root / "hd-4k"));
+    auto deleted = catalog(root);
+    assert(deleted.size() == 3 && deleted[0].installed && !deleted[1].installed);
+    file(root / "hd-4k" / "GPI" / "tex1_reinstalled.dds", "again");
+    assert(catalog(root)[1].installed);
+
     assert(fs::exists(root / "hd-1080p" / "GPI" / "tex1_a.png"));
     assert(fs::exists(temp / "outside" / "keep"));
     assert(sizeText(3200000000ULL) == "3.2 GB");

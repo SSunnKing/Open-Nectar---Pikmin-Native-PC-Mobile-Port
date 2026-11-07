@@ -88,6 +88,16 @@ int main()
     check(frame(ImVec2(disabledAt.x + 30, disabledAt.y + 5), enabled) == ImGuiMouseCursor_Hand,
           "the same combo enabled shows the hand");
 
+    const auto missingPack = [] {
+        ImGui::SetCursorScreenPos(ImVec2(20, 200));
+        ImGui::BeginDisabled();
+        handRadioButton("HD 1080p", false);
+        ImGui::EndDisabled();
+    };
+    frame(ImVec2(25, 205), missingPack);
+    check(frame(ImVec2(25, 205), missingPack) == ImGuiMouseCursor_Arrow,
+          "missing texture pack radio has no hand cursor");
+
     // Open the combo with a click, then hover its frame and an entry.
     const ImVec2 onCombo(comboAt.x + 30, comboAt.y + 5);
     frame(onCombo, enabled);

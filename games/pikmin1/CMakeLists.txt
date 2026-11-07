@@ -169,7 +169,11 @@ if(PIKMIN_BUILD_TESTS)
     add_executable(settings_pack_test pc_port/launcher/settings_pack_test.cpp pc_port/launcher/settings_model.cpp)
     target_compile_features(settings_pack_test PRIVATE cxx_std_17)
     add_test(NAME settings_pack_test COMMAND settings_pack_test)
-    foreach(pack_test texture_pack_catalog_test toast_layout_test settings_pack_test)
+    add_executable(texture_pack_download_test pc_port/launcher/texture_pack_download_test.cpp
+        pc_port/launcher/texture_pack_download.cpp pc_port/mods/texture_pack_catalog_win32.cpp)
+    target_compile_features(texture_pack_download_test PRIVATE cxx_std_17)
+    add_test(NAME texture_pack_download_test COMMAND texture_pack_download_test)
+    foreach(pack_test texture_pack_catalog_test toast_layout_test settings_pack_test texture_pack_download_test)
         if(MSVC)
             target_compile_options(${pack_test} PRIVATE /UNDEBUG)
         else()
@@ -1055,6 +1059,7 @@ if(ANDROID AND NOT TARGET nectar_launcher)
         pc_port/launcher/settings_model.cpp
         pc_port/launcher/release_update.cpp
         pc_port/launcher/texture_pack_download.cpp
+        pc_port/launcher/texture_pack_download_dialog.cpp
         pc_port/launcher/installer_ui.cpp
         pc_port/launcher/launcher_platform_android.cpp
         pc_port/pc_icon.cpp
@@ -1130,6 +1135,7 @@ if(PIKMIN_BUILD_LAUNCHER)
         pc_port/launcher/settings_model.cpp
         pc_port/launcher/release_update.cpp
         pc_port/launcher/texture_pack_download.cpp
+        pc_port/launcher/texture_pack_download_dialog.cpp
         pc_port/launcher/installer_ui.cpp
         ${NECTAR_LIBS_DIR}/nectar_assets/src/charpack.cpp
         pc_port/pc_icon.cpp

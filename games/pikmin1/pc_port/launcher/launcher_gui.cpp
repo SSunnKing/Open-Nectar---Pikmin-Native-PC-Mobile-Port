@@ -35,6 +35,8 @@
 #include "settings_model.h"
 #include "toast_layout.h"
 #include "texture_pack_row.h"
+#include "texture_pack_download.h"
+#include "texture_pack_storage.h"
 #include "release_update.h"
 
 #include "imgui.h"
@@ -506,6 +508,8 @@ struct SettingsClient {
     std::string busyLabel = "Saving..."; // lo que se enseña mientras trabaja
     std::atomic<bool> busy { false };
     bool loaded = false;
+    std::string downloadingPack; // guarded by mutex, along with snapshot
+    bool packResultReady = false;
 
     // Ejecuta el juego con esos argumentos y se queda con su respuesta.
     static void request(std::shared_ptr<SettingsClient> self, std::vector<std::string> arguments)
@@ -527,6 +531,56 @@ struct SettingsClient {
             self->error = "Could not read the game's settings (" + failure + ").";
         }
         self->busy = false;
+    }
+
+    static void installPack(std::shared_ptr<SettingsClient> self, TexturePackInfo pack, TexturePackDownload download)
+    {
+        if (self->busy.exchange(true)) return;
+        {
+            std::lock_guard<std::mutex> lock(self->mutex);
+            self->downloadingPack = pack.id;
+            self->packResultReady = false;
+            self->busyLabel = "Downloading " + pack.name + "...";
+            self->snapshot.message.clear();
+        }
+        std::thread([self, pack, download] {
+            std::string failure;
+            const bool ok = downloadTexturePack(download, self->directory, pack.id,
+                [self](const fs::path& zip, const std::string& variant, std::string& error) {
+                    std::string output;
+                    const bool executed = platform::runAndCapture(self->game,
+                        { "--texpack-install", zip.string(), variant }, self->directory, output, error);
+                    SettingsSnapshot result;
+                    std::string parseError;
+                    if (parseSettingsDump(output, result, parseError) && result.messageIsError) {
+                        error = result.message; return false;
+                    }
+                    return executed;
+                }, platform::downloadFile,
+                [self, pack](const std::string& phase) {
+                    std::lock_guard<std::mutex> lock(self->mutex);
+                    self->busyLabel = phase + " " + pack.name + "...";
+                }, failure);
+            // Refresh off-thread, without clearing the busy guard between the
+            // transfer and refresh. A second click can never start another job.
+            std::string output, refreshError, parseError;
+            SettingsSnapshot refreshed;
+            const bool read = platform::runAndCapture(self->game, { "--settings-dump" },
+                self->directory, output, refreshError) && parseSettingsDump(output, refreshed, parseError);
+            std::lock_guard<std::mutex> lock(self->mutex);
+            if (read) self->snapshot = std::move(refreshed);
+            self->snapshot.messageIsError = !ok;
+            if (ok) {
+                std::string size;
+                for (const auto& installed : self->snapshot.texturePackDetails)
+                    if (installed.id == pack.id && installed.installed) size = installed.size;
+                self->snapshot.message = "Installed " + pack.name + (size.empty() ? "" : " (" + size + ")") + " to " + pack.path;
+                if (!read) self->snapshot.message += ". Refresh failed; reopen Settings.";
+            } else self->snapshot.message = "Could not install " + pack.name + ": " + failure;
+            self->downloadingPack.clear();
+            self->packResultReady = true;
+            self->busy = false;
+        }).detach();
     }
 
     static void start(std::shared_ptr<SettingsClient> self, std::vector<std::string> arguments,
@@ -672,6 +726,11 @@ struct Hub {
     std::string moveNote;    // aviso bajo el formulario
     std::shared_ptr<MoveJob> moveJob;
     TexturePackInfo deletingPack;
+    TexturePackInfo installingPack;
+    TexturePackDownload installingDownload {};
+    std::optional<std::uint64_t> installFreeSpace;
+    TexturePackStorage installStorage = TexturePackStorage::Unknown;
+    std::string pendingPackInstall;
     bool awaitingPackResult = false;
     std::string toast;
     float toastTime = 0.0f;
@@ -1453,30 +1512,105 @@ struct Hub {
                 texturePackRow(rowWidth, actionSize, [&] { option(pack.c_str(), pack); }, [] {});
         } else for (const auto& pack : snap.texturePackDetails) {
             ImGui::PushID(pack.id.c_str());
-            const std::string label = pack.name + " (" + pack.size + ")";
+            const std::string label = pack.name + (pack.installed ? " (" + pack.size + ")" : "");
+            const bool working = settings && settings->downloadingPack == pack.id;
+            const auto action = texturePackAction(pack, working);
+            const char* actionLabel = action == TexturePackAction::Working ? "Working..."
+                : action == TexturePackAction::Install ? "Install" : "Delete...";
+            std::optional<TexturePackDownload> downloadable;
+            for (const auto& candidate : texturePackDownloads(settingsGame)) {
+                const std::string id = std::string(candidate.label) == "4K" ? "hd-4k" : "hd-1080p";
+#ifndef __ANDROID__
+                if (id == pack.id) downloadable = candidate;
+#endif
+            }
             texturePackRow(rowWidth, actionSize, [&] {
-                option(label.c_str(), pack.id);
+                ImGui::BeginDisabled(!pack.installed);
+                if (!pack.installed) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.65f, 0.65f, 0.65f, 1));
+                if (pack.installed) option(label.c_str(), pack.id);
+                else handRadioButton(label.c_str(), false);
+                if (!pack.installed) ImGui::PopStyleColor();
+                ImGui::EndDisabled();
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                     ImGui::BeginTooltip();
                     ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
-                    ImGui::Text("%s\n%s\nApplies next time the game starts.", pack.path.c_str(), pack.size.c_str());
+                    if (pack.installed)
+                        ImGui::Text("%s\n%s\nApplies next time the game starts.", pack.path.c_str(), pack.size.c_str());
+                    else ImGui::Text("Not installed. Use Install to download this pack.\n%s", pack.path.c_str());
                     ImGui::PopTextWrapPos();
                     ImGui::EndTooltip();
                 }
             }, [&] {
-                if (glassButton("Delete...", ImVec2(deleteWidth, deleteHeight), false, busy || !pack.removable)) {
-                    deletingPack = pack;
-                    ImGui::OpenPopup("Delete texture pack?");
+                const bool unavailable = pack.installed ? !pack.removable : !downloadable;
+                if (glassButton(actionLabel, ImVec2(deleteWidth, deleteHeight), false, busy || unavailable)) {
+                    if (pack.installed) {
+                        deletingPack = pack;
+                        ImGui::OpenPopup("Delete texture pack?");
+                    } else if (downloadable) {
+                        installingPack = pack;
+                        installingDownload = *downloadable;
+                        installFreeSpace.reset();
+                        fs::path parent = fs::u8path(pack.path);
+                        std::error_code ec;
+                        while (!parent.empty() && !fs::exists(parent, ec)) {
+                            if (ec && ec != std::errc::no_such_file_or_directory) break;
+                            const auto next = parent.parent_path();
+                            if (next == parent) break;
+                            parent = next; ec.clear();
+                        }
+                        if (!ec) {
+                            const auto space = fs::space(parent, ec);
+                            if (!ec && space.available != std::uintmax_t(-1)) installFreeSpace = space.available;
+                        }
+                        installStorage = texturePackStorageCheck(installingDownload.bytes, installFreeSpace);
+                        if (installStorage == TexturePackStorage::Confirm || installStorage == TexturePackStorage::Block)
+                            ImGui::OpenPopup("Texture pack storage");
+                        else {
+                            if (installStorage == TexturePackStorage::Unknown)
+                                std::fprintf(stderr, "Texture pack storage unknown for %s; proceeding.\n", pack.path.c_str());
+                            pendingPackInstall = pack.id;
+                        }
+                    }
                 }
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                     ImGui::BeginTooltip();
                     ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
-                    ImGui::Text("%s\n%s\n%s", pack.path.c_str(), pack.size.c_str(),
+                    if (!pack.installed) {
+                        if (downloadable && downloadable->bytes)
+                            ImGui::Text("Download: %s", texturePackSizeText(downloadable->bytes).c_str());
+                        else ImGui::TextUnformatted("Download size unavailable.");
+                        ImGui::Text("Installs to: %s", pack.path.c_str());
+                        ImGui::TextUnformatted(working ? "Download / install in progress." : "Installing does not select this pack.");
+                    } else ImGui::Text("%s\n%s\n%s", pack.path.c_str(), pack.size.c_str(),
                         pack.removable ? "Deletes only this pack. You can download it again." : "Deletion unavailable: unsafe links or unreadable files.");
                     ImGui::PopTextWrapPos();
                     ImGui::EndTooltip();
                 }
             });
+            ImGui::SetNextWindowSize(ImVec2(std::min(560.0f, ImGui::GetIO().DisplaySize.x - 32.0f), 0), ImGuiCond_Always);
+            if (ImGui::BeginPopupModal("Texture pack storage", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
+                ImGui::PushFont(fonts.caption);
+                const bool blocked = installStorage == TexturePackStorage::Block;
+                ImGui::TextWrapped("%s", blocked ? "Not enough space to install this texture pack." : "Free space is below the recommended amount. Install anyway?");
+                ImGui::Text("Pack download: %s", texturePackSizeText(installingDownload.bytes).c_str());
+                ImGui::Text("Free space: %s", texturePackSizeText(installFreeSpace.value_or(0)).c_str());
+                const auto needed = texturePackStorageBytes(installingDownload.bytes, blocked ? kTexturePackHardFactor : kTexturePackSoftFactor);
+                ImGui::Text("%s: %s", blocked ? "Needed" : "Recommended", texturePackSizeText(needed).c_str());
+                if (blocked) ImGui::Text("Free up at least: %s", texturePackSizeText(needed - installFreeSpace.value_or(0)).c_str());
+                ImGui::TextWrapped("Destination: %s", installingPack.path.c_str());
+                if (glassButton(blocked ? "OK" : "Cancel", ImVec2(110, 38), true)) ImGui::CloseCurrentPopup();
+                ImGui::SetItemDefaultFocus();
+                if (ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+                if (!blocked) {
+                    ImGui::SameLine();
+                    if (glassButton("Install anyway", ImVec2(160, 38))) {
+                        pendingPackInstall = installingPack.id;
+                        ImGui::CloseCurrentPopup();
+                    }
+                }
+                ImGui::PopFont();
+                ImGui::EndPopup();
+            }
             ImGui::SetNextWindowSize(ImVec2(std::min(560.0f, ImGui::GetIO().DisplaySize.x - 32.0f), 0), ImGuiCond_Always);
             if (ImGui::BeginPopupModal("Delete texture pack?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
                 ImGui::PushFont(fonts.caption);
@@ -1887,6 +2021,16 @@ struct Hub {
             std::lock_guard<std::mutex> lock(settings->mutex);
             drawSettingsLocked(top, size, dt);
         }
+        if (!pendingPackInstall.empty()) {
+            for (const auto& download : texturePackDownloads(settingsGame)) {
+                const std::string id = std::string(download.label) == "4K" ? "hd-4k" : "hd-1080p";
+                if (id == pendingPackInstall) {
+                    SettingsClient::installPack(settings, installingPack, download);
+                    break;
+                }
+            }
+            pendingPackInstall.clear();
+        }
         if (!pendingRequest.empty()) {
             SettingsClient::start(settings, std::move(pendingRequest), pendingLabel);
             pendingRequest.clear();
@@ -2022,11 +2166,12 @@ struct Hub {
             return;
         }
         const SettingsSnapshot& snap = settings->snapshot;
-        if (awaitingPackResult && !busy && pendingRequest.empty()) {
+        if ((awaitingPackResult || settings->packResultReady) && !busy && pendingRequest.empty()) {
             if (!snap.message.empty()) notify(snap.message);
             else if (!settings->error.empty()) notify(settings->error);
             toastTime = 8.0f;
             awaitingPackResult = false;
+            settings->packResultReady = false;
         }
         const std::vector<SettingsGroup>& groups = snap.groups;
         if (groups.empty()) return;

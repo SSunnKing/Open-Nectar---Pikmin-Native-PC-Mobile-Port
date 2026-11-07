@@ -49,4 +49,12 @@ with tempfile.TemporaryDirectory(prefix='nectar-pack-cli-') as tmp:
     p,s=run('--settings-dump')
     assert s['texturePacks']['active']==''
     assert s['texturePacks']['installed']==['hd-1080p']
+    details=s['texturePacks']['details']
+    assert [p['id'] for p in details]==['hd-1080p','hd-4k']
+    assert details[0]['installed'] and not details[1]['installed']
+    # Reinstalling a deleted known variant restores the row, but never selects it.
+    p,s=run('--texpack-install',str(zip),'hd-4k')
+    assert p.returncode == 0 and s['texturePacks']['details'][1]['installed']
+    assert s['texturePacks']['active']==''
+
     print('settings CLI installation, metadata, selection and safe deletion: PASS')

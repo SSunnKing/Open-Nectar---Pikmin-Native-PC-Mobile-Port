@@ -10401,7 +10401,7 @@ void headlessDump(const std::string& message = std::string(), bool messageIsErro
         jsonString(out, packs[i].c_str());
     }
     out += "],\"details\":[";
-    const auto details = nectar::textures::discover(std::filesystem::path("Load") / "Textures");
+    const auto details = nectar::textures::catalog(std::filesystem::path("Load") / "Textures");
     for (size_t i = 0; i < details.size(); ++i) {
         if (i) out += ',';
         const auto& pack = details[i];
@@ -10410,6 +10410,7 @@ void headlessDump(const std::string& message = std::string(), bool messageIsErro
         out += ",\"path\":"; jsonString(out, pack.path.string().c_str());
         out += ",\"size\":"; jsonString(out, pack.removable ? nectar::textures::sizeText(pack.bytes).c_str() : "Size unavailable");
         out += ",\"removable\":"; out += pack.removable ? "true" : "false";
+        out += ",\"installed\":"; out += pack.installed ? "true" : "false";
         out += '}';
     }
     out += "]}";

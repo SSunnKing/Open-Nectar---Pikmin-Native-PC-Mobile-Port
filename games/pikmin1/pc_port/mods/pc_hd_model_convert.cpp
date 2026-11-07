@@ -12,6 +12,7 @@
 
 #include "nectar_paths/paths.h"
 #include "texture_pack_catalog.h"
+#include "../launcher/texture_pack_storage.h"
 #include "stb_image.h"
 
 #include <algorithm>
@@ -2030,6 +2031,18 @@ int pc_texpack_install_zip(const char* zipPath, char* message, unsigned long mes
 	std::error_code ec;
 	fs::create_directories(root, ec);
 	if (ec || !nectar::textures::plainDirectory(root)) { say("Unsafe texture folder."); return 0; }
+	// Now the ZIP index is available, replace the click-time estimate with its
+	// actual uncompressed size. The ZIP still occupies disk while we stage all
+	// extracted files, so require extraction space plus 10% before staging.
+	std::uint64_t expandedBytes = 0;
+	for (const auto& entry : zip.entries) expandedBytes += entry.usize;
+	const auto storage = fs::space(root, ec);
+	if (!ec && storage.available < pikmin::launcher::texturePackStorageBytes(
+	        expandedBytes, pikmin::launcher::kTexturePackExtractionHeadroom)) {
+		say("Not enough space to extract this ZIP (including 10% headroom). No pack was installed.");
+		return 0;
+	}
+	ec.clear();
 	fs::path target = root;
 	if (!id.empty()) {
 		if (fs::exists(root / id, ec) || fs::is_symlink(root / id, ec)) {
