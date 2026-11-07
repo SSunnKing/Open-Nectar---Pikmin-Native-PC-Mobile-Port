@@ -55,14 +55,21 @@ inline bool plainDirectory(const fs::path& path) {
     std::error_code ec;
     const auto absolute = fs::absolute(path, ec).lexically_normal();
     if (ec) return false;
-    fs::path part;
-    for (const auto& component : absolute) {
-        part /= component;
+    const auto plainEntry = [&](const fs::path& entry) {
 #ifdef _WIN32
-        if (windowsUnsafeEntry(part)) return false;
+        if (windowsUnsafeEntry(entry)) return false;
 #endif
-        const auto st = fs::symlink_status(part, ec);
-        if (ec || st.type() != fs::file_type::directory) return false;
+        const auto st = fs::symlink_status(entry, ec);
+        return !ec && st.type() == fs::file_type::directory;
+    };
+    // Windows iterates "C:\folder" as "C:", "\", "folder". "C:" alone
+    // is drive-relative, not the root, and may fail the filesystem checks.
+    // Start with the complete root rather than querying the bare drive name.
+    fs::path part = absolute.root_path();
+    if (!plainEntry(part)) return false;
+    for (const auto& component : absolute.relative_path()) {
+        part /= component;
+        if (!plainEntry(part)) return false;
     }
     return true;
 }

@@ -5,7 +5,7 @@
 #include <random>
 using namespace nectar::textures;
 int main() {
-    const auto temp = fs::canonical(fs::temp_directory_path()) / ("nectar-pack-test-" + std::to_string(std::random_device{}()));
+    const auto temp = fs::canonical(fs::temp_directory_path()) / ("nectar pack test-" + std::to_string(std::random_device{}()));
     const auto root = temp / "Load" / "Textures";
     auto file = [](const fs::path& p, const std::string& text) { fs::create_directories(p.parent_path()); std::ofstream(p) << text; };
     file(root / "hd-1080p" / "GPI" / "tex1_a.png", "abc");
@@ -17,6 +17,13 @@ int main() {
     assert(absent.size() == 2 && !absent[0].installed && !absent[1].installed);
     assert(absent[0].id == "hd-1080p" && absent[1].id == "hd-4k");
     assert(!absent[0].removable && absent[0].path.is_absolute());
+    // Validate the complete root, not a drive-relative prefix such as "C:".
+    assert(plainDirectory(root.root_path()));
+    assert(plainDirectory(root));
+    assert(plainDirectory(fs::path(root.generic_string())));
+    assert(plainDirectory(root / ""));
+    assert(!plainDirectory(root / "missing"));
+    assert(!plainDirectory(root / "hd-1080p" / "GPI" / "tex1_a.png"));
     auto packs = discover(root);
     assert(packs.size() == 3);
     assert(packs[0].id == "hd-1080p" && packs[0].name == "HD 1080p" && packs[0].bytes == 3);
