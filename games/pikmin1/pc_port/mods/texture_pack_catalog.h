@@ -8,15 +8,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#else
+#ifndef _WIN32
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -25,6 +17,12 @@
 
 namespace nectar::textures {
 namespace fs = std::filesystem;
+#ifdef _WIN32
+// True when the path is missing or is a reparse point (symlink, junction...).
+// Defined in texture_pack_catalog_win32.cpp so the Windows SDK headers never
+// reach the game's translation units, whose decompiled headers define HWND.
+bool windowsUnsafeEntry(const fs::path& path);
+#endif
 struct Pack {
     std::string id;
     std::string name;
@@ -60,8 +58,7 @@ inline bool plainDirectory(const fs::path& path) {
     for (const auto& component : absolute) {
         part /= component;
 #ifdef _WIN32
-        const DWORD attributes = GetFileAttributesW(part.c_str());
-        if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+        if (windowsUnsafeEntry(part)) return false;
 #endif
         const auto st = fs::symlink_status(part, ec);
         if (ec || st.type() != fs::file_type::directory) return false;
@@ -76,8 +73,7 @@ inline bool measure(const fs::path& path, std::uintmax_t& bytes) {
     for (; it != end; it.increment(ec)) {
         if (ec) return false;
 #ifdef _WIN32
-        const DWORD attributes = GetFileAttributesW(it->path().c_str());
-        if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+        if (windowsUnsafeEntry(it->path())) return false;
 #endif
         const auto st = it->symlink_status(ec);
         if (ec || (st.type() != fs::file_type::directory && st.type() != fs::file_type::regular)) return false;

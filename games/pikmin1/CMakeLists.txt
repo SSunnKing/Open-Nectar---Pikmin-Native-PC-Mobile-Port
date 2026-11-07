@@ -159,7 +159,8 @@ option(NECTAR_ONLINE "Build the experimental direct online co-op layer" OFF)
 
 if(PIKMIN_BUILD_TESTS)
     enable_testing()
-    add_executable(texture_pack_catalog_test pc_port/mods/texture_pack_catalog_test.cpp)
+    add_executable(texture_pack_catalog_test pc_port/mods/texture_pack_catalog_test.cpp
+        pc_port/mods/texture_pack_catalog_win32.cpp)
     target_compile_features(texture_pack_catalog_test PRIVATE cxx_std_17)
     add_test(NAME texture_pack_catalog_test COMMAND texture_pack_catalog_test)
     add_executable(toast_layout_test pc_port/launcher/toast_layout_test.cpp)
@@ -359,6 +360,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_gpu_preference.cpp
     pc_port/mods/pc_hd_models.cpp
     pc_port/mods/pc_hd_model_convert.cpp
+    pc_port/mods/texture_pack_catalog_win32.cpp
     pc_port/mods/pc_vs_arena.cpp
     pc_port/mods/pc_vs_map.cpp
     pc_port/mods/pc_map_catalog.cpp
