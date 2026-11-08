@@ -63,12 +63,15 @@ void testPending()
     int tag = 0, frames = 0;
     bool chosen = false;
     char out[64];
+    auto lastPoll = Clock::now();
     while (frames < requiredFrames && Clock::now() < deadline) {
         if (pc_file_dialog_poll(&tag, &chosen, out, sizeof(out)) != PC_FILE_DIALOG_PENDING) break;
-        ++frames;
+        lastPoll = Clock::now();
+        if (++frames == requiredFrames) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
-    check(frames == requiredFrames && Clock::now() < deadline,
+    // Judge the deadline by the last successful poll, not by when the loop ended.
+    check(frames == requiredFrames && lastPoll < deadline,
           "poll returned PENDING for four frames within five seconds (" + std::to_string(frames) + " frames)");
     pc_file_dialog_close();
     check(!pc_file_dialog_busy(), "idle after pending picker closes");
