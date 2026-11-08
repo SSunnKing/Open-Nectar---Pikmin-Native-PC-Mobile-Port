@@ -43,7 +43,7 @@ int Stream::readInt()
  */
 u8 Stream::readByte()
 {
-	u8 c;
+	u8 c = 0; // a short read (EOF/truncated file) returns 0, not stack garbage
 	read(&c, sizeof(u8));
 	return c;
 }

@@ -624,7 +624,7 @@ void App::drawSetup()
 	ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 	ImGui::SetNextWindowSize(ImVec2(720, 0));
 	ImGui::Begin("Nectar Map Maker", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
-	ImGui::TextWrapped(tr("¡Bienvenido! Con este programa puedes crear tus propios mapas para el modo VS de Open Nectar."));
+	ImGui::TextWrapped("%s", tr("¡Bienvenido! Con este programa puedes crear tus propios mapas para el modo VS de Open Nectar."));
 	hint(tr("Usa los datos del juego que ya tienes instalado: ni el programa ni tus mapas llevan nada de Nintendo dentro."));
 	languagePicker(cfg_);
 	ImGui::Spacing();
@@ -654,7 +654,7 @@ void App::drawSetup()
 		if (!p.empty()) copyStr(gameBuf_, sizeof(gameBuf_), p.string());
 	}
 	std::error_code ec;
-	if (gameBuf_[0] && !fs::is_regular_file(gameBuf_, ec)) ImGui::TextColored(kWarn, tr("No existe ese archivo."));
+	if (gameBuf_[0] && !fs::is_regular_file(gameBuf_, ec)) ImGui::TextColored(kWarn, "%s", tr("No existe ese archivo."));
 
 	ImGui::Spacing();
 	ImGui::Separator();
@@ -677,10 +677,10 @@ void App::drawBuilding()
 	ImGui::Begin(tr("Preparando"), nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 	if (!catalogFinished_) {
 		const int done = catalogDone_, total = catalogTotal_;
-		ImGui::Text(tr("Preparando las cosas del juego..."));
+		ImGui::Text("%s", tr("Preparando las cosas del juego..."));
 		char overlay[64];
 		if (total > 0) std::snprintf(overlay, sizeof(overlay), "%d / %d", done, total);
-		else std::snprintf(overlay, sizeof(overlay), tr("Buscando..."));
+		else std::snprintf(overlay, sizeof(overlay), "%s", tr("Buscando..."));
 		ImGui::ProgressBar(total > 0 ? float(done) / float(total) : 0.0f, ImVec2(-1, 0), overlay);
 		hint(tr("Solo tarda la primera vez."));
 	} else {
@@ -1869,35 +1869,35 @@ void App::drawTopBar(const Rect& r)
 			if (ed_.dirty && !ed_.path.empty()) saveMap(ed_.path);
 			openCampaign(editingZoneOf_);
 		}
-		ImGui::SetItemTooltip(tr("Guarda este nivel y vuelve al mapa de la campaña"));
+		ImGui::SetItemTooltip("%s", tr("Guarda este nivel y vuelve al mapa de la campaña"));
 		ImGui::SameLine();
 	}
 	if (ImGui::Button(tr("Nuevo"), b)) openNew_ = true;
-	ImGui::SetItemTooltip(tr("Empezar otro mapa"));
+	ImGui::SetItemTooltip("%s", tr("Empezar otro mapa"));
 	ImGui::SameLine();
 	if (ImGui::Button(tr("Abrir"), b)) {
 		refreshOpenList();
 		openOpen_ = true;
 	}
-	ImGui::SetItemTooltip(tr("Abrir uno de tus mapas"));
+	ImGui::SetItemTooltip("%s", tr("Abrir uno de tus mapas"));
 	ImGui::SameLine();
 	if (ImGui::Button(tr("Guardar"), b)) saveOrAsk(false);
-	ImGui::SetItemTooltip(tr("Guardar (Ctrl+S)"));
+	ImGui::SetItemTooltip("%s", tr("Guardar (Ctrl+S)"));
 	ImGui::SameLine();
 	if (ImGui::Button(tr("Exportar"), b)) {
 		if (ed_.path.empty() || ed_.dirty) saveOrAsk(false);
 		if (!ed_.path.empty() && !ed_.dirty) exportPackOf(fs::path(ed_.path).parent_path().string());
 	}
-	ImGui::SetItemTooltip(tr("Guardar un .nectarpack para compartir este mapa"));
+	ImGui::SetItemTooltip("%s", tr("Guardar un .nectarpack para compartir este mapa"));
 	ImGui::SameLine(0, 14);
 	ImGui::BeginDisabled(!ed_.canUndo());
 	if (ImGui::Button(tr("Deshacer"), ImVec2(88, 34))) ed_.undo();
-	ImGui::SetItemTooltip(tr("Volver atrás el último cambio (Ctrl+Z)"));
+	ImGui::SetItemTooltip("%s", tr("Volver atrás el último cambio (Ctrl+Z)"));
 	ImGui::EndDisabled();
 	ImGui::SameLine();
 	ImGui::BeginDisabled(!ed_.canRedo());
 	if (ImGui::Button(tr("Rehacer"), ImVec2(84, 34))) ed_.redo();
-	ImGui::SetItemTooltip(tr("Repetir lo que deshiciste (Ctrl+Y)"));
+	ImGui::SetItemTooltip("%s", tr("Repetir lo que deshiciste (Ctrl+Y)"));
 	ImGui::EndDisabled();
 	const float mapX = ImGui::GetItemRectMax().x - wp.x + 18.0f;
 	if (mapX < r.w - 370.0f) {
@@ -1961,7 +1961,7 @@ void App::drawTopBar(const Rect& r)
 		}
 		ImGui::EndPopup();
 	}
-	ImGui::SetItemTooltip(tr("Guarda el mapa y lo abre en el juego para jugarlo (F5)"));
+	ImGui::SetItemTooltip("%s", tr("Guarda el mapa y lo abre en el juego para jugarlo (F5)"));
 	ImGui::End();
 }
 
@@ -2456,7 +2456,7 @@ void App::drawSwatches(bool allowAdd)
 			matBrowserTarget_ = -1;
 			openMatBrowser_   = true;
 		}
-		ImGui::SetItemTooltip(tr("Añadir otro suelo de los escenarios del juego"));
+		ImGui::SetItemTooltip("%s", tr("Añadir otro suelo de los escenarios del juego"));
 	} else {
 		ImGui::NewLine();
 	}
@@ -2466,7 +2466,7 @@ void App::drawSwatches(bool allowAdd)
 void App::drawBrushSettings()
 {
 	ImGui::SliderFloat(tr("Pincel"), &brushRadius_, 25, 1000, "%.0f");
-	ImGui::SetItemTooltip(tr("Tamaño del pincel (también con Ctrl + rueda del ratón)."));
+	ImGui::SetItemTooltip("%s", tr("Tamaño del pincel (también con Ctrl + rueda del ratón)."));
 	ImGui::TextColored(kDim, "%s", tr("Forma"));
 	ImGui::SameLine(78);
 	if (choiceButton(tr("Circular"), brushShape_ == BrushShape::Circle, ImVec2(88, 0))) brushShape_ = BrushShape::Circle;
@@ -2492,19 +2492,19 @@ void App::drawFloorOptions()
 	drawSwatches(true);
 
 	ImGui::SeparatorText(tr("Tamaño del mapa"));
-	ImGui::Text(tr("Ancho"));
+	ImGui::Text("%s", tr("Ancho"));
 	ImGui::SameLine(80);
 	if (ImGui::Button(tr("Más##w"), ImVec2(80, 0))) growMap(4, 0);
 	ImGui::SameLine();
 	if (ImGui::Button(tr("Menos##w"), ImVec2(80, 0))) growMap(-4, 0);
-	ImGui::Text(tr("Largo"));
+	ImGui::Text("%s", tr("Largo"));
 	ImGui::SameLine(80);
 	if (ImGui::Button(tr("Más##l"), ImVec2(80, 0))) growMap(0, 4);
 	ImGui::SameLine();
 	if (ImGui::Button(tr("Menos##l"), ImVec2(80, 0))) growMap(0, -4);
 	const MapDoc& d = ed_.doc;
 	ImGui::TextColored(kDim, tr("Ahora: %.0f x %.0f"), d.maxX - d.minX, d.maxZ - d.minZ);
-	ImGui::Text(tr("Detalle"));
+	ImGui::Text("%s", tr("Detalle"));
 	ImGui::SameLine(80);
 	const double cells[] = { 50.0, 25.0 };
 	const char* cellNames[] = { tr("Normal"), tr("Fino") };
@@ -2542,7 +2542,7 @@ void App::drawFloorOptions()
 		matBrowserCourse_ = g.border.source;
 		openMatBrowser_   = true;
 	}
-	ImGui::SetItemTooltip(tr("Pulsa para elegir otro aspecto"));
+	ImGui::SetItemTooltip("%s", tr("Pulsa para elegir otro aspecto"));
 	ImGui::SameLine();
 	ImGui::BeginGroup();
 	float h = float(ed_.doc.wallHeight);
@@ -2573,8 +2573,8 @@ void App::drawHeightOptions()
 	drawBrushSettings();
 	ImGui::SliderFloat(tr("Fuerza"), &brushStrength_, 20, 600, "%.0f");
 	ImGui::Spacing();
-	ImGui::TextColored(kWarn, tr("Las zonas rojas son tan empinadas"));
-	ImGui::TextColored(kWarn, tr("que los Pikmin resbalan."));
+	ImGui::TextColored(kWarn, "%s", tr("Las zonas rojas son tan empinadas"));
+	ImGui::TextColored(kWarn, "%s", tr("que los Pikmin resbalan."));
 	ImGui::Spacing();
 	if (ImGui::Button(tr("Allanar todo el mapa"), ImVec2(-1, 0))) {
 		std::fill(ed_.doc.terrain.heights.begin(), ed_.doc.terrain.heights.end(), std::int16_t(0));
@@ -2627,7 +2627,7 @@ void App::drawPlateauOptions()
 	hint(plateauUp_ ? tr("Pinta una zona: queda plana y más alta que donde empiezas a pintar (una plataforma).")
 	                : tr("Pinta una zona: queda plana y más baja que donde empiezas a pintar (un foso)."));
 	hint(tr("Mantén Mayús para hacer lo contrario."));
-	ImGui::Text(tr("¿Cuánto?"));
+	ImGui::Text("%s", tr("¿Cuánto?"));
 	const struct {
 		const char* label;
 		float amount;
@@ -2638,8 +2638,8 @@ void App::drawPlateauOptions()
 	}
 	drawBrushSettings();
 	ImGui::Spacing();
-	ImGui::TextColored(kWarn, tr("Los bordes son acantilados:"));
-	ImGui::TextColored(kWarn, tr("los Pikmin no pueden subirlos."));
+	ImGui::TextColored(kWarn, "%s", tr("Los bordes son acantilados:"));
+	ImGui::TextColored(kWarn, "%s", tr("los Pikmin no pueden subirlos."));
 	hint(tr("Para unir alturas pon una rampa (Poner cosas > Puentes y rampas) o suaviza el borde con «Montañas y hoyos»."));
 }
 
@@ -2797,7 +2797,7 @@ void App::drawWallOptions()
 {
 	ImGui::SeparatorText(tr("Muros"));
 	hint(tr("Haz clic donde empieza el muro y arrastra hasta donde acaba."));
-	ImGui::Text(tr("Altura"));
+	ImGui::Text("%s", tr("Altura"));
 	if (choiceButton(tr("Bajo"), wallHeight_ == 60, ImVec2(80, 0))) wallHeight_ = 60;
 	ImGui::SameLine();
 	if (choiceButton(tr("Medio"), wallHeight_ == 150, ImVec2(80, 0))) wallHeight_ = 150;
@@ -3343,7 +3343,7 @@ void App::drawSelected()
 		const nectar::ObjectInfo* info = objectInfo(o.kind);
 		if (info) hint(tr(info->hint));
 		if (o.kind.rfind("bridge", 0) == 0 || o.kind.rfind("slope", 0) == 0) {
-			ImGui::Text(tr("Trabajo para construirlo:"));
+			ImGui::Text("%s", tr("Trabajo para construirlo:"));
 			const struct {
 				const char* label;
 				int work;
@@ -3638,7 +3638,7 @@ void App::drawMapPanel()
 		ImGui::SetNextItemWidth(-90);
 		ImGui::SliderInt(tr("Ver el día"), &viewDay_, 0, 30, viewDay_ ? "%d" : tr("todos"));
 		ImGui::SetItemTooltip("%s", tr("Enseña solo los enemigos que salen ese día (según «Sale desde/hasta el día»). No cambia el mapa."));
-		ImGui::Text(tr("Pikmin al empezar (en el grupo):"));
+		ImGui::Text("%s", tr("Pikmin al empezar (en el grupo):"));
 		const char* colours[] = { tr("Azules"), tr("Rojos"), tr("Amarillos") };
 		for (int c = 0; c < 3; c++) {
 			ImGui::SetNextItemWidth(-90);
@@ -4132,9 +4132,9 @@ void App::drawChecklist()
 	const std::vector<Issue> issues = checkMap();
 	bool blocking = false;
 	for (const Issue& i : issues) blocking = blocking || i.blocking;
-	if (preview_.busy() && compiled_.generation != ed_.liveGeneration) ImGui::TextColored(kDim, tr("Comprobando..."));
-	else if (!blocking) ImGui::TextColored(kGood, tr("¡Sí! Pulsa «Probar en el juego»."));
-	else ImGui::TextColored(kBad, tr("Todavía no. Arregla esto:"));
+	if (preview_.busy() && compiled_.generation != ed_.liveGeneration) ImGui::TextColored(kDim, "%s", tr("Comprobando..."));
+	else if (!blocking) ImGui::TextColored(kGood, "%s", tr("¡Sí! Pulsa «Probar en el juego»."));
+	else ImGui::TextColored(kBad, "%s", tr("Todavía no. Arregla esto:"));
 	int n = 0;
 	for (const Issue& i : issues) {
 		ImGui::PushID(n++);
@@ -4178,7 +4178,7 @@ void App::drawChecklist()
 		if (s.object == "boss") bosses += n;
 	}
 	ImGui::Spacing();
-	ImGui::TextColored(kDim, tr("Presupuesto del juego:"));
+	ImGui::TextColored(kDim, "%s", tr("Presupuesto del juego:"));
 	auto bar = [&](const char* label, double used, double max) {
 		const float use = max > 0 ? float(used / max) : 0.0f;
 		char text[96];
@@ -4269,7 +4269,7 @@ void App::drawModals()
 	}
 
 	if (ImGui::BeginPopupModal(tr("Guardar mapa"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-		ImGui::Text(tr("¿Cómo se llama tu mapa?"));
+		ImGui::Text("%s", tr("¿Cómo se llama tu mapa?"));
 		ImGui::SetNextItemWidth(360);
 		if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
 		const bool enter = ImGui::InputText("##name", saveName_, sizeof(saveName_), ImGuiInputTextFlags_EnterReturnsTrue);
@@ -4293,7 +4293,7 @@ void App::drawModals()
 	}
 
 	if (ImGui::BeginPopupModal(tr("Abrir mapa"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-		ImGui::Text(tr("Tus mapas"));
+		ImGui::Text("%s", tr("Tus mapas"));
 		ImGui::BeginChild("list", ImVec2(560, 340), ImGuiChildFlags_Borders);
 		for (const auto& m : openList_) {
 			ImGui::PushID(m.second.c_str());
@@ -4324,8 +4324,8 @@ void App::drawModals()
 	}
 
 	if (ImGui::BeginPopupModal(tr("Mapa nuevo"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-		if (ed_.dirty) ImGui::TextColored(kWarn, tr("Ojo: el mapa actual tiene cambios sin guardar."));
-		ImGui::Text(tr("Elige la forma para empezar:"));
+		if (ed_.dirty) ImGui::TextColored(kWarn, "%s", tr("Ojo: el mapa actual tiene cambios sin guardar."));
+		ImGui::Text("%s", tr("Elige la forma para empezar:"));
 		struct S {
 			const char* id;
 			nectar::TerrainShape shape;
@@ -4353,7 +4353,7 @@ void App::drawModals()
 	}
 
 	if (ImGui::BeginPopupModal(tr("Salir"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-		ImGui::Text(tr("Tienes cambios sin guardar."));
+		ImGui::Text("%s", tr("Tienes cambios sin guardar."));
 		if (ImGui::Button(tr("Guardar y salir"))) {
 			ImGui::CloseCurrentPopup();
 			if (!ed_.path.empty() && saveMap(ed_.path)) quit_ = true;
@@ -4377,13 +4377,13 @@ void App::drawHelp()
 	if (!ImGui::BeginPopupModal((std::string(tr("Ayuda")) + "###help").c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
 	languagePicker(cfg_);
 	ImGui::SeparatorText(tr("Cómo se hace un mapa"));
-	ImGui::TextWrapped(tr("1. Da forma al suelo con «Dibujar suelo» y súbelo o bájalo con «Montañas y hoyos»."));
-	ImGui::TextWrapped(tr("2. Con «Poner cosas» añade piezas de la nave, pastillas, Bulborbs y decoración."));
-	ImGui::TextWrapped(tr("3. Coloca las salidas, cebollas y cohetes de cada jugador con «Mover y girar»."));
-	ImGui::TextWrapped(tr("4. Mira a la derecha si está listo y pulsa «Probar en el juego»."));
-	ImGui::TextWrapped(tr("5. Usa Vista para revisar colisión, rutas y pendientes antes de jugar."));
-	ImGui::TextWrapped(tr("6. Las comprobaciones pueden mover elementos, crear suelo o corregir errores seguros."));
-	ImGui::TextWrapped(tr("7. Rampas une dos alturas: marca primero el extremo bajo y después el alto."));
+	ImGui::TextWrapped("%s", tr("1. Da forma al suelo con «Dibujar suelo» y súbelo o bájalo con «Montañas y hoyos»."));
+	ImGui::TextWrapped("%s", tr("2. Con «Poner cosas» añade piezas de la nave, pastillas, Bulborbs y decoración."));
+	ImGui::TextWrapped("%s", tr("3. Coloca las salidas, cebollas y cohetes de cada jugador con «Mover y girar»."));
+	ImGui::TextWrapped("%s", tr("4. Mira a la derecha si está listo y pulsa «Probar en el juego»."));
+	ImGui::TextWrapped("%s", tr("5. Usa Vista para revisar colisión, rutas y pendientes antes de jugar."));
+	ImGui::TextWrapped("%s", tr("6. Las comprobaciones pueden mover elementos, crear suelo o corregir errores seguros."));
+	ImGui::TextWrapped("%s", tr("7. Rampas une dos alturas: marca primero el extremo bajo y después el alto."));
 	ImGui::SeparatorText(tr("La vista"));
 	ImGui::TextWrapped("%s%s", tr("Botón derecho + arrastrar: girar la vista. Rueda: acercar y alejar. Botón central: desplazar. "),
 	                   tr("Botón derecho + W A S D: volar."));
@@ -6025,7 +6025,7 @@ void App::drawMaterialBrowser()
 	for (int pass = 0; pass < 2; pass++) {
 		if (pass == 1) {
 			ImGui::Spacing();
-			ImGui::TextColored(kDim, tr("Escenarios de prueba"));
+			ImGui::TextColored(kDim, "%s", tr("Escenarios de prueba"));
 		}
 		for (const nectar::CatalogEntry& e : catalog_.entries) {
 			if (e.kind != nectar::AssetKind::Model || e.category != "terrain" || !e.error.empty()) continue;
@@ -6221,7 +6221,7 @@ void App::drawCampaignPickers()
 		openNewCampaign_ = false;
 	}
 	if (ImGui::BeginPopupModal("##newcampaign", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-		ImGui::Text(tr("¿Cómo se llama la campaña?"));
+		ImGui::Text("%s", tr("¿Cómo se llama la campaña?"));
 		ImGui::SetNextItemWidth(320);
 		ImGui::InputText("##campname", campNewName_, sizeof(campNewName_));
 		if (ImGui::Button(tr("Crear"), ImVec2(120, 0)) && campNewName_[0]) {
@@ -6431,7 +6431,7 @@ void App::drawCampaign()
 	if (ImGui::Button(campDirty_ ? tr("Guardar *") : tr("Guardar"), ImVec2(110, 34))) saveCampaign();
 	ImGui::SameLine();
 	if (ImGui::Button(tr("Exportar paquete..."), ImVec2(170, 34)) && (!campDirty_ || saveCampaign())) exportPackOf(campDir_);
-	ImGui::SetItemTooltip(tr("Un solo archivo .nectarpack con la campaña y sus niveles, para compartirla"));
+	ImGui::SetItemTooltip("%s", tr("Un solo archivo .nectarpack con la campaña y sus niveles, para compartirla"));
 	ImGui::SameLine();
 	ImGui::TextColored(ImVec4(0.90f, 0.87f, 0.62f, 1), "%s", camp_.name.c_str());
 	ImGui::SameLine();
@@ -6732,16 +6732,16 @@ void App::drawCampaignPanel()
 		ImGui::SetNextItemWidth(-90);
 		if (ImGui::InputText(tr("En inglés"), buf, 128)) camp_.nameEn = buf, ch = true;
 		copyStr(buf, sizeof(buf), camp_.intro);
-		ImGui::Text(tr("Introducción (al empezar una partida):"));
+		ImGui::Text("%s", tr("Introducción (al empezar una partida):"));
 		if (ImGui::InputTextMultiline("##intro", buf, sizeof(buf), ImVec2(-1, 70))) camp_.intro = buf, ch = true;
 		copyStr(buf, sizeof(buf), camp_.introEn);
-		ImGui::Text(tr("En inglés:"));
+		ImGui::Text("%s", tr("En inglés:"));
 		if (ImGui::InputTextMultiline("##introen", buf, sizeof(buf), ImVec2(-1, 50))) camp_.introEn = buf, ch = true;
 		ImGui::Text(tr("Imagen de la introducción: %s"), camp_.introImage.empty() ? tr("ninguna") : camp_.introImage.c_str());
 		if (ImGui::Button(tr("Elegir...##introimg"))) ch |= pickPackImage(tr("Imagen de la introducción"), "intro.png", camp_.introImage);
 		ImGui::SameLine();
 		if (ImGui::Button(tr("Quitar##introimg"))) camp_.introImage.clear(), ch = true;
-		ImGui::Text(tr("Imagen del mapa:"));
+		ImGui::Text("%s", tr("Imagen del mapa:"));
 		if (choiceButton(tr("La del juego"), camp_.worldmap == "game", ImVec2(150, 0))) camp_.worldmap = "game", ch = true;
 		ImGui::SameLine();
 		if (ImGui::Button(tr("Elegir una imagen PNG..."), ImVec2(-1, 0))) {
@@ -6768,7 +6768,7 @@ void App::drawCampaignPanel()
 		const char* onions[] = { tr("Cebolla azul"), tr("Cebolla roja"), tr("Cebolla amarilla") };
 		const char* pikmin[] = { tr("Azules"), tr("Rojos"), tr("Amarillos") };
 		for (int c = 0; c < 3; c++) ch |= ImGui::Checkbox(onions[c], &camp_.start.onions[c]);
-		ImGui::Text(tr("Pikmin en el grupo el primer día:"));
+		ImGui::Text("%s", tr("Pikmin en el grupo el primer día:"));
 		for (int c = 0; c < 3; c++) {
 			ImGui::SetNextItemWidth(-90);
 			ch |= ImGui::SliderInt(pikmin[c], &camp_.start.pikmin[c], 0, 100);
