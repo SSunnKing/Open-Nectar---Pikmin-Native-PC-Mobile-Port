@@ -374,10 +374,13 @@ s32 Jaq_SetSeqData_Limit(seqp_* track, u8* sequenceData, u32 sequenceSize, u32 s
 	}
 	case 1:
 	{
-		track->fileHandle = FAT_AllocateMemory(sequenceSize);
-		if (track->fileHandle == 0xffff) { // Isn't this literally impossible?
+		// fileHandle is a u8, so check FAT_AllocateMemory's 0xffff failure
+		// value before it is truncated (it used to become handle 0xff).
+		int handle = FAT_AllocateMemory(sequenceSize);
+		if (handle == 0xffff) {
 			return -1;
 		}
+		track->fileHandle = handle;
 		FAT_StoreBlock(sequenceData, track->fileHandle, 0, sequenceSize);
 		trackData = NULL;
 		break;
