@@ -133,6 +133,7 @@ void pc_settings_draw_idle_counter(void);
 void pc_settings_draw_vs_hud(void);
 /// Aviso de logro desbloqueado (pc_achievements).
 void pc_settings_draw_achievement_toast(void);
+void pc_settings_draw_repair_note(void); ///< "Progression repaired" note after a stuck-save repair
 /// VS: pasa las reglas guardadas (menú previo) a la partida.
 void pc_settings_apply_vs_rules(void);
 #if defined(PIKI_PC_PORT)

@@ -1,0 +1,19 @@
+# K1: skipped first yellow plus the first collected part on the same day.
+# The part is owned but the counters and areas missed it. The engine is not owned.
+name = k1-skipped-yellow-and-first-part
+[saved]
+mode = story
+day = 2
+owned = ust3
+curr = 0
+required = 0
+level = 0
+ship_effect = 0
+course_open = 1
+collect_engine = 1
+red = unlocked booted displayed discovered plucked
+red.stored = 20
+yellow = booted discovered
+[world]
+red.onion = present expected
+yellow.onion = present expected

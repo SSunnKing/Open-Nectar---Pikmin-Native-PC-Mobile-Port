@@ -541,6 +541,9 @@ void PlayerState::loadCard(RandomAccessStream& data)
 		PRINT("Invalid UFO-part state count %d with %d bytes pending; ignoring section\n", parts, data.getPending());
 		parts = 0;
 	}
+#if defined(PIKI_PC_PORT)
+	mPcLoadedPartEntries = parts;
+#endif
 	for (i = 0; i < parts; i++) {
 		const u8 visibility = data.readByte();
 		if (i < mTotalParts) {

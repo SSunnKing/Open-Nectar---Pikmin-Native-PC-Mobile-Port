@@ -1,0 +1,20 @@
+# K12: day 29, counts out of step with 29 owned parts, Final Trial closed, blue starter missing.
+name = k12-day29-final-trial
+[saved]
+mode = story
+day = 29
+owned = ust1 ust2 ust3 ust4 ust5 uf01 uf02 uf03 uf04 uf05 uf06 uf07 uf08 uf09 uf10 uf11 un01 un02 un03 un04 un05 un06 un07 un08 un09 un10 un11 un12 un13
+curr = 20
+required = 20
+level = 3
+ship_effect = 7
+course_open = 15
+red = unlocked booted displayed discovered plucked
+red.stored = 60
+yellow = unlocked booted displayed discovered plucked
+yellow.stored = 40
+blue = booted discovered
+[world]
+red.onion = present expected
+yellow.onion = present expected
+blue.onion = present expected

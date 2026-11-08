@@ -1,0 +1,8 @@
+# A new game that has not discovered anything yet. Red is unlocked from the start.
+name = healthy-pristine-tutorial
+[saved]
+mode = story
+day = 1
+tutorial = 1
+red = unlocked displayed
+[world]

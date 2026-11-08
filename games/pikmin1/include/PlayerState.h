@@ -240,6 +240,9 @@ public:
 	PermanentEffect* mNaviLightEfx;       // _1B8
 	PermanentEffect* mNaviLightGlowEfx;   // _1BC
 	Vector3f mNaviLightEfxPos;            // _1C0
+#if defined(PIKI_PC_PORT)
+	int mPcLoadedPartEntries = -1;        // part slots the last loaded save held, -1 when nothing was loaded (stuck-save repair)
+#endif
 };
 
 extern bool preloadUFO;
