@@ -413,12 +413,12 @@ std::string itemName(const MapDoc& d, const ItemRef& r)
 		snprintf(buf, sizeof(buf), "%s", k >= 0 && k < 5 ? pieceNames[k] : tr("Pieza de la nave"));
 		break;
 	}
-	case ItemType::BigPiece: snprintf(buf, sizeof(buf), tr("Pieza grande (aparece durante la partida)")); break;
-	case ItemType::Guard: snprintf(buf, sizeof(buf), tr("Bulborb dormido")); break;
+	case ItemType::BigPiece: snprintf(buf, sizeof(buf), "%s", tr("Pieza grande (aparece durante la partida)")); break;
+	case ItemType::Guard: snprintf(buf, sizeof(buf), "%s", tr("Bulborb dormido")); break;
 	case ItemType::Prop: snprintf(buf, sizeof(buf), "%s", assetLabel(d.props[std::size_t(r.index)].asset).c_str()); break;
 	case ItemType::Gen: snprintf(buf, sizeof(buf), "%s", d.gens[std::size_t(r.index)].label.c_str()); break;
 	case ItemType::Wall: snprintf(buf, sizeof(buf), "%s", d.walls[std::size_t(r.index)].isArc ? tr("Muro curvo") : tr("Muro")); break;
-	case ItemType::Pond: snprintf(buf, sizeof(buf), tr("Charca")); break;
+	case ItemType::Pond: snprintf(buf, sizeof(buf), "%s", tr("Charca")); break;
 	case ItemType::Enemy: {
 		const std::string& t = d.enemies[std::size_t(r.index)].type;
 		const char* label    = t.c_str();
@@ -439,9 +439,9 @@ std::string itemName(const MapDoc& d, const ItemRef& r)
 	}
 	case ItemType::Captain:
 		if (d.story.captainCount > 1) snprintf(buf, sizeof(buf), tr("Capitán del %s"), player);
-		else snprintf(buf, sizeof(buf), tr("Capitán"));
+		else snprintf(buf, sizeof(buf), "%s", tr("Capitán"));
 		break;
-	case ItemType::Ship: snprintf(buf, sizeof(buf), tr("Nave")); break;
+	case ItemType::Ship: snprintf(buf, sizeof(buf), "%s", tr("Nave")); break;
 	case ItemType::StoryOnion: {
 		const int c = d.story.onions[std::size_t(r.index)].color;
 		snprintf(buf, sizeof(buf), tr("Cebolla %s"), tr(onionNames[c >= 0 && c < 3 ? c : 1]));
