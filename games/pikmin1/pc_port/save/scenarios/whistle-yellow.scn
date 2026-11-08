@@ -1,0 +1,19 @@
+# Historical whistle pluck (S05, C): living yellow Pikmin, yellow still locked.
+name = whistle-yellow
+[saved]
+mode = story
+day = 6
+owned = ust1 ust2 ust3 ust4 ust5 uf01 uf02 uf03
+curr = 8
+required = 8
+level = 2
+ship_effect = 1
+course_open = 7
+collect_engine = 1
+red = unlocked booted displayed discovered plucked
+red.stored = 30
+yellow = booted discovered
+[world]
+red.onion = present expected
+yellow.live = 4
+yellow.onion = present expected

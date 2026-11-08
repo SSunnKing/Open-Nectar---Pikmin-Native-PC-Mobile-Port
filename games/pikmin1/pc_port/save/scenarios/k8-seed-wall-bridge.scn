@@ -1,0 +1,23 @@
+# K8: missing blue seed, a destroyed wall restored closed, a finished bridge restored closed,
+# plus an intact wall and an unfinished bridge that must not change.
+name = k8-seed-wall-bridge
+[saved]
+mode = story
+day = 6
+owned = ust1 ust2 ust3 ust4 ust5 uf01 uf02 uf03
+curr = 8
+required = 8
+level = 2
+ship_effect = 1
+course_open = 7
+collect_engine = 1
+red = unlocked booted displayed discovered plucked
+red.stored = 30
+blue = booted discovered
+[world]
+red.onion = present expected
+blue.onion = present expected
+obstacle = wall 1 done
+obstacle = bridge 2 done
+obstacle = wall 3
+obstacle = bridge 4

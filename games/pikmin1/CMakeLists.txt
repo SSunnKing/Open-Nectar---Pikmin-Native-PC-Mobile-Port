@@ -358,6 +358,10 @@ set(PC_PORT_SOURCES
     pc_port/pc_speedrun.cpp
     pc_port/pc_livesplit.cpp
     pc_port/pc_day_history.cpp
+    pc_port/save/pc_progression_repair.cpp
+    pc_port/save/pc_progression_saved.cpp
+    pc_port/save/pc_progression_backup.cpp
+    pc_port/save/pc_progression_game.cpp
     pc_port/pc_art.cpp
     pc_port/pc_icon.cpp
     pc_port/settings/pc_glass_menu.cpp
@@ -1381,6 +1385,27 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_generator_cache_validation_test PRIVATE pc_port/save)
     target_compile_options(pc_generator_cache_validation_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_generator_cache_validation_test COMMAND pc_generator_cache_validation_test)
+
+    # Stuck-save repair (fork issue 192): the decision function for every spec scenario
+    # and combination, then disc-free scenario saves through the load adapters, the
+    # backup and the save boundary. No game, disc, assets or real save involved.
+    add_executable(pc_progression_repair_test
+        pc_port/save/pc_progression_repair_test.cpp
+        pc_port/save/pc_progression_repair.cpp)
+    target_include_directories(pc_progression_repair_test PRIVATE pc_port/save)
+    target_compile_options(pc_progression_repair_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_progression_repair_test COMMAND pc_progression_repair_test)
+
+    add_executable(pc_progression_scenario_test
+        pc_port/save/pc_progression_scenario_test.cpp
+        pc_port/save/pc_progression_repair.cpp
+        pc_port/save/pc_progression_saved.cpp
+        pc_port/save/pc_progression_backup.cpp)
+    target_include_directories(pc_progression_scenario_test PRIVATE pc_port/save)
+    target_compile_definitions(pc_progression_scenario_test PRIVATE
+        PC_PROGRESSION_SCENARIO_DIR="${CMAKE_CURRENT_SOURCE_DIR}/pc_port/save/scenarios")
+    target_compile_options(pc_progression_scenario_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_progression_scenario_test COMMAND pc_progression_scenario_test)
 
     # Envelope smoke test executable (not linked into main game)
     add_executable(pc_envelope_test pc_port/audio/pc_envelope_test.cpp pc_port/audio/pc_envelope.cpp)

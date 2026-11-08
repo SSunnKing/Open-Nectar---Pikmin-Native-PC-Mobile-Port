@@ -1,0 +1,19 @@
+# A healthy mid-game save. The repair pass must change nothing.
+name = healthy-midgame
+[saved]
+mode = story
+day = 6
+owned = ust1 ust2 ust3 ust4 ust5 uf01 uf02 uf03
+curr = 8
+required = 8
+level = 2
+ship_effect = 1
+course_open = 7
+collect_engine = 1
+red = unlocked booted displayed discovered plucked
+red.stored = 30
+yellow = unlocked booted displayed discovered plucked
+yellow.stored = 12
+[world]
+red.onion = present expected
+yellow.onion = present expected

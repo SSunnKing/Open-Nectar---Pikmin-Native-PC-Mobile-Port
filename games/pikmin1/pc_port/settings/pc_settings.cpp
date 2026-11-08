@@ -58,6 +58,7 @@
 #include "nectar_mapcore/pack.h"
 #include "netplay/pc_netplay_det.h"
 #include "pc_achievements.h"
+#include "save/pc_progression_game.h"
 #include "pc_speedrun.h"
 #include "pc_livesplit.h"
 #include "pc_captain_preview.h"
@@ -8429,6 +8430,41 @@ void pc_settings_draw_achievement_toast(void) {
         }
         drawTextOutline(x + textX, y + 12, "%s", Colour(255, 229, 120, a), shadow, head);
         drawTextOutline(x + textX, y + 36, "%s", Colour(255, 255, 255, a), shadow, title);
+    }
+    (void)screenH;
+}
+
+// "Progression repaired": a short note on the left after a stuck save was fixed on load.
+// Plain lines about what changed, no spoilers, no save contents.
+void pc_settings_draw_repair_note(void) {
+    if (!gsys || !gsys->mDGXGfx) return;
+    int count = 0;
+    float age = 0.0f;
+    const char* const* lines = pc_progression_note_lines(&count, &age);
+    if (!lines || count <= 0) return;
+    DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+    ensureFont();
+    if (!sFont) return;
+    const int screenW = gfx->mScreenWidth, screenH = gfx->mScreenHeight;
+    PcSettingsP2DFrame nativeFrame(screenW, screenH);
+    Matrix4f ortho;
+    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
+
+    const float fade = std::min(1.0f, std::min(age / 0.25f, (9.0f - age) / 0.4f));
+    const u8 a       = u8(255.0f * std::max(0.0f, fade));
+    if (a == 0) return;
+    const Colour shadow(8, 12, 28, a);
+    const int shown = std::min(count, 3);
+    const char* head = "Progression repaired";
+    int textW = menuTextWidth(head);
+    for (int i = 0; i < shown; ++i) textW = std::max(textW, menuTextWidth(lines[i]));
+    const int w = std::min(screenW - 40, textW + 40);
+    const int h = 40 + shown * 24;
+    const int x = 20, y = 20;
+    drawPikminPanel(gfx, x, y, w, h, 14);
+    drawTextOutline(x + 20, y + 12, "%s", Colour(255, 229, 120, a), shadow, head);
+    for (int i = 0; i < shown; ++i) {
+        drawTextOutline(x + 20, y + 36 + i * 24, "%s", Colour(255, 255, 255, a), shadow, lines[i]);
     }
     (void)screenH;
 }
