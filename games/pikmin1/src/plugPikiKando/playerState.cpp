@@ -23,6 +23,7 @@
 #include "settings/pc_settings.h"
 #include "pc_achievements.h"
 #include "pc_speedrun.h"
+#include "save/pc_progression_game.h"
 #include "netplay/pc_netplay_present.h"
 #endif
 
@@ -166,6 +167,11 @@ bool PlayerState::existUfoParts(u32 id)
 void PlayerState::initGame()
 {
 	int i;
+#if defined(PIKI_PC_PORT)
+	// A new game: nothing is pending from a save loaded earlier and no part table was loaded.
+	mPcLoadedPartEntries = -1;
+	pc_progression_reset();
+#endif
 	for (i = 0; i < MAX_DAYS; i++) {
 		mPartsCollectedByDay[i] = 0;
 		mPartsToNextByDay[i]    = 0;

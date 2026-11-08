@@ -18,6 +18,7 @@
 #include "PikiHeadItem.h"
 #include "PikiMgr.h"
 #include "PlayerState.h"
+#include "SimpleAI.h"
 #include "gameflow.h"
 #include "pc_coop.h"
 #include "pc_speedrun.h"
@@ -178,9 +179,10 @@ WorldInventory captureWorld()
 		WorldColour& wc            = w.colours[c];
 		wc.onionPresent            = goal != nullptr;
 		wc.pending                 = goal && goal->mSAICtx.mCurrAnimId > 0 ? goal->mSAICtx.mCurrAnimId : 0;
-		// finalSetup's own rule: an unlocked colour with nobody left gets the normal extinction seed.
-		wc.bonusSeedQueued = playerState->mHasExtinctionDemoPlayed == false && !playerState->isTutorial() && !pc_vs_active()
-		                  && playerState->hasContainer(c) && GameStat::allPikis[c] == 0;
+		// finalSetup's own rule, minus the unlock: once a colour is unlocked and nobody of it is left,
+		// the normal extinction movie gives it a seed.
+		wc.bonusPathOpen = playerState->mHasExtinctionDemoPlayed == false && !playerState->isTutorial() && !pc_vs_active()
+		                  && GameStat::allPikis[c] == 0;
 		// The stage's Onion catalogue is not available here, so a missing Onion object is reported, not recreated.
 		wc.onionExpected = false;
 	}
@@ -210,6 +212,9 @@ void applyFactual(const Action& a)
 struct GameExecutor : ActionExecutor {
 	bool execute(const Action& a) override
 	{
+		// A boot flag set after the stage was built would leave its Onion in the dormant pre-boot state.
+		// Rebuilding that is not done in the game, so it stays deferred and nothing builds on it.
+		if (a.kind == Kind::SetBooted) return false;
 		if (isFactual(a.kind)) {
 			applyFactual(a);
 			return true;
@@ -220,6 +225,8 @@ struct GameExecutor : ActionExecutor {
 		GoalItem* goal = itemMgr->getContainer(a.colour);
 		PikiHeadMgr* seedMgr = itemMgr->getPikiHeadMgr();
 		if (!goal || !seedMgr || seedMgr->getSize() >= seedMgr->getMax()) return false;
+		// Only an Onion that is open (Wait) can play the emit animation. A dormant one cannot.
+		if (!goal->mSAICtx.mStateMachine || C_SAI(goal)->getCurrID(goal) != GoalAI::GOAL_Wait) return false;
 		// The same call the normal extinction seed uses: the Onion births one seed and plays its emit animation.
 		goal->mSAICtx.mCurrAnimId++;
 		goal->emitPiki();
@@ -245,6 +252,7 @@ void armNote()
 	for (const std::string& line : sNote) sNotePtr.push_back(line.c_str());
 	sNoteStart = SDL_GetTicks();
 	sNoteArmed = !sNote.empty();
+	sApplied.clear(); // shown once; a later repair gets its own note
 }
 
 } // namespace
@@ -288,7 +296,21 @@ bool pc_progression_before_save(void)
 	return false;
 }
 
-void pc_progression_after_save(bool succeeded) { sPending.afterSave(succeeded); }
+void pc_progression_after_save(bool succeeded, const void* savedImage, std::size_t size)
+{
+	sPending.afterSave(succeeded);
+	// The file on the card is now the one just written: a later repair must back up that, not the file loaded earlier.
+	if (succeeded) sPending.replaceImage(savedImage, size);
+}
+
+void pc_progression_reset(void)
+{
+	sPending.reset();
+	sApplied.clear();
+	sNote.clear();
+	sNotePtr.clear();
+	sNoteArmed = false;
+}
 
 const char* const* pc_progression_note_lines(int* count, float* ageSeconds)
 {

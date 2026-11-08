@@ -171,7 +171,7 @@ void testHealthy()
 		 } },
 		{ "normal extinction with the queued BonusPiki", [](ProgressionSnapshot& s) {
 			 s.colours[Yellow].stored = 0;
-			 s.colours[Yellow].bonusSeedQueued = true;
+			 s.colours[Yellow].bonusPathOpen = true;
 		 } },
 		{ "first-part flag with the delivery pending", [](ProgressionSnapshot& s) {
 			 ownFirst(s, 0, true);
@@ -517,7 +517,7 @@ void testNegatives()
 		s.colours[Yellow].onionPresent  = false;
 		s.colours[Yellow].onionExpected = false;
 		s.colours[Yellow].stored        = 0;
-		s.colours[Yellow].bonusSeedQueued = true;
+		s.colours[Yellow].bonusPathOpen = true;
 	});
 	none("S09 incomplete inventory defers", [](ProgressionSnapshot& s) {
 		s.colours[Red].onionPresent    = false;
@@ -526,7 +526,7 @@ void testNegatives()
 	// S10
 	none("S10 one colour extinct while the queued seed is coming", [](ProgressionSnapshot& s) {
 		s.colours[Yellow].stored = 0;
-		s.colours[Yellow].bonusSeedQueued = true;
+		s.colours[Yellow].bonusPathOpen = true;
 	});
 	// S14
 	none("S14 live absorption", [](ProgressionSnapshot& s) { ownFirst(s, 0, true); s.upgradeLevel = 0; s.shipEffect = 8; s.courseOpen = 1; s.deliveryPending = true; });
@@ -805,9 +805,25 @@ void testCombinations()
 		ProgressionSnapshot queued = stage();
 		queued.colours[Blue] = ColourState {};
 		queued.colours[Yellow].stored = 0;
-		queued.colours[Yellow].bonusSeedQueued = true;
+		queued.colours[Yellow].bonusPathOpen = true;
 		check(repairToFixedPoint(queued).applied.empty(), "K11: an already queued BonusPiki adds no second seed");
 		check(appliedCount(first, Kind::CollapsePartDuplicates) == 1, "K11: the duplicate part collapses once");
+	}
+	// Review fix: a colour unlocked by this very plan must not also get a seed when the normal
+	// extinction movie will supply one (the game would otherwise give it two).
+	{
+		ProgressionSnapshot s = stage();
+		ColourState& y        = s.colours[Yellow];
+		y                     = ColourState {};
+		y.booted = y.discovered = y.plucked = true;
+		y.onionPresent = y.onionExpected = true;
+		y.bonusPathOpen = true;
+		const RepairResult open = repairToFixedPoint(s);
+		check(appliedHas(open, { Kind::SetUnlocked, Yellow }) && appliedCount(open, Kind::ReplaceSeed, Yellow) == 0, "unlock plus an open extinction path: the normal seed is the only one");
+		checkIdempotent("unlock with open path", open);
+		y.bonusPathOpen = false;
+		const RepairResult closed = repairToFixedPoint(s);
+		check(appliedCount(closed, Kind::ReplaceSeed, Yellow) == 1, "unlock with the extinction path closed (tutorial): one replacement seed");
 	}
 	// K12: day 29 + count mismatch + closed Final Trial + missing blue.
 	{

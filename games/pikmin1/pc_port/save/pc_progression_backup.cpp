@@ -101,6 +101,11 @@ void PendingRepair::rememberLoadedImage(const void* data, std::size_t size)
 	mBackedUp = false;
 }
 
+void PendingRepair::replaceImage(const void* data, std::size_t size)
+{
+	mImage.assign(static_cast<const std::uint8_t*>(data), static_cast<const std::uint8_t*>(data) + (data ? size : 0));
+}
+
 void PendingRepair::markRepaired(int slot, int day)
 {
 	mActive   = true;

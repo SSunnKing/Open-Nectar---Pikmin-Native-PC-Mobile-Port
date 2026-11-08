@@ -57,6 +57,9 @@ public:
 	/** Call after the save was written. The repaired state is now the saved state. */
 	void afterSave(bool succeeded);
 
+	/** The file on the card changed (a save succeeded): later backups must copy this, not the file loaded earlier. */
+	void replaceImage(const void* data, std::size_t size);
+
 	/** Forget everything (a different save was loaded or a new game started). */
 	void reset();
 

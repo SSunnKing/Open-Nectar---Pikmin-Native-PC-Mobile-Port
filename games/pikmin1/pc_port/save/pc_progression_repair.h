@@ -152,7 +152,7 @@ struct ColourState {
 	int sproutsOffStage = 0; ///< saved sprouts of the other stages
 	int pending         = 0; ///< committed emissions not yet landed (replacement seeds reserved by this pass)
 
-	bool bonusSeedQueued = false; ///< the normal extinction movie (BonusPiki) will supply one
+	bool bonusPathOpen = false; ///< the normal extinction movie would run for this colour once it is unlocked and empty (not tutorial, not already played, no one left)
 	bool onionPresent    = false; ///< the Onion object exists in the loaded stage
 	bool onionExpected   = false; ///< the loaded stage is known to define this Onion
 

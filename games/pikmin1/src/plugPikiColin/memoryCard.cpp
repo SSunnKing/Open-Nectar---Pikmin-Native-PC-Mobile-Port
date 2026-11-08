@@ -986,7 +986,8 @@ void MemoryCard::saveCurrentGame()
 	gameflow.mGamePrefs.mHasSaveGame = true;
 	gsys->mIsCardSaving              = FALSE;
 #if defined(PIKI_PC_PORT)
-	pc_progression_after_save(!mDidSaveFail);
+	// The slots were swapped above: the current index now holds the file just written.
+	pc_progression_after_save(!mDidSaveFail, getGameFilePtr(gameflow.mGamePrefs.mMemCardSaveIndex - 1), 0x8000);
 	// On the first save after direct boot, the previous current slot is zero.
 	// It cannot become a backup: derive the unused/redundant block from the
 	// card directory, as the file-selection screen normally does.

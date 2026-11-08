@@ -25,7 +25,10 @@ void pc_progression_stage_phase(void);
 
 /** Returns false when the save must be refused because the backup could not be made. */
 bool pc_progression_before_save(void);
-void pc_progression_after_save(bool succeeded);
+void pc_progression_after_save(bool succeeded, const void* savedImage, std::size_t size);
+
+/** A new game starts: forget any repair that was pending for a save loaded earlier. */
+void pc_progression_reset(void);
 
 /** The note for the screen: lines of plain text and how long it has been up. nullptr when there is none. */
 const char* const* pc_progression_note_lines(int* count, float* ageSeconds);

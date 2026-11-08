@@ -351,15 +351,18 @@ struct Planner {
 
 			// Seeds: S01, S02, S03, S10, S11, S12, S13.
 			if (cs.booted && evidence && populationBuilt() && cs.viable() == 0) {
-				bool wants  = false;
-				int scn     = 10;
-				if (c != Red && !cs.unlocked) {
-					wants = !cs.bonusSeedQueued;
-					scn   = c == Yellow ? 1 : 2;
-				} else {
-					wants = !cs.bonusSeedQueued;
-					scn   = (c == Red && !cs.plucked) ? 3 : 10;
-				}
+				int scn = 10;
+				if (c != Red && !cs.unlocked) scn = c == Yellow ? 1 : 2;
+				else scn = (c == Red && !cs.plucked) ? 3 : 10;
+				// Once this colour is unlocked (now or in this very plan) and empty, the normal extinction
+				// movie supplies its seed. Adding another here would give it two.
+				const bool unlockPlanned = [&] {
+					for (const Action& a : out) {
+						if (a.disposition == Disposition::Repair && a.kind == Kind::SetUnlocked && a.colour == c) return true;
+					}
+					return false;
+				}();
+				const bool wants = !((cs.unlocked || unlockPlanned) && cs.bonusPathOpen);
 				if (wants) {
 					if (!cs.onionPresent) {
 						// Waits for RestoreOnionObject (S09) or reports why it cannot.

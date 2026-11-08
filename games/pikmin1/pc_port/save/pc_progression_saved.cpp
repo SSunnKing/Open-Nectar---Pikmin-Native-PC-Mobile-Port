@@ -79,7 +79,7 @@ ProgressionSnapshot buildSnapshot(const SavedProgression& saved, const WorldInve
 		cs.live            = wc.live;
 		cs.sproutsLoaded   = wc.sprouts; // the live seeds replace the serialized copy: never both
 		cs.pending         = wc.pending;
-		cs.bonusSeedQueued = wc.bonusSeedQueued;
+		cs.bonusPathOpen   = wc.bonusPathOpen;
 		cs.onionPresent    = wc.onionPresent;
 		cs.onionExpected   = wc.onionExpected;
 	}
@@ -390,7 +390,7 @@ struct Parser {
 			if (field == "live") return intValue(v, wc.live);
 			if (field == "sprouts") return intValue(v, wc.sprouts);
 			if (field == "pending") return intValue(v, wc.pending);
-			if (field == "bonus") { wc.bonusSeedQueued = !v.empty() && v[0] == "queued"; return true; }
+			if (field == "bonus") { wc.bonusPathOpen = !v.empty() && v[0] == "open"; return true; }
 			if (field == "onion") {
 				for (const std::string& t : v) {
 					if (t == "present") wc.onionPresent = true;

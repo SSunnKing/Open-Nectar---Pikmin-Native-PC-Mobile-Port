@@ -72,7 +72,7 @@ struct WorldColour {
 	int live             = 0;
 	int sprouts          = 0; ///< seeds and sprouts on the stage, flying ones included
 	int pending          = 0;
-	bool bonusSeedQueued = false;
+	bool bonusPathOpen   = false; ///< the extinction movie will supply a seed once the colour is unlocked and empty
 	bool onionPresent    = false;
 	bool onionExpected   = false;
 };

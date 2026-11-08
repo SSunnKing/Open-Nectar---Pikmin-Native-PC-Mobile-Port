@@ -403,6 +403,24 @@ void testSaveBoundary()
 	check(!failing.beforeSave(blocked, &error) && !error.empty(), "a failed backup refuses the save");
 	check(failing.active(), "and the repair stays pending");
 
+	// A save that succeeded replaced the file on the card: a later repair backs up that file.
+	{
+		const fs::path later = scratch("later");
+		const std::string newer(0x8000, 'b');
+		PendingRepair p;
+		p.rememberLoadedImage(image.data(), image.size());
+		p.markRepaired(1, 4);
+		check(p.beforeSave(later, &error), "first backup");
+		p.afterSave(true);
+		p.replaceImage(newer.data(), newer.size());
+		p.markRepaired(1, 5);
+		check(p.beforeSave(later, &error) && readFile(p.lastBackupPath()) == newer, "a second repair backs up the file the last save wrote");
+		p.reset();
+		check(!p.active(), "a new game resets the pending repair");
+		std::error_code ec2;
+		fs::remove_all(later, ec2);
+	}
+
 	// Loading a different save forgets the pending repair.
 	failing.rememberLoadedImage(image.data(), image.size());
 	check(!failing.active(), "a new load clears a pending repair");
