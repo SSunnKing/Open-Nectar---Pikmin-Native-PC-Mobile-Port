@@ -53,17 +53,37 @@ void testTitle()
     }
 }
 
+void testPending()
+{
+    // Keep the stand-in open well beyond the deadline, then close it ourselves.
+    // A short-lived picker races the runner: it can finish before enough frames.
+    constexpr int requiredFrames = 4;
+    const auto deadline = Clock::now() + std::chrono::seconds(5);
+    check(pc_file_dialog_begin_command(1, "sleep 30"), "begin pending picker");
+    int tag = 0, frames = 0;
+    bool chosen = false;
+    char out[64];
+    while (frames < requiredFrames && Clock::now() < deadline) {
+        if (pc_file_dialog_poll(&tag, &chosen, out, sizeof(out)) != PC_FILE_DIALOG_PENDING) break;
+        ++frames;
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+    check(frames == requiredFrames && Clock::now() < deadline,
+          "poll returned PENDING for four frames within five seconds (" + std::to_string(frames) + " frames)");
+    pc_file_dialog_close();
+    check(!pc_file_dialog_busy(), "idle after pending picker closes");
+}
+
 void testChosen()
 {
     check(!pc_file_dialog_busy(), "idle at start");
-    check(pc_file_dialog_begin_command(7, "sleep 0.3; printf '/tmp/pick me.zip\\n'"), "begin");
+    check(pc_file_dialog_begin_command(7, "printf '/tmp/pick me.zip\\n'"), "begin");
     check(pc_file_dialog_busy(), "busy while open");
     check(!pc_file_dialog_begin_command(8, "printf other"), "a second picker cannot open");
     int tag = 0, frames = 0;
     bool chosen = false;
     std::string text;
     check(pollUntilDone(tag, chosen, text, frames) == PC_FILE_DIALOG_DONE, "answer arrives");
-    check(frames > 3, "poll returned PENDING while the dialog was open (" + std::to_string(frames) + " frames)");
     check(tag == 7, "tag handed back");
     check(chosen, "path chosen");
     check(text == "/tmp/pick me.zip", "path without the newline: " + text);
@@ -107,6 +127,7 @@ void testClose()
 int main()
 {
     testTitle();
+    testPending();
     testChosen();
     testCancelled();
     testClose();
