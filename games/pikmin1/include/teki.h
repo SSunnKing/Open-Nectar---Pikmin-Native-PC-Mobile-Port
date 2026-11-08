@@ -19,6 +19,7 @@
 #include "zen/CallBack.h"
 #if defined(PIKI_PC_PORT)
 #include "mods/pc_hd_models.h"
+#include "timing/pc_ballistic.h"
 #endif
 
 #if defined(PIKI_PC_PORT)
@@ -569,6 +570,9 @@ public:
 	SearchData mTekiSearchData[3];                // _42C
 	WayPoint** mRouteWayPoints;                   // _450, array of something, unsure what
 	                                              // _454 = PaniAnimKeyListener
+#if defined(PIKI_PC_PORT)
+	PcBallisticClock mPcActionBallisticClock;
+#endif
 };
 
 /**

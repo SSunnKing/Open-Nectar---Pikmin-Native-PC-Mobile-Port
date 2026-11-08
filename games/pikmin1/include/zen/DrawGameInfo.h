@@ -195,6 +195,10 @@ public:
 	/// play_day.blo es plano: el día (dc*, dico) y los contadores conviven
 	/// en la misma pantalla; en partida se muestran por separado.
 	void setDatePanesVisible(bool on);
+#if PIKI_SCENARIOS
+	/// Validates stand-in HUD pane positions written into the gameplay BLO files.
+	bool checkStandInHudLayout(const char** why) const;
+#endif
 	DGIScreenMgr* mDateScreenMgr = nullptr; ///< solo el día, para la parte compartida
 #endif
 

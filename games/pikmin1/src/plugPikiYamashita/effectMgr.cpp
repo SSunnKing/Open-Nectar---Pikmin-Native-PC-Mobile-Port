@@ -1,6 +1,9 @@
 #include "EffectMgr.h"
 #if defined(PIKI_PC_PORT)
 #include "gl/pc_gfx.h"
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 #endif
 #include "Colour.h"
 #include "DebugLog.h"
@@ -795,10 +798,19 @@ void EffectMgr::draw(Graphics& gfx)
  */
 void EffectMgr::drawshapes(Graphics& gfx)
 {
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+	// The only effect shapes are the Onions' [rby]_goal.mod; the disc-free
+	// stand-ins put each hive's coloured crystals there, with their shading in
+	// the vertex colours, so they take the same unlit draw as the hive (#115).
+	pc_scenario_push_creature_unlit_draw();
+#endif
 	FOREACH_NODE(EffShpInst, mActiveGeomList.mChild, inst)
 	{
 		inst->draw(gfx);
 	}
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+	pc_scenario_pop_creature_unlit_draw();
+#endif
 }
 
 /**

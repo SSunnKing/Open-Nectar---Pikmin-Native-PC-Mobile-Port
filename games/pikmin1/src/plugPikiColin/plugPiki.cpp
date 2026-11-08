@@ -341,6 +341,9 @@ int PlugPikiApp::idle()
 			gsys->mDGXGfx->resetPresentBuffer();
 			pc_netplay_present_begin_presentation(*gsys->mDGXGfx);
 			pc_gfx_reset_ui_state();
+#if PIKI_SCENARIOS
+			pc_gfx_scenario_presentation_pass_begin();
+#endif
 			// initRender ran once before the authoritative pass; reset what it
 			// accumulated (lights, cached shapes, lens flares) as beginView does
 			// for a second view. The sim matrix pool stays untouched.

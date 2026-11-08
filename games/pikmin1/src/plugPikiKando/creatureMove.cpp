@@ -110,6 +110,26 @@ void Creature::moveAttach()
  */
 void Creature::moveNew(f32 deltaTime)
 {
+#if defined(PIKI_PC_PORT)
+	// Direct callers (bosses and attachment motion) have one persistent pass.
+	if (PcBallisticClock::enabled(deltaTime)) {
+		float remaining = deltaTime;
+		while (remaining > 0.0000001f) {
+			const float dt = mPcBallisticClock.slice(remaining);
+			moveNewStep(dt, mPcBallisticClock.boundary() ? PcBallisticClock::step : 0.0f);
+			mPcBallisticClock.advance(dt);
+			remaining -= dt;
+		}
+		if (mGroundTriangle || mRope || mStickTarget) mPcBallisticClock.reset();
+		return;
+	}
+	mPcBallisticClock.reset();
+#endif
+	moveNewStep(deltaTime, deltaTime);
+}
+
+void Creature::moveNewStep(f32 deltaTime, f32 forceTime)
+{
 	if (mSRT.t.y < -2000.0f && isAlive()) {
 		if (mObjType == OBJTYPE_Piki) {
 			Piki* piki = static_cast<Piki*>(this);
@@ -136,16 +156,15 @@ void Creature::moveNew(f32 deltaTime)
 		return;
 	}
 
-	if (!isCreatureFlag(CF_IsFlying) && !mRope && (!mStickTarget || !isStickToPlatform() || !mStickPart->isClimbable())
-	    && !isCreatureFlag(CF_IgnoreGravity) && (!mStickTarget || mPelletStickSlot == -1)) {
-		mVelocity.y -= AICONST.mGravity() * deltaTime;
+	if (usesGravity()) {
+		mVelocity.y -= AICONST.mGravity() * forceTime;
 	}
 
 	if (isCreatureFlag(CF_EnableAirDrag)) {
-		mVelocity.y -= deltaTime * mAirResistance * mVelocity.y;
+		mVelocity.y -= forceTime * mAirResistance * mVelocity.y;
 		f32 scale   = 0.2f;
-		mVelocity.x = mVelocity.x - (deltaTime * mAirResistance) * scale * mVelocity.x;
-		mVelocity.z = mVelocity.z - (deltaTime * mAirResistance) * scale * mVelocity.z;
+		mVelocity.x = mVelocity.x - (forceTime * mAirResistance) * scale * mVelocity.x;
+		mVelocity.z = mVelocity.z - (forceTime * mAirResistance) * scale * mVelocity.z;
 	}
 
 	mGroundTriangle = nullptr;
@@ -511,4 +530,10 @@ void traceMove2(Creature* target, MoveTrace& trace, f32 p3)
 			trace.mPosition.add(vel);
 		}
 	}
+}
+
+bool Creature::usesGravity()
+{
+	return !isCreatureFlag(CF_IsFlying) && !mRope && (!mStickTarget || !isStickToPlatform() || !mStickPart->isClimbable())
+	    && !isCreatureFlag(CF_IgnoreGravity) && (!mStickTarget || mPelletStickSlot == -1);
 }

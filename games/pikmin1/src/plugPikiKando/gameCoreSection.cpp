@@ -1,4 +1,7 @@
 #include "GameCoreSection.h"
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 #if defined(PIKI_PC_PORT)
 #include <SDL.h>
 #include <cstdlib>
@@ -9,6 +12,7 @@
 #if defined(PIKI_PC_PORT)
 #include "settings/pc_settings.h"
 #include "netplay/pc_netplay_det.h"
+#include "netplay/pc_input_log.h"
 #include "netplay/pc_netplay_present.h"
 #include "netplay/pc_coop_switch.h"
 #include "netplay/pc_state_hash.h"
@@ -919,6 +923,9 @@ void GameCoreSection::prepareBadEnd()
  */
 void GameCoreSection::exitStage()
 {
+#if PIKI_SCENARIOS
+	pc_scenario_unregister_draw_game_info();
+#endif
 #if defined(PIKI_PC_PORT)
 	pc_window_set_gameplay_active(false);
 	// Stale focus would keep depth of field running on the file-select and
@@ -2995,6 +3002,9 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 	memStat->end("gamecore");
 
 	mDrawGameInfo = new zen::DrawGameInfo(!gameflow.mIsChallengeMode ? zen::DrawGameInfo::MODE_Story : zen::DrawGameInfo::MODE_Challenge);
+#if PIKI_SCENARIOS
+	pc_scenario_register_draw_game_info(mDrawGameInfo);
+#endif
 #if defined(PIKI_PC_PORT)
 	if (mNavi2) {
 		containerWindow2 = new zen::DrawContainer(2);
@@ -3551,7 +3561,18 @@ void GameCoreSection::updateAI()
 	// builds mLookAtMtx, and that matrix is what the renderer actually uses --
 	// setting mPosition after update() changes the reported position without
 	// moving the view at all.
-	if (!gameflow.mMoviePlayer->mIsActive && pc_photo_mode_poll_toggle()) {
+	//
+	// Netplay: the toggle freezes the sim, so offline deterministic mode takes
+	// it from pad 0's per-tick input (pc_input_log.h), where the window files
+	// F3 and the touch button, and a replay toggles on the same tick. A
+	// session and the default mode poll the key here.
+	bool photoToggle = false;
+	if (!gameflow.mMoviePlayer->mIsActive) {
+		photoToggle = (pc_netplay_deterministic() && pc_netplay_local_slots_filled())
+		                ? (pc_netplay_local_flags(0) & pc_input_log::kLocalPhotoToggle) != 0
+		                : pc_photo_mode_poll_toggle() != 0;
+	}
+	if (photoToggle) {
 		PcamCamera* pcam = cameraMgr->mCamera;
 		if (pc_photo_mode_active()) {
 			pc_photo_mode_exit();
@@ -4113,6 +4134,9 @@ void GameCoreSection::beginView(Graphics& gfx, int view, f32 farClip)
 	pc_gfx_set_proj_offset(horizontal ? 0.0f : -shift, horizontal ? shift : 0.0f);
 	gfx.setCamera(cam);
 	cam->update(pc_gfx_get_window_aspect_ratio(), cam->mFov, pc_first_person_active_for(view) ? 3.0f : 100.0f, farClip);
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+	pc_scenario_apply_debug_camera(cam);
+#endif
 	gfx.setViewport(AREA_FULL_SCREEN(gfx));
 	gfx.setScissor(currentViewRect(gfx));
 	// initRender() vacía luces y shapes cacheadas una vez por frame; cada
@@ -4257,7 +4281,12 @@ void GameCoreSection::draw(Graphics& gfx)
 	gfx.setColour(Colour(255, 255, 255, 128), true);
 #if defined(PIKI_PC_PORT)
 	// Con sombras proyectadas (shadow map) las manchas originales sobran.
-	if (pc_settings_get_shadows() == 0)
+#if PIKI_SCENARIOS
+	const bool drawBlobShadows = pc_settings_get_shadows() == 0 && !pc_scenario_uses_disc_free_assets();
+#else
+	const bool drawBlobShadows = pc_settings_get_shadows() == 0;
+#endif
+	if (drawBlobShadows)
 #endif
 	{
 		if (AIPerf::optLevel <= 1) {

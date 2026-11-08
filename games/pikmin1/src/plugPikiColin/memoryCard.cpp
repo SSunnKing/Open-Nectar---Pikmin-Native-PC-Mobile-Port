@@ -5,6 +5,10 @@
 #include "PlayerState.h"
 #include "Stream.h"
 #include "gameflow.h"
+#if PIKI_SCENARIOS
+#include "FlowController.h"
+#include "Generator.h"
+#endif
 #if defined(PIKI_PC_PORT)
 #include "pc_permadeath.h"
 #include "pc_day_history.h"
@@ -1299,6 +1303,45 @@ bool MemoryCard::pcRestoreDay(int slot, int day)
 /**
  * @todo: Documentation
  */
+#if PIKI_SCENARIOS
+void MemoryCard::pcScenarioWriteSaveBlock(u8* out)
+{
+	memset(out, 0, 0x8000);
+	RamStream stream(out, 0x8000);
+	PlayState state     = gameflow.mPlayState;
+	const bool tutorial = playerState != nullptr && playerState->mIsTutorialMode;
+	const int registered = playerState != nullptr ? playerState->mTotalRegisteredParts : 0;
+	if (playerState != nullptr) playerState->mTotalRegisteredParts = playerState->mTotalParts;
+	writeCurrentGame(&stream, state);
+	if (playerState != nullptr) {
+		playerState->mIsTutorialMode       = tutorial;
+		playerState->mTotalRegisteredParts = registered;
+	}
+	stream.padFileTo(0x8000, 8);
+	pc_permadeath_write_block(stream, pc_permadeath_active(), pc_hardmode_active(), pc_randomizer_rules());
+}
+
+// Scenario save round-trip: the game reloaded from such a block, with the reset
+// CardSelectSection does before the file select loads a save (the stage
+// being entered is kept). The caller restores what the file does not decide:
+// the world clock (readCurrentGame takes the day from the play state) and
+// the tutorial flag (saveCard always writes it cleared).
+void MemoryCard::pcScenarioLoadSaveBlock(const u8* data)
+{
+	playerState->initGame();
+	generatorCache->initGame();
+	pikiInfMgr.initGame();
+	FOREACH_NODE(StageInfo, flowCont.mStageList.mChild, stage)
+	{
+		stage->mHasInitialised = FALSE;
+		stage->mStageInf.initGame();
+	}
+	memcpy(sPcDayFile, data, sizeof(sPcDayFile));
+	RamStream stream(sPcDayFile, sizeof(sPcDayFile));
+	readCurrentGame(&stream);
+}
+#endif
+
 s32 MemoryCard::doFormatCard()
 {
 	PRINT("*-----------------------------------------------------------*\n");

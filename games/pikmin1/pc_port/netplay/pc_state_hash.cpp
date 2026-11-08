@@ -304,7 +304,9 @@ void initOnce(void)
 	if (logPath == nullptr) logPath = std::getenv("PIKMIN_STATE_HASH_LOG");
 	if (exitText == nullptr) exitText = std::getenv("PIKMIN_NETPLAY_EXIT_AFTER_TICKS");
 	if (logPath != nullptr && *logPath != '\0') {
-		sLogFile = std::fopen(logPath, "w");
+		// Binary mode: a text-mode "w" writes CRLF on Windows, so the same run
+		// would give a different file there than on macOS and Linux.
+		sLogFile = std::fopen(logPath, "wb");
 		if (sLogFile != nullptr) {
 			std::setvbuf(sLogFile, nullptr, _IOFBF, 64 * 1024);
 			sLogActive = true;

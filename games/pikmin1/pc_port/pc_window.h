@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 bool pc_window_init(const char* title, int width, int height);
+void pc_window_set_hidden(bool hidden); // before pc_window_init: create the window hidden (--scenario)
 void pc_window_poll_events(PADStatus* pad);
 void pc_window_swap_buffers(void);
 void pc_window_set_swap_interval(int interval);
@@ -108,8 +109,6 @@ static inline bool pc_bind_is_valid(int binding) { return binding >= 0 && bindin
 // Whether the swarm binding (keyboard, mouse or gamepad) is held right now.
 bool pc_window_swarm_held(void);
 bool pc_window_swarm_held_p2(void);
-/// D-pad Down on that player's pad: the pad's swarm button, so it must not
-/// also trigger the original D-pad Down action (Olimar lying down).
 /// Eje vertical del stick derecho con Free Camera activo (zoom del radar).
 float pc_window_free_camera_sub_y(void);
 /// Flanco de subida del Lock-On de ese jugador (0/1): true una vez por

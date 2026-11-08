@@ -52,7 +52,18 @@ void PeveAccelerationEvent::makeAccelerationEvent(PeveCondition* cond, NVector3f
 	mPositionIO = posIO;
 	mVelocityIO = velIO;
 	mAccelIO    = accelIO;
+#if defined(PIKI_PC_PORT)
+	mPcBallisticClock.reset();
+#endif
 }
+
+#if defined(PIKI_PC_PORT)
+void PeveAccelerationEvent::reset()
+{
+	PeveEvent::reset();
+	mPcBallisticClock.reset();
+}
+#endif
 
 /**
  * @todo: Documentation
@@ -68,6 +79,36 @@ void PeveAccelerationEvent::update()
 	mVelocityIO->output(vel);
 	mAccelIO->output(accel);
 
+#if defined(PIKI_PC_PORT)
+	const f32 delta = NSystem::getFrameTime();
+	if (PcBallisticClock::enabled(delta)) {
+		f32 remaining = delta;
+		while (remaining > 0.0000001f) {
+			const f32 slice = mPcBallisticClock.slice(remaining);
+			if (mPcBallisticClock.boundary()) mPcReferenceAcceleration = accel;
+			// Scripted parabolas drift before kicking: retain their original
+			// segment slope and apply the sampled force at the interval's end.
+			Vector3f movement(vel);
+			movement.scale(slice);
+			pos.add(movement);
+			mPcBallisticClock.advance(slice);
+			remaining -= slice;
+			if (mPcBallisticClock.boundary()) {
+				Vector3f change(mPcReferenceAcceleration);
+				change.scale(PcBallisticClock::step);
+				vel.add(change);
+				// Respect clamping IO at each original boundary, including an
+				// update that spans several reference intervals.
+				mVelocityIO->input(vel);
+				mVelocityIO->output(vel);
+			}
+		}
+		mPositionIO->input(pos);
+		mVelocityIO->input(vel);
+		return;
+	}
+	mPcBallisticClock.reset();
+#endif
 	f32 fTime = NSystem::getFrameTime();
 	Vector3f posChange(vel);
 	posChange.scale(fTime);

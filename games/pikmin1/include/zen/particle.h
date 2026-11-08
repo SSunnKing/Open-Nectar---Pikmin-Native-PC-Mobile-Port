@@ -436,8 +436,13 @@ protected:
 
 	void pmGetArbitUnitVec(Vector3f& unitVec)
 	{
+#if defined(PIKI_PC_PORT)
+		f32 angle1 = zen::CosmeticRand(TAU);
+		f32 angle2 = zen::CosmeticRand(TAU);
+#else
 		f32 angle1 = zen::Rand(TAU);
 		f32 angle2 = zen::Rand(TAU);
+#endif
 
 		f32 sin1 = sinf(angle1);
 		f32 cos1 = cosf(angle1);

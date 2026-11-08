@@ -1025,6 +1025,26 @@ void resetToDefaults() {
     sVideoConfirmActive = false;
 }
 
+void scenarioOpenMenuForTest()
+{
+    if (sMenuOpen) return;
+    pc_pikmin_models_refresh();
+    sPending             = sConfig;
+    sPending.controlMode = pc_window_get_control_mode();
+    sMenuOpen            = true;
+    pc_window_set_settings_menu_open(true);
+    sOpenGroup           = PC_SET_GROUP_DISPLAY;
+    sGroupSel            = 0;
+    sF1Scroll            = 0;
+    sF1OptFocus          = false;
+    sVideoConfirmActive  = false;
+    rebuildResolutionList();
+    const int idx = resolutionIndexFor(pc_window_get_width(), pc_window_get_height());
+    sResolutionIdx       = idx >= 0 ? idx : defaultResolutionIndex();
+}
+
+void scenarioCloseMenuForTest() { closeMenu(); }
+
 } // namespace
 
 // Defined outside the anonymous namespace and deliberately self-contained: it
@@ -1192,7 +1212,38 @@ int netplayApplyConfigText(const char* text) {
 }
 #endif
 
+#if PIKI_SCENARIOS
+// --scenario: the settings file is neither read nor written, so a developer's
+// pikmin_settings.conf cannot change a run. fpsMode, infiniteDay and
+// whistlePluck are overrides the scenario can switch at runtime.
+static bool sScenarioSettings   = false;
+static int sScenarioFpsMode     = 0;
+static int sScenarioInfiniteDay = 0;
+static int sScenarioWhistlePluck = 0;
+static int sScenarioNoDayAdvance = 0; // "No Day Limit"
+static int sScenarioHideOlimarText = 0; // the setting's default (sConfig.hideOlimarText)
+static int sScenarioBluesOnlyWater = 0;
+static int sScenarioQuickGrab = -1;
+static int sScenarioThrowSpeedPct = -1;
+static int sScenarioChainActions = -1;
+static int sScenarioWhistleRadiusPct = -1;
+static int sScenarioPikiInvincible = -1;
+static int sScenarioNaviHealthPct = -1;
+static int sScenarioTekiHealthPct = -1;
+static int sScenarioPikiLimit = -1;
+static int sScenarioUnlockZones = -1;
+static int sScenarioAllOnions = -1;
+// The scenario window (PIKMIN_SCENARIO_WINDOW, see pc_scenario.cpp). Every tick
+// draws a frame, which under software GL costs per pixel, and no scenario reads
+// the picture.
+static int sScenarioWindowWidth  = 64;
+static int sScenarioWindowHeight = 36;
+#endif
+
 void saveConfig() {
+#if PIKI_SCENARIOS
+    if (sScenarioSettings) return;
+#endif
 #if PIKI_NETPLAY_BUILD
     netplayRelockSessionFields();
     NetplayDiskValuesScope netplayDiskValues;
@@ -1327,6 +1378,18 @@ void saveConfig() {
 
 void loadConfig() {
     sConfig.applyDefaults();
+#if PIKI_SCENARIOS
+    if (sScenarioSettings) {
+        // Windowed, small so per-tick cost stays low under software GL, and no
+        // vsync wait.
+        sConfig.windowWidth  = sScenarioWindowWidth;
+        sConfig.windowHeight = sScenarioWindowHeight;
+        sConfig.renderScale  = 1.0f; // the scene renders at the window size
+        sConfig.vsync        = false;
+        sHadConfigFile       = true;
+        return;
+    }
+#endif
     std::string path = std::string(kConfigFilename);
     std::ifstream in(path, std::ios::in);
     if (!in) {
@@ -3769,12 +3832,26 @@ int f1TextWrapped(int x, int y, int w, const char* text, Colour c, int fw, int f
 
 int achievementAtRow(int row); // logro de esa fila de la pestaña, o -1
 
-// Textura del icono de un logro (del juego), cargada una vez.
+// Textura de la interfaz por ruta (screen/tex/...). Sin caché propia de
+// texturas: el registro de gsys ya la hace y se invalida cuando el heap del
+// nivel se resetea (un Texture* guardado aquí quedaba con la textura GL
+// liberada y los píxeles reutilizados). Pero un archivo que falta no entra en
+// el registro, así que loadTexture lo reabría (y DVDOpen lo anotaba en el log)
+// en cada dibujo: en datos sin disco faltan los iconos de logros. Se recuerdan
+// las rutas que faltan, junto con la carpeta de texturas del idioma (mTexDir):
+// cambiar de idioma cambia la carpeta y el icono puede existir en la nueva.
+static Texture* uiTexture(const char* path) {
+    static std::vector<std::string> sMissing;
+    const std::string key = std::string(gsys->mTexDir ? gsys->mTexDir : "") + '|' + path;
+    if (std::find(sMissing.begin(), sMissing.end(), key) != sMissing.end()) return nullptr;
+    Texture* tex = zen::loadTexExp(path, true, true);
+    if (!tex) sMissing.push_back(key);
+    return tex;
+}
+
+// Textura del icono de un logro (del juego).
 Texture* achievementIcon(int id) {
-    // Sin caché propia: el registro de gsys ya la hace y se invalida cuando el
-    // heap del nivel se resetea (un Texture* guardado aquí quedaba con la textura
-    // GL liberada y los píxeles reutilizados).
-    return zen::loadTexExp(pc_achievement_icon(id), true, true);
+    return uiTexture(pc_achievement_icon(id));
 }
 
 void drawAchievementIcon(DGXGraphics* gfx, Texture* icon, int x, int y, int maxW, int maxH, const Colour& tint) {
@@ -3986,9 +4063,13 @@ void pc_settings_init(void) {
     // Sin fichero previo, arrancar a la resolucion del monitor en vez de a un
     // 1280x720 fijo que en un panel 16:10 o 21:9 deja barras desde el principio.
     int idx = sHadConfigFile ? resolutionIndexFor(sPending.windowWidth, sPending.windowHeight) : -1;
+    bool keepWindowSize = false;
+#if PIKI_SCENARIOS
+    keepWindowSize = sScenarioSettings; // the scenario layer's small window, not the monitor's
+#endif
     if (idx < 0) {
         idx = defaultResolutionIndex();
-        if (!sResolutions.empty()) {
+        if (!sResolutions.empty() && !keepWindowSize) {
             sPending.windowWidth = sResolutions[idx].w;
             sPending.windowHeight = sResolutions[idx].h;
             sConfig.windowWidth = sPending.windowWidth;
@@ -5095,6 +5176,19 @@ bool pc_newgame_prompt_chose_hard(void) { return sNewGamePromptHard; }
 
 bool pc_newgame_prompt_chose_skip_tutorial(void) { return sNewGamePromptSkipTutorial; }
 
+#if PIKI_SCENARIOS
+void pc_newgame_prompt_scenario_auto_accept(void)
+{
+	if (!sNewGamePromptOpen) return;
+	sNewGamePromptRules  = false;
+	sNewGamePromptHard   = false;
+	sNewGamePromptSkipTutorial = false;
+	sNewGamePromptResult = PC_NEWGAME_NORMAL;
+	sNewGamePromptOpen   = false;
+	pc_tutorial_skip_set_pending(true);
+}
+#endif
+
 void pc_tutorial_skip_set_pending(bool on) { sTutorialSkipPending = on; }
 bool pc_tutorial_skip_pending(void) { return sTutorialSkipPending; }
 void pc_tutorial_skip_clear_pending(void) { sTutorialSkipPending = false; }
@@ -5997,7 +6091,18 @@ void pcCaptainPromptInput() {
         pc_captain_preview_release();
     }
 }
+
 }
+#if PIKI_SCENARIOS
+void pc_captain_prompt_scenario_auto_accept(void)
+{
+    if (!sCaptainPromptOpen) return;
+    pc_coop_set_captain(0, PC_CAPTAIN_OLIMAR);
+    sCaptainPromptResult = PC_DEVASSIGN_OK;
+    sCaptainPromptOpen   = false;
+    pc_captain_preview_release();
+}
+#endif
 
 void pc_captain_prompt_open(void) {
     pc_captain_custom_refresh(); // personajes instalados con el juego abierto
@@ -6670,12 +6775,9 @@ void vsFitText(const char* s, char* out, size_t n, int maxW, int fw)
 
 Texture* vsIcon(const char* name)
 {
-    // Sin caché propia: el registro de gsys ya la hace y se invalida cuando el
-    // heap del nivel se resetea (un Texture* guardado aquí quedaba con la textura
-    // GL liberada y los píxeles reutilizados).
     char path[64];
     snprintf(path, sizeof(path), "screen/tex/%s.bti", name);
-    return zen::loadTexExp(path, true, true);
+    return uiTexture(path);
 }
 void vsDrawIcon(const char* name, int x, int y, int w, int h)
 {
@@ -8918,10 +9020,16 @@ const char* pc_settings_get_speedrun_ls_host(void) { return sConfig.speedrunLsHo
 int pc_settings_get_speedrun_ls_port(void) { return sConfig.speedrunLsPort; }
 int pc_settings_get_online_stun(void) { return sConfig.onlineStun; }
 int pc_settings_get_fps_mode(void) { if (pc_speedrun_active()) return 0;
+#if PIKI_SCENARIOS
+    if (sScenarioSettings) return sScenarioFpsMode;
+#endif
     return sConfig.fpsMode;
 }
 
 int pc_settings_get_chain_actions(void) { if (pc_speedrun_active()) return 0;
+#if PIKI_SCENARIOS
+    if (sScenarioSettings && sScenarioChainActions >= 0) return sScenarioChainActions;
+#endif
     return sConfig.chainActions;
 }
 
@@ -8929,8 +9037,13 @@ int pc_settings_get_better_pathfinding(void) { if (pc_speedrun_active()) return 
     return sConfig.betterPathfinding;
 }
 
-int pc_settings_get_blues_only_water(void) { if (pc_speedrun_active()) return 0;
-    return sConfig.bluesOnlyWater;
+int pc_settings_get_blues_only_water(void)
+{
+	if (pc_speedrun_active()) return 0;
+#if PIKI_SCENARIOS
+	if (sScenarioSettings) return sScenarioBluesOnlyWater;
+#endif
+	return sConfig.bluesOnlyWater;
 }
 
 int pc_settings_get_idle_counter(void) { if (pc_speedrun_active()) return 0;
@@ -8938,13 +9051,21 @@ int pc_settings_get_idle_counter(void) { if (pc_speedrun_active()) return 0;
 }
 
 int pc_settings_get_navi_health_pct(void) { if (pc_speedrun_active()) return 100;
-    return pc_hardmode_active() ? 100 : sConfig.naviHealthPct;
+    if (pc_hardmode_active()) return 100;
+#if PIKI_SCENARIOS
+    if (sScenarioSettings && sScenarioNaviHealthPct >= 0) return sScenarioNaviHealthPct;
+#endif
+    return sConfig.naviHealthPct;
 }
 
 int pc_settings_get_teki_health_pct(void) { if (pc_speedrun_active()) return 100;
     // Misiones y campañas: el modificador elegido al empezar.
     if (pc_mission_active()) return pc_mission_mods().tekiHealth;
-    return pc_hardmode_active() ? 100 : sConfig.tekiHealthPct;
+    if (pc_hardmode_active()) return 100;
+#if PIKI_SCENARIOS
+    if (sScenarioSettings && sScenarioTekiHealthPct >= 0) return sScenarioTekiHealthPct;
+#endif
+    return sConfig.tekiHealthPct;
 }
 
 int pc_settings_get_infinite_day(void) { if (pc_speedrun_active()) return 0;
@@ -8952,8 +9073,41 @@ int pc_settings_get_infinite_day(void) { if (pc_speedrun_active()) return 0;
     if (pc_vs_active()) return 1;
     // Misión: el día acaba con el reloj (decide el resultado).
     if (pc_mission_active()) return 0;
-    return pc_hardmode_active() ? 0 : sConfig.infiniteDay;
+    if (pc_hardmode_active()) return 0;
+#if PIKI_SCENARIOS
+    if (sScenarioSettings) return sScenarioInfiniteDay;
+#endif
+    return sConfig.infiniteDay;
 }
+
+#if PIKI_SCENARIOS
+void pc_settings_scenario_enable(void) { sScenarioSettings = true; }
+void pc_settings_scenario_set_fps_mode(int fpsMode) { sScenarioFpsMode = fpsMode; }
+void pc_settings_scenario_set_infinite_day(int on) { sScenarioInfiniteDay = on; }
+void pc_settings_scenario_set_whistle_pluck(int on) { sScenarioWhistlePluck = on; }
+void pc_settings_scenario_set_no_day_advance(int on) { sScenarioNoDayAdvance = on; }
+void pc_settings_scenario_set_hide_olimar_text(int on) { sScenarioHideOlimarText = on; }
+void pc_settings_scenario_set_blues_only_water(int on) { sScenarioBluesOnlyWater = on; }
+void pc_settings_scenario_set_window_size(int width, int height)
+{
+    sScenarioWindowWidth  = width;
+    sScenarioWindowHeight = height;
+}
+void pc_settings_scenario_set_quick_grab(int on) { sScenarioQuickGrab = on ? 1 : 0; }
+void pc_settings_scenario_set_throw_speed_pct(int pct) { sScenarioThrowSpeedPct = pct; }
+void pc_settings_scenario_set_chain_actions(int on) { sScenarioChainActions = on ? 1 : 0; }
+void pc_settings_scenario_set_whistle_radius_pct(int pct) { sScenarioWhistleRadiusPct = pct; }
+void pc_settings_scenario_set_piki_invincible(int on) { sScenarioPikiInvincible = on ? 1 : 0; }
+void pc_settings_scenario_set_navi_health_pct(int pct) { sScenarioNaviHealthPct = pct; }
+void pc_settings_scenario_set_teki_health_pct(int pct) { sScenarioTekiHealthPct = pct; }
+void pc_settings_scenario_set_piki_limit(int limit) { sScenarioPikiLimit = limit; }
+void pc_settings_scenario_set_unlock_zones(int on) { sScenarioUnlockZones = on ? 1 : 0; }
+void pc_settings_scenario_set_all_onions(int on) { sScenarioAllOnions = on ? 1 : 0; }
+
+void pc_settings_scenario_open_menu(void) { scenarioOpenMenuForTest(); }
+
+void pc_settings_scenario_close_menu(void) { scenarioCloseMenuForTest(); }
+#endif
 
 int pc_settings_get_face_cursor(void) { return sConfig.faceCursor; }
 int pc_settings_get_free_camera(void) { if (pc_speedrun_active()) return 0;
@@ -8961,10 +9115,16 @@ int pc_settings_get_free_camera(void) { if (pc_speedrun_active()) return 0;
 }
 
 int pc_settings_get_whistle_radius_pct(void) { if (pc_speedrun_active()) return 100;
+#if PIKI_SCENARIOS
+    if (sScenarioSettings && sScenarioWhistleRadiusPct > 0) return sScenarioWhistleRadiusPct;
+#endif
     return sConfig.whistleRadiusPct;
 }
 
 float pc_settings_get_throw_speed_scale(void) { if (pc_speedrun_active()) return 1.0f;
+#if PIKI_SCENARIOS
+    if (sScenarioSettings && sScenarioThrowSpeedPct > 0) return sScenarioThrowSpeedPct / 100.0f;
+#endif
     return sConfig.throwSpeedPct / 100.0f;
 }
 
@@ -8973,6 +9133,9 @@ int pc_settings_get_throw_cancel_b(void) { if (pc_speedrun_active()) return 0;
 }
 
 int pc_settings_get_quick_grab(void) { if (pc_speedrun_active()) return 0;
+#if PIKI_SCENARIOS
+    if (sScenarioSettings && sScenarioQuickGrab >= 0) return sScenarioQuickGrab;
+#endif
     return sConfig.quickGrab;
 }
 
@@ -8981,10 +9144,18 @@ int pc_settings_get_no_trip(void) { if (pc_speedrun_active()) return 0;
 }
 
 int pc_settings_get_whistle_pluck(void) { if (pc_speedrun_active()) return 0;
+#if PIKI_SCENARIOS
+    if (sScenarioSettings) return sScenarioWhistlePluck;
+#endif
     return sConfig.whistlePluck;
 }
 
-int pc_settings_get_hide_olimar_text(void) { if (pc_speedrun_active()) return 0; return sConfig.hideOlimarText; }
+int pc_settings_get_hide_olimar_text(void) { if (pc_speedrun_active()) return 0;
+#if PIKI_SCENARIOS
+    if (sScenarioSettings) return sScenarioHideOlimarText;
+#endif
+    return sConfig.hideOlimarText;
+}
 
 int pc_settings_get_breakable_gates(void) { if (pc_speedrun_active()) return 0;
     return pc_hardmode_active() ? 0 : sConfig.breakableGates;
@@ -9004,15 +9175,38 @@ int pc_settings_get_onion_step10(void) { if (pc_speedrun_active()) return 0;
     return sConfig.onionStep10;
 }
 
-int pc_settings_get_piki_invincible(void) { if (pc_speedrun_active()) return 0; return pc_hardmode_active() ? 0 : sConfig.pikiInvincible; }
+int pc_settings_get_piki_invincible(void) { if (pc_speedrun_active()) return 0;
+    if (pc_hardmode_active()) return 0;
+#if PIKI_SCENARIOS
+    if (sScenarioSettings && sScenarioPikiInvincible >= 0) return sScenarioPikiInvincible;
+#endif
+    return sConfig.pikiInvincible;
+}
 int pc_settings_get_all_flowers(void) { if (pc_speedrun_active()) return 0; return pc_hardmode_active() ? 0 : sConfig.allFlowers; }
 float pc_settings_get_carry_speed_scale(void) { if (pc_speedrun_active()) return 1.0f;
     if (pc_mission_active()) return pc_mission_mods().carry / 100.0f;
     return pc_hardmode_active() ? 1.0f : sConfig.carrySpeedPct / 100.0f; }
 float pc_settings_get_navi_speed_scale(void) { if (pc_speedrun_active()) return 1.0f; return pc_hardmode_active() ? 1.0f : sConfig.naviSpeedPct / 100.0f; }
-int pc_settings_get_unlock_zones(void) { if (pc_speedrun_active()) return 0; return pc_hardmode_active() ? 0 : sConfig.unlockZones; }
-int pc_settings_get_no_day_advance(void) { if (pc_speedrun_active()) return 0; return pc_hardmode_active() ? 0 : sConfig.noDayAdvance; }
-int pc_settings_get_all_onions(void) { if (pc_speedrun_active()) return 0; return pc_hardmode_active() ? 0 : sConfig.allOnions; }
+int pc_settings_get_unlock_zones(void) { if (pc_speedrun_active()) return 0;
+    if (pc_hardmode_active()) return 0;
+#if PIKI_SCENARIOS
+    if (sScenarioSettings && sScenarioUnlockZones >= 0) return sScenarioUnlockZones;
+#endif
+    return sConfig.unlockZones;
+}
+int pc_settings_get_no_day_advance(void) { if (pc_speedrun_active()) return 0;
+    if (pc_hardmode_active()) return 0;
+#if PIKI_SCENARIOS
+    if (sScenarioSettings) return sScenarioNoDayAdvance;
+#endif
+    return sConfig.noDayAdvance; }
+int pc_settings_get_all_onions(void) { if (pc_speedrun_active()) return 0;
+    if (pc_hardmode_active()) return 0;
+#if PIKI_SCENARIOS
+    if (sScenarioSettings && sScenarioAllOnions >= 0) return sScenarioAllOnions;
+#endif
+    return sConfig.allOnions;
+}
 
 int pc_settings_get_instant_whistle(void) { if (pc_speedrun_active()) return 0;
     return sConfig.instantWhistle;
@@ -9094,6 +9288,13 @@ int pc_settings_get_mouse_wheel_action(void) { if (pc_speedrun_active()) return 
 }
 
 int pc_settings_get_piki_limit(void) { if (pc_speedrun_active()) return 100;
+#if PIKI_SCENARIOS
+    if (sScenarioSettings && sScenarioPikiLimit > 0) {
+        const int lim = sScenarioPikiLimit;
+        if (pc_hardmode_active() && lim > PC_HARDMODE_PIKI_LIMIT) return PC_HARDMODE_PIKI_LIMIT;
+        return lim;
+    }
+#endif
     if (pc_hardmode_active() && sConfig.pikiLimit > PC_HARDMODE_PIKI_LIMIT)
         return PC_HARDMODE_PIKI_LIMIT;
     return sConfig.pikiLimit;

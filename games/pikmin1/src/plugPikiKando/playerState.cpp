@@ -25,6 +25,9 @@
 #include "pc_speedrun.h"
 #include "netplay/pc_netplay_present.h"
 #endif
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 
 int PlayerState::totalUfoParts = MAX_UFO_PARTS;
 
@@ -749,6 +752,9 @@ void PlayerState::initCourse()
 	setDayEnd(false);
 #if defined(PIKI_PC_PORT)
 	pcCheatGiveOnions(this);
+#if PIKI_SCENARIOS
+	pc_scenario_on_course_init();
+#endif
 #endif
 	mHasExtinctionDemoPlayed = false;
 	mNaviLightEfx            = new PermanentEffect;

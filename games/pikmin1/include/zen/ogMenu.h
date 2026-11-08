@@ -298,6 +298,12 @@ public:
 	void start();
 	bool draw(Graphics&);
 
+#if defined(PIKI_SCENARIOS) && PIKI_SCENARIOS
+	// Read-only, for the map_menu scenario: the status and the page (1 map, 2 controller).
+	returnStatusFlag pcScenarioStatus() const { return mStatus; }
+	int pcScenarioScreenIndex() const { return mCurrentScreenIndex; }
+#endif
+
 private:
 	void updateInfo(Controller*);
 	void updateCont(Controller*);

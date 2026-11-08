@@ -18,6 +18,9 @@
 #include "pc_coop.h"
 #include "mods/pc_pikmin_models.h"
 #include "timing/pc_render_phase.h"
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 
 #include <chrono>
 #include <cmath>
@@ -265,6 +268,10 @@ void pc_captain_preview_draw(int captain, int x, int y, int w, int h, int virtW,
 	} else if (captain == PC_CAPTAIN_PUFFMIN) {
 		m->shape->mMaterialList->setColour(Piki::kinokoColors[Red]);
 	}
+#if PIKI_SCENARIOS
+	// Disc-free stand-ins: vertex-coloured, drawn unlit as in play (#115).
+	pc_scenario_push_creature_unlit_draw();
+#endif
 	if (!drawn) m->shape->drawshape(gfx, sCam, nullptr);
 
 	// El Puffmin lleva la seta en el modelo, sin hoja.
@@ -280,6 +287,9 @@ void pc_captain_preview_draw(int captain, int x, int y, int w, int h, int virtW,
 	}
 	gfx.flushCachedShapes();
 	gfx.resetCacheBuffer();
+#if PIKI_SCENARIOS
+	pc_scenario_pop_creature_unlit_draw();
+#endif
 
 	// Dejarlo todo como estaba para el resto del menú.
 	gfx.mActiveLightMask = 0;

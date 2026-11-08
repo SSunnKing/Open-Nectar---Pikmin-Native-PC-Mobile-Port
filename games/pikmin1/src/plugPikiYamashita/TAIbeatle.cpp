@@ -287,8 +287,14 @@ protected:
 		}
 
 		for (i = 0; i < 10; i++) {
+#if defined(PIKI_PC_PORT)
+			// Which steam parts emit is presentation: cosmetic stream.
+			firstID  = zen::CosmeticRand(6.0f);
+			secondID = zen::CosmeticRand(6.0f);
+#else
 			firstID  = zen::Rand(6.0f);
 			secondID = zen::Rand(6.0f);
+#endif
 
 			int temp              = collPartIDs[firstID];
 			collPartIDs[firstID]  = collPartIDs[secondID];

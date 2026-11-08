@@ -454,7 +454,12 @@ void SpiderAi::dieState()
 		timings[i] = C_SPIDER_PARM(mSpider, mDeadScaleStartDelay) + i * C_SPIDER_PARM(mSpider, mDeadScaleStageDelay);
 	}
 
+#if defined(PIKI_PC_PORT)
+	// The branch only spawns spark effects: cosmetic stream (same shaping as NsMathF::getRand).
+	if (timer < timings[3] && pc_cosmetic_randf(1.0f) * (1.0f * 0.99999899f) < 0.2f) {
+#else
 	if (timer < timings[3] && NsMathF::getRand(1.0f) < 0.2f) {
+#endif
 		mSpider->mSpiderLeg->createSmallSparkEffect(1);
 	}
 

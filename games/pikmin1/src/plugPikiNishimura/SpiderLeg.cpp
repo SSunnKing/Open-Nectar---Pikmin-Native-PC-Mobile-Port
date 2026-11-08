@@ -225,7 +225,12 @@ void SpiderLeg::createSmallSparkEffect(int count)
 
 	// shuffle
 	for (i = 0; i < 12; i++) {
+#if defined(PIKI_PC_PORT)
+		// Which joints spark is presentation: cosmetic stream (same shaping as NsMathI::getRand).
+		tmp1          = int(pc_cosmetic_randf(1.0f) * (12 * 0.99999899f));
+#else
 		tmp1          = NsMathI::getRand(12);
+#endif
 		int tmp       = legVals[i];
 		legVals[i]    = legVals[tmp1];
 		legVals[tmp1] = tmp;

@@ -55,9 +55,18 @@ int pc_netplay_present_skip_presentation(void)
 	return sSkipPresentation ? 1 : 0;
 }
 
+#if PIKI_SCENARIOS
+static bool sScenarioSplitViews = false;
+
+void pc_netplay_present_scenario_split_views(int on) { sScenarioSplitViews = on != 0; }
+#endif
+
 int pc_netplay_present_two_pass_active(void)
 {
 #if defined(PIKI_PC_PORT) && !defined(PC_NETPLAY_PRESENT_HOST)
+#if PIKI_SCENARIOS
+	if (sScenarioSplitViews) return 0;
+#endif
 	return pc_netplay_deterministic() ? 1 : 0;
 #else
 	return 0;

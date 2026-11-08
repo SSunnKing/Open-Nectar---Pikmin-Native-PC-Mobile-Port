@@ -71,6 +71,30 @@ int pc_settings_get_idle_counter(void);
 int pc_settings_get_navi_health_pct(void);
 int pc_settings_get_teki_health_pct(void);
 int pc_settings_get_infinite_day(void);
+#if PIKI_SCENARIOS
+// --scenario settings layer: pikmin_settings.conf is neither read nor written.
+// Call before pc_settings_init. fpsMode is 0 for 30 Hz and 1 for 60 Hz.
+void pc_settings_scenario_enable(void);
+void pc_settings_scenario_set_fps_mode(int fpsMode);
+void pc_settings_scenario_set_infinite_day(int on);
+void pc_settings_scenario_set_whistle_pluck(int on);
+void pc_settings_scenario_set_no_day_advance(int on); ///< the "No Day Limit" cheat
+void pc_settings_scenario_set_hide_olimar_text(int on);
+void pc_settings_scenario_set_blues_only_water(int on);
+void pc_settings_scenario_set_window_size(int width, int height);
+void pc_settings_scenario_set_quick_grab(int on);
+void pc_settings_scenario_set_throw_speed_pct(int pct);
+void pc_settings_scenario_set_chain_actions(int on);
+void pc_settings_scenario_set_whistle_radius_pct(int pct);
+void pc_settings_scenario_set_piki_invincible(int on);
+void pc_settings_scenario_set_navi_health_pct(int pct);
+void pc_settings_scenario_set_teki_health_pct(int pct);
+void pc_settings_scenario_set_piki_limit(int limit);
+void pc_settings_scenario_set_unlock_zones(int on);
+void pc_settings_scenario_set_all_onions(int on);
+void pc_settings_scenario_open_menu(void);
+void pc_settings_scenario_close_menu(void);
+#endif
 int pc_settings_get_eternal_night(void);
 int pc_settings_get_fireflies(void);
 int pc_settings_get_free_camera(void);
@@ -247,6 +271,10 @@ int  pc_newgame_prompt_result(void);
 bool pc_newgame_prompt_chose_hard(void);
 /// True after accepting the new-game prompt with "Skip tutorial: Yes".
 bool pc_newgame_prompt_chose_skip_tutorial(void);
+#if PIKI_SCENARIOS
+/// Headless scenario runs: accept Normal / Standard / no skip-tutorial without SDL input.
+void pc_newgame_prompt_scenario_auto_accept(void);
+#endif
 
 /* One-shot request carried from file select to the first playable tutorial
    stage. It is not a saved rule: the resulting day-2 save is a normal save. */
@@ -287,6 +315,9 @@ void pc_captain_prompt_open(void);
 bool pc_captain_prompt_active(void);
 int  pc_captain_prompt_result(void);
 void pc_captain_prompt_draw(void);
+#if PIKI_SCENARIOS
+void pc_captain_prompt_scenario_auto_accept(void);
+#endif
 int  pc_devassign_prompt_result(void);
 
 /// Debug shortcuts F5 and F6, off by default.

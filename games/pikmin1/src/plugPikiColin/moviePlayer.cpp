@@ -1,3 +1,6 @@
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 #include "MoviePlayer.h"
 #include <cstdio>
 #include "DebugLog.h"
@@ -405,6 +408,15 @@ MovieTransInfo transTable[] = {
 int MoviePlayer::translateIndex(int idx, int stage)
 {
 	PRINT("trying to find translation for index %d in stage %d\n", idx, stage);
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+	// The tables have STAGE_COUNT entries. A stage with no `id` in stages.ini is
+	// STAGE_TESTMAP (= STAGE_COUNT), and reading past the table picks whatever
+	// the next array holds. Fall back to Impact Site, as Jac_SceneSetup does for
+	// the music (newPikiGame.cpp).
+	if (pc_scenario_uses_disc_free_assets() && (stage < 0 || stage >= STAGE_COUNT)) {
+		stage = STAGE_Practice;
+	}
+#endif
 	for (MovieTransInfo* info = transTable; info->mMovieID; info++) {
 		if (info->mMovieID == idx) {
 			int outIdx = info->mTransTable[stage];

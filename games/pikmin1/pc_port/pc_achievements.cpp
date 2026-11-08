@@ -9,6 +9,12 @@
 #include "pc_coop.h"
 #include "mods/pc_mission.h"
 #include "settings/pc_settings.h"
+#if PIKI_SCENARIOS
+#include <cstdlib>
+#include <string>
+
+#include "scenarios/pc_scenario.h"
+#endif
 
 namespace {
 
@@ -69,11 +75,28 @@ Uint32 sToastStart               = 0;
 Uint32 sBlockedToastStart        = 0;
 bool sBlockedToastShown          = false;
 
+// The file sits in the working directory. A scenario run changes into the shared
+// data folder, so there it goes to the run's own NECTAR_SAVE_DIR instead: a
+// scenario that unlocks one writes nothing into the stand-in tree, and parallel
+// runs each start with none unlocked.
+const char* filePath()
+{
+#if PIKI_SCENARIOS
+	if (pc_scenario_active()) {
+		static std::string path;
+		const char* dir = std::getenv("NECTAR_SAVE_DIR");
+		if (path.empty() && dir && *dir) path = std::string(dir) + "/" + kFilename;
+		if (!path.empty()) return path.c_str();
+	}
+#endif
+	return kFilename;
+}
+
 void save()
 {
-	FILE* out = fopen(kFilename, "w");
+	FILE* out = fopen(filePath(), "w");
 	if (!out) {
-		printf("[Achievements] Failed to write %s\n", kFilename);
+		printf("[Achievements] Failed to write %s\n", filePath());
 		return;
 	}
 	fprintf(out, "# Open Nectar achievements (unlocked ids)\n");
@@ -126,7 +149,7 @@ void pc_achievements_load(void)
 {
 	if (sLoaded) return;
 	sLoaded = true;
-	FILE* in = fopen(kFilename, "r");
+	FILE* in = fopen(filePath(), "r");
 	if (!in) return;
 	char line[64];
 	while (fgets(line, sizeof(line), in)) {

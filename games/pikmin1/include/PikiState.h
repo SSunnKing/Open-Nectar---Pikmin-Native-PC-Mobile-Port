@@ -452,6 +452,7 @@ protected:
  * @note Size: 0x44.
  */
 struct PikiFlyingState : public PikiState {
+	void integrateFlight(Piki*, f32, bool);
 public:
 	PikiFlyingState();
 

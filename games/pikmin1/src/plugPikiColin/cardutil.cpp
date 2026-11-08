@@ -10,6 +10,9 @@
 // only, null otherwise.
 void pc_netplay_load_keepalive(int site);
 #endif
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 
 /// Global thread for async card operations called directly by the game code.
 CardUtilThread CardThread;
@@ -668,6 +671,14 @@ static s32 CardUtilCommand(s32 chan, s32 command, void* file, void* workBuffer, 
 		OSSignalCond(&CardControl.mCondition);
 	}
 	OSUnlockMutex(&CardControl.mMutex);
+#if PIKI_SCENARIOS
+	// Scenario runs only (issue #125): finish the command before returning, so a screen
+	// that polls hasCardFinished() once per tick sees it done whatever the card thread's
+	// speed. Normal play keeps the asynchronous card, as on the GameCube.
+	if (res == CARD_RESULT_READY && pc_scenario_card_sync()) {
+		CardUtilIdleWhileBusy();
+	}
+#endif
 	return res;
 }
 
@@ -836,6 +847,9 @@ static void* CardUtilMain(void*)
 		offset = CardControl.mOffset;  // r21
 		length = CardControl.mLength;  // r17
 		OSUnlockMutex(&CardControl.mMutex);
+#if PIKI_SCENARIOS
+		pc_scenario_card_thread_delay(); // --scenario-card-delay-ms: a slow card (issue #125)
+#endif
 
 		// execute command
 		switch (cmd) {

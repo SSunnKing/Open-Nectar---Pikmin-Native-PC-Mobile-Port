@@ -880,7 +880,11 @@ void GoalAI::EmitPiki::act(AICreature* item)
 		Vector3f pos = item->mSRT.t;
 		pos.y += 110.0f;
 
+#if defined(PIKI_PC_PORT)
+		f32 unused1 = pc_cosmetic_randf(1.0f) * PI * 2; // dead store in the firework block: keep it off the sim stream
+#else
 		f32 unused1 = gsys->getRand(1.0f) * PI * 2;
+#endif
 		f32 unused2 = 145.0f;
 		f32 unused3 = 400.0f;
 

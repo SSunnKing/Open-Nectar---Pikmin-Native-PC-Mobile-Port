@@ -56,6 +56,21 @@ inline f32 RandShift(f32 min)
 	return Rand(2.0f * min) - min;
 }
 
+#if defined(PIKI_PC_PORT)
+// PC: Rand and RandShift for draw-only code such as particle effects. They use
+// the cosmetic RNG stream, so effect content cannot shift the sim stream. With
+// deterministic mode off, both streams are rand(), so the values are unchanged.
+inline f32 CosmeticRand(f32 max)
+{
+	return 1.0f * pc_cosmetic_randf(max);
+}
+
+inline f32 CosmeticRandShift(f32 min)
+{
+	return CosmeticRand(2.0f * min) - min;
+}
+#endif
+
 struct ZenQuat {
 	// unused globals
 	static void GetMatrix(const Quat&, Matrix3f&);

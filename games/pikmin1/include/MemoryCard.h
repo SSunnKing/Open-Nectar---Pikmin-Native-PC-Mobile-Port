@@ -77,6 +77,12 @@ public:
 	bool pcRestoreDay(int slot, int day);
 #endif
 
+#if PIKI_SCENARIOS
+	// Scenario-only in-memory round-trip through the normal save format.
+	void pcScenarioWriteSaveBlock(u8* out);
+	void pcScenarioLoadSaveBlock(const u8* data);
+#endif
+
 protected:
 	u32 calcChecksum(void*, u32);
 	u32 calcChecksumLegacy(void*, u32);

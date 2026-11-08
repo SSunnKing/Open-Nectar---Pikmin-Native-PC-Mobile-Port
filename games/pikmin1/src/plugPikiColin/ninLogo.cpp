@@ -15,6 +15,9 @@
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_coop_switch.h"
 #include "pc_vs.h"
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 #endif
 
 /**
@@ -94,7 +97,12 @@ struct NinLogoSetupSection : public Node {
 			static f32 pcLogoTime = 0.0f;
 			const f32 kLogoTime   = 2.5f, kFade = 0.5f;
 			// Con --vs-map (editor de mapas) no se espera al logo.
-			if (pcLogoTime < kLogoTime && !pc_vs_direct_requested() && !pc_coop_direct_requested()) {
+			bool pcScenarioBoot = false;
+#if PIKI_SCENARIOS
+			pcScenarioBoot = pc_scenario_skip_boot_menus();
+#endif
+			if (pcLogoTime < kLogoTime && !pc_vs_direct_requested() && !pc_coop_direct_requested()
+			    && !pcScenarioBoot) {
 				pcLogoTime += gsys->getFrameTime();
 				f32 fade = 1.0f;
 				if (pcLogoTime < kFade) {
@@ -103,6 +111,16 @@ struct NinLogoSetupSection : public Node {
 					fade = (kLogoTime - pcLogoTime) / kFade;
 				}
 				gameflow.mLevelBannerFadeValue = fade < 0.0f ? 0.0f : (fade > 1.0f ? 1.0f : fade);
+				return;
+			}
+#endif
+#if PIKI_SCENARIOS
+			if (pc_scenario_skip_boot_menus()) {
+				// Before the first stage is ready: skip title and file select. GameSetup still builds the
+				// stage list, playerState and the caches gameplay needs.
+				gameflow.mNextGameSectionID      = SECTION_OnePlayer;
+				gameflow.mNextOnePlayerSectionID = ONEPLAYER_GameSetup;
+				gsys->softReset();
 				return;
 			}
 #endif

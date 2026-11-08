@@ -7,6 +7,9 @@
 #endif
 #if defined(PIKI_PC_PORT)
 #include "settings/pc_settings.h"
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 #endif
 #include "AIConstant.h"
 #include "BaseInf.h"
@@ -812,7 +815,17 @@ void ItemCreature::refresh(Graphics& gfx)
 
 		if (!isOffCamera) {
 			gfx.useMatrix(Matrix4f::ident, 0);
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+			// Disc-free stand-ins with Blender art (#115): the bomb rock and the
+			// nectar carry their shading in vertex colours, which only the unlit
+			// stand-in draw shows.
+			const bool unlit = mObjType == OBJTYPE_Bomb || mObjType == OBJTYPE_Water || mObjType == OBJTYPE_FallWater;
+			if (unlit) pc_scenario_push_creature_unlit_draw();
+#endif
 			mItemShapeObject->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
+#if PIKI_SCENARIOS && defined(PIKI_PC_PORT)
+			if (unlit) pc_scenario_pop_creature_unlit_draw();
+#endif
 		}
 		return;
 	}

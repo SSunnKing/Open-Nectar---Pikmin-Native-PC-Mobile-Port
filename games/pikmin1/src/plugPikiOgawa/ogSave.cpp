@@ -14,6 +14,7 @@
 #include "zen/ogMemChk.h"
 #include "zen/ogNitaku.h"
 #include "zen/ogSub.h"
+#include "scenarios/pc_scenario_note.h"
 
 /**
  * @todo: Documentation
@@ -148,6 +149,7 @@ void zen::ogSaveMgr::startDirectSave(short state)
  */
 zen::ogSaveMgr::SaveStatus zen::ogSaveMgr::update(Controller* input)
 {
+	PC_SCENARIO_NOTE("savemgr", mStatus);
 	if (mStatus == Inactive) {
 		return mStatus;
 	}
@@ -455,6 +457,7 @@ zen::ogSaveMgr::SaveStatus zen::ogSaveMgr::update(Controller* input)
 		STACK_PAD_TERNARY(mStatus, 2);
 	}
 
+	PC_SCENARIO_NOTE("savemgr", mStatus);
 	return mStatus;
 }
 

@@ -30,6 +30,13 @@ int pc_netplay_present_skip_presentation(void);
 // True when the two-pass frame is active (deterministic mode, engine build).
 int pc_netplay_present_two_pass_active(void);
 
+#if PIKI_SCENARIOS
+// A co-op scenario (--scenario): the two-pass frame stays off although the
+// scenario runs in deterministic mode, so split screen draws its two views per
+// tick as ordinary local co-op does. Call before the first tick.
+void pc_netplay_present_scenario_split_views(int on);
+#endif
+
 // True when this pass may write sim state: single-pass mode, or the
 // authoritative pass of a two-pass tick. The presentation pass only reads
 // sim state and writes view state.

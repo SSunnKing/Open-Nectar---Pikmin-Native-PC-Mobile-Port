@@ -13,6 +13,9 @@
 #include "timing/pc_render_packet.h"
 #include "mods/pc_vs_arena.h"
 #include "netplay/pc_netplay_det.h"
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 #include "timing/pc_anim_timing.h"
 
 // Monitor FPS mode with vsync on, in the high-rate gameplay clamp and outside
@@ -441,15 +444,20 @@ void System::run(BaseApp* app)
 			// Counts the tick and, in deterministic mode, pins the FP state.
 			pc_netplay_on_tick_begin();
 #endif
+#if PIKI_SCENARIOS
+			pc_scenario_on_tick_begin();
+#endif
 			app->idle();
 #if PIKI_PC_PORT
 			if (pc_netplay_deterministic()) pc_netplay_det_profile_note_tick();
 			pc_input_log_tick_end();
 			pc_state_hash_tick_end(); // netplay harness: hash the sim after this tick
+#if PIKI_SCENARIOS
+			pc_scenario_on_tick_end();
+#endif
 #endif
 
 			// Identity-replay experiment: re-execute the tick's captured display
-			// lists into a cleared framebuffer and present that. It is NOT the
 			// 60 FPS mode -- it repaints the same frame rather than running the
 			// game faster; the frame rate comes from setFrameClamp(1) instead.
 			//

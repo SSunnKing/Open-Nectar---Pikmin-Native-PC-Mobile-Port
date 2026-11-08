@@ -1,4 +1,7 @@
 #include "OnePlayerSection.h"
+#if PIKI_SCENARIOS
+#include "scenarios/pc_scenario.h"
+#endif
 
 #include "CardSelectSection.h"
 #include "CmdStream.h"
@@ -312,6 +315,13 @@ void OnePlayerSection::init()
 		}
 		case ONEPLAYER_MapSelect:
 		{
+#if PIKI_SCENARIOS
+			// A scenario that crosses days may choose the next course itself (the
+			// stand-in tree has no world map screens); the loop then builds NewPikiGame.
+			if (pc_scenario_active() && pc_scenario_on_map_select()) {
+				break;
+			}
+#endif
 			// world map section!
 			PRINT("making new MAPSELECT\n");
 			currentSection = new MapSelectSection();
@@ -419,6 +429,11 @@ void OnePlayerSection::init()
 			_kPrint  = FALSE;
 			_nPrint  = FALSE;
 			_cPrint  = FALSE;
+#endif
+
+#if PIKI_SCENARIOS
+			// Stage and day are set before the stage's constructors consume them.
+			if (pc_scenario_active()) pc_scenario_pre_stage();
 #endif
 
 			if (!gsys->mIsLoadingActive) {
