@@ -29,6 +29,7 @@
 #include "android/pc_save_android.h"
 #endif
 #include "gl/pc_texpack.h"
+#include "mods/texture_pack_catalog.h"
 
 #include <SDL2/SDL.h>
 #include <cstdio>
@@ -590,7 +591,7 @@ enum : int { kPickTexturePack = 1, kPickNectarPack = 2, kPickHdModel = 100 /* + 
 std::atomic<int> sTexturePackInstallFiles{0};  // ficheros extraídos (hilo Java)
 // Mensaje de la última acción (instalación o aviso de sobremesa).
 bool sTexturePackRestartPrompt = false; // modal "reiniciar para aplicar"
-constexpr int kTexturePackInstallRow = 0;
+constexpr int kTexturePackInstallRow = 1; // row 0 is explicitly Off
 std::mutex sTexturePackNoticeMutex;
 char sTexturePackNotice[256] = {};
 bool sTexturePackNoticeError = false;
@@ -2487,9 +2488,9 @@ void pollMenuInput() {
         }
 
         // Lista de packs desde el disco: muestra una instalación recién hecha
-        // sin reiniciar. La fila 0 es "instalar"; las siguientes son packs.
+        // sin reiniciar. Las filas 0/1 son Off/instalar; siguen los packs.
         std::vector<std::string> packs = pc_texpack_list_packs();
-        const int rowCount = 1 + static_cast<int>(packs.size());
+        const int rowCount = 2 + static_cast<int>(packs.size());
         if (sTexturePacksSelection >= rowCount) sTexturePacksSelection = rowCount - 1;
 
         if (up) { sTexturePacksSelection = (sTexturePacksSelection + rowCount - 1) % rowCount; return; }
@@ -3100,6 +3101,16 @@ void saveDataRowAction(int row) {
 }
 
 void texturePacksRowAction(int row, const std::vector<std::string>& packs) {
+    if (row == 0) {
+        if (sTexturePackPickerActive) { texturePackNotice(true, "Wait: a pack is still installing."); return; }
+        sConfig.texturePackEnabled = 0;
+        sConfig.texturePack.clear();
+        sPending.texturePackEnabled = 0;
+        sPending.texturePack.clear();
+        saveConfig();
+        texturePackNotice(false, "Off selected. Applies next time the game starts.");
+        return;
+    }
     if (row == kTexturePackInstallRow) {
         if (!sTexturePackPickerActive) {
 #ifdef __ANDROID__
@@ -3126,24 +3137,13 @@ void texturePacksRowAction(int row, const std::vector<std::string>& packs) {
             // de 3000 y el menú diciendo "Active".
             texturePackNotice(true, "Wait: the pack is still being installed.");
         } else {
-            if (active) {
-                // Retirar el pack: también requiere reinicio para reconstruir
-                // el índice sin él, pero no merece un modal: ya está visible
-                // en marcha, solo seguirá indexándolo hasta el próximo arranque.
-                sConfig.texturePackEnabled = 0;
-                sConfig.texturePack.clear();
-                sPending.texturePackEnabled = 0;
-                sPending.texturePack.clear();
-                saveConfig();
-                texturePackNotice(false, "Pack desactivado. Se aplica al reiniciar.");
-            } else {
-                sConfig.texturePack = folder;
-                sConfig.texturePackEnabled = 1;
-                sPending.texturePack = folder;
-                sPending.texturePackEnabled = 1;
-                saveConfig();
-                sTexturePackRestartPrompt = true;
-            }
+            if (active) return;
+            sConfig.texturePack = folder;
+            sConfig.texturePackEnabled = 1;
+            sPending.texturePack = folder;
+            sPending.texturePackEnabled = 1;
+            saveConfig();
+            texturePackNotice(false, "Pack selected. Applies next time the game starts.");
         }
     }
 }
@@ -3969,9 +3969,17 @@ static void applyLauncherPackActivation() {
         if (in) std::getline(in, name);
     }
     while (!name.empty() && (name.back() == '\r' || name.back() == ' ')) name.pop_back();
+    name = nectar::textures::resolveSelection(std::filesystem::path("Load") / "Textures", name);
     if (!name.empty()) {
         sConfig.texturePack = name;
         sConfig.texturePackEnabled = 1;
+        sPending = sConfig;
+        saveConfig();
+    }
+    const std::string resolved = nectar::textures::resolveSelection(std::filesystem::path("Load") / "Textures", sConfig.texturePack);
+    if (resolved != sConfig.texturePack || (sConfig.texturePackEnabled && resolved.empty())) {
+        sConfig.texturePack = resolved;
+        if (resolved.empty()) sConfig.texturePackEnabled = 0;
         sPending = sConfig;
         saveConfig();
     }
@@ -4049,6 +4057,7 @@ void pc_texpack_install_progress(int files) {
 }
 
 void pc_texpack_install_finished(bool ok, const char* message) {
+    nectar::textures::invalidate();
     sTexturePackPickerActive = false;
     sTexturePackInstallFiles.store(0);
     if (sHdModelInstallActive.exchange(false) && ok) sHdModelRestartPrompt = true;
@@ -8791,11 +8800,11 @@ void pc_settings_draw(void) {
         const int subX = px1 + 18, subY = py1 + 44;
         const int subW = panelW - 36, subH = panelH - 58;
         drawSubmenuSurface(gfx, subX, subY, subW, subH, "Texture Packs",
-                           "A: activate / deactivate",
+                           "A: choose (applies next start)",
                            "Up/Down: select   Esc/B: back");
 
         std::vector<std::string> packs = pc_texpack_list_packs();
-        const int rowCount = 1 + static_cast<int>(packs.size());
+        const int rowCount = 2 + static_cast<int>(packs.size());
         const int listStartY = subY + 62;
         const int itemH = packs.empty() ? 26 : 22;
         // 9 filas caben cómodas; más se desplazan marcando la fila activa abajo.
@@ -8809,6 +8818,9 @@ void pc_settings_draw(void) {
         const int fromRow = startIdx;
         const int toRow = std::min(rowCount, startIdx + visibleItems);
 
+        if (fromRow == 0)
+            drawSubmenuRow(gfx, subX + 20, listStartY, subW - 40,
+                "Off (original textures)", sConfig.texturePackEnabled ? "" : "Selected", sTexturePacksSelection == 0);
         // Instalar desde fichero.
         if (fromRow <= kTexturePackInstallRow && kTexturePackInstallRow < toRow) {
             const int itemY = listStartY + (kTexturePackInstallRow - fromRow) * itemH;
@@ -8848,11 +8860,12 @@ void pc_settings_draw(void) {
                 : loadedNow ? "Active"
                 : chosenAtBoot ? "Failed to load (see below)"
                 : "Active  (on restart)";
-            drawSubmenuRow(gfx, subX + 20, itemY, subW - 40, folder.c_str(), state, selected);
+            drawSubmenuRow(gfx, subX + 20, itemY, subW - 40,
+                nectar::textures::display(std::filesystem::path("Load") / "Textures", folder).c_str(), state, selected);
         }
 
         if (packs.empty()) {
-            const int itemY = listStartY + itemH;
+            const int itemY = listStartY + 2 * itemH;
             const bool selected = false;
             drawSubmenuRow(gfx, subX + 20, itemY, subW - 40,
                            "No packs installed", "install one above", selected);
@@ -9290,7 +9303,7 @@ void graphicsRowValue(int i, char* value, size_t n) {
     case 9: if (!gradingOn) snprintf(value, n, "--"); else snprintf(value, n, sPending.saturation == 1.0f ? "%.2f  (neutral)" : "%.2f", sPending.saturation); break;
     case 10: {
         std::vector<std::string> packs = pc_texpack_list_packs();
-        if (sConfig.texturePackEnabled && !sConfig.texturePack.empty()) snprintf(value, n, "%s  >", sConfig.texturePack.c_str());
+        if (sConfig.texturePackEnabled && !sConfig.texturePack.empty()) snprintf(value, n, "%s  >", nectar::textures::display(std::filesystem::path("Load") / "Textures", sConfig.texturePack).c_str());
         else snprintf(value, n, "%d installed  >", (int)packs.size());
         break;
     }
@@ -9953,7 +9966,7 @@ int pc_settings_rows_count(int group) {
     if (groupRows(group, &n)) return n;
     switch (group) {
     case PC_SET_PICKER_RESOLUTION: return (int)pickerResolutionChoices().size();
-    case PC_SET_PICKER_TEXPACKS: return 1 + (int)pc_texpack_list_packs().size();
+    case PC_SET_PICKER_TEXPACKS: return 2 + (int)pc_texpack_list_packs().size();
     case PC_SET_PICKER_HDMODELS: return 6;
     case PC_SET_PICKER_KEYBOARD:
     case PC_SET_PICKER_GAMEPAD: return PC_KEY_ACT_COUNT;
@@ -9990,7 +10003,7 @@ const char* pc_settings_row_help(int group, int row) {
     }
     switch (group) {
     case PC_SET_PICKER_RESOLUTION: return "A: use this size. You then get a few seconds to keep or revert it.";
-    case PC_SET_PICKER_TEXPACKS: return "A: install, activate or deactivate. Changes need a restart.";
+    case PC_SET_PICKER_TEXPACKS: return "Choose Off or an installed pack. Applies next start. Delete packs in the launcher.";
     case PC_SET_PICKER_HDMODELS: return "A: pick the model's zip to install it. Needs a restart.";
     case PC_SET_PICKER_KEYBOARD: return "A: press the new key or mouse button. Left/Right: back to default.";
     case PC_SET_PICKER_GAMEPAD: return "A: press the new button. Left/Right: default or none. Delete: none.";
@@ -10035,10 +10048,11 @@ const char* pc_settings_row_label(int group, int row) {
     if (group == PC_SET_PICKER_KEYBOARD || group == PC_SET_PICKER_GAMEPAD)
         return (row >= 0 && row < PC_KEY_ACT_COUNT) ? pc_window_get_key_action_name(row) : "";
     if (group == PC_SET_PICKER_TEXPACKS) {
-        if (row == 0) return "Install pack...";
+        if (row == 0) return "Off (original textures)";
+        if (row == kTexturePackInstallRow) return "Install pack";
         std::vector<std::string> packs = pc_texpack_list_packs();
-        if (row - 1 < 0 || row - 1 >= (int)packs.size()) return "";
-        snprintf(label, sizeof(label), "%s", packs[row - 1].c_str());
+        if (row - 2 < 0 || row - 2 >= (int)packs.size()) return "";
+        snprintf(label, sizeof(label), "%s", nectar::textures::display(std::filesystem::path("Load") / "Textures", packs[row - 2]).c_str());
         return label;
     }
     if (group == PC_SET_PICKER_HDMODELS) return (row >= 0 && row < 6) ? kHdModelLabels[row] : "";
@@ -10104,11 +10118,12 @@ void pc_settings_row_value(int group, int row, char* out, unsigned long n) {
         return;
     }
     if (group == PC_SET_PICKER_TEXPACKS) {
-        if (row == 0) snprintf(out, n, "%s", sTexturePackPickerActive ? "Installing..." : "A: choose zip");
+        if (row == 0) snprintf(out, n, "%s", sConfig.texturePackEnabled ? "" : "Selected");
+        else if (row == kTexturePackInstallRow) snprintf(out, n, "%s", sTexturePackPickerActive ? "Installing..." : "A: choose zip");
         else {
             std::vector<std::string> packs = pc_texpack_list_packs();
-            if (row - 1 >= 0 && row - 1 < (int)packs.size()) {
-                const bool active = sConfig.texturePackEnabled && packs[row - 1] == sConfig.texturePack;
+            if (row - 2 >= 0 && row - 2 < (int)packs.size()) {
+                const bool active = sConfig.texturePackEnabled && packs[row - 2] == sConfig.texturePack;
                 snprintf(out, n, "%s", active ? "Active" : "");
             }
         }
@@ -10385,6 +10400,19 @@ void headlessDump(const std::string& message = std::string(), bool messageIsErro
         if (i) out += ',';
         jsonString(out, packs[i].c_str());
     }
+    out += "],\"details\":[";
+    const auto details = nectar::textures::catalog(std::filesystem::path("Load") / "Textures");
+    for (size_t i = 0; i < details.size(); ++i) {
+        if (i) out += ',';
+        const auto& pack = details[i];
+        out += "{\"id\":"; jsonString(out, pack.id.c_str());
+        out += ",\"name\":"; jsonString(out, pack.name.c_str());
+        out += ",\"path\":"; jsonString(out, pack.path.string().c_str());
+        out += ",\"size\":"; jsonString(out, pack.removable ? nectar::textures::sizeText(pack.bytes).c_str() : "Size unavailable");
+        out += ",\"removable\":"; out += pack.removable ? "true" : "false";
+        out += ",\"installed\":"; out += pack.installed ? "true" : "false";
+        out += '}';
+    }
     out += "]}";
 
     // Modelos HD: una fila por modelo, como en su selector del F1.
@@ -10443,7 +10471,7 @@ int pc_settings_cli(int argc, char** argv) {
     int at = -1;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--settings-dump") || !strcmp(argv[i], "--settings-set") || !strcmp(argv[i], "--settings-reset")
-            || !strcmp(argv[i], "--texpack-install") || !strcmp(argv[i], "--texpack-activate")
+            || !strcmp(argv[i], "--texpack-install") || !strcmp(argv[i], "--texpack-activate") || !strcmp(argv[i], "--texpack-delete")
             || !strcmp(argv[i], "--hdmodel-install") || !strcmp(argv[i], "--hdmodel-enable")
             || !strcmp(argv[i], "--pikmin-model")) {
             at = i;
@@ -10468,14 +10496,46 @@ int pc_settings_cli(int argc, char** argv) {
     bool messageIsError = false;
     if (!strcmp(argv[at], "--texpack-install") && at + 1 < argc) {
         char msg[192] = {};
-        const int written = pc_texpack_install_zip(argv[at + 1], msg, sizeof(msg));
+        const int written = pc_texpack_install_zip(argv[at + 1], msg, sizeof(msg), at + 2 < argc ? argv[at + 2] : nullptr);
         message = msg;
         messageIsError = written <= 0;
+        result = messageIsError ? 1 : 0;
     } else if (!strcmp(argv[at], "--texpack-activate") && at + 1 < argc) {
-        sConfig.texturePack = argv[at + 1];
-        sConfig.texturePackEnabled = sConfig.texturePack.empty() ? 0 : 1;
-        sPending = sConfig;
-        saveConfig();
+        const std::string id = argv[at + 1];
+        const std::string resolved = nectar::textures::resolveSelection(std::filesystem::path("Load") / "Textures", id);
+        if (!id.empty() && resolved.empty()) {
+            message = "That texture pack is not installed.";
+            messageIsError = true;
+            result = 1;
+        } else {
+            sConfig.texturePack = resolved;
+            sConfig.texturePackEnabled = !resolved.empty();
+            sPending = sConfig;
+            saveConfig();
+            message = "Selected " + (resolved.empty() ? std::string("Off") : nectar::textures::display(std::filesystem::path("Load") / "Textures", resolved))
+                + ". Applies next time the game starts.";
+        }
+    } else if (!strcmp(argv[at], "--texpack-delete") && at + 1 < argc) {
+        const std::string id = argv[at + 1];
+        const auto root = std::filesystem::path("Load") / "Textures";
+        std::string name = id;
+        for (const auto& pack : nectar::textures::discover(root)) if (pack.id == id) name = pack.name;
+        std::uintmax_t freed = 0;
+        if (!nectar::textures::removePack(root, id, freed, message)) {
+            messageIsError = true;
+            result = 1;
+        } else {
+            const bool wasActive = sConfig.texturePackEnabled && sConfig.texturePack == id;
+            if (sConfig.texturePack == id) {
+                sConfig.texturePack.clear();
+                sConfig.texturePackEnabled = 0;
+                sPending = sConfig;
+                saveConfig();
+            }
+            message = "Deleted " + name + " (" + nectar::textures::sizeText(freed) + " freed). "
+                + (wasActive ? "Switched to Off. " : "")
+                + "From " + std::filesystem::absolute(root / id).lexically_normal().string();
+        }
     } else if (!strcmp(argv[at], "--hdmodel-enable") && at + 2 < argc) {
         const int row = atoi(argv[at + 1]);
         if (row >= 0 && row < 6) {

@@ -11,6 +11,8 @@
 #include "pc_hd_model_convert.h"
 
 #include "nectar_paths/paths.h"
+#include "texture_pack_catalog.h"
+#include "../launcher/texture_pack_storage.h"
 #include "stb_image.h"
 
 #include <algorithm>
@@ -2015,7 +2017,7 @@ fs::path findPikmin2Szs()
 // ".../Load/Textures/<pack>/..." van a Load/Textures/<pack>/...; si el zip
 // no lleva esa carpeta, todo cuelga de Load/Textures/<nombre del zip>/.
 // Misma regla que el instalador Android (TexturePack.java).
-int pc_texpack_install_zip(const char* zipPath, char* message, unsigned long messageSize)
+int pc_texpack_install_zip(const char* zipPath, char* message, unsigned long messageSize, const char* variant)
 {
 	auto say = [&](const std::string& text) {
 		if (message && messageSize) std::snprintf(message, messageSize, "%s", text.c_str());
@@ -2023,15 +2025,45 @@ int pc_texpack_install_zip(const char* zipPath, char* message, unsigned long mes
 	ZipSource zip;
 	if (!zipPath || !zip.open(zipPath)) { say("Not a readable .zip file."); return 0; }
 	const fs::path root = fs::path("Load") / "Textures";
+	const std::string id = variant ? variant : "";
+	if (!id.empty() && !nectar::textures::managedId(id)) { say("Unknown texture pack variant."); return 0; }
 	const std::string stem = fs::path(zipPath).stem().string();
 	std::error_code ec;
 	fs::create_directories(root, ec);
+	if (ec || !nectar::textures::plainDirectory(root)) { say("Unsafe texture folder."); return 0; }
+	// Now the ZIP index is available, replace the click-time estimate with its
+	// actual uncompressed size. The ZIP still occupies disk while we stage all
+	// extracted files, so require extraction space plus 10% before staging.
+	std::uint64_t expandedBytes = 0;
+	for (const auto& entry : zip.entries) expandedBytes += entry.usize;
+	const auto storage = fs::space(root, ec);
+	if (!ec && storage.available < pikmin::launcher::texturePackStorageBytes(
+	        expandedBytes, pikmin::launcher::kTexturePackExtractionHeadroom)) {
+		say("Not enough space to extract this ZIP (including 10% headroom). No pack was installed.");
+		return 0;
+	}
+	ec.clear();
+	fs::path target = root;
+	if (!id.empty()) {
+		if (fs::exists(root / id, ec) || fs::is_symlink(root / id, ec)) {
+			say("That pack is already installed. Delete it before replacing it."); return 0;
+		}
+		target = root / (".install-" + id);
+		if (!fs::create_directory(target, ec) || ec) { say("Another install is pending; leave its folder untouched."); return 0; }
+	}
+	// Only our newly-created staging directory is cleaned up on failure.
+	struct Staging {
+		fs::path path;
+		~Staging() { if (!path.empty()) { std::error_code error; fs::remove_all(path, error); } }
+	} staging { id.empty() ? fs::path() : target };
+
 	// Los packs de Dolphin traen más cosas (el emulador, Config, Shaders):
 	// si el zip tiene Load/Textures, solo se instala eso.
 	bool hasLoadTextures = false;
 	for (const ZipSource::Entry& e : zip.entries)
 		if (e.lowerName.find("load/textures/") != std::string::npos) { hasLoadTextures = true; break; }
 	int written = 0;
+	bool hasTextures = false;
 	for (const ZipSource::Entry& e : zip.entries) {
 		if (e.name.empty() || e.name.back() == '/') continue;
 		std::string rel;
@@ -2039,22 +2071,55 @@ int pc_texpack_install_zip(const char* zipPath, char* message, unsigned long mes
 		if (idx != std::string::npos) rel = e.name.substr(idx + std::strlen("load/textures/"));
 		else if (hasLoadTextures) continue;
 		else rel = stem + "/" + e.name;
-		if (rel.empty() || rel.find("..") != std::string::npos) continue;
-		const fs::path out = root / rel;
+		if (!id.empty() && idx == std::string::npos) {
+			// Raw GameID/texture zips and flat texture zips are also accepted.
+			rel = e.name;
+			const auto first = fs::path(rel).begin()->string();
+			if (!nectar::textures::gameId(first)) rel = "GPI/" + rel;
+		}
+		const fs::path relative(rel);
+		bool safe = !relative.empty() && !relative.is_absolute() && !relative.has_root_name()
+			&& rel.find('\\') == std::string::npos && rel.find(':') == std::string::npos;
+		for (const auto& component : relative) if (component == ".." || component == ".") safe = false;
+		if (!safe) { say("Unsafe path in texture zip; installation stopped."); return 0; }
+		if (!id.empty() && !nectar::textures::gameId(relative.begin()->string())) continue;
+		const fs::path out = target / relative;
+		// Existing legacy folders must never redirect extraction through links.
+		fs::path parent = target;
+		for (const auto& component : relative.parent_path()) {
+			parent /= component;
+			if (fs::is_symlink(parent, ec)) { say("Symlink in texture destination."); return 0; }
+			ec.clear();
+		}
+		if (fs::is_symlink(out, ec)) { say("Symlink in texture destination."); return 0; }
+		ec.clear();
 		try {
 			std::vector<char> bytes = zip.readEntry(e);
 			fs::create_directories(out.parent_path(), ec);
 			std::ofstream f(out, std::ios::binary);
-			if (!f) continue;
-			f.write(bytes.data(), (std::streamsize)bytes.size());
+			if (!f || !f.write(bytes.data(), (std::streamsize)bytes.size())) { say("Could not write texture file."); return 0; }
 			written++;
+			const std::string filename = lower(out.filename().string());
+			const std::string ext = lower(out.extension().string());
+			if (filename.rfind("tex1_", 0) == 0 && (ext == ".png" || ext == ".dds")) hasTextures = true;
 		} catch (const Error& err) {
 			say(err.message);
-			return written;
+			return 0;
 		}
+	}
+	if (!id.empty() && !hasTextures) { say("The zip contains no replacement textures."); return 0; }
+	if (written > 0 && !id.empty()) {
+		std::ofstream marker(target / ".nectar-pack");
+		marker << (id == "hd-4k" ? "4K" : "1080p") << '\n';
+		marker.close();
+		if (!marker) { say("Could not mark the installed pack."); return 0; }
+		fs::rename(target, root / id, ec);
+		if (ec) { say("Could not finish the texture install."); return 0; }
+		staging.path.clear();
 	}
 	if (written == 0) say("The zip has no files to install.");
 	else say("Texture pack installed (" + std::to_string(written) + " files). Activate it in the list.");
+	if (written > 0) nectar::textures::invalidate();
 	return written;
 }
 

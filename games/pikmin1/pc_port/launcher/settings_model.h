@@ -46,12 +46,27 @@ struct PikminModelChoice {
 };
 
 // Todo lo que el juego cuenta de sus ajustes en una respuesta.
+struct TexturePackInfo {
+    std::string id, name, path, size;
+    bool removable = false;
+    bool installed = true;
+};
+
+enum class TexturePackAction { Install, Delete, Working, Unavailable };
+inline TexturePackAction texturePackAction(const TexturePackInfo& pack, bool working) {
+    if (working) return TexturePackAction::Working;
+    if (pack.installed) return TexturePackAction::Delete;
+    if (pack.id == "hd-1080p" || pack.id == "hd-4k") return TexturePackAction::Install;
+    return TexturePackAction::Unavailable;
+}
+
 struct SettingsSnapshot {
     // True cuando el juego pide que el launcher reproduzca exactamente su F1,
     // sin anexar las páginas históricas de packs/modelos de Pikmin 1.
     bool exactF1 = false;
     std::vector<SettingsGroup> groups;
     std::vector<std::string> texturePacks; // instalados en Load/Textures
+    std::vector<TexturePackInfo> texturePackDetails;
     std::string activePack;                // "" = ninguno
     std::vector<HdModel> hdModels;
     std::vector<PikminModelChoice> pikminModels;

@@ -9059,7 +9059,7 @@ const char* pc_settings_row_label(int group, int row) {
     if (group == PC_SET_PICKER_KEYBOARD || group == PC_SET_PICKER_GAMEPAD)
         return (row >= 0 && row < PC_KEY_ACT_COUNT) ? pc_window_get_key_action_name(row) : "";
     if (group == PC_SET_PICKER_TEXPACKS) {
-        if (row == 0) return "Install pack...";
+        if (row == 0) return "Install pack";
         std::vector<std::string> packs = pc_texpack_list_packs();
         if (row - 1 < 0 || row - 1 >= (int)packs.size()) return "";
         snprintf(label, sizeof(label), "%s", packs[row - 1].c_str());

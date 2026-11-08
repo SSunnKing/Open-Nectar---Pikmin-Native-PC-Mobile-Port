@@ -64,6 +64,11 @@ bool parseSettingsDump(const std::string& output, SettingsSnapshot& snapshot, st
     }
     if (const Json* packs = root.get("texturePacks"); packs && packs->type == Json::Type::Object) {
         snapshot.activePack = packs->str("active");
+        if (const Json* details = packs->get("details"); details && details->type == Json::Type::Array) {
+            for (const Json& pack : details->items)
+                snapshot.texturePackDetails.push_back({ pack.str("id"), pack.str("name"), pack.str("path"),
+                    pack.str("size"), pack.flag("removable", false), pack.flag("installed", true) });
+        }
         if (const Json* installed = packs->get("installed"); installed && installed->type == Json::Type::Array) {
             for (const Json& name : installed->items)
                 if (name.type == Json::Type::String) snapshot.texturePacks.push_back(name.text);

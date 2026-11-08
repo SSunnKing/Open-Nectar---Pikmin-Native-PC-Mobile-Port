@@ -159,6 +159,29 @@ option(NECTAR_ONLINE "Build the experimental direct online co-op layer" OFF)
 
 if(PIKMIN_BUILD_TESTS)
     enable_testing()
+    add_executable(texture_pack_catalog_test pc_port/mods/texture_pack_catalog_test.cpp
+        pc_port/mods/texture_pack_catalog_win32.cpp)
+    target_compile_features(texture_pack_catalog_test PRIVATE cxx_std_17)
+    add_test(NAME texture_pack_catalog_test COMMAND texture_pack_catalog_test)
+    add_executable(toast_layout_test pc_port/launcher/toast_layout_test.cpp)
+    target_compile_features(toast_layout_test PRIVATE cxx_std_17)
+    add_test(NAME toast_layout_test COMMAND toast_layout_test)
+    add_executable(settings_pack_test pc_port/launcher/settings_pack_test.cpp pc_port/launcher/settings_model.cpp)
+    target_compile_features(settings_pack_test PRIVATE cxx_std_17)
+    add_test(NAME settings_pack_test COMMAND settings_pack_test)
+    add_executable(texture_pack_download_test pc_port/launcher/texture_pack_download_test.cpp
+        pc_port/launcher/texture_pack_download.cpp pc_port/mods/texture_pack_catalog_win32.cpp)
+    target_compile_features(texture_pack_download_test PRIVATE cxx_std_17)
+    add_test(NAME texture_pack_download_test COMMAND texture_pack_download_test)
+    foreach(pack_test texture_pack_catalog_test toast_layout_test settings_pack_test texture_pack_download_test)
+        if(MSVC)
+            target_compile_options(${pack_test} PRIVATE /UNDEBUG)
+        else()
+            target_compile_options(${pack_test} PRIVATE -UNDEBUG)
+        endif()
+    endforeach()
+
+
 endif()
 
 # ─── Which release of the game this binary is built for ───
@@ -341,6 +364,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_gpu_preference.cpp
     pc_port/mods/pc_hd_models.cpp
     pc_port/mods/pc_hd_model_convert.cpp
+    pc_port/mods/texture_pack_catalog_win32.cpp
     pc_port/mods/pc_vs_arena.cpp
     pc_port/mods/pc_vs_map.cpp
     pc_port/mods/pc_map_catalog.cpp
@@ -958,6 +982,15 @@ if (NOT ANDROID AND PIKMIN_GAME_VERSION STREQUAL "VERSION_GPIP01_00")
         COMMENT "Copying the PAL game as nectar-pal for the launcher")
 endif()
 
+if(PIKMIN_BUILD_TESTS AND NOT ANDROID)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME texture_pack_cli_test COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/texture_pack_cli_test.py" "$<TARGET_FILE:${NECTAR_GAME}>")
+        set_tests_properties(texture_pack_cli_test PROPERTIES TIMEOUT 60)
+    endif()
+endif()
+
 # Standalone first-run launcher. It accepts an original, uncompressed
 # GameCube ISO/GCM supplied by the user, extracts its FST into the per-user
 # data directory and then starts the game from there. Keeping the extractor in
@@ -1026,6 +1059,7 @@ if(ANDROID AND NOT TARGET nectar_launcher)
         pc_port/launcher/settings_model.cpp
         pc_port/launcher/release_update.cpp
         pc_port/launcher/texture_pack_download.cpp
+        pc_port/launcher/texture_pack_download_dialog.cpp
         pc_port/launcher/installer_ui.cpp
         pc_port/launcher/launcher_platform_android.cpp
         pc_port/pc_icon.cpp
@@ -1101,6 +1135,7 @@ if(PIKMIN_BUILD_LAUNCHER)
         pc_port/launcher/settings_model.cpp
         pc_port/launcher/release_update.cpp
         pc_port/launcher/texture_pack_download.cpp
+        pc_port/launcher/texture_pack_download_dialog.cpp
         pc_port/launcher/installer_ui.cpp
         ${NECTAR_LIBS_DIR}/nectar_assets/src/charpack.cpp
         pc_port/pc_icon.cpp
@@ -1302,6 +1337,14 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
         target_compile_options(launcher_cursor_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
         target_link_libraries(launcher_cursor_test PRIVATE launcher_imgui)
         add_test(NAME launcher_cursor_test COMMAND launcher_cursor_test)
+
+        add_executable(texture_pack_row_test pc_port/launcher/texture_pack_row_test.cpp
+            "${LAUNCHER_EMBED_DIR}/font_fredoka.h")
+        set_property(TARGET texture_pack_row_test PROPERTY INCLUDE_DIRECTORIES "")
+        target_include_directories(texture_pack_row_test PRIVATE "${LAUNCHER_EMBED_DIR}")
+        target_compile_options(texture_pack_row_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+        target_link_libraries(texture_pack_row_test PRIVATE launcher_imgui)
+        add_test(NAME texture_pack_row_test COMMAND texture_pack_row_test)
     endif()
 
     add_executable(launcher_scroll_test pc_port/launcher/launcher_scroll_test.cpp)
@@ -1589,7 +1632,8 @@ if(PIKMIN_BUILD_TESTS)
 
     # Real replacement loader with GL dispatch stubs: no GPU, disc or pack download.
     foreach(test pc_texpack_test pc_texpack_gles_test)
-        add_executable(${test} pc_port/gl/pc_texpack_test.cpp)
+        add_executable(${test} pc_port/gl/pc_texpack_test.cpp
+            pc_port/mods/texture_pack_catalog_win32.cpp)
         target_include_directories(${test} PRIVATE ${SDL2_INCLUDE_DIRS}
             third_party/stb third_party/bcdec)
         target_compile_options(${test} PRIVATE ${NATIVE_COMPILE_OPTIONS})
