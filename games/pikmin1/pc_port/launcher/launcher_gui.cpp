@@ -18,6 +18,7 @@
 
 #include "bti_decode.h"
 #include "button_layout.h"
+#include "settings_row_layout.h"
 #include "button_style.h"
 #if PIKMIN_LAUNCHER_NETPLAY
 #include "launcher_coop.h"
@@ -1454,14 +1455,24 @@ struct Hub {
         ImGui::PopTextWrapPos();
         ImGui::Dummy(ImVec2(0, 6));
 
+        const float width = ImGui::GetContentRegionAvail().x;
+        const float toggleW = buttons::buttonWidth(role::kToggle);
+        float nameW = 0.0f;
+        for (const HdModel& model : snap.hdModels)
+            nameW = std::max(nameW, ImGui::CalcTextSize(model.name.c_str()).x);
+        const auto layout = settingsRowLayout(width, nameW, toggleW + 12.0f + buttonW);
+        float nameHeight = ImGui::GetTextLineHeight();
+        for (const HdModel& model : snap.hdModels)
+            nameHeight = std::max(nameHeight, ImGui::CalcTextSize(model.name.c_str(), nullptr, false,
+                                                               layout.stacked ? width : nameW).y);
         for (const HdModel& model : snap.hdModels) {
             ImGui::PushID(model.row);
-            ImGui::AlignTextToFramePadding();
+            const ImVec2 origin = ImGui::GetCursorScreenPos();
+            const float controlsY = origin.y + (layout.stacked ? nameHeight + 8.0f : 0.0f);
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + (layout.stacked ? width : nameW));
             ImGui::TextColored(ImVec4(1.0f, 0.93f, 0.80f, 1.0f), "%s", model.name.c_str());
-            // Instalado: interruptor On/Off (apagar no borra nada, vuelve al
-            // modelo original). Sin instalar: solo el aviso.
-            const float toggleW = buttons::buttonWidth(role::kToggle);
-            ImGui::SameLine(ImGui::GetContentRegionMax().x - buttonW - toggleW - 12.0f);
+            ImGui::PopTextWrapPos();
+            ImGui::SetCursorScreenPos(ImVec2(origin.x + layout.controlsX, controlsY));
             if (model.installed) {
                 if (glassButton(model.enabled ? "On" : "Off", role::kToggle, 40.0f, model.enabled, busy)) {
                     queue({ "--hdmodel-enable", std::to_string(model.row), model.enabled ? "0" : "1" });
@@ -1470,9 +1481,9 @@ struct Hub {
                 ImGui::AlignTextToFramePadding();
                 ImGui::TextColored(ImVec4(0.62f, 0.58f, 0.44f, 1.0f), "Not installed");
             }
-            ImGui::SameLine(ImGui::GetContentRegionMax().x - buttonW);
+            ImGui::SetCursorScreenPos(ImVec2(origin.x + width - buttonW, controlsY));
             const std::string pickOwner = "model" + std::to_string(model.row);
-            if (glassButton(filePickLabel(pickOwner, model.installed ? "Replace..." : "Install...").c_str(),
+            if (glassButton(filePickLabel(pickOwner, model.installed ? "Replace" : "Install").c_str(),
                             role::kSettingsRow, 40.0f, false, busy || filePickOpen())) {
                 const int row = model.row;
                 startFilePick(pickOwner, "Choose the zip for " + model.name, "Model zip", "*.zip *.ZIP",
@@ -1480,6 +1491,8 @@ struct Hub {
                                   queue({ "--hdmodel-install", std::to_string(row), zip.string() }, "Converting the model...");
                               });
             }
+            ImGui::SetCursorScreenPos(origin);
+            ImGui::Dummy(ImVec2(width, (layout.stacked ? nameHeight + 8.0f : 0.0f) + 40.0f + 8.0f));
             ImGui::PopID();
         }
         drawPikminModels(snap, busy);
@@ -1501,12 +1514,17 @@ struct Hub {
                            "the leaf, bud and flower stay the game's.");
         ImGui::PopTextWrapPos();
         ImGui::Dummy(ImVec2(0, 6));
-        const float comboW = 300.0f;
+        const float width = ImGui::GetContentRegionAvail().x;
+        const float comboW = std::min(300.0f, width);
+        float nameW = 0.0f;
+        for (const PikminModelChoice& choice : snap.pikminModels)
+            nameW = std::max(nameW, ImGui::CalcTextSize(choice.name.c_str()).x);
+        const auto layout = settingsRowLayout(width, nameW, comboW);
         for (const PikminModelChoice& choice : snap.pikminModels) {
             ImGui::PushID(choice.color.c_str());
             ImGui::AlignTextToFramePadding();
             ImGui::TextColored(ImVec4(1.0f, 0.93f, 0.80f, 1.0f), "%s", choice.name.c_str());
-            ImGui::SameLine(ImGui::GetContentRegionMax().x - comboW);
+            if (!layout.stacked) ImGui::SameLine(ImGui::GetCursorPosX() + layout.controlsX);
             ImGui::SetNextItemWidth(comboW);
             std::string current = "Game";
             for (const auto& [id, name] : choice.options)
@@ -1707,17 +1725,18 @@ struct Hub {
         ImGui::TextColored(ImVec4(0.62f, 0.58f, 0.44f, 1.0f), "%s", savesStatus.c_str());
         ImGui::PopTextWrapPos();
         ImGui::Dummy(ImVec2(0, 10));
-        // One shared width for every Saves-page button: wide enough for the longest label (including the
-        // "Waiting for file picker..." state), never below 240 px. Two buttons + gap fit the panel at 960 px.
+        // Share a measured width, but stack button pairs when the panel is narrow.
+        // Include the picker state so opening a picker cannot change the layout.
         float savesButtonW = 240.0f;
-        for (const char* label : {"Import a save...", "Open save folder", "Restore previous save", "Open backups folder",
+        for (const char* label : {"Import a save", "Open save folder", "Restore previous save", "Open backups folder",
                                   "Waiting for file picker..."})
             savesButtonW = std::max(savesButtonW, ImGui::CalcTextSize(label).x + 48.0f);
-        const ImVec2 savesButtonSize(savesButtonW, 46.0f);
-        if (glassButton(filePickLabel("gci", "Import a save...").c_str(), savesButtonSize, false,
+        const bool paired = settingsButtonsFit(ImGui::GetContentRegionAvail().x, savesButtonW);
+        const ImVec2 savesButtonSize(std::min(savesButtonW, ImGui::GetContentRegionAvail().x), 46.0f);
+        if (glassButton(filePickLabel("gci", "Import a save").c_str(), savesButtonSize, false,
                         busy || filePickOpen()))
             tryImportGciSave();
-        ImGui::SameLine(0.0f, 12.0f);
+        if (paired) ImGui::SameLine(0.0f, 12.0f);
         if (glassButton("Open save folder", savesButtonSize, false, !savesFolderExists)) openFolder(saveCardFolder());
 
         ImGui::Dummy(ImVec2(0, 18));
@@ -1738,7 +1757,7 @@ struct Hub {
         if (!savesBackupTime.empty()) {
             if (glassButton("Restore previous save", savesButtonSize, false, busy || filePickOpen()))
                 tryRestoreSave();
-            ImGui::SameLine(0.0f, 12.0f);
+            if (paired) ImGui::SameLine(0.0f, 12.0f);
         }
         if (glassButton("Open backups folder", savesButtonSize, false, !backupsFolderExists))
             openFolder(cardBackupRoot(saveCardFolder()));
