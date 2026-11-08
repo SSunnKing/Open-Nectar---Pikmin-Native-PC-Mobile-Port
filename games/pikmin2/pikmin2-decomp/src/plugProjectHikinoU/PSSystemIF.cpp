@@ -1,3 +1,5 @@
+#include <cstdio>
+#include <cstdlib>
 #ifdef PIKI_PC_PORT
 bool pc_host_alloc_active();
 void pc_host_alloc_set(bool active);
@@ -144,6 +146,13 @@ JAISe* SysIF::playSystemSe(u32 soundID, u32 flag)
 #endif
 	JAISe* se = nullptr;
 	startSoundActorReturnHandleT(&se, soundID, nullptr, flag, 4);
+#ifdef PIKI_PC_PORT
+	// PIKMIN_SE_TRACE=1: sonidos de sistema pedidos y si se crearon (#190).
+	static const bool seTrace = getenv("PIKMIN_SE_TRACE") != nullptr;
+	if (seTrace) {
+		fprintf(stderr, "[se] system 0x%04X flag=%u -> %s\n", (unsigned)soundID, (unsigned)flag, se ? "started" : "DROPPED");
+	}
+#endif
 	return se;
 }
 
