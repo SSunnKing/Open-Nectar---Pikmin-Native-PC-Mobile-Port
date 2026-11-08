@@ -38,9 +38,12 @@ inline std::string chooseFileScript(const std::string& prompt, bool showPackageC
 }
 
 // Prints the chosen folder's POSIX path, which ends in "/".
-inline std::string chooseFolderScript(const std::string& prompt)
+inline std::string chooseFolderScript(const std::string& prompt, const std::string& defaultPosixPath = {})
 {
-    return "POSIX path of (choose folder with prompt " + appleScriptString(prompt) + ")";
+    std::string script = "POSIX path of (choose folder with prompt " + appleScriptString(prompt);
+    if (!defaultPosixPath.empty())
+        script += " default location POSIX file " + appleScriptString(defaultPosixPath);
+    return script + ")";
 }
 
 // A message with one OK button. No "activate": it adds about 2 s before the

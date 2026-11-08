@@ -1016,6 +1016,9 @@ if(ANDROID AND NOT TARGET nectar_launcher)
     add_library(nectar_launcher SHARED
         pc_port/launcher/launcher_android_main.cpp
         pc_port/launcher/launcher_gui.cpp
+        pc_port/launcher/install_directory.cpp
+        pc_port/launcher/install_note_layout.cpp
+        pc_port/dolphin_stubs/pc_card_save_root.cpp
         pc_port/launcher/button_style.cpp
         pc_port/launcher/button_layout.cpp
         pc_port/launcher/crash_report.cpp
@@ -1087,6 +1090,8 @@ if(PIKMIN_BUILD_LAUNCHER)
     add_executable(pikmin_launcher
         pc_port/launcher/launcher_main.cpp
         pc_port/launcher/launcher_gui.cpp
+        pc_port/launcher/install_directory.cpp
+        pc_port/launcher/install_note_layout.cpp
         pc_port/launcher/gci_save_import.cpp
         pc_port/dolphin_stubs/pc_card_save_root.cpp
         pc_port/launcher/button_style.cpp
@@ -1166,9 +1171,42 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
     target_compile_options(gci_save_import_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME gci_save_import_test COMMAND gci_save_import_test)
 
+    add_executable(install_directory_test
+        pc_port/launcher/install_directory_test.cpp
+        pc_port/launcher/install_directory.cpp
+        pc_port/launcher/install_note_layout.cpp
+        pc_port/dolphin_stubs/pc_card_save_root.cpp)
+    target_include_directories(install_directory_test PRIVATE pc_port/launcher ${PC_PORT_DIR})
+    target_compile_options(install_directory_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME install_directory_test COMMAND install_directory_test)
+
+    add_executable(install_note_layout_test pc_port/launcher/install_note_layout_test.cpp
+        pc_port/launcher/install_note_layout.cpp)
+    target_include_directories(install_note_layout_test PRIVATE pc_port/launcher ${PC_PORT_DIR})
+    target_compile_options(install_note_layout_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME install_note_layout_test COMMAND install_note_layout_test)
+
+    add_executable(install_dialog_snapshot
+        pc_port/launcher/install_dialog_snapshot.cpp
+        pc_port/launcher/install_note_layout.cpp
+        pc_port/dolphin_stubs/pc_card_save_root.cpp
+        pc_port/launcher/installer_ui.cpp
+        pc_port/pc_icon.cpp
+        ${LAUNCHER_PLATFORM_SOURCE})
+    target_include_directories(install_dialog_snapshot PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/pc_port/launcher
+        ${SDL2_INCLUDE_DIRS})
+    target_link_libraries(install_dialog_snapshot PRIVATE nectar_paths ${SDL2_LIBRARIES} Threads::Threads)
+    if (WIN32)
+        target_link_libraries(install_dialog_snapshot PRIVATE comdlg32 ole32 shell32 uuid winhttp)
+    endif()
+    target_compile_options(install_dialog_snapshot PRIVATE ${NATIVE_COMPILE_OPTIONS})
+
     add_executable(installer_ui_test
         pc_port/launcher/installer_ui_test.cpp
         pc_port/launcher/installer_ui.cpp
+        pc_port/launcher/install_note_layout.cpp
+        pc_port/dolphin_stubs/pc_card_save_root.cpp
         pc_port/pc_icon.cpp
         ${LAUNCHER_PLATFORM_SOURCE})
     target_include_directories(installer_ui_test PRIVATE

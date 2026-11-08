@@ -16,7 +16,8 @@ public:
     virtual ~InstallerUi() = default;
     // Pide la imagen y la carpeta. false = el usuario no quiere instalar.
     virtual bool choosePaths(const std::function<std::string()>& chooseRom,
-                             const std::function<std::string()>& chooseInstallDirectory,
+                             const std::function<std::string(const std::string& currentInstallDirectory)>&
+                                 chooseInstallDirectory,
                              std::string& rom, std::string& installDirectory) = 0;
     // Runs a native dialog (a platform::askFor* call or showMessage) without
     // freezing the window: on a worker thread while the window keeps drawing
@@ -47,8 +48,10 @@ public:
     InstallerWindow& operator=(const InstallerWindow&) = delete;
 
     bool open(std::string& error);
+    void presetInstallDirectory(const std::string& directory);
     bool choosePaths(const std::function<std::string()>& chooseRom,
-                     const std::function<std::string()>& chooseInstallDirectory,
+                     const std::function<std::string(const std::string& currentInstallDirectory)>&
+                         chooseInstallDirectory,
                      std::string& rom, std::string& installDirectory) override;
     std::string runDialog(const std::function<std::string()>& dialog, const std::string& what) override;
     void updateProgress(std::uint32_t percent, const std::string& currentFile,
@@ -56,6 +59,9 @@ public:
     void showError(const std::string& message) override;
     bool offerRetry(const std::string& message) override;
     bool showComplete(const std::string& installDirectory, bool willLaunch) override;
+
+    // Test-only: renders the setup screen and saves a BMP (dummy SDL video driver).
+    bool saveSetupScreenshot(const std::string& path, const std::string& rom, const std::string& installDirectory);
 
 private:
     struct Impl;

@@ -30,13 +30,13 @@ int main()
     click(600, 230);
     click(300, 320);
     std::string rom, directory;
-    if (!window.choosePaths([] { return "original.rvz"; }, [] { return "install"; }, rom, directory)
+    if (!window.choosePaths([] { return "original.rvz"; }, [](const std::string&) { return "install"; }, rom, directory)
         || rom != "original.rvz" || directory != "install") return 1;
     // A failed attempt must return to setup with its original choices intact,
     // not with the temporary ISO path used internally during conversion.
     window.updateProgress(25, "", "Checking disc");
     click(300, 320);
-    if (!window.choosePaths([] { return "unexpected"; }, [] { return "unexpected"; }, rom, directory)
+    if (!window.choosePaths([] { return "unexpected"; }, [](const std::string&) { return "unexpected"; }, rom, directory)
         || rom != "original.rvz" || directory != "install") return 1;
     std::puts("installer_ui_test: phases and setup selection retention passed");
     return 0;

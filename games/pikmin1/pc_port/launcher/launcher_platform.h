@@ -76,7 +76,9 @@ std::filesystem::path askForFile(const std::string& title, const std::string& fi
 
 // Diálogo de selección de la carpeta de instalación. Vacía si se cancela.
 // `title` va tras "Open Nectar - " en la barra del diálogo.
-std::filesystem::path askForInstallDirectory(const std::string& title = "Choose the install folder");
+// `initialDirectory` abre el selector en esa carpeta cuando se puede.
+std::filesystem::path askForInstallDirectory(const std::string& title = "Choose the install folder",
+                                             const std::filesystem::path& initialDirectory = {});
 
 // Aviso al usuario. Si no hay diálogos disponibles, escribe por stderr.
 void showMessage(const std::string& title, const std::string& message, bool error);
