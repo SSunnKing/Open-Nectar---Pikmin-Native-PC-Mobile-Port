@@ -97,6 +97,9 @@ int offStageSprouts(int colour, StageInfo* skip)
 // The persisted progression of the loaded save. `ids` is true once the ship has registered its parts.
 SavedProgression captureSaved(bool ids, StageInfo* loadedStage)
 {
+	// A save is read at the file select, where the AI constants do not exist yet: a course exit clears
+	// them and only the next course creates them again.
+	AIConstant::createInstance();
 	SavedProgression s;
 	s.mode             = currentMode();
 	s.prov.lineage     = std::uint64_t(gameflow.mPlayState.mSaveSlot);
