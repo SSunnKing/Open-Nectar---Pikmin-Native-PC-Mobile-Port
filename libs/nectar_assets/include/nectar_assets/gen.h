@@ -68,6 +68,31 @@ bool loadGen(const std::string& path, GenFile& out, std::string& error);
 /// el origen). Cada uno debe empezar como Generator::raw.
 std::vector<std::uint8_t> writeGen(const std::vector<std::vector<std::uint8_t>>& generators);
 
+/// One item generator, as the game's editor writes it (Generator::write with
+/// GenObjectItem 'item' v0.1, GenAreaPoint 'pint' v0.0, GenTypeOne '1one'
+/// v0.0; generator.cpp, genItem.cpp). The game reads it back with
+/// Generator::read: ids are stored byte-reversed (readID swaps them on PC),
+/// everything else big-endian. Written for the scenario sandbox (#68): the
+/// sandbox's gate is a 'sluice bomb' placed this way.
+struct GenItemSpec {
+	std::string memo;         ///< at most 31 bytes (32 with the NUL)
+	Vec3 pos;                 ///< mGenPosition; the item is born there (GenAreaPoint)
+	std::string item;         ///< ObjType name, e.g. "sluice bomb" (objectTypes.cpp); at most 255 bytes
+	int type   = 0;           ///< 'p00' (GenObjectItem mParameterA: colour of an Onion, a gem...)
+	int day    = 0;           ///< 'p01'; health = hour + day * hoursInDay (GenObjectItem::birth)
+	int hour   = 0;           ///< 'p02'
+	int stages = 3;           ///< 'p03' (building stages of a gate, count of a rock or weed generator)
+	int rotX = 0, rotY = 0, rotZ = 0; ///< GenTypeOne 'p00'..'p02', degrees
+	int resurrectDays = 0;    ///< GenType 'b00'
+	int carryOver     = 0;    ///< GenType 'b01'
+	std::uint32_t carryOverFlags = 0; ///< Generator::mCarryOverFlags
+};
+
+/// The generator bytes (one entry of a .gen, the same layout Generator::raw
+/// holds); concatenate them with writeGen. false, with `error`, for a memo
+/// that does not fit or an empty or oversized item name.
+bool writeItemGenerator(const GenItemSpec& in, std::vector<std::uint8_t>& out, std::string& error);
+
 /// 'teki' -> "teki".
 std::string genIdString(std::uint32_t id);
 
