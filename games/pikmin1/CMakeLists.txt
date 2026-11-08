@@ -1188,6 +1188,8 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
 
     add_executable(install_dialog_snapshot
         pc_port/launcher/install_dialog_snapshot.cpp
+        pc_port/launcher/install_note_layout.cpp
+        pc_port/dolphin_stubs/pc_card_save_root.cpp
         pc_port/launcher/installer_ui.cpp
         pc_port/pc_icon.cpp
         ${LAUNCHER_PLATFORM_SOURCE})

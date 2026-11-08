@@ -3361,7 +3361,10 @@ bool HubWindow::savePathsModalScreenshot(const std::string& path, int width, int
     m.installDirectory      = installDirectory;
     m.pathsLegacyOverride   = legacySaveOverride;
     m.modal                 = Impl::Modal::Paths;
-    m.frame();
+    // Settle the resized window, then capture the back buffer before swapping.
+    for (int frame = 0; frame < 3; ++frame) m.frame();
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     glFinish();
     int fbW = 0, fbH = 0;
     SDL_GL_GetDrawableSize(m.window, &fbW, &fbH);

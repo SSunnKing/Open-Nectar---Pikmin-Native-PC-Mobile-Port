@@ -104,10 +104,11 @@ void testSaveMigrationNote()
     fs::remove_all(root);
     const fs::path install = root / "install";
     const fs::path xdgData = root / "xdg-data";
-    const fs::path legacySave = xdgData / "pikmin-native" / "save";
 #ifdef _WIN32
-    _putenv_s("XDG_DATA_HOME", xdgData.string().c_str());
+    const fs::path legacySave = xdgData / "Nectar" / "save";
+    _putenv_s("LOCALAPPDATA", xdgData.string().c_str());
 #else
+    const fs::path legacySave = xdgData / "pikmin-native" / "save";
     setenv("XDG_DATA_HOME", xdgData.string().c_str(), 1);
 #endif
     touch(legacySave / "card0" / "test.bin");

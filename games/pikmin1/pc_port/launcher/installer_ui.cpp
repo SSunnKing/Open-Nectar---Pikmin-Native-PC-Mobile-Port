@@ -164,6 +164,8 @@ struct InstallerWindow::Impl {
         }
     }
 
+    SDL_Cursor* handCursor = nullptr;
+    SDL_Cursor* arrowCursor = nullptr;
     std::uint32_t lastRenderTicks = 0;
 
     void render()
@@ -200,8 +202,13 @@ struct InstallerWindow::Impl {
         drawButton(installButton, installing ? "Installing" : "Install",
                    contains(installButton, mouseX, mouseY), rom.empty() || installDirectory.empty() || installing);
 
-        drawText(renderer, 45, 279, "In game: F1 opens graphics, controls and gameplay settings", 1,
-                 { 180, 197, 214, 255 });
+        const bool clickable = !installing && (contains(romBrowse, mouseX, mouseY)
+            || contains(installBrowse, mouseX, mouseY)
+            || (!rom.empty() && !installDirectory.empty() && contains(installButton, mouseX, mouseY)));
+        if (SDL_Cursor* cursor = clickable ? handCursor : arrowCursor) SDL_SetCursor(cursor);
+        if (!installing)
+            drawText(renderer, 45, 382, "In game: F1 opens graphics, controls and gameplay settings", 1,
+                     { 180, 197, 214, 255 });
 
         if (installing) {
             SDL_Rect track { 45, 373, 670, 12 };
@@ -267,6 +274,8 @@ InstallerWindow::InstallerWindow()
 
 InstallerWindow::~InstallerWindow()
 {
+    if (mImpl->handCursor) SDL_FreeCursor(mImpl->handCursor);
+    if (mImpl->arrowCursor) SDL_FreeCursor(mImpl->arrowCursor);
     if (mImpl->renderer) SDL_DestroyRenderer(mImpl->renderer);
     if (mImpl->window) SDL_DestroyWindow(mImpl->window);
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
@@ -294,6 +303,8 @@ bool InstallerWindow::open(std::string& error)
         error = SDL_GetError();
         return false;
     }
+    mImpl->handCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
+    mImpl->arrowCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
     mImpl->render();
     return true;
 }
