@@ -100,6 +100,21 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake ninja-build g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64 pkg-config
+      # The Windows build links SDL2 statically from third_party/SDL2-mingw64 (it is not
+      # committed). This is the setup the README describes, with the same SDL version the
+      # Linux and macOS scripts build.
+      - name: Download SDL2 for MinGW
+        env:
+          SDL_VERSION: '2.32.10'
+        run: |
+          curl -fsSL -o sdl2-mingw.tar.gz \
+            "https://github.com/libsdl-org/SDL/releases/download/release-${SDL_VERSION}/SDL2-devel-${SDL_VERSION}-mingw.tar.gz"
+          tar -xzf sdl2-mingw.tar.gz
+          for game in pikmin1 pikmin2; do
+            mkdir -p "games/${game}/third_party/SDL2-mingw64"
+            cp -R "SDL2-${SDL_VERSION}/x86_64-w64-mingw32/." "games/${game}/third_party/SDL2-mingw64/"
+          done
+          test -f games/pikmin1/third_party/SDL2-mingw64/lib/libSDL2.a
       - name: Build
         run: bash scripts/release-windows.sh
       - name: Collect
