@@ -69,6 +69,11 @@ protected:
 		p.setContainer(Red);
 		p.setContainer(Blue);
 		p.setContainer(Yellow);
+		// An owned Onion's colour is already visible in a healthy save.
+		// Keep this round-trip fixture coherent with progression repair on load.
+		p.setDisplayPikiCount(Red);
+		p.setDisplayPikiCount(Blue);
+		p.setDisplayPikiCount(Yellow);
 		mDriver.setPlan({}); // Yes, A everywhere
 		return true;
 	}
