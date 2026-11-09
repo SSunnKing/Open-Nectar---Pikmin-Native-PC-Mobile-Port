@@ -37,6 +37,7 @@
 #include "texture_pack_row.h"
 #include "texture_pack_download.h"
 #include "texture_pack_storage.h"
+#include "hd_model_downloads.h"
 #include "release_update.h"
 
 #include "imgui.h"
@@ -74,6 +75,8 @@
 #include <memory>
 #include <map>
 #include <mutex>
+#include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -726,6 +729,29 @@ struct Hub {
     std::string moveNote;    // aviso bajo el formulario
     std::shared_ptr<MoveJob> moveJob;
     TexturePackInfo deletingPack;
+    HdModel deletingModel;
+#ifndef __ANDROID__
+    // Get HD models (#189): see drawGetHdModels.
+    struct HdJob {
+        fs::path path;
+        bool fromDownloads = false;
+        enum Stage { Identify, Install } stage = Identify;
+        int row = -1;
+    };
+    struct HdZipOffer {
+        fs::path zip;
+        std::string size;
+    };
+    DownloadsWatcher hdWatcher;
+    float hdPollClock = 0.0f;
+    std::vector<HdJob> hdFound;        // zips still to check, oldest first
+    std::optional<HdJob> hdJob;        // the one the game is working on
+    std::set<int> hdWaitingRows;       // pages opened, zip not in yet
+    std::map<int, std::string> hdRowErrors;
+    std::optional<HdZipOffer> hdZipOffer; // "delete the downloaded zip?"
+    std::string hdGetNote;
+    bool hdGetNoteError = false;
+#endif
     TexturePackInfo installingPack;
     TexturePackDownload installingDownload {};
     std::optional<std::uint64_t> installFreeSpace;
@@ -1460,7 +1486,8 @@ struct Hub {
 
     void queue(std::vector<std::string> arguments, const char* label = "Saving...")
     {
-        if (!arguments.empty() && arguments[0].find("--texpack-") == 0) awaitingPackResult = true;
+        if (!arguments.empty() && (arguments[0].find("--texpack-") == 0 || arguments[0] == "--hdmodel-delete"))
+            awaitingPackResult = true;
         pendingRequest = std::move(arguments);
         pendingLabel = label;
         messageGame = settingsGame;
@@ -1657,6 +1684,9 @@ struct Hub {
     // Modelos HD: uno por fila, cada uno se instala desde su zip.
     void drawHdModels(const SettingsSnapshot& snap, bool busy)
     {
+#ifndef __ANDROID__
+        pumpHdImports(snap, busy);
+#endif
         const float buttonW = buttons::buttonWidth(role::kSettingsRow);
         ImGui::PushFont(fonts.caption);
         ImGui::TextColored(kOrangeDeep, "HD MODELS");
@@ -1667,36 +1697,75 @@ struct Hub {
                            "Higher-detail characters, converted from the model zips. They apply the next time the game starts.");
         ImGui::PopTextWrapPos();
         ImGui::Dummy(ImVec2(0, 6));
+#ifndef __ANDROID__
+        if (glassButton("Get HD models",
+                        ImVec2(std::min(buttons::buttonWidth(role::kWide), ImGui::GetContentRegionAvail().x), 44.0f))) {
+            ImGui::OpenPopup("Get HD models");
+            startHdWatch();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 26.0f);
+            ImGui::TextUnformatted("Lists each character with a Download button that opens its page in your browser. "
+                                   "Zips you download there install by themselves.");
+            ImGui::PopTextWrapPos();
+            ImGui::EndTooltip();
+        }
+        drawGetHdModels(snap, busy);
+        ImGui::Dummy(ImVec2(0, 8));
+#endif
 
         const float width = ImGui::GetContentRegionAvail().x;
         const float toggleW = buttons::buttonWidth(role::kToggle);
+        const float deleteW = buttons::buttonWidth(role::kSmallAction);
         float nameW = 0.0f;
         for (const HdModel& model : snap.hdModels)
             nameW = std::max(nameW, ImGui::CalcTextSize(model.name.c_str()).x);
-        const auto layout = settingsRowLayout(width, nameW, toggleW + 12.0f + buttonW);
+        // On/Off, Delete, Install/Replace. Too narrow even stacked: the
+        // buttons go on two lines (toggle + delete, then install).
+        const float controlsW = toggleW + 12.0f + deleteW + 12.0f + buttonW;
+        const bool twoLines = controlsW > width;
+        const auto layout = settingsRowLayout(width, nameW, twoLines ? std::max(toggleW + 12.0f + deleteW, buttonW) : controlsW);
+        const bool stacked = layout.stacked || twoLines;
         float nameHeight = ImGui::GetTextLineHeight();
         for (const HdModel& model : snap.hdModels)
             nameHeight = std::max(nameHeight, ImGui::CalcTextSize(model.name.c_str(), nullptr, false,
-                                                               layout.stacked ? width : nameW).y);
+                                                               stacked ? width : nameW).y);
         for (const HdModel& model : snap.hdModels) {
             ImGui::PushID(model.row);
             const ImVec2 origin = ImGui::GetCursorScreenPos();
-            const float controlsY = origin.y + (layout.stacked ? nameHeight + 8.0f : 0.0f);
+            const float controlsY = origin.y + (stacked ? nameHeight + 8.0f : 0.0f);
             // Beside the 40 px buttons, centre the name on them.
-            if (!layout.stacked) ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + std::max(0.0f, (40.0f - nameHeight) * 0.5f)));
-            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + (layout.stacked ? width : nameW));
+            if (!stacked) ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + std::max(0.0f, (40.0f - nameHeight) * 0.5f)));
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + (stacked ? width : nameW));
             ImGui::TextColored(ImVec4(1.0f, 0.93f, 0.80f, 1.0f), "%s", model.name.c_str());
             ImGui::PopTextWrapPos();
-            ImGui::SetCursorScreenPos(ImVec2(origin.x + layout.controlsX, controlsY));
+            const float controlsX = twoLines ? 0.0f : (stacked ? width - controlsW : layout.controlsX);
+            ImGui::SetCursorScreenPos(ImVec2(origin.x + controlsX, controlsY));
             if (model.installed) {
                 if (glassButton(model.enabled ? "On" : "Off", role::kToggle, 40.0f, model.enabled, busy)) {
                     queue({ "--hdmodel-enable", std::to_string(model.row), model.enabled ? "0" : "1" });
                 }
+                ImGui::SetCursorScreenPos(ImVec2(origin.x + controlsX + toggleW + 12.0f, controlsY));
+                if (glassButton("Delete", role::kSmallAction, 40.0f, false, busy)) {
+                    deletingModel = model;
+                    ImGui::OpenPopup("Delete HD model?");
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    ImGui::BeginTooltip();
+                    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                    ImGui::Text("Frees %s.", model.size.empty() ? "its space" : model.size.c_str());
+                    ImGui::Text("From: %s", model.path.c_str());
+                    ImGui::TextUnformatted("Deletes only this model's files. You can install it again.");
+                    ImGui::PopTextWrapPos();
+                    ImGui::EndTooltip();
+                }
             } else {
-                ImGui::AlignTextToFramePadding();
+                ImGui::SetCursorScreenPos(ImVec2(origin.x + controlsX, controlsY + (40.0f - ImGui::GetTextLineHeight()) * 0.5f));
                 ImGui::TextColored(ImVec4(0.62f, 0.58f, 0.44f, 1.0f), "Not installed");
             }
-            ImGui::SetCursorScreenPos(ImVec2(origin.x + width - buttonW, controlsY));
+            const float installY = twoLines ? controlsY + 48.0f : controlsY;
+            ImGui::SetCursorScreenPos(ImVec2(origin.x + (twoLines ? 0.0f : width - buttonW), installY));
             const std::string pickOwner = "model" + std::to_string(model.row);
             if (glassButton(filePickLabel(pickOwner, model.installed ? "Replace" : "Install").c_str(),
                             role::kSettingsRow, 40.0f, false, busy || filePickOpen())) {
@@ -1706,12 +1775,282 @@ struct Hub {
                                   queue({ "--hdmodel-install", std::to_string(row), zip.string() }, "Converting the model...");
                               });
             }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::BeginTooltip();
+                ImGui::TextUnformatted("Pick this model's zip (or its unzipped folder) yourself.");
+                ImGui::EndTooltip();
+            }
             ImGui::SetCursorScreenPos(origin);
-            ImGui::Dummy(ImVec2(width, (layout.stacked ? nameHeight + 8.0f : 0.0f) + 40.0f + 8.0f));
+            ImGui::Dummy(ImVec2(width, (installY - origin.y) + 40.0f + 8.0f));
             ImGui::PopID();
         }
+        drawDeleteHdModel();
         drawPikminModels(snap, busy);
     }
+
+    void drawDeleteHdModel()
+    {
+        ImGui::SetNextWindowSize(ImVec2(std::min(560.0f, ImGui::GetIO().DisplaySize.x - 32.0f), 0), ImGuiCond_Always);
+        if (!ImGui::BeginPopupModal("Delete HD model?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
+            return;
+        ImGui::PushFont(fonts.caption);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::Text("Delete %s (%s)?", deletingModel.name.c_str(), deletingModel.size.c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::TextUnformatted("Its files are permanently deleted from:");
+        ImGui::SetNextItemWidth(-1);
+        std::vector<char> path(deletingModel.path.begin(), deletingModel.path.end());
+        path.push_back(0);
+        ImGui::InputText("##deleteModelPath", path.data(), path.size(), ImGuiInputTextFlags_ReadOnly);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", deletingModel.path.c_str());
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextUnformatted("Other models in that folder stay. The game uses the original model next time it starts.");
+        ImGui::PopTextWrapPos();
+        if (glassButton("Cancel", ImVec2(110, 38))) ImGui::CloseCurrentPopup();
+        ImGui::SetItemDefaultFocus();
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        ImGui::SameLine();
+        if (glassButton("Delete model", ImVec2(150, 38), true)) {
+            queue({ "--hdmodel-delete", std::to_string(deletingModel.row) }, "Deleting the model...");
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::PopFont();
+        ImGui::EndPopup();
+    }
+
+#ifndef __ANDROID__
+    // ── Get HD models (#189) ─────────────────────────────────────────────────
+    // Download opens the character's page in the browser; while the window is
+    // open the Downloads folder is polled and each new zip is first identified
+    // by the game (--hdmodel-identify) and, if it is a model, converted
+    // (--hdmodel-install -1). One request at a time, through queue().
+    void startHdWatch()
+    {
+        hdGetNote.clear();
+        if (!hdWatcher.watching()) hdWatcher.start(downloadsDirectory());
+        hdPollClock = 0.0f;
+    }
+
+    void stopHdWatch()
+    {
+        if (!hdWatcher.watching() && hdWaitingRows.empty()) return;
+        hdWatcher.stop();
+        hdWaitingRows.clear();
+        // Zips found but not started yet are dropped; one already running ends.
+        hdFound.erase(std::remove_if(hdFound.begin(), hdFound.end(), [](const HdJob& job) { return job.fromDownloads; }),
+                      hdFound.end());
+    }
+
+    void pumpHdImports(const SettingsSnapshot& snap, bool busy)
+    {
+        const bool idle = !busy && pendingRequest.empty();
+        if (hdJob && idle) {
+            HdJob job = *hdJob;
+            hdJob.reset();
+            const std::string name = job.path.filename().string();
+            if (job.stage == HdJob::Identify) {
+                if (snap.hdModelDetected >= 0) {
+                    job.stage = HdJob::Install;
+                    job.row = snap.hdModelDetected;
+                    hdRowErrors.erase(job.row);
+                    hdJob = job;
+                    queue({ "--hdmodel-install", "-1", job.path.string() }, "Installing the model...");
+                    return;
+                }
+                hdGetNote = job.fromDownloads ? "Skipped " + name + ": it is not one of the model zips. It was left as it is."
+                                              : name + " is not one of the model zips listed here.";
+                hdGetNoteError = !job.fromDownloads;
+                if (!job.fromDownloads) notify(hdGetNote);
+            } else if (snap.hdModelInstalled >= 0) {
+                hdWaitingRows.erase(job.row);
+                hdRowErrors.erase(job.row);
+                notify(snap.message);
+                toastTime = 8.0f;
+                hdGetNote.clear();
+                std::error_code ec;
+                if (job.fromDownloads && fs::is_regular_file(fs::symlink_status(job.path, ec))) {
+                    const auto bytes = fs::file_size(job.path, ec);
+                    hdZipOffer = HdZipOffer { job.path, ec ? std::string() : texturePackSizeText(bytes) };
+                }
+            } else {
+                hdRowErrors[job.row] = "Could not install " + name + ": "
+                                     + (snap.message.empty() ? settings->error : snap.message)
+                                     + " Try downloading it again.";
+                notify(hdRowErrors[job.row]);
+            }
+        }
+        if (hdWatcher.watching()) {
+            hdPollClock += ImGui::GetIO().DeltaTime;
+            if (hdPollClock >= 1.0f) {
+                hdPollClock = 0.0f;
+                for (const fs::path& zip : hdWatcher.poll()) hdFound.push_back({ zip, true });
+            }
+        }
+        if (!hdJob && idle && !hdFound.empty()) {
+            HdJob job = hdFound.front();
+            hdFound.erase(hdFound.begin());
+            hdJob = job;
+            queue({ "--hdmodel-identify", job.path.string() }, "Checking the zip...");
+        }
+    }
+
+    HdRowInput hdRowInput(const SettingsSnapshot& snap, int row) const
+    {
+        HdRowInput in;
+        for (const HdModel& model : snap.hdModels)
+            if (model.row == row) {
+                in.installed = model.installed;
+                in.size = model.installed ? model.size : std::string();
+            }
+        in.waiting = hdWaitingRows.count(row) > 0;
+        in.importing = hdJob && hdJob->stage == HdJob::Install && hdJob->row == row;
+        if (const auto it = hdRowErrors.find(row); it != hdRowErrors.end()) in.error = it->second;
+        return in;
+    }
+
+    void drawGetHdModels(const SettingsSnapshot& snap, bool busy)
+    {
+        const ImVec2 display = ImGui::GetIO().DisplaySize;
+        const ImVec2 popupSize(std::min(680.0f, display.x - 32.0f), std::min(820.0f, display.y - 32.0f));
+        ImGui::SetNextWindowSize(popupSize, ImGuiCond_Always);
+        ImGui::SetNextWindowPos(ImVec2(display.x * 0.5f, display.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        if (!ImGui::BeginPopupModal("Get HD models", nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoResize
+                                                                  | ImGuiWindowFlags_NoMove)) {
+            stopHdWatch();
+            return;
+        }
+        const ImVec4 cream(1.0f, 0.93f, 0.80f, 1.0f), dim(0.62f, 0.58f, 0.44f, 1.0f);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(cream, "Click Download to open a character's page on The Models Resource, then download its zip "
+                                  "there. Each model zip that lands in Downloads installs by itself.");
+        ImGui::PopTextWrapPos();
+        ImGui::PushFont(fonts.caption);
+        ImGui::PushTextWrapPos(0.0f);
+        if (hdWatcher.folder().empty())
+            ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.40f, 1.0f), "Could not find your Downloads folder. Use Import a zip instead.");
+        else
+            ImGui::TextColored(dim, "Watching for new zips in %s", hdWatcher.folder().string().c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::PopFont();
+        ImGui::Separator();
+
+        // The rows scroll; the zip offer, the progress line and the buttons
+        // below them always stay in view.
+        const float fullW = ImGui::GetContentRegionAvail().x;
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float footW = buttons::buttonWidth(ButtonSize::Large);
+        const bool footStacked = fullW < footW * 2.0f + 12.0f;
+        std::string offerText, progressText;
+        if (hdZipOffer)
+            offerText = "Delete " + hdZipOffer->zip.filename().string()
+                      + (hdZipOffer->size.empty() ? std::string() : " (" + hdZipOffer->size + ")")
+                      + " from Downloads? The model no longer needs it.";
+        if (hdJob)
+            progressText = std::string(hdJob->stage == HdJob::Identify ? "Checking " : "Installing ")
+                         + hdJob->path.filename().string() + "...";
+        else progressText = hdGetNote;
+        float footerH = 6.0f + (footStacked ? 42.0f * 2.0f + style.ItemSpacing.y : 42.0f) + style.ItemSpacing.y * 3.0f
+                      + style.WindowPadding.y;
+        if (!offerText.empty())
+            footerH += 4.0f + style.ItemSpacing.y + ImGui::CalcTextSize(offerText.c_str(), nullptr, false, fullW).y
+                     + style.ItemSpacing.y + 38.0f + style.ItemSpacing.y;
+        if (!progressText.empty())
+            footerH += ImGui::CalcTextSize(progressText.c_str(), nullptr, false, fullW).y + style.ItemSpacing.y;
+        ImGui::BeginChild("##hdrows", ImVec2(0, -footerH), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+        const float width = ImGui::GetContentRegionAvail().x;
+        const float buttonW = buttons::buttonWidth(role::kSettingsRow);
+        const bool stacked = width < buttonW + 12.0f + 220.0f;
+        const float textW = stacked ? width : width - buttonW - 12.0f;
+        for (const HdModelSource& source : hdModelSources()) {
+            ImGui::PushID(source.row);
+            const HdRowInput in = hdRowInput(snap, source.row);
+            const HdRowState rowState = hdRowState(in);
+            const ImVec2 origin = ImGui::GetCursorScreenPos();
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + textW);
+            ImGui::TextColored(cream, "%s", source.name);
+            ImGui::PopTextWrapPos();
+            const ImVec4 statusColour = rowState == HdRowState::Failed ? ImVec4(1.0f, 0.55f, 0.40f, 1.0f)
+                                      : rowState == HdRowState::Installed ? ImVec4(0.60f, 0.92f, 0.50f, 1.0f)
+                                      : rowState == HdRowState::NotInstalled ? dim : kOrange;
+            ImGui::PushFont(fonts.caption);
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + textW);
+            ImGui::TextColored(statusColour, "%s", hdRowStatusText(in).c_str());
+            ImGui::PopTextWrapPos();
+            ImGui::PopFont();
+            const float textBottom = ImGui::GetCursorScreenPos().y;
+            const ImVec2 buttonAt = stacked ? ImVec2(origin.x, textBottom + 4.0f)
+                                            : ImVec2(origin.x + width - buttonW, origin.y + std::max(0.0f, (textBottom - origin.y - 40.0f) * 0.5f));
+            ImGui::SetCursorScreenPos(buttonAt);
+            if (glassButton("Download", role::kSettingsRow, 40.0f, false, rowState == HdRowState::Importing)) {
+                hdRowErrors.erase(source.row);
+                hdWaitingRows.insert(source.row);
+                if (!hdWatcher.watching()) startHdWatch();
+                if (SDL_OpenURL(source.url) != 0) {
+                    hdRowErrors[source.row] = std::string("Could not open the browser. Visit ") + source.url;
+                    hdWaitingRows.erase(source.row);
+                }
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::BeginTooltip();
+                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                ImGui::Text("Opens the %s page in your browser. Download the zip there (it has %s); this window installs it.",
+                            source.name, source.marker);
+                ImGui::TextColored(dim, "%s", source.url);
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
+            }
+            const float bottom = std::max(textBottom, buttonAt.y + 40.0f);
+            ImGui::SetCursorScreenPos(ImVec2(origin.x, bottom + 6.0f));
+            ImGui::Separator();
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
+
+        if (hdZipOffer) {
+            ImGui::Dummy(ImVec2(0, 4));
+            const std::string name = hdZipOffer->zip.filename().string();
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(cream, "%s", offerText.c_str());
+            ImGui::PopTextWrapPos();
+            if (glassButton("Delete zip", role::kSettingsRow, 38.0f)) {
+                std::error_code ec;
+                if (fs::is_regular_file(fs::symlink_status(hdZipOffer->zip, ec)) && fs::remove(hdZipOffer->zip, ec) && !ec)
+                    hdGetNote = "Deleted " + name + " from Downloads.";
+                else
+                    hdGetNote = "Could not delete " + hdZipOffer->zip.string() + ".";
+                hdGetNoteError = !!ec;
+                hdZipOffer.reset();
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", hdZipOffer ? hdZipOffer->zip.string().c_str() : "");
+            ImGui::SameLine(0.0f, 12.0f);
+            if (glassButton("Keep it", role::kSettingsRow, 38.0f)) hdZipOffer.reset();
+        }
+        if (!progressText.empty()) {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(hdJob ? kOrange : hdGetNoteError ? ImVec4(1.0f, 0.55f, 0.40f, 1.0f) : dim, "%s",
+                               progressText.c_str());
+            ImGui::PopTextWrapPos();
+        }
+
+        ImGui::Dummy(ImVec2(0, 6));
+        if (glassButton(filePickLabel("hdget", "Import a zip").c_str(), ImVec2(footW, 42.0f), false, filePickOpen())) {
+            startFilePick("hdget", "Choose a model zip", "Model zip", "*.zip *.ZIP",
+                          [this](const fs::path& zip) { hdFound.push_back({ zip, false }); });
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::BeginTooltip();
+            ImGui::TextUnformatted("For a model zip you downloaded somewhere else.");
+            ImGui::EndTooltip();
+        }
+        if (!footStacked) ImGui::SameLine(0.0f, 12.0f);
+        if (glassButton("Close", ImVec2(footW, 42.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            ImGui::CloseCurrentPopup();
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Stops watching Downloads.");
+        (void)busy;
+        ImGui::EndPopup();
+    }
+#endif
 
     // Modelos de Pikmin propios (creador de modelos): uno por color. Se
     // instalan con el botón Characters de la portada.
@@ -2277,6 +2616,9 @@ struct Hub {
         const SettingsGroup* shownGroup = settingsGroup < packsPage ? &groups[size_t(settingsGroup)] : nullptr;
         if (!snap.exactF1 && settingsGroup == packsPage) drawTexturePacks(snap, busy);
         if (!snap.exactF1 && settingsGroup == modelsPage) drawHdModels(snap, busy);
+#ifndef __ANDROID__
+        else stopHdWatch(); // the Get HD models window only lives on that page
+#endif
 #ifndef __ANDROID__
         if (settingsGroup == savesPage) drawSaves(busy, dt);
 #endif

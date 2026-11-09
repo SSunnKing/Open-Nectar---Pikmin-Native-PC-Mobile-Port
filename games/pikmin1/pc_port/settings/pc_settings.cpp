@@ -10366,10 +10366,18 @@ void pc_settings_touch_drag(float dy) { sTouchDragY += dy; }
 //   --texpack-activate NOMBRE       activa ese pack ("" = ninguno)
 //   --hdmodel-install FILA ZIP      convierte e instala un modelo HD
 //   --hdmodel-enable FILA 0|1       usar o no ese modelo HD instalado
+//   --hdmodel-identify ZIP          qué modelo HD es ese zip (solo lo lee)
+//   --hdmodel-delete FILA           borra solo los ficheros de ese modelo HD
 //   --pikmin-model COLOR ID         modelo de Pikmin de ese color (red, yellow,
 //                                   blue) de Load/Pikmin; ID "" = el del juego
 // Trabaja sobre pikmin_settings.conf del directorio actual, como el juego.
 namespace {
+
+// Result of the last --hdmodel-install, for the launcher's guided download:
+// the row the zip was recognised as and the row that was installed (-1 =
+// none). Both stay -2 for every other request, and are then not dumped.
+int sHdModelDetected = -2;
+int sHdModelInstalled = -2;
 
 void jsonString(std::string& out, const char* text) {
     out += '"';
@@ -10462,9 +10470,30 @@ void headlessDump(const std::string& message = std::string(), bool messageIsErro
         out += hdModelInstalled(m) ? "true" : "false";
         out += ",\"enabled\":";
         out += pc_settings_get_hd_model_enabled(m) ? "true" : "false";
+        // Where its files live and how much deleting them frees.
+        std::uintmax_t bytes = 0;
+        std::string folder;
+        for (const std::string& file : pc_hd_models_row_files(m)) {
+            const std::filesystem::path path = std::filesystem::path("Load") / "Models" / file;
+            if (folder.empty()) folder = std::filesystem::absolute(path.parent_path()).lexically_normal().string();
+            std::error_code ec;
+            if (std::filesystem::is_regular_file(std::filesystem::symlink_status(path, ec))) {
+                const std::uintmax_t size = std::filesystem::file_size(path, ec);
+                if (!ec) bytes += size;
+            }
+        }
+        out += ",\"path\":";
+        jsonString(out, folder.c_str());
+        out += ",\"bytes\":" + std::to_string(bytes);
+        out += ",\"size\":";
+        jsonString(out, nectar::textures::sizeText(bytes).c_str());
         out += '}';
     }
     out += "]";
+    if (sHdModelDetected != -2) {
+        out += ",\"hdModelDetected\":" + std::to_string(sHdModelDetected);
+        out += ",\"hdModelInstalled\":" + std::to_string(sHdModelInstalled);
+    }
 
     // Modelos de Pikmin propios: el elegido de cada color y los que hay.
     out += ",\"pikminModels\":[";
@@ -10509,6 +10538,7 @@ int pc_settings_cli(int argc, char** argv) {
         if (!strcmp(argv[i], "--settings-dump") || !strcmp(argv[i], "--settings-set") || !strcmp(argv[i], "--settings-reset")
             || !strcmp(argv[i], "--texpack-install") || !strcmp(argv[i], "--texpack-activate") || !strcmp(argv[i], "--texpack-delete")
             || !strcmp(argv[i], "--hdmodel-install") || !strcmp(argv[i], "--hdmodel-enable")
+            || !strcmp(argv[i], "--hdmodel-delete") || !strcmp(argv[i], "--hdmodel-identify")
             || !strcmp(argv[i], "--pikmin-model")) {
             at = i;
             break;
@@ -10597,9 +10627,63 @@ int pc_settings_cli(int argc, char** argv) {
         }
     } else if (!strcmp(argv[at], "--hdmodel-install") && at + 2 < argc) {
         char msg[192] = {};
-        const int written = pc_hd_models_convert_file(argv[at + 2], atoi(argv[at + 1]), msg, sizeof(msg));
+        const int expected = atoi(argv[at + 1]);
+        sHdModelDetected = pc_hd_models_identify(argv[at + 2]);
+        const int written = pc_hd_models_convert_file(argv[at + 2], expected, msg, sizeof(msg));
+        sHdModelInstalled = written > 0 ? sHdModelDetected : -1;
         message = msg;
         messageIsError = written <= 0;
+        result = messageIsError ? 1 : 0;
+    } else if (!strcmp(argv[at], "--hdmodel-identify") && at + 1 < argc) {
+        // The launcher's Downloads watcher asks first, so a zip that is not a
+        // model rip is never converted (and is left exactly as it was).
+        sHdModelDetected = pc_hd_models_identify(argv[at + 1]);
+        sHdModelInstalled = -1;
+    } else if (!strcmp(argv[at], "--hdmodel-delete") && at + 1 < argc) {
+        // Only the files that row's rip wrote: Bulborb and Dwarf Bulborb share
+        // BulborbHD, so the folder goes only once it is empty. Links are
+        // never followed or removed.
+        const int row = atoi(argv[at + 1]);
+        const std::vector<std::string> files = pc_hd_models_row_files(row);
+        std::uintmax_t freed = 0;
+        int removed = 0;
+        bool failed = files.empty();
+        std::filesystem::path folder;
+        for (const std::string& file : files) {
+            const std::filesystem::path path = std::filesystem::path("Load") / "Models" / file;
+            folder = path.parent_path();
+            std::error_code ec;
+            const auto status = std::filesystem::symlink_status(path, ec);
+            if (!std::filesystem::exists(status)) continue;
+            if (!std::filesystem::is_regular_file(status)) { failed = true; continue; }
+            const std::uintmax_t size = std::filesystem::file_size(path, ec);
+            if (std::filesystem::remove(path, ec) && !ec) {
+                freed += size;
+                removed++;
+            } else failed = true;
+        }
+        std::error_code ec;
+        if (!folder.empty() && std::filesystem::is_directory(std::filesystem::symlink_status(folder, ec))
+            && std::filesystem::is_empty(folder, ec))
+            std::filesystem::remove(folder, ec);
+        const std::string where = folder.empty() ? std::string() : std::filesystem::absolute(folder).lexically_normal().string();
+        const char* name = row >= 0 && row < 6 ? pc_settings_row_label(PC_SET_PICKER_HDMODELS, row) : "That model";
+        if (failed) {
+            message = files.empty() ? std::string("That HD model does not exist.")
+                                    : std::string("Could not delete every file of ") + name + " in " + where + ".";
+            messageIsError = true;
+            result = 1;
+        } else if (!removed) {
+            message = std::string(name) + " is not installed.";
+            messageIsError = true;
+            result = 1;
+        } else {
+            // A later reinstall starts On again.
+            sConfig.hdModelsDisabled &= ~(1 << row);
+            sPending = sConfig;
+            saveConfig();
+            message = std::string("Deleted ") + name + " (" + nectar::textures::sizeText(freed) + " freed) from " + where + ".";
+        }
     } else if (!strcmp(argv[at], "--settings-set")) {
         for (int i = at + 1; i + 2 < argc; i += 3) {
             pc_settings_row_pick_option(atoi(argv[i]), atoi(argv[i + 1]), atoi(argv[i + 2]));

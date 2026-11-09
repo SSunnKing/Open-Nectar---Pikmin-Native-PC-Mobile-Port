@@ -2145,35 +2145,63 @@ int pc_hd_models_convert_sources(void)
 	return written;
 }
 
+namespace {
+constexpr int kKindCount = (int)(sizeof(kKinds) / sizeof(kKinds[0]));
+const char* const kKindNames[kKindCount] = { "Olimar", "Louie", "Louie HD", "Pikmin", "Bulborb", "Dwarf Bulborb" };
+const char* const kKindInstalled[kKindCount] = { "Olimar HD", "Louie", "Louie HD", "Pikmin HD", "Bulborb HD", "Dwarf Bulborb HD" };
+
+std::unique_ptr<Source> openSource(const fs::path& source, const char** error)
+{
+	std::error_code ec;
+	if (fs::is_directory(source, ec)) {
+		auto dir = std::make_unique<DirSource>();
+		if (!dir->open(source)) { if (error) *error = "The folder is empty."; return nullptr; }
+		return dir;
+	}
+	auto zip = std::make_unique<ZipSource>();
+	if (!zip->open(source)) { if (error) *error = "Not a readable .zip file."; return nullptr; }
+	return zip;
+}
+
+int identifySource(const Source& src)
+{
+	for (int k = 0; k < kKindCount; k++)
+		if (src.has(kKinds[k].marker)) return k;
+	return -1;
+}
+} // namespace
+
+int pc_hd_models_identify(const char* pathStr)
+{
+	std::unique_ptr<Source> src = openSource(fs::path(pathStr ? pathStr : ""), nullptr);
+	return src ? identifySource(*src) : -1;
+}
+
+std::vector<std::string> pc_hd_models_row_files(int row)
+{
+	std::vector<std::string> files;
+	if (row < 0 || row >= kKindCount) return files;
+	for (const char* file : kKinds[row].outputs) files.push_back(std::string(kKinds[row].pack) + "/" + file);
+	return files;
+}
+
 int pc_hd_models_convert_file(const char* pathStr, int expected, char* message, unsigned long messageSize)
 {
 	auto say = [&](const char* text) {
 		if (message && messageSize) std::snprintf(message, messageSize, "%s", text);
 	};
 	const fs::path modelsRoot = fs::path("Load") / "Models";
-	const fs::path source(pathStr ? pathStr : "");
-	std::error_code ec;
-	std::unique_ptr<Source> src;
-	if (fs::is_directory(source, ec)) {
-		auto dir = std::make_unique<DirSource>();
-		if (!dir->open(source)) { say("The folder is empty."); return 0; }
-		src = std::move(dir);
-	} else {
-		auto zip = std::make_unique<ZipSource>();
-		if (!zip->open(source)) { say("Not a readable .zip file."); return 0; }
-		src = std::move(zip);
-	}
-	int found = -1;
-	for (int k = 0; k < (int)(sizeof(kKinds) / sizeof(kKinds[0])); k++)
-		if (src->has(kKinds[k].marker)) { found = k; break; }
+	const char* openError = "";
+	std::unique_ptr<Source> src = openSource(fs::path(pathStr ? pathStr : ""), &openError);
+	if (!src) { say(openError); return 0; }
+	const int found = identifySource(*src);
 	if (found < 0) {
 		say("Not a known model zip (Olimar, Louie, Louie HD, Pikmin, Bulborb or Dwarf Bulborb).");
 		return 0;
 	}
-	static const char* kNames[] = { "Olimar", "Louie", "Louie HD", "Pikmin", "Bulborb", "Dwarf Bulborb" };
-	if (expected >= 0 && expected != found) {
+	if (expected >= 0 && expected < kKindCount && expected != found) {
 		char buf[160];
-		std::snprintf(buf, sizeof(buf), "This zip is the %s model, not %s.", kNames[found], kNames[expected]);
+		std::snprintf(buf, sizeof(buf), "This zip is the %s model, not %s.", kKindNames[found], kKindNames[expected]);
 		say(buf);
 		return 0;
 	}
@@ -2187,8 +2215,15 @@ int pc_hd_models_convert_file(const char* pathStr, int expected, char* message, 
 		say(e.what());
 		return 0;
 	}
-	char buf[160];
-	std::snprintf(buf, sizeof(buf), "%s HD installed (%d files). Restart to use it.", kNames[found], (int)kind.outputs.size());
+	std::uintmax_t bytes = 0;
+	std::error_code ec;
+	for (const char* file : kind.outputs) {
+		const std::uintmax_t size = fs::file_size(modelsRoot / kind.pack / file, ec);
+		if (!ec) bytes += size;
+	}
+	char buf[192];
+	std::snprintf(buf, sizeof(buf), "%s installed: %s in Load/Models/%s. Restart the game to use it.", kKindInstalled[found],
+	              nectar::textures::sizeText(bytes).c_str(), kind.pack);
 	say(buf);
 	return (int)kind.outputs.size();
 }
