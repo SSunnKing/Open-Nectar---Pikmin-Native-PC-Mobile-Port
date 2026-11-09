@@ -1,0 +1,19 @@
+# K10: a Randomizer save whose manifest no longer matches, wrong counters, and every colour extinct.
+name = k10-randomizer-extinct
+[saved]
+mode = story
+day = 12
+randomizer = active manifest_mismatch
+owned = ust1 ust2 ust3 ust4 ust5 uf01 uf02 uf03 uf04
+curr = 3
+required = 3
+level = 1
+ship_effect = 1
+course_open = 3
+collect_engine = 1
+red = unlocked booted displayed discovered plucked
+yellow = unlocked booted displayed discovered plucked
+[world]
+red.onion = present expected
+yellow.onion = present expected
+part.un03 = missing carrier_consumed

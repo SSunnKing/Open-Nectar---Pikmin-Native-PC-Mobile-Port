@@ -169,7 +169,7 @@ fs::path askForFile(const std::string& title, const std::string& filterName, con
     return fs::path(selected.data());
 }
 
-fs::path askForInstallDirectory(const std::string& title)
+fs::path askForInstallDirectory(const std::string& title, const fs::path& initialDirectory)
 {
     // IFileOpenDialog en modo carpeta es el selector moderno del shell; da la
     // misma experiencia que cualquier aplicación nativa y admite rutas largas.
@@ -191,6 +191,16 @@ fs::path askForInstallDirectory(const std::string& title)
         }
         const std::wstring caption = L"Open Nectar - " + fs::path(title).wstring();
         dialog->SetTitle(caption.c_str());
+
+        std::error_code ec;
+        if (!initialDirectory.empty() && fs::is_directory(initialDirectory, ec)) {
+            IShellItem* folder = nullptr;
+            const std::wstring path = fs::absolute(initialDirectory, ec).wstring();
+            if (SUCCEEDED(SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(&folder)))) {
+                dialog->SetFolder(folder);
+                folder->Release();
+            }
+        }
 
         if (SUCCEEDED(dialog->Show(nullptr))) {
             IShellItem* item = nullptr;

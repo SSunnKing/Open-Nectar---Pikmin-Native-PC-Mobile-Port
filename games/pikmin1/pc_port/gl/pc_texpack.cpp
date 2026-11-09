@@ -1,4 +1,6 @@
 #include "pc_texpack.h"
+#include "pc_texture_mips.h"
+#include "../mods/texture_pack_catalog.h"
 
 #include <algorithm>
 #include <cctype>
@@ -64,14 +66,6 @@ namespace fs = std::filesystem;
 #ifndef GL_TEXTURE_MAX_LEVEL
 #define GL_TEXTURE_MAX_LEVEL 0x813D
 #endif
-
-// GameIDs de Pikmin 1: el launcher conoce la región; aquí se admite el id de 6
-// letras, el de 3 (el prefijo de región libre que Dolphin acepta, incluyendo
-// el "GPI" a secas que usan los packs de la calle) y "all" (comodín), sin
-// distinguir mayúsculas/minúsculas.
-static const char* const kGameIdCandidates[] = {
-    "GPIE01", "GPIP01", "GPIJ01", "GPIE", "GPIP", "GPIJ", "GPI", "all",
-};
 
 static bool sRequested = false;
 static bool sEnabled = false;
@@ -191,22 +185,8 @@ const std::string& pc_texpack_selected_pack(void)
 std::vector<std::string> pc_texpack_list_packs(void)
 {
     std::vector<std::string> packs;
-    std::error_code ec;
-    const fs::path root = fs::path("Load") / "Textures";
-    if (!fs::is_directory(root, ec)) return packs;
-    fs::directory_iterator dit(root, ec);
-    for (; dit != fs::directory_iterator(); dit.increment(ec)) {
-        if (ec) { ec.clear(); continue; }
-        if (!dit->is_directory()) continue;
-        std::string name = dit->path().filename().string();
-        std::string lower = name;
-        for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        for (const char* cand : kGameIdCandidates) {
-            std::string candidate = cand;
-            for (char& c : candidate) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            if (lower == candidate) { packs.push_back(name); break; }
-        }
-    }
+    for (const auto& pack : nectar::textures::discover(fs::path("Load") / "Textures", false))
+        packs.push_back(pack.id);
     return packs;
 }
 
@@ -249,32 +229,25 @@ void pc_texpack_init(void)
     fs::path root = fs::path("Load") / "Textures";
     if (!fs::is_directory(root, ec)) {
         printf("[PC TexPack] Load/Textures not found under %s\n",
-               fs::current_path().c_str());
+               fs::current_path().string().c_str());
         snprintf(sStatus, sizeof(sStatus), "Load/Textures not found");
         return;
     }
 
-    // Cada carpeta de primer nivel es un candidato de GameID. Con un pack
-    // elegido en el menú F1 (sSelectedPack), solo ese se indexa: activar un
-    // pack desactiva cualquier otro, y así la opción significa lo que dice.
-    std::string selectedLower = sSelectedPack;
-    for (char& c : selectedLower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     std::vector<fs::path> packDirs;
-    fs::directory_iterator dit(root, ec);
-    for (; dit != fs::directory_iterator(); dit.increment(ec)) {
-        if (ec) { ec.clear(); continue; }
-        if (!dit->is_directory()) continue;
-        std::string name = dit->path().filename().string();
-        std::string lower = name;
-        for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        const bool matchesSelected = selectedLower.empty() || lower == selectedLower;
-        for (const char* cand : kGameIdCandidates) {
-            std::string candidate = cand;
-            for (char& c : candidate) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            if (lower != candidate || !matchesSelected) continue;
-            packDirs.push_back(dit->path());
-            break;
-        }
+    for (const auto& pack : nectar::textures::discover(root, false)) {
+        if (!sSelectedPack.empty() && nectar::textures::lower(pack.id) != nectar::textures::lower(sSelectedPack)) continue;
+        // Managed variants contain the original GameID folders; legacy packs
+        // already are GameID folders. Never merge two managed variants.
+        if (nectar::textures::managedId(pack.id)) {
+            if (sSelectedPack.empty()) continue;
+            fs::directory_iterator it(pack.path, ec), end;
+            for (; !ec && it != end; it.increment(ec)) {
+                if (nectar::textures::gameId(it->path().filename().string())
+                    && it->symlink_status(ec).type() == fs::file_type::directory)
+                    packDirs.push_back(it->path());
+            }
+        } else packDirs.push_back(pack.path);
     }
     if (packDirs.empty()) {
         printf("[PC TexPack] no GPIE01/GPI*/all folder under %s\n", root.string().c_str());
@@ -288,7 +261,7 @@ void pc_texpack_init(void)
         fs::recursive_directory_iterator rit(dir, fs::directory_options::skip_permission_denied, ec);
         for (; rit != fs::recursive_directory_iterator(); rit.increment(ec)) {
             if (ec) { ec.clear(); continue; }
-            if (!rit->is_regular_file()) continue;
+            if (rit->symlink_status(ec).type() != fs::file_type::regular || ec) continue;
             const std::string ext = lower_ext(rit->path());
             if (ext == ".dds" || ext == ".png")
                 index_texture_file(rit->path());
@@ -344,6 +317,7 @@ static bool load_dds(const fs::path& path, DdsFile& out)
 
     const uint32_t height = read_le32(b, 12);
     const uint32_t width = read_le32(b, 16);
+    if (!width || !height) return false;
     const uint32_t mipCount = read_le32(b, 28);
     const uint32_t fourCC = read_le32(b, 84);
 
@@ -386,14 +360,18 @@ static bool load_dds(const fs::path& path, DdsFile& out)
     out.compressed = compressed;
     out.levels.clear();
 
-    const uint32_t mips = mipCount ? mipCount : 1;
+    const uint32_t mips = std::min<uint32_t>(mipCount ? mipCount : 1, pc_texture_mip_count(width, height));
     size_t offset = dataStart;
     uint32_t w = width, h = height;
     for (uint32_t i = 0; i < mips; ++i) {
         const size_t levelBytes = compressed
             ? (size_t((w + 3) / 4) * size_t((h + 3) / 4) * blockBytes)
             : size_t(w) * size_t(h) * 4;
-        if (offset + levelBytes > b.size()) return false;
+        if (levelBytes > b.size() - offset) {
+            // A readable base is still useful when an embedded tail is missing.
+            if (out.levels.empty()) return false;
+            break;
+        }
         out.levels.emplace_back(b.begin() + static_cast<std::ptrdiff_t>(offset),
                                 b.begin() + static_cast<std::ptrdiff_t>(offset + levelBytes));
         offset += levelBytes;
@@ -537,21 +515,12 @@ static bool decode_bc_level(GLenum internalFormat, uint32_t w, uint32_t h,
     return true;
 }
 
-// Deja la imagen en un formato que este driver acepte: tal cual si tiene la
-// extensión, o descodificada a RGBA8 si no. Devuelve false si no hay manera.
-static bool make_uploadable(PackImage& image)
+static bool is_srgb(GLenum format)
 {
-    if (capabilities_ok(image)) return true;
-    for (PackLevel& level : image.levels) {
-        std::vector<uint8_t> rgba;
-        if (!decode_bc_level(image.internalFormat, level.width, level.height, level.data, rgba))
-            return false;
-        level.data = std::move(rgba);
-    }
-    image.compressed = false;
-    image.internalFormat = GL_RGBA8;
-    image.sourceFormat = GL_RGBA;
-    return true;
+    return format == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM
+        || format == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT
+        || format == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT
+        || format == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT;
 }
 
 #ifdef _WIN32
@@ -622,18 +591,8 @@ bool pc_texpack_try_upload(const char* name, GLuint texId, int* glLevels, size_t
         ++sStatFailed;
         return false;
     }
-    // DDS comprimido que el driver no puede subir: se descodifica en CPU
-    // (bcdec). Solo si ni eso vale cae al camino de siempre.
-    if (!make_uploadable(base)) {
-        log_once(name, "compressed format not supported by driver nor decoder");
-        ++sStatFailed;
-        return false;
-    }
-
-    // Niveles: el base y, si el pack trae ficheros _mipN consecutivos, estos
-    // reemplazan a cualquier nivel interno del base (pack de Henriko: un
-    // fichero por nivel; permiten un PNG de un solo nivel como base). El resto
-    // de formatos heredan la cadena interna.
+    // Keep the valid supplied prefix, then generate the tail. A gap, repeated
+    // dimension or incompatible format must not leave an HD base unmipmapped.
     std::vector<std::pair<int, fs::path>> mipFiles;
     for (const fs::path& p : it->second) {
         const int lev = mip_level_of(p.stem().string());
@@ -641,46 +600,110 @@ bool pc_texpack_try_upload(const char* name, GLuint texId, int* glLevels, size_t
             mipFiles.emplace_back(lev, p);
     }
     std::sort(mipFiles.begin(), mipFiles.end());
+    const int fullLevels = pc_texture_mip_count(base.width, base.height);
+    if (!mipFiles.empty()) {
+        base.levels.resize(1);
+        uint32_t w = base.width, h = base.height;
+        for (const auto& entry : mipFiles) {
+            if (base.levels.size() == size_t(fullLevels)) break;
+            if (entry.first != int(base.levels.size())) break;
+            w = pc_texture_next_mip_size(w);
+            h = pc_texture_next_mip_size(h);
+            PackImage mip;
+            if (!load_pack_image(entry.second, mip) || mip.levels.empty()) break;
+            if (mip.compressed != base.compressed || mip.internalFormat != base.internalFormat) break;
+            if (mip.width != w || mip.height != h) break;
+            base.levels.emplace_back(std::move(mip.levels[0]));
+        }
+    }
 
+#if !PIKI_USE_GLES
+    // Desktop GL can generate compressed levels. Start at the last valid
+    // supplied level so authored mips are not overwritten. Keep the source
+    // buffers until it succeeds: a driver that cannot encode this BC format
+    // falls back to the streaming CPU/RGBA path below.
+    if (base.compressed && capabilities_ok(base) && compressed_tex_image_2d()
+        && int(base.levels.size()) < fullLevels) {
+        const auto generate = reinterpret_cast<PFNGLGENERATEMIPMAPPROC>(SDL_GL_GetProcAddress("glGenerateMipmap"));
+        if (generate) {
+            while (glGetError() != GL_NO_ERROR) {}
+            size_t compressedBytes = 0;
+            for (size_t i = 0; i < base.levels.size(); ++i) {
+                const PackLevel& level = base.levels[i];
+                upload_level(base, int(i), level.width, level.height, level.data);
+                compressedBytes += level.data.size();
+            }
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, int(base.levels.size()) - 1);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, fullLevels - 1);
+            pc_texpack_count_real_gl();
+            generate(GL_TEXTURE_2D);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+            if (glGetError() == GL_NO_ERROR) {
+                const size_t blockBytes = base.internalFormat == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT
+                    || base.internalFormat == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT ? 8 : 16;
+                uint32_t w = base.levels.back().width, h = base.levels.back().height;
+                for (int i = int(base.levels.size()); i < fullLevels; ++i) {
+                    w = pc_texture_next_mip_size(w);
+                    h = pc_texture_next_mip_size(h);
+                    compressedBytes += size_t((w + 3) / 4) * ((h + 3) / 4) * blockBytes;
+                }
+                ++sStatReplaced;
+                if (glLevels) *glLevels = fullLevels;
+                if (gpuBytes) *gpuBytes = compressedBytes;
+                return true;
+            }
+        }
+    }
+#endif
+
+    // GLES forbids compressed mip generation; desktop drivers may fail it.
+    // Decode incomplete BC1/2/3/7 chains and build their tail as RGBA instead.
+    // Complete supported compressed chains stay compressed. Decode/upload one
+    // level at a time; only the last prefix level and its child are kept for
+    // generation, not an additional full uncompressed CPU mip pyramid.
+    const bool decode = base.compressed && (!capabilities_ok(base)
+        || int(base.levels.size()) < fullLevels || !compressed_tex_image_2d());
+    PackImage uploadFormat;
+    uploadFormat.compressed = base.compressed && !decode;
+    uploadFormat.internalFormat = decode ? (is_srgb(base.internalFormat) ? GL_SRGB8_ALPHA8 : GL_RGBA8)
+                                         : base.internalFormat;
     int levels = 0;
     size_t bytes = 0;
-    const bool useMipFiles = !mipFiles.empty();
-    const auto push = [&](int level, uint32_t w, uint32_t h, const std::vector<uint8_t>& data) {
-        upload_level(base, level, w, h, data);
+    const auto push = [&](uint32_t w, uint32_t h, const std::vector<uint8_t>& data) {
+        upload_level(uploadFormat, levels, w, h, data);
         bytes += data.size();
         ++levels;
     };
-
     while (glGetError() != GL_NO_ERROR) {}
 
-    push(0, base.width, base.height, base.levels[0].data);
-    if (useMipFiles) {
-        int expected = 1;
-        for (const auto& entry : mipFiles) {
-            if (entry.first != expected) break;  // hueco: la cadena acaba ahí
-            PackImage mip;
-            if (!load_pack_image(entry.second, mip) || mip.levels.empty()) break;
-            if (!make_uploadable(mip)) break;
-            // Un nivel PNG bajo una base DDS (o al revés) no se puede mezclar
-            // en la misma textura GL: la cadena acaba aquí.
-            if (mip.compressed != base.compressed || mip.internalFormat != base.internalFormat) break;
-            // El pack de Henriko vuelca varios _mipN a la dimensión del original
-            // GX, que solo encaja en un nivel concreto de la mitad: si este
-            // nivel no tiene el tamaño esperado por la cadena, la cadena para
-            // aquí (subirlo con otra dimensión sería GL_INVALID_VALUE).
-            if (mip.width != (base.width >> expected) || mip.height != (base.height >> expected)) break;
-            push(expected, mip.width, mip.height, mip.levels[0].data);
-            ++expected;
+    std::vector<uint8_t> previous;
+    uint32_t w = base.width, h = base.height;
+    for (PackLevel& level : base.levels) {
+        std::vector<uint8_t> pixels = std::move(level.data);
+        if (decode) {
+            std::vector<uint8_t> rgba;
+            if (!decode_bc_level(base.internalFormat, w, h, pixels, rgba)) {
+                log_once(name, "compressed mip decode failed");
+                ++sStatFailed;
+                return false;
+            }
+            pixels = std::move(rgba);
         }
-    } else {
-        for (size_t i = 1; i < base.levels.size(); ++i)
-            push(static_cast<int>(i), std::max<uint32_t>(1, base.width >> i),
-                 std::max<uint32_t>(1, base.height >> i), base.levels[i].data);
+        push(w, h, pixels);
+        if (levels == int(base.levels.size())) previous = std::move(pixels);
+        if (levels < int(base.levels.size())) {
+            w = pc_texture_next_mip_size(w);
+            h = pc_texture_next_mip_size(h);
+        }
     }
-
-    // La cadena del pack casi nunca llega hasta 1x1 (Henriko para en _mip3 o
-    // se queda en la dimensión GX original). Sin acotar el último nivel, un
-    // filtro MIPMAP deja la textura incompleta y GL la muestra negra.
+    while (levels < fullLevels) {
+        std::vector<uint8_t> next = pc_texture_downsample_rgba8(previous, w, h,
+                                                              is_srgb(base.internalFormat));
+        w = pc_texture_next_mip_size(w);
+        h = pc_texture_next_mip_size(h);
+        push(w, h, next);
+        previous = std::move(next);
+    }
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, levels - 1);
 
     const GLenum err = glGetError();

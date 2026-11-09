@@ -1360,10 +1360,8 @@ static void pc_gfx_note_null_deferred()
 {
     if (sNullDeferredInits++ == 0) std::atexit(pc_gfx_log_null_deferred);
 }
-// Texturas con reemplazo HD del pack (PLAN_TEXTURAS_HD fase 1): texId -> si
-// trae cadena de mips propia. Sobre estas hay que saltarse glGenerateMipmap:
-// sobre un bloque comprimido es GL_INVALID_OPERATION, y además la cadena ya
-// viene con el pack.
+// HD replacement id -> has mip levels. The pack loader completes these
+// chains; filtering must not regenerate them or overwrite authored levels.
 static std::unordered_map<GLuint, bool> sExternalMipChain;
 
 // ── Volcado de nombres de textura (--dump-texture-names, PLAN_TEXTURAS_HD fase 0) ──
@@ -5515,7 +5513,7 @@ void pc_gfx_set_tev_swap_mode_table(GXTevSwapSel table, GXTevColorChan red, GXTe
 // Anisotropic filtering is meaningless on its own here for the same reason. It
 // chooses among mip levels along the direction of anisotropy, and there were
 // none to choose from.
-static void apply_texture_filtering(bool gameRequestedMipmaps);
+static void apply_texture_filtering(GLuint texId, bool gameRequestedMipmaps);
 
 // Replaces whatever this key was costing. An upload into an existing texture
 // swaps the old figure rather than adding to it.
@@ -5594,7 +5592,7 @@ void pc_gfx_set_anisotropy(int samples)
         glBindTexture(GL_TEXTURE_2D, entry.second);
         // Level zero is still there, so the chain can be rebuilt in place
         // without re-decoding anything.
-        apply_texture_filtering(false);
+        apply_texture_filtering(entry.second, false);
         touched++;
     }
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -5604,27 +5602,17 @@ void pc_gfx_set_anisotropy(int samples)
     fflush(stdout);
 }
 
-// Applies the filter state to whatever is bound. Mipmapping is honoured per
-// texture rather than forced: a texture with no LOD levels of its own is one
-// the game means to sample flat, and the HUD is full of them.
-static void apply_texture_filtering(bool gameRequestedMipmaps)
+// texId identifies the actual bound object, including during cache iteration.
+// Replacements are minified even when their original GX art had no mipmaps.
+static void apply_texture_filtering(GLuint texId, bool gameRequestedMipmaps)
 {
-    // The game asks for mipmaps only where a material carries LOD levels of its
-    // own, which turns out to be almost nowhere -- so honouring the flag alone
-    // produced a setting with nothing to act on.
-    //
-    // Turning the setting up therefore builds the chain regardless. That is
-    // what a player means by raising texture filtering, and it is safe for the
-    // interface: a mip chain only changes a surface under minification, and the
-    // HUD is drawn at its own size, where level zero is chosen anyway.
-    const bool wantsMipmaps = gameRequestedMipmaps || sAnisotropyRequested > 1;
-
-    const auto externalIt = sExternalMipChain.find(sBoundTextures[0]);
+    const auto externalIt = sExternalMipChain.find(texId);
     const bool isExternal = externalIt != sExternalMipChain.end();
     const bool externalChain = isExternal && externalIt->second;
+    const bool wantsMipmaps = isExternal || gameRequestedMipmaps || sAnisotropyRequested > 1;
 
-    // Las HD del pack suben su propia cadena de mips: generarla aquí daría
-    // GL_INVALID_OPERATION sobre un bloque comprimido y arruinaría la textura.
+    // Replacement chains are completed by the pack loader, not regenerated
+    // here: that would overwrite authored levels and is illegal for BC in GLES.
     if (wantsMipmaps && !isExternal && glGenerateMipmap_ptr) {
         glGenerateMipmap_ptr(GL_TEXTURE_2D);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
@@ -5823,7 +5811,7 @@ void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, G
             && pc_texpack_try_upload(texPackName, texId, &glLevels, &gpuBytes)) {
             sExternalMipChain[texId] = glLevels > 1;
             note_texture_bytes(key, gpuBytes ? gpuBytes : size_t(width) * height * 4);
-            apply_texture_filtering(mipmap != GX_FALSE);
+            apply_texture_filtering(texId, mipmap != GX_FALSE);
             ++sPerfTextureUploads;
             sTextureSignatures[key] = signature;
             return;
@@ -5977,7 +5965,7 @@ void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, G
     note_texture_bytes(key, size_t(width) * size_t(height) * 4);
     // After the upload: the mip chain is built from the data, so it cannot be
     // asked for before there is any.
-    apply_texture_filtering(mipmap != GX_FALSE);
+    apply_texture_filtering(texId, mipmap != GX_FALSE);
     ++sPerfTextureUploads;
     sTextureSignatures[key] = signature;
 }
@@ -6104,7 +6092,7 @@ static bool upload_ci_texture(GXTexObj* obj, const PcCiTexture& ci) {
             sExternalMipChain[texId] = glLevels > 1;
             note_texture_bytes(key, gpuBytes ? gpuBytes
                                              : size_t(ci.width) * size_t(ci.height) * 4);
-            apply_texture_filtering(false);
+            apply_texture_filtering(texId, false);
             ++sPerfTextureUploads;
             return true;
         }
@@ -6113,7 +6101,7 @@ static bool upload_ci_texture(GXTexObj* obj, const PcCiTexture& ci) {
     note_texture_bytes(key, size_t(ci.width) * size_t(ci.height) * 4);
     // Palettised textures carry no LOD levels through this path, so they are
     // filtered flat -- but they still take the wrap and magnification state.
-    apply_texture_filtering(false);
+    apply_texture_filtering(texId, false);
     ++sPerfTextureUploads;
     return true;
 }

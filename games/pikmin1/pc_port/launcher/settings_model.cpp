@@ -1,6 +1,7 @@
 #include "settings_model.h"
 #include "json_mini.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <map>
 #include <memory>
@@ -64,6 +65,11 @@ bool parseSettingsDump(const std::string& output, SettingsSnapshot& snapshot, st
     }
     if (const Json* packs = root.get("texturePacks"); packs && packs->type == Json::Type::Object) {
         snapshot.activePack = packs->str("active");
+        if (const Json* details = packs->get("details"); details && details->type == Json::Type::Array) {
+            for (const Json& pack : details->items)
+                snapshot.texturePackDetails.push_back({ pack.str("id"), pack.str("name"), pack.str("path"),
+                    pack.str("size"), pack.flag("removable", false), pack.flag("installed", true) });
+        }
         if (const Json* installed = packs->get("installed"); installed && installed->type == Json::Type::Array) {
             for (const Json& name : installed->items)
                 if (name.type == Json::Type::String) snapshot.texturePacks.push_back(name.text);
@@ -71,7 +77,11 @@ bool parseSettingsDump(const std::string& output, SettingsSnapshot& snapshot, st
     }
     if (const Json* models = root.get("hdModels"); models && models->type == Json::Type::Array) {
         for (const Json& m : models->items) {
-            snapshot.hdModels.push_back({ m.integer("row", 0), m.str("name"), m.flag("installed", false), m.flag("enabled", true) });
+            HdModel model { m.integer("row", 0), m.str("name"), m.flag("installed", false), m.flag("enabled", true) };
+            model.path = m.str("path");
+            model.size = m.str("size");
+            model.bytes = (unsigned long long)std::max(0, m.integer("bytes", 0));
+            snapshot.hdModels.push_back(std::move(model));
         }
     }
     if (const Json* models = root.get("pikminModels"); models && models->type == Json::Type::Array) {
@@ -82,6 +92,8 @@ bool parseSettingsDump(const std::string& output, SettingsSnapshot& snapshot, st
             snapshot.pikminModels.push_back(std::move(choice));
         }
     }
+    snapshot.hdModelDetected = root.integer("hdModelDetected", -2);
+    snapshot.hdModelInstalled = root.integer("hdModelInstalled", -2);
     snapshot.message = root.str("message");
     snapshot.messageIsError = root.flag("messageError", false);
     return true;

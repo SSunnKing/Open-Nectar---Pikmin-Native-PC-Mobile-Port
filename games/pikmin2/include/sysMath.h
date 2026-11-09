@@ -3,6 +3,7 @@
 
 #include "types.h"
 #include <math.h>
+#include <string.h>
 
 class Vector3f;
 class BoundBox;
@@ -21,7 +22,12 @@ class KSegment;
 
 static inline f32 quickABS(f32 x)
 {
-	*reinterpret_cast<u32*>(&x) &= ~0x80000000;
+	// Clear the sign bit through memcpy: bit-identical to the original
+	// type-pun, without the strict-aliasing UB.
+	u32 bits;
+	memcpy(&bits, &x, sizeof(bits));
+	bits &= ~0x80000000;
+	memcpy(&x, &bits, sizeof(x));
 	return x;
 }
 

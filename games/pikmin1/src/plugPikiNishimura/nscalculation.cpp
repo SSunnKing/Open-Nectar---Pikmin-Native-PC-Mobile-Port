@@ -57,12 +57,13 @@ void NsCalculation::calcMatrix(const Vector3f& xVec, const Vector3f& yVec, const
  */
 void NsCalculation::calcMatrix3f(const Vector3f& vec1, const Vector3f& vec2, const Vector3f& vec3, Matrix3f& mtx)
 {
+	// The decompiled code also wrote mMtx[0][3] = vec1.y and mMtx[1][3] = vec2.z,
+	// which are out of bounds on a 3x3 matrix. They alias [1][0] and [2][0],
+	// which are overwritten below, so dropping them leaves the result unchanged.
 	mtx.mMtx[0][0] = vec1.x;
-	mtx.mMtx[0][3] = vec1.y;
 	mtx.mMtx[1][2] = vec1.z;
 	mtx.mMtx[0][1] = vec2.x;
 	mtx.mMtx[1][0] = vec2.y;
-	mtx.mMtx[1][3] = vec2.z;
 	mtx.mMtx[0][2] = vec3.x;
 	mtx.mMtx[1][1] = vec3.y;
 	mtx.mMtx[2][0] = vec3.z;

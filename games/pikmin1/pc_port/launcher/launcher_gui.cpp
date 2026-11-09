@@ -18,17 +18,26 @@
 
 #include "bti_decode.h"
 #include "button_layout.h"
+#include "settings_row_layout.h"
 #include "button_style.h"
 #if PIKMIN_LAUNCHER_NETPLAY
 #include "launcher_coop.h"
 #endif
 #include "gci_save_import.h"
+#include "install_directory.h"
+#include "install_note_layout.h"
+#include "dolphin_stubs/pc_card_save_root.h"
 #include "launcher_cursor.h"
 #include "launcher_platform.h"
 #include "launcher_page_layout.h"
 #include "launcher_sidebar_layout.h"
 #include "launcher_scroll.h"
 #include "settings_model.h"
+#include "toast_layout.h"
+#include "texture_pack_row.h"
+#include "texture_pack_download.h"
+#include "texture_pack_storage.h"
+#include "hd_model_downloads.h"
 #include "release_update.h"
 
 #include "imgui.h"
@@ -66,6 +75,8 @@
 #include <memory>
 #include <map>
 #include <mutex>
+#include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -500,14 +511,20 @@ struct SettingsClient {
     std::string busyLabel = "Saving..."; // lo que se enseña mientras trabaja
     std::atomic<bool> busy { false };
     bool loaded = false;
+    std::string downloadingPack; // guarded by mutex, along with snapshot
+    bool packResultReady = false;
 
     // Ejecuta el juego con esos argumentos y se queda con su respuesta.
     static void request(std::shared_ptr<SettingsClient> self, std::vector<std::string> arguments)
     {
         std::string output, failure;
         SettingsSnapshot parsed;
-        const bool ok = platform::runAndCapture(self->game, arguments, self->directory, output, failure)
-                     && parseSettingsDump(output, parsed, failure);
+        const bool executed = platform::runAndCapture(self->game, arguments, self->directory, output, failure);
+        // A rejected install/delete still returns a settings snapshot with a
+        // useful error message. Do not replace it with "exit status 1".
+        std::string parseFailure;
+        const bool ok = parseSettingsDump(output, parsed, parseFailure);
+        if (!ok && executed) failure = parseFailure;
         std::lock_guard<std::mutex> lock(self->mutex);
         if (ok) {
             self->snapshot = std::move(parsed);
@@ -517,6 +534,56 @@ struct SettingsClient {
             self->error = "Could not read the game's settings (" + failure + ").";
         }
         self->busy = false;
+    }
+
+    static void installPack(std::shared_ptr<SettingsClient> self, TexturePackInfo pack, TexturePackDownload download)
+    {
+        if (self->busy.exchange(true)) return;
+        {
+            std::lock_guard<std::mutex> lock(self->mutex);
+            self->downloadingPack = pack.id;
+            self->packResultReady = false;
+            self->busyLabel = "Downloading " + pack.name + "...";
+            self->snapshot.message.clear();
+        }
+        std::thread([self, pack, download] {
+            std::string failure;
+            const bool ok = downloadTexturePack(download, self->directory, pack.id,
+                [self](const fs::path& zip, const std::string& variant, std::string& error) {
+                    std::string output;
+                    const bool executed = platform::runAndCapture(self->game,
+                        { "--texpack-install", zip.string(), variant }, self->directory, output, error);
+                    SettingsSnapshot result;
+                    std::string parseError;
+                    if (parseSettingsDump(output, result, parseError) && result.messageIsError) {
+                        error = result.message; return false;
+                    }
+                    return executed;
+                }, platform::downloadFile,
+                [self, pack](const std::string& phase) {
+                    std::lock_guard<std::mutex> lock(self->mutex);
+                    self->busyLabel = phase + " " + pack.name + "...";
+                }, failure);
+            // Refresh off-thread, without clearing the busy guard between the
+            // transfer and refresh. A second click can never start another job.
+            std::string output, refreshError, parseError;
+            SettingsSnapshot refreshed;
+            const bool read = platform::runAndCapture(self->game, { "--settings-dump" },
+                self->directory, output, refreshError) && parseSettingsDump(output, refreshed, parseError);
+            std::lock_guard<std::mutex> lock(self->mutex);
+            if (read) self->snapshot = std::move(refreshed);
+            self->snapshot.messageIsError = !ok;
+            if (ok) {
+                std::string size;
+                for (const auto& installed : self->snapshot.texturePackDetails)
+                    if (installed.id == pack.id && installed.installed) size = installed.size;
+                self->snapshot.message = "Installed " + pack.name + (size.empty() ? "" : " (" + size + ")") + " to " + pack.path;
+                if (!read) self->snapshot.message += ". Refresh failed; reopen Settings.";
+            } else self->snapshot.message = "Could not install " + pack.name + ": " + failure;
+            self->downloadingPack.clear();
+            self->packResultReady = true;
+            self->busy = false;
+        }).detach();
     }
 
     static void start(std::shared_ptr<SettingsClient> self, std::vector<std::string> arguments,
@@ -661,6 +728,39 @@ struct Hub {
     std::string moveTarget;  // carpeta nueva elegida
     std::string moveNote;    // aviso bajo el formulario
     std::shared_ptr<MoveJob> moveJob;
+    TexturePackInfo deletingPack;
+    HdModel deletingModel;
+    // Set by an Uninstall button; drawDeleteHdModel opens the confirm at its
+    // own ID level (the buttons sit under PushID/child windows).
+    bool uninstallPending = false;
+#ifndef __ANDROID__
+    // Get HD models (#189): see drawGetHdModels.
+    struct HdJob {
+        fs::path path;
+        bool fromDownloads = false;
+        enum Stage { Identify, Install } stage = Identify;
+        int row = -1;
+    };
+    struct HdZipOffer {
+        fs::path zip;
+        std::string size;
+    };
+    DownloadsWatcher hdWatcher;
+    float hdPollClock = 0.0f;
+    std::vector<HdJob> hdFound;        // zips still to check, oldest first
+    std::optional<HdJob> hdJob;        // the one the game is working on
+    std::set<int> hdWaitingRows;       // pages opened, zip not in yet
+    std::map<int, std::string> hdRowErrors;
+    std::optional<HdZipOffer> hdZipOffer; // "delete the downloaded zip?"
+    std::string hdGetNote;
+    bool hdGetNoteError = false;
+#endif
+    TexturePackInfo installingPack;
+    TexturePackDownload installingDownload {};
+    std::optional<std::uint64_t> installFreeSpace;
+    TexturePackStorage installStorage = TexturePackStorage::Unknown;
+    std::string pendingPackInstall;
+    bool awaitingPackResult = false;
     std::string toast;
     float toastTime = 0.0f;
     bool chosen = false;
@@ -1389,6 +1489,8 @@ struct Hub {
 
     void queue(std::vector<std::string> arguments, const char* label = "Saving...")
     {
+        if (!arguments.empty() && (arguments[0].find("--texpack-") == 0 || arguments[0] == "--hdmodel-delete"))
+            awaitingPackResult = true;
         pendingRequest = std::move(arguments);
         pendingLabel = label;
         messageGame = settingsGame;
@@ -1409,15 +1511,19 @@ struct Hub {
     // desde su zip. Se aplica la próxima vez que arranca el juego.
     void drawTexturePacks(const SettingsSnapshot& snap, bool busy)
     {
-        ImGui::PushFont(fonts.caption);
-        ImGui::TextColored(kOrangeDeep, "TEXTURE PACKS");
-        ImGui::PopFont();
-        ImGui::Separator();
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextColored(ImVec4(1.0f, 0.93f, 0.80f, 0.85f),
-                           "Replacement textures for the whole game. Pick the one to use; it applies the next time the game starts.");
-        ImGui::PopTextWrapPos();
-        ImGui::Dummy(ImVec2(0, 6));
+        const bool compact = ImGui::GetContentRegionAvail().x < 420.0f;
+        if (compact) {
+            ImGui::PushFont(fonts.caption);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6, 3));
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 4));
+        } else {
+            ImGui::PushFont(fonts.caption);
+            ImGui::TextColored(kOrangeDeep, "TEXTURE PACKS");
+            ImGui::PopFont();
+            ImGui::Separator();
+        }
+        ImGui::TextUnformatted(busy ? "Updating texture packs..." : "Applies next time the game starts.");
+        ImGui::Dummy(ImVec2(0, compact ? 2.0f : 6.0f));
         ImGui::BeginDisabled(busy);
         const auto option = [&](const char* label, const std::string& name) {
             const bool active = snap.activePack == name;
@@ -1425,21 +1531,165 @@ struct Hub {
                 queue({ "--texpack-activate", name });
             }
         };
-        option("None (original textures)", "");
-        for (const std::string& pack : snap.texturePacks) option(pack.c_str(), pack);
+        const float rowWidth = ImGui::GetContentRegionAvail().x;
+        const float deleteHeight = compact ? 30.0f : 34.0f;
+        const float deleteWidth = std::max(buttons::buttonWidth(role::kTexturePackDelete),
+            buttons::fitWidth("Delete", deleteHeight, buttons::kLabelSize, measureLabel()));
+        const ImVec2 actionSize(deleteWidth, deleteHeight);
+        texturePackRow(rowWidth, actionSize, [&] { option("Off (original textures)", ""); }, [] {});
+        if (snap.texturePackDetails.empty()) {
+            for (const std::string& pack : snap.texturePacks)
+                texturePackRow(rowWidth, actionSize, [&] { option(pack.c_str(), pack); }, [] {});
+        } else for (const auto& pack : snap.texturePackDetails) {
+            ImGui::PushID(pack.id.c_str());
+            const std::string label = pack.name + (pack.installed ? " (" + pack.size + ")" : "");
+            const bool working = settings && settings->downloadingPack == pack.id;
+            const auto action = texturePackAction(pack, working);
+            const char* actionLabel = action == TexturePackAction::Working ? "Working..."
+                : action == TexturePackAction::Install ? "Install" : "Delete";
+            std::optional<TexturePackDownload> downloadable;
+            for (const auto& candidate : texturePackDownloads(settingsGame)) {
+                const std::string id = std::string(candidate.label) == "4K" ? "hd-4k" : "hd-1080p";
+#ifndef __ANDROID__
+                if (id == pack.id) downloadable = candidate;
+#endif
+            }
+            texturePackRow(rowWidth, actionSize, [&] {
+                ImGui::BeginDisabled(!pack.installed);
+                if (!pack.installed) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.65f, 0.65f, 0.65f, 1));
+                if (pack.installed) option(label.c_str(), pack.id);
+                else handRadioButton(label.c_str(), false);
+                if (!pack.installed) ImGui::PopStyleColor();
+                ImGui::EndDisabled();
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    ImGui::BeginTooltip();
+                    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                    if (pack.installed)
+                        ImGui::Text("%s\n%s\nApplies next time the game starts.", pack.path.c_str(), pack.size.c_str());
+                    else ImGui::Text("Not installed. Use Install to download this pack.\n%s", pack.path.c_str());
+                    ImGui::PopTextWrapPos();
+                    ImGui::EndTooltip();
+                }
+            }, [&] {
+                const bool unavailable = pack.installed ? !pack.removable : !downloadable;
+                if (glassButton(actionLabel, ImVec2(deleteWidth, deleteHeight), false, busy || unavailable)) {
+                    if (pack.installed) {
+                        deletingPack = pack;
+                        ImGui::OpenPopup("Delete texture pack?");
+                    } else if (downloadable) {
+                        installingPack = pack;
+                        installingDownload = *downloadable;
+                        installFreeSpace.reset();
+                        fs::path parent = fs::u8path(pack.path);
+                        std::error_code ec;
+                        while (!parent.empty() && !fs::exists(parent, ec)) {
+                            if (ec && ec != std::errc::no_such_file_or_directory) break;
+                            const auto next = parent.parent_path();
+                            if (next == parent) break;
+                            parent = next; ec.clear();
+                        }
+                        if (!ec) {
+                            const auto space = fs::space(parent, ec);
+                            if (!ec && space.available != std::uintmax_t(-1)) installFreeSpace = space.available;
+                        }
+                        installStorage = texturePackStorageCheck(installingDownload.bytes, installFreeSpace);
+                        if (installStorage == TexturePackStorage::Confirm || installStorage == TexturePackStorage::Block)
+                            ImGui::OpenPopup("Texture pack storage");
+                        else {
+                            if (installStorage == TexturePackStorage::Unknown)
+                                std::fprintf(stderr, "Texture pack storage unknown for %s; proceeding.\n", pack.path.c_str());
+                            pendingPackInstall = pack.id;
+                        }
+                    }
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    ImGui::BeginTooltip();
+                    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                    if (!pack.installed) {
+                        if (downloadable && downloadable->bytes)
+                            ImGui::Text("Download: %s", texturePackSizeText(downloadable->bytes).c_str());
+                        else ImGui::TextUnformatted("Download size unavailable.");
+                        ImGui::Text("Installs to: %s", pack.path.c_str());
+                        ImGui::TextUnformatted(working ? "Download / install in progress." : "Installing does not select this pack.");
+                    } else ImGui::Text("%s\n%s\n%s", pack.path.c_str(), pack.size.c_str(),
+                        pack.removable ? "Deletes only this pack. You can download it again." : "Deletion unavailable: unsafe links or unreadable files.");
+                    ImGui::PopTextWrapPos();
+                    ImGui::EndTooltip();
+                }
+            });
+            ImGui::SetNextWindowSize(ImVec2(std::min(560.0f, ImGui::GetIO().DisplaySize.x - 32.0f), 0), ImGuiCond_Always);
+            if (ImGui::BeginPopupModal("Texture pack storage", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
+                ImGui::PushFont(fonts.caption);
+                const bool blocked = installStorage == TexturePackStorage::Block;
+                ImGui::TextWrapped("%s", blocked ? "Not enough space to install this texture pack." : "Free space is below the recommended amount. Install anyway?");
+                ImGui::Text("Pack download: %s", texturePackSizeText(installingDownload.bytes).c_str());
+                ImGui::Text("Free space: %s", texturePackSizeText(installFreeSpace.value_or(0)).c_str());
+                const auto needed = texturePackStorageBytes(installingDownload.bytes, blocked ? kTexturePackHardFactor : kTexturePackSoftFactor);
+                ImGui::Text("%s: %s", blocked ? "Needed" : "Recommended", texturePackSizeText(needed).c_str());
+                if (blocked) ImGui::Text("Free up at least: %s", texturePackSizeText(needed - installFreeSpace.value_or(0)).c_str());
+                ImGui::TextWrapped("Destination: %s", installingPack.path.c_str());
+                if (glassButton(blocked ? "OK" : "Cancel", ImVec2(110, 38), true)) ImGui::CloseCurrentPopup();
+                ImGui::SetItemDefaultFocus();
+                if (ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+                if (!blocked) {
+                    ImGui::SameLine();
+                    if (glassButton("Install anyway", ImVec2(160, 38))) {
+                        pendingPackInstall = installingPack.id;
+                        ImGui::CloseCurrentPopup();
+                    }
+                }
+                ImGui::PopFont();
+                ImGui::EndPopup();
+            }
+            ImGui::SetNextWindowSize(ImVec2(std::min(560.0f, ImGui::GetIO().DisplaySize.x - 32.0f), 0), ImGuiCond_Always);
+            if (ImGui::BeginPopupModal("Delete texture pack?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
+                ImGui::PushFont(fonts.caption);
+                ImGui::Text("Delete %s (%s)?", deletingPack.name.c_str(), deletingPack.size.c_str());
+                ImGui::TextUnformatted("Folder to permanently delete:");
+                // Read-only, selectable path: long paths remain accessible by
+                // scrolling/copying and in the full-path tooltip.
+                ImGui::SetNextItemWidth(-1);
+                std::vector<char> path(deletingPack.path.begin(), deletingPack.path.end()); path.push_back(0);
+                ImGui::InputText("##deletePath", path.data(), path.size(), ImGuiInputTextFlags_ReadOnly);
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                    ImGui::SetTooltip("%s", deletingPack.path.c_str());
+                }
+                ImGui::TextUnformatted(snap.activePack == deletingPack.id
+                    ? "This pack is selected. Textures will switch to Off." : "Other installed packs will stay.");
+                ImGui::TextUnformatted("Close the game first. Saves and discs stay.");
+                if (glassButton("Cancel", ImVec2(110, 38))) ImGui::CloseCurrentPopup();
+                ImGui::SameLine();
+                if (glassButton("Delete pack", ImVec2(130, 38), true)) {
+                    queue({ "--texpack-delete", deletingPack.id }, "Deleting the pack...");
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::PopFont();
+                ImGui::EndPopup();
+            }
+            ImGui::PopID();
+        }
         if (snap.texturePacks.empty()) ImGui::TextColored(ImVec4(0.62f, 0.58f, 0.44f, 1.0f), "No packs installed yet.");
         ImGui::EndDisabled();
         ImGui::Dummy(ImVec2(0, 10));
-        if (glassButton(filePickLabel("texpack", "Install a pack from a .zip").c_str(), role::kWide, 46.0f, false,
+        if (glassButton(filePickLabel("texpack", "Install a pack from a .zip").c_str(),
+                        ImVec2(std::min(buttons::buttonWidth(role::kWide), ImGui::GetContentRegionAvail().x), compact ? 34.0f : 46.0f), false,
                         busy || filePickOpen())) {
             startFilePick("texpack", "Choose the texture pack zip", "Texture pack zip", "*.zip *.ZIP",
                           [this](const fs::path& zip) { queue({ "--texpack-install", zip.string() }, "Installing the pack..."); });
+        }        if (compact) {
+            ImGui::PopStyleVar(2);
+            ImGui::PopFont();
         }
+
     }
 
     // Modelos HD: uno por fila, cada uno se instala desde su zip.
     void drawHdModels(const SettingsSnapshot& snap, bool busy)
     {
+#ifndef __ANDROID__
+        pumpHdImports(snap, busy);
+#endif
         const float buttonW = buttons::buttonWidth(role::kSettingsRow);
         ImGui::PushFont(fonts.caption);
         ImGui::TextColored(kOrangeDeep, "HD MODELS");
@@ -1450,26 +1700,77 @@ struct Hub {
                            "Higher-detail characters, converted from the model zips. They apply the next time the game starts.");
         ImGui::PopTextWrapPos();
         ImGui::Dummy(ImVec2(0, 6));
+#ifndef __ANDROID__
+        if (glassButton("Get HD models",
+                        ImVec2(std::min(buttons::buttonWidth(role::kWide), ImGui::GetContentRegionAvail().x), 44.0f))) {
+            ImGui::OpenPopup("Get HD models");
+            startHdWatch();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 26.0f);
+            ImGui::TextUnformatted("Lists each character with a Download button that opens its page in your browser. "
+                                   "Zips you download there install by themselves.");
+            ImGui::PopTextWrapPos();
+            ImGui::EndTooltip();
+        }
+        drawGetHdModels(snap, busy);
+        ImGui::Dummy(ImVec2(0, 8));
+#endif
 
+        const float width = ImGui::GetContentRegionAvail().x;
+        const float toggleW = buttons::buttonWidth(role::kToggle);
+        const float deleteW = buttons::buttonWidth(role::kSmallAction);
+        float nameW = 0.0f;
+        for (const HdModel& model : snap.hdModels)
+            nameW = std::max(nameW, ImGui::CalcTextSize(model.name.c_str()).x);
+        // On/Off, Delete, Install/Replace. Too narrow even stacked: the
+        // buttons go on two lines (toggle + delete, then install).
+        const float controlsW = toggleW + 12.0f + deleteW + 12.0f + buttonW;
+        const bool twoLines = controlsW > width;
+        const auto layout = settingsRowLayout(width, nameW, twoLines ? std::max(toggleW + 12.0f + deleteW, buttonW) : controlsW);
+        const bool stacked = layout.stacked || twoLines;
+        float nameHeight = ImGui::GetTextLineHeight();
+        for (const HdModel& model : snap.hdModels)
+            nameHeight = std::max(nameHeight, ImGui::CalcTextSize(model.name.c_str(), nullptr, false,
+                                                               stacked ? width : nameW).y);
         for (const HdModel& model : snap.hdModels) {
             ImGui::PushID(model.row);
-            ImGui::AlignTextToFramePadding();
+            const ImVec2 origin = ImGui::GetCursorScreenPos();
+            const float controlsY = origin.y + (stacked ? nameHeight + 8.0f : 0.0f);
+            // Beside the 40 px buttons, centre the name on them.
+            if (!stacked) ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + std::max(0.0f, (40.0f - nameHeight) * 0.5f)));
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + (stacked ? width : nameW));
             ImGui::TextColored(ImVec4(1.0f, 0.93f, 0.80f, 1.0f), "%s", model.name.c_str());
-            // Instalado: interruptor On/Off (apagar no borra nada, vuelve al
-            // modelo original). Sin instalar: solo el aviso.
-            const float toggleW = buttons::buttonWidth(role::kToggle);
-            ImGui::SameLine(ImGui::GetContentRegionMax().x - buttonW - toggleW - 12.0f);
+            ImGui::PopTextWrapPos();
+            const float controlsX = twoLines ? 0.0f : (stacked ? width - controlsW : layout.controlsX);
+            ImGui::SetCursorScreenPos(ImVec2(origin.x + controlsX, controlsY));
             if (model.installed) {
                 if (glassButton(model.enabled ? "On" : "Off", role::kToggle, 40.0f, model.enabled, busy)) {
                     queue({ "--hdmodel-enable", std::to_string(model.row), model.enabled ? "0" : "1" });
                 }
+                ImGui::SetCursorScreenPos(ImVec2(origin.x + controlsX + toggleW + 12.0f, controlsY));
+                if (glassButton("Uninstall", role::kSmallAction, 40.0f, false, busy)) {
+                    deletingModel = model;
+                    uninstallPending = true;
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    ImGui::BeginTooltip();
+                    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                    ImGui::Text("Frees %s.", model.size.empty() ? "its space" : model.size.c_str());
+                    ImGui::Text("From: %s", model.path.c_str());
+                    ImGui::TextUnformatted("Uninstalls only this model's files. You can install it again.");
+                    ImGui::PopTextWrapPos();
+                    ImGui::EndTooltip();
+                }
             } else {
-                ImGui::AlignTextToFramePadding();
+                ImGui::SetCursorScreenPos(ImVec2(origin.x + controlsX, controlsY + (40.0f - ImGui::GetTextLineHeight()) * 0.5f));
                 ImGui::TextColored(ImVec4(0.62f, 0.58f, 0.44f, 1.0f), "Not installed");
             }
-            ImGui::SameLine(ImGui::GetContentRegionMax().x - buttonW);
+            const float installY = twoLines ? controlsY + 48.0f : controlsY;
+            ImGui::SetCursorScreenPos(ImVec2(origin.x + (twoLines ? 0.0f : width - buttonW), installY));
             const std::string pickOwner = "model" + std::to_string(model.row);
-            if (glassButton(filePickLabel(pickOwner, model.installed ? "Replace..." : "Install...").c_str(),
+            if (glassButton(filePickLabel(pickOwner, model.installed ? "Replace" : "Install").c_str(),
                             role::kSettingsRow, 40.0f, false, busy || filePickOpen())) {
                 const int row = model.row;
                 startFilePick(pickOwner, "Choose the zip for " + model.name, "Model zip", "*.zip *.ZIP",
@@ -1477,10 +1778,304 @@ struct Hub {
                                   queue({ "--hdmodel-install", std::to_string(row), zip.string() }, "Converting the model...");
                               });
             }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::BeginTooltip();
+                ImGui::TextUnformatted("Pick this model's zip (or its unzipped folder) yourself.");
+                ImGui::EndTooltip();
+            }
+            ImGui::SetCursorScreenPos(origin);
+            ImGui::Dummy(ImVec2(width, (installY - origin.y) + 40.0f + 8.0f));
             ImGui::PopID();
         }
+        drawDeleteHdModel();
         drawPikminModels(snap, busy);
     }
+
+    void drawDeleteHdModel()
+    {
+        if (uninstallPending) {
+            uninstallPending = false;
+            ImGui::OpenPopup("Uninstall HD model?");
+        }
+        ImGui::SetNextWindowSize(ImVec2(std::min(560.0f, ImGui::GetIO().DisplaySize.x - 32.0f), 0), ImGuiCond_Always);
+        if (!ImGui::BeginPopupModal("Uninstall HD model?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
+            return;
+        ImGui::PushFont(fonts.caption);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::Text("Uninstall %s? This frees %s.", deletingModel.name.c_str(), deletingModel.size.c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::TextUnformatted("Its files are permanently deleted from:");
+        ImGui::SetNextItemWidth(-1);
+        std::vector<char> path(deletingModel.path.begin(), deletingModel.path.end());
+        path.push_back(0);
+        ImGui::InputText("##deleteModelPath", path.data(), path.size(), ImGuiInputTextFlags_ReadOnly);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", deletingModel.path.c_str());
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextUnformatted("Other models in that folder stay. The game uses the original model next time it starts.");
+        ImGui::PopTextWrapPos();
+        if (glassButton("Cancel", ImVec2(110, 38))) ImGui::CloseCurrentPopup();
+        ImGui::SetItemDefaultFocus();
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        ImGui::SameLine();
+        if (glassButton("Uninstall", ImVec2(150, 38), true)) {
+            queue({ "--hdmodel-delete", std::to_string(deletingModel.row) }, "Uninstalling the model...");
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::PopFont();
+        ImGui::EndPopup();
+    }
+
+#ifndef __ANDROID__
+    // ── Get HD models (#189) ─────────────────────────────────────────────────
+    // Download opens the character's page in the browser; while the window is
+    // open the Downloads folder is polled and each new zip is first identified
+    // by the game (--hdmodel-identify) and, if it is a model, converted
+    // (--hdmodel-install -1). One request at a time, through queue().
+    void startHdWatch()
+    {
+        hdGetNote.clear();
+        if (!hdWatcher.watching()) hdWatcher.start(downloadsDirectory());
+        hdPollClock = 0.0f;
+    }
+
+    void stopHdWatch()
+    {
+        if (!hdWatcher.watching() && hdWaitingRows.empty()) return;
+        hdWatcher.stop();
+        hdWaitingRows.clear();
+        // Zips found but not started yet are dropped; one already running ends.
+        hdFound.erase(std::remove_if(hdFound.begin(), hdFound.end(), [](const HdJob& job) { return job.fromDownloads; }),
+                      hdFound.end());
+    }
+
+    void pumpHdImports(const SettingsSnapshot& snap, bool busy)
+    {
+        const bool idle = !busy && pendingRequest.empty();
+        if (hdJob && idle) {
+            HdJob job = *hdJob;
+            hdJob.reset();
+            const std::string name = job.path.filename().string();
+            if (job.stage == HdJob::Identify) {
+                if (snap.hdModelDetected >= 0) {
+                    job.stage = HdJob::Install;
+                    job.row = snap.hdModelDetected;
+                    hdRowErrors.erase(job.row);
+                    hdJob = job;
+                    queue({ "--hdmodel-install", "-1", job.path.string() }, "Installing the model...");
+                    return;
+                }
+                hdGetNote = job.fromDownloads ? "Skipped " + name + ": it is not one of the model zips. It was left as it is."
+                                              : name + " is not one of the model zips listed here.";
+                hdGetNoteError = !job.fromDownloads;
+                if (!job.fromDownloads) notify(hdGetNote);
+            } else if (snap.hdModelInstalled >= 0) {
+                hdWaitingRows.erase(job.row);
+                hdRowErrors.erase(job.row);
+                notify(snap.message);
+                toastTime = 8.0f;
+                hdGetNote.clear();
+                std::error_code ec;
+                if (job.fromDownloads && fs::is_regular_file(fs::symlink_status(job.path, ec))) {
+                    const auto bytes = fs::file_size(job.path, ec);
+                    hdZipOffer = HdZipOffer { job.path, ec ? std::string() : texturePackSizeText(bytes) };
+                }
+            } else {
+                hdRowErrors[job.row] = "Could not install " + name + ": "
+                                     + (snap.message.empty() ? settings->error : snap.message)
+                                     + " Try downloading it again.";
+                notify(hdRowErrors[job.row]);
+            }
+        }
+        if (hdWatcher.watching()) {
+            hdPollClock += ImGui::GetIO().DeltaTime;
+            if (hdPollClock >= 1.0f) {
+                hdPollClock = 0.0f;
+                for (const fs::path& zip : hdWatcher.poll()) hdFound.push_back({ zip, true });
+            }
+        }
+        if (!hdJob && idle && !hdFound.empty()) {
+            HdJob job = hdFound.front();
+            hdFound.erase(hdFound.begin());
+            hdJob = job;
+            queue({ "--hdmodel-identify", job.path.string() }, "Checking the zip...");
+        }
+    }
+
+    HdRowInput hdRowInput(const SettingsSnapshot& snap, int row) const
+    {
+        HdRowInput in;
+        for (const HdModel& model : snap.hdModels)
+            if (model.row == row) {
+                in.installed = model.installed;
+                in.size = model.installed ? model.size : std::string();
+            }
+        in.waiting = hdWaitingRows.count(row) > 0;
+        in.importing = hdJob && hdJob->stage == HdJob::Install && hdJob->row == row;
+        if (const auto it = hdRowErrors.find(row); it != hdRowErrors.end()) in.error = it->second;
+        return in;
+    }
+
+    void drawGetHdModels(const SettingsSnapshot& snap, bool busy)
+    {
+        const ImVec2 display = ImGui::GetIO().DisplaySize;
+        const ImVec2 popupSize(std::min(680.0f, display.x - 32.0f), std::min(820.0f, display.y - 32.0f));
+        ImGui::SetNextWindowSize(popupSize, ImGuiCond_Always);
+        ImGui::SetNextWindowPos(ImVec2(display.x * 0.5f, display.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        if (!ImGui::BeginPopupModal("Get HD models", nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoResize
+                                                                  | ImGuiWindowFlags_NoMove)) {
+            stopHdWatch();
+            return;
+        }
+        const ImVec4 cream(1.0f, 0.93f, 0.80f, 1.0f), dim(0.62f, 0.58f, 0.44f, 1.0f);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(cream, "Click Download to open a character's page on The Models Resource, then download its zip "
+                                  "there. Each model zip that lands in Downloads installs by itself.");
+        ImGui::PopTextWrapPos();
+        ImGui::PushFont(fonts.caption);
+        ImGui::PushTextWrapPos(0.0f);
+        if (hdWatcher.folder().empty())
+            ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.40f, 1.0f), "Could not find your Downloads folder. Use Import a zip instead.");
+        else
+            ImGui::TextColored(dim, "Watching for new zips in %s", hdWatcher.folder().string().c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::PopFont();
+        ImGui::Separator();
+
+        // The rows scroll; the zip offer, the progress line and the buttons
+        // below them always stay in view.
+        const float fullW = ImGui::GetContentRegionAvail().x;
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float footW = buttons::buttonWidth(ButtonSize::Large);
+        const bool footStacked = fullW < footW * 2.0f + 12.0f;
+        std::string offerText, progressText;
+        if (hdZipOffer)
+            offerText = "Delete " + hdZipOffer->zip.filename().string()
+                      + (hdZipOffer->size.empty() ? std::string() : " (" + hdZipOffer->size + ")")
+                      + " from Downloads? The model no longer needs it.";
+        if (hdJob)
+            progressText = std::string(hdJob->stage == HdJob::Identify ? "Checking " : "Installing ")
+                         + hdJob->path.filename().string() + "...";
+        else progressText = hdGetNote;
+        float footerH = 6.0f + (footStacked ? 42.0f * 2.0f + style.ItemSpacing.y : 42.0f) + style.ItemSpacing.y * 3.0f
+                      + style.WindowPadding.y;
+        if (!offerText.empty())
+            footerH += 4.0f + style.ItemSpacing.y + ImGui::CalcTextSize(offerText.c_str(), nullptr, false, fullW).y
+                     + style.ItemSpacing.y + 38.0f + style.ItemSpacing.y;
+        if (!progressText.empty())
+            footerH += ImGui::CalcTextSize(progressText.c_str(), nullptr, false, fullW).y + style.ItemSpacing.y;
+        ImGui::BeginChild("##hdrows", ImVec2(0, -footerH), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+        const float width = ImGui::GetContentRegionAvail().x;
+        const float buttonW = buttons::buttonWidth(role::kSettingsRow);
+        const bool stacked = width < buttonW + 12.0f + 220.0f;
+        const float textW = stacked ? width : width - buttonW - 12.0f;
+        for (const HdModelSource& source : hdModelSources()) {
+            ImGui::PushID(source.row);
+            const HdRowInput in = hdRowInput(snap, source.row);
+            const HdRowState rowState = hdRowState(in);
+            const ImVec2 origin = ImGui::GetCursorScreenPos();
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + textW);
+            ImGui::TextColored(cream, "%s", source.name);
+            ImGui::PopTextWrapPos();
+            const ImVec4 statusColour = rowState == HdRowState::Failed ? ImVec4(1.0f, 0.55f, 0.40f, 1.0f)
+                                      : rowState == HdRowState::Installed ? ImVec4(0.60f, 0.92f, 0.50f, 1.0f)
+                                      : rowState == HdRowState::NotInstalled ? dim : kOrange;
+            ImGui::PushFont(fonts.caption);
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + textW);
+            ImGui::TextColored(statusColour, "%s", hdRowStatusText(in).c_str());
+            ImGui::PopTextWrapPos();
+            ImGui::PopFont();
+            const float textBottom = ImGui::GetCursorScreenPos().y;
+            const ImVec2 buttonAt = stacked ? ImVec2(origin.x, textBottom + 4.0f)
+                                            : ImVec2(origin.x + width - buttonW, origin.y + std::max(0.0f, (textBottom - origin.y - 40.0f) * 0.5f));
+            ImGui::SetCursorScreenPos(buttonAt);
+            const HdRowAction action = hdRowAction(in);
+            if (action == HdRowAction::Uninstall) {
+                if (glassButton("Uninstall", role::kSettingsRow, 40.0f, false, busy)) {
+                    for (const HdModel& model : snap.hdModels)
+                        if (model.row == source.row) deletingModel = model;
+                    hdRowErrors.erase(source.row);
+                    uninstallPending = true;
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    ImGui::BeginTooltip();
+                    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                    ImGui::Text("Frees %s. Uninstalls only this model's files; the game goes back to the original.",
+                                in.size.empty() ? "its space" : in.size.c_str());
+                    for (const HdModel& model : snap.hdModels)
+                        if (model.row == source.row) ImGui::TextColored(dim, "From: %s", model.path.c_str());
+                    ImGui::PopTextWrapPos();
+                    ImGui::EndTooltip();
+                }
+            } else if (glassButton(hdRowActionLabel(action), role::kSettingsRow, 40.0f, false, action == HdRowAction::Busy)) {
+                hdRowErrors.erase(source.row);
+                hdWaitingRows.insert(source.row);
+                if (!hdWatcher.watching()) startHdWatch();
+                if (SDL_OpenURL(source.url) != 0) {
+                    hdRowErrors[source.row] = std::string("Could not open the browser. Visit ") + source.url;
+                    hdWaitingRows.erase(source.row);
+                }
+            }
+            if (action != HdRowAction::Uninstall && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::BeginTooltip();
+                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                ImGui::Text("Opens the %s page in your browser. Download the zip there (it has %s); this window installs it.",
+                            source.name, source.marker);
+                ImGui::TextColored(dim, "%s", source.url);
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
+            }
+            const float bottom = std::max(textBottom, buttonAt.y + 40.0f);
+            ImGui::SetCursorScreenPos(ImVec2(origin.x, bottom + 6.0f));
+            ImGui::Separator();
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
+
+        if (hdZipOffer) {
+            ImGui::Dummy(ImVec2(0, 4));
+            const std::string name = hdZipOffer->zip.filename().string();
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(cream, "%s", offerText.c_str());
+            ImGui::PopTextWrapPos();
+            if (glassButton("Delete zip", role::kSettingsRow, 38.0f)) {
+                std::error_code ec;
+                if (fs::is_regular_file(fs::symlink_status(hdZipOffer->zip, ec)) && fs::remove(hdZipOffer->zip, ec) && !ec)
+                    hdGetNote = "Deleted " + name + " from Downloads.";
+                else
+                    hdGetNote = "Could not delete " + hdZipOffer->zip.string() + ".";
+                hdGetNoteError = !!ec;
+                hdZipOffer.reset();
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", hdZipOffer ? hdZipOffer->zip.string().c_str() : "");
+            ImGui::SameLine(0.0f, 12.0f);
+            if (glassButton("Keep it", role::kSettingsRow, 38.0f)) hdZipOffer.reset();
+        }
+        if (!progressText.empty()) {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(hdJob ? kOrange : hdGetNoteError ? ImVec4(1.0f, 0.55f, 0.40f, 1.0f) : dim, "%s",
+                               progressText.c_str());
+            ImGui::PopTextWrapPos();
+        }
+
+        ImGui::Dummy(ImVec2(0, 6));
+        if (glassButton(filePickLabel("hdget", "Import a zip").c_str(), ImVec2(footW, 42.0f), false, filePickOpen())) {
+            startFilePick("hdget", "Choose a model zip", "Model zip", "*.zip *.ZIP",
+                          [this](const fs::path& zip) { hdFound.push_back({ zip, false }); });
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::BeginTooltip();
+            ImGui::TextUnformatted("For a model zip you downloaded somewhere else.");
+            ImGui::EndTooltip();
+        }
+        if (!footStacked) ImGui::SameLine(0.0f, 12.0f);
+        if (glassButton("Close", ImVec2(footW, 42.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            ImGui::CloseCurrentPopup();
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Stops watching Downloads.");
+        drawDeleteHdModel(); // Uninstall: the same confirm as the HD Models page
+        ImGui::EndPopup();
+    }
+#endif
 
     // Modelos de Pikmin propios (creador de modelos): uno por color. Se
     // instalan con el botón Characters de la portada.
@@ -1498,12 +2093,17 @@ struct Hub {
                            "the leaf, bud and flower stay the game's.");
         ImGui::PopTextWrapPos();
         ImGui::Dummy(ImVec2(0, 6));
-        const float comboW = 300.0f;
+        const float width = ImGui::GetContentRegionAvail().x;
+        const float comboW = std::min(300.0f, width);
+        float nameW = 0.0f;
+        for (const PikminModelChoice& choice : snap.pikminModels)
+            nameW = std::max(nameW, ImGui::CalcTextSize(choice.name.c_str()).x);
+        const auto layout = settingsRowLayout(width, nameW, comboW);
         for (const PikminModelChoice& choice : snap.pikminModels) {
             ImGui::PushID(choice.color.c_str());
             ImGui::AlignTextToFramePadding();
             ImGui::TextColored(ImVec4(1.0f, 0.93f, 0.80f, 1.0f), "%s", choice.name.c_str());
-            ImGui::SameLine(ImGui::GetContentRegionMax().x - comboW);
+            if (!layout.stacked) ImGui::SameLine(ImGui::GetCursorPosX() + layout.controlsX);
             ImGui::SetNextItemWidth(comboW);
             std::string current = "Game";
             for (const auto& [id, name] : choice.options)
@@ -1704,17 +2304,18 @@ struct Hub {
         ImGui::TextColored(ImVec4(0.62f, 0.58f, 0.44f, 1.0f), "%s", savesStatus.c_str());
         ImGui::PopTextWrapPos();
         ImGui::Dummy(ImVec2(0, 10));
-        // One shared width for every Saves-page button: wide enough for the longest label (including the
-        // "Waiting for file picker..." state), never below 240 px. Two buttons + gap fit the panel at 960 px.
+        // Share a measured width, but stack button pairs when the panel is narrow.
+        // Include the picker state so opening a picker cannot change the layout.
         float savesButtonW = 240.0f;
-        for (const char* label : {"Import a save...", "Open save folder", "Restore previous save", "Open backups folder",
+        for (const char* label : {"Import a save", "Open save folder", "Restore previous save", "Open backups folder",
                                   "Waiting for file picker..."})
             savesButtonW = std::max(savesButtonW, ImGui::CalcTextSize(label).x + 48.0f);
-        const ImVec2 savesButtonSize(savesButtonW, 46.0f);
-        if (glassButton(filePickLabel("gci", "Import a save...").c_str(), savesButtonSize, false,
+        const bool paired = settingsButtonsFit(ImGui::GetContentRegionAvail().x, savesButtonW);
+        const ImVec2 savesButtonSize(std::min(savesButtonW, ImGui::GetContentRegionAvail().x), 46.0f);
+        if (glassButton(filePickLabel("gci", "Import a save").c_str(), savesButtonSize, false,
                         busy || filePickOpen()))
             tryImportGciSave();
-        ImGui::SameLine(0.0f, 12.0f);
+        if (paired) ImGui::SameLine(0.0f, 12.0f);
         if (glassButton("Open save folder", savesButtonSize, false, !savesFolderExists)) openFolder(saveCardFolder());
 
         ImGui::Dummy(ImVec2(0, 18));
@@ -1735,7 +2336,7 @@ struct Hub {
         if (!savesBackupTime.empty()) {
             if (glassButton("Restore previous save", savesButtonSize, false, busy || filePickOpen()))
                 tryRestoreSave();
-            ImGui::SameLine(0.0f, 12.0f);
+            if (paired) ImGui::SameLine(0.0f, 12.0f);
         }
         if (glassButton("Open backups folder", savesButtonSize, false, !backupsFolderExists))
             openFolder(cardBackupRoot(saveCardFolder()));
@@ -1786,10 +2387,40 @@ struct Hub {
             std::lock_guard<std::mutex> lock(settings->mutex);
             drawSettingsLocked(top, size, dt);
         }
+        if (!pendingPackInstall.empty()) {
+            for (const auto& download : texturePackDownloads(settingsGame)) {
+                const std::string id = std::string(download.label) == "4K" ? "hd-4k" : "hd-1080p";
+                if (id == pendingPackInstall) {
+                    SettingsClient::installPack(settings, installingPack, download);
+                    break;
+                }
+            }
+            pendingPackInstall.clear();
+        }
         if (!pendingRequest.empty()) {
             SettingsClient::start(settings, std::move(pendingRequest), pendingLabel);
             pendingRequest.clear();
         }
+    }
+
+    // Etiqueta de una fila de ajustes (ver fitSettingRow): en una línea, partida
+    // en dos al lado del control o entera encima de él; nunca recortada. Deja el
+    // cursor donde va el control y devuelve su ancho.
+    float settingRowLabel(const std::string& text, const ImVec4& colour, float innerW)
+    {
+        const float lineH = std::max(1.0f, ImGui::GetTextLineHeight());
+        auto lines = [&](float width) {
+            return int(std::lround(ImGui::CalcTextSize(text.c_str(), nullptr, false, width).y / lineH));
+        };
+        const SettingRowFit fit = fitSettingRow(innerW, ImGui::CalcTextSize(text.c_str()).x, lines);
+        ImGui::AlignTextToFramePadding();
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + fit.labelMaxW);
+        ImGui::TextColored(colour, "%s", text.c_str());
+        ImGui::PopTextWrapPos();
+        const float controlX = ImGui::GetContentRegionMax().x - fit.controlW;
+        if (fit.mode == SettingRowMode::Stacked) ImGui::SetCursorPosX(controlX);
+        else ImGui::SameLine(controlX);
+        return fit.controlW;
     }
 
     // Settings > Launcher: where the launcher keeps its own settings. Same
@@ -1819,19 +2450,8 @@ struct Hub {
         ImGui::BeginChild("launcherRows", ImVec2(panelW, panelFit.rowsH), ImGuiChildFlags_Borders,
                           ImGuiWindowFlags_NoScrollWithMouse);
         const float innerW = ImGui::GetContentRegionAvail().x;
-        auto measure = [](const std::string& s) { return ImGui::CalcTextSize(s.c_str()).x; };
-        // Como en las filas de un juego: etiqueta encima del control si no cabe
-        // al lado (paneles estrechos) o recortada con "..." (anchos).
-        auto rowLabel = [&](const char* text, const ImVec4& colour) {
-            const SettingRowFit fit = fitSettingRow(innerW, measure(text));
-            const std::string shown = fit.mode == SettingRowMode::Inline ? std::string(text) : ellipsizeEnd(text, fit.labelMaxW, measure);
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextColored(colour, "%s", shown.c_str());
-            if (shown != text && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", text);
-            if (fit.mode == SettingRowMode::Stacked) ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - fit.controlW);
-            else ImGui::SameLine(ImGui::GetContentRegionMax().x - fit.controlW);
-            return fit.controlW;
-        };
+        // Como en las filas de un juego (settingRowLabel).
+        auto rowLabel = [&](const char* text, const ImVec4& colour) { return settingRowLabel(text, colour, innerW); };
         const ImVec4 label(1.0f, 0.93f, 0.80f, 1.0f), dim(0.62f, 0.58f, 0.44f, 1.0f);
         ImGui::Dummy(ImVec2(0, 4));
         ImGui::PushFont(fonts.caption);
@@ -1921,6 +2541,13 @@ struct Hub {
             return;
         }
         const SettingsSnapshot& snap = settings->snapshot;
+        if ((awaitingPackResult || settings->packResultReady) && !busy && pendingRequest.empty()) {
+            if (!snap.message.empty()) notify(snap.message);
+            else if (!settings->error.empty()) notify(settings->error);
+            toastTime = 8.0f;
+            awaitingPackResult = false;
+            settings->packResultReady = false;
+        }
         const std::vector<SettingsGroup>& groups = snap.groups;
         if (groups.empty()) return;
         // Los paquetes antiguos de Pikmin 1 añaden dos páginas administrativas.
@@ -1944,7 +2571,11 @@ struct Hub {
         const float bottom = size.y - 64.0f;
         // Algunas opciones de desarrollo documentan varias teclas: con sitio
         // caben cuatro líneas. En ventanas bajas la caja cede ante las filas.
-        const SettingsPanelFit panelFit = fitSettingsPanel(bottom - (top + 24.0f));
+        SettingsPanelFit panelFit = fitSettingsPanel(bottom - (top + 24.0f));
+        if (!snap.exactF1 && settingsGroup == packsPage) {
+            panelFit.helpH = 0;
+            panelFit.rowsH = std::max(1.0f, bottom - (top + 24.0f));
+        }
         const float helpH = panelFit.helpH;
 
         // Grupos a la izquierda, como pestañas verticales. Tienen que acabar por
@@ -2011,12 +2642,15 @@ struct Hub {
         if (!snap.exactF1 && settingsGroup == packsPage) drawTexturePacks(snap, busy);
         if (!snap.exactF1 && settingsGroup == modelsPage) drawHdModels(snap, busy);
 #ifndef __ANDROID__
+        else stopHdWatch(); // the Get HD models window only lives on that page
+#endif
+#ifndef __ANDROID__
         if (settingsGroup == savesPage) drawSaves(busy, dt);
 #endif
         if (shownGroup) {
         const SettingsGroup& group = *shownGroup;
         const float innerW = ImGui::GetContentRegionAvail().x;
-        auto measure = [](const std::string& s) { return ImGui::CalcTextSize(s.c_str()).x; };
+        const ImVec4 dim(0.62f, 0.58f, 0.44f, 1.0f);
         for (const SettingsRow& row : group.rows) {
             if (!row.section.empty()) {
                 ImGui::Dummy(ImVec2(0, 4));
@@ -2027,20 +2661,7 @@ struct Hub {
             }
             ImGui::PushID(row.row);
             const float rowY = ImGui::GetCursorPosY();
-            // La etiqueta nunca queda debajo del control: encima de él en
-            // paneles estrechos, recortada con "..." (entera al pasar el ratón)
-            // en los anchos.
-            const SettingRowFit fit = fitSettingRow(innerW, measure(row.label));
-            const float controlW = fit.controlW;
-            const std::string label = fit.mode == SettingRowMode::Inline ? row.label
-                                                                        : ellipsizeEnd(row.label, fit.labelMaxW, measure);
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextColored(row.enabled ? ImVec4(1.0f, 0.93f, 0.80f, 1.0f) : ImVec4(0.62f, 0.58f, 0.44f, 1.0f), "%s",
-                               label.c_str());
-            if (label != row.label && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                ImGui::SetTooltip("%s", row.label.c_str());
-            if (fit.mode == SettingRowMode::Stacked) ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - controlW);
-            else ImGui::SameLine(ImGui::GetContentRegionMax().x - controlW);
+            const float controlW = settingRowLabel(row.label, row.enabled ? ImVec4(1.0f, 0.93f, 0.80f, 1.0f) : dim, innerW);
             ImGui::SetNextItemWidth(controlW);
             if (row.editable()) {
                 ImGui::BeginDisabled(busy);
@@ -2057,14 +2678,20 @@ struct Hub {
                 }
                 ImGui::EndDisabled();
             } else {
-                // Sin lista: se enseña el valor y, si hace falta, dónde cambiarlo.
-                std::string shown = row.value;
-                if (row.enabled && (row.picker || row.action)) shown += "   (in game: F1 or backtick)";
-                const std::string fitted = ellipsizeEnd(shown, controlW, measure);
+                // Sin lista: se enseña el valor entero (partido si no cabe) y,
+                // si hace falta, dónde cambiarlo en su propia línea debajo.
+                // Antes iba todo en una línea y salía recortado (issue #191).
                 ImGui::AlignTextToFramePadding();
-                ImGui::TextColored(ImVec4(0.62f, 0.58f, 0.44f, 1.0f), "%s", fitted.c_str());
-                if (fitted != shown && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                    ImGui::SetTooltip("%s", shown.c_str());
+                ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x);
+                ImGui::TextColored(dim, "%s", row.value.c_str());
+                if (row.enabled && (row.picker || row.action)) {
+                    // Right under the value, not a whole frame-height line below.
+                    ImGui::SetCursorScreenPos(ImVec2(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y + 2.0f));
+                    ImGui::PushFont(fonts.caption);
+                    ImGui::TextColored(dim, "%s", "In game: F1 or backtick");
+                    ImGui::PopFont();
+                }
+                ImGui::PopTextWrapPos();
             }
             // Ayuda de la fila bajo el ratón.
             const float rowH = ImGui::GetCursorPosY() - rowY;
@@ -2544,12 +3171,27 @@ struct Hub {
         ImDrawList* dl = ImGui::GetForegroundDrawList();
         if (toastTime > 0.0f) {
             const float alpha = std::min(1.0f, toastTime);
-            const ImVec2 t = fonts.body->CalcTextSizeA(19.0f, FLT_MAX, 0.0f, toast.c_str());
-            const ImVec2 a((size.x - t.x) * 0.5f - 20.0f, size.y - 96.0f);
-            const ImVec2 b((size.x + t.x) * 0.5f + 20.0f, size.y - 56.0f);
-            dl->AddRectFilled(a, b, col(ImVec4(0.04f, 0.16f, 0.06f, 0.95f), alpha), 20.0f);
-            dl->AddRect(a, b, col(kOrange, alpha), 20.0f, 0, 2.0f);
-            dl->AddText(fonts.body, 19.0f, ImVec2(a.x + 20.0f, a.y + 9.0f), col(kOrange, alpha), toast.c_str());
+            const float padding = std::min(20.0f, size.x * 0.04f);
+            const float width = std::max(1.0f, size.x - padding * 2.0f - 24.0f);
+            const auto measure = [&](const std::string& text) {
+                return fonts.body->CalcTextSizeA(19.0f, FLT_MAX, 0.0f, text.c_str()).x;
+            };
+            const std::string shown = fitToast(toast, width, measure);
+            const ImVec2 t = fonts.body->CalcTextSizeA(19.0f, FLT_MAX, 0.0f, shown.c_str());
+            const ImVec2 a(std::max(4.0f, (size.x - t.x) * 0.5f - padding), size.y - 58.0f - t.y - 18.0f);
+            const ImVec2 b(std::min(size.x - 4.0f, a.x + t.x + padding * 2.0f), a.y + t.y + 18.0f);
+            dl->AddRectFilled(a, b, col(ImVec4(0.04f, 0.16f, 0.06f, 0.95f), alpha), 16.0f);
+            dl->AddRect(a, b, col(kOrange, alpha), 16.0f, 0, 2.0f);
+            dl->PushClipRect(a, b, true);
+            dl->AddText(fonts.body, 19.0f, ImVec2(a.x + padding, a.y + 9.0f), col(kOrange, alpha), shown.c_str());
+            dl->PopClipRect();
+            if (ImGui::IsMouseHoveringRect(a, b)) {
+                ImGui::BeginTooltip();
+                ImGui::PushTextWrapPos(std::min(600.0f, size.x - 32.0f));
+                ImGui::TextUnformatted(toast.c_str());
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
+            }
         }
     }
 
@@ -2673,7 +3315,8 @@ struct HubWindow::Impl {
     enum class Modal { None, Paths, Progress, Message };
     Modal modal = Modal::None;
     // Rutas
-    std::string rom, installDirectory, pathsNote;
+    std::string rom, installDirectory;
+    std::string pathsLegacyOverride;
     int pathsAction = 0; // 1 examinar imagen, 2 examinar carpeta, 3 instalar, 4 cancelar
     // Progreso
     std::uint32_t percent = 0;
@@ -2756,9 +3399,23 @@ struct HubWindow::Impl {
 
     void drawPaths(ImVec2 size)
     {
-        const ImVec2 panel(std::min(size.x - 80.0f, 700.0f), 430.0f);
+        const float panelW = std::min(size.x - 80.0f, 700.0f);
+        const float width = panelW - 68.0f;
+        const float noteSize = 16.0f;
+        const float noteLineStep = noteSize + 4.0f;
+        const TextWidthMeasure measure = [&](const std::string& text) {
+            return hub->fonts.caption->CalcTextSizeA(noteSize, FLT_MAX, 0.0f, text.c_str()).x;
+        };
+        std::vector<std::string> noteLines;
+        if (!installDirectory.empty()) {
+            const fs::path legacy = pathsLegacyOverride.empty()
+                ? pc_card_legacy_save_migration_source(fs::u8path(installDirectory))
+                : fs::u8path(pathsLegacyOverride);
+            if (!legacy.empty()) noteLines = layoutInstallSaveMigrationNote(legacy, width, 2, measure);
+        }
+        const float noteBlock = noteLines.empty() ? 0.0f : 8.0f + float(noteLines.size()) * noteLineStep;
+        const ImVec2 panel(panelW, 430.0f + noteBlock);
         const ImVec2 at = beginModal(size, panel);
-        const float width = panel.x - 68.0f;
         const bool pikmin2 = installGame == HubGame::Pikmin2;
         title(at, pikmin2 ? "Install Pikmin 2" : "Install Pikmin");
         ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -2767,8 +3424,13 @@ struct HubWindow::Impl {
                             : "Use your own disc: Pikmin USA (Rev 1) or Europe. ISO or GCM; RVZ, WIA and GCZ need Dolphin.");
         if (pathField(ImVec2(at.x, at.y + 80.0f), width, "Disc image", rom, "No disc image chosen", "rom")) pathsAction = 1;
         if (pathField(ImVec2(at.x, at.y + 170.0f), width, "Install to", installDirectory, "No folder chosen", "dir")) pathsAction = 2;
-        if (!pathsNote.empty()) {
-            dl->AddText(hub->fonts.caption, 16.0f, ImVec2(at.x, at.y + 262.0f), col(ImVec4(1.0f, 0.45f, 0.30f, 1.0f)), pathsNote.c_str());
+        if (!noteLines.empty()) {
+            const ImU32 noteColour = col(ImVec4(1.0f, 0.45f, 0.30f, 1.0f));
+            float y = at.y + 262.0f;
+            for (const std::string& line : noteLines) {
+                dl->AddText(hub->fonts.caption, noteSize, ImVec2(at.x, y), noteColour, line.c_str());
+                y += noteLineStep;
+            }
         }
         const float buttonsY = at.y + panel.y - 110.0f;
         const float actionW = buttons::buttonWidth(role::kAction);
@@ -3216,7 +3878,8 @@ int HubWindow::ask(const std::string& title, const std::string& text, const std:
 }
 
 bool HubWindow::choosePaths(const std::function<std::string()>& chooseRom,
-                            const std::function<std::string()>& chooseInstallDirectory,
+                            const std::function<std::string(const std::string& currentInstallDirectory)>&
+                                chooseInstallDirectory,
                             std::string& rom, std::string& installDirectory)
 {
     Impl& m = *mImpl;
@@ -3233,7 +3896,6 @@ bool HubWindow::choosePaths(const std::function<std::string()>& chooseRom,
             }
         }
         m.modal = Impl::Modal::Paths;
-        m.pathsNote.clear();
         for (;;) {
             m.pathsAction = 0;
             m.frame();
@@ -3243,7 +3905,15 @@ bool HubWindow::choosePaths(const std::function<std::string()>& chooseRom,
                 if (m.quitRequested) return false;
                 if (!selected.empty()) m.rom = selected;
             } else if (m.pathsAction == 2) {
-                const std::string selected = m.waitForDialog(chooseInstallDirectory, "folder picker");
+                const std::string selected = m.waitForDialog(
+                    [&] {
+                        if (chooseInstallDirectory) return chooseInstallDirectory(m.installDirectory);
+                        return platform::askForInstallDirectory(
+                                   "Choose the install folder",
+                                   m.installDirectory.empty() ? fs::path {} : fs::u8path(m.installDirectory))
+                            .u8string();
+                    },
+                    "folder picker");
                 if (m.quitRequested) return false;
                 if (!selected.empty()) m.installDirectory = selected;
             } else if (m.pathsAction == 3) {
@@ -3317,6 +3987,50 @@ bool HubWindow::showComplete(const std::string& installDirectory, bool willLaunc
     if (m.homeLoop) m.homeLoop();
     else if (runHome().action == HubAction::Play) return true;
     return false;
+}
+
+bool HubWindow::savePathsModalScreenshot(const std::string& path, int width, int height, const std::string& rom,
+                                         const std::string& installDirectory, const std::string& legacySaveOverride)
+{
+    Impl& m = *mImpl;
+    if (!m.window) return false;
+    SDL_SetWindowSize(m.window, width, height);
+    SDL_SetWindowPosition(m.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    m.rom                   = rom;
+    m.installDirectory      = installDirectory;
+    m.pathsLegacyOverride   = legacySaveOverride;
+    m.modal                 = Impl::Modal::Paths;
+    // Settle the resized window, then capture the back buffer before swapping.
+    for (int frame = 0; frame < 3; ++frame) m.frame();
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    glFinish();
+    int fbW = 0, fbH = 0;
+    SDL_GL_GetDrawableSize(m.window, &fbW, &fbH);
+    if (fbW <= 0 || fbH <= 0) return false;
+    std::vector<unsigned char> rgba(static_cast<std::size_t>(fbW) * static_cast<std::size_t>(fbH) * 4);
+    glReadPixels(0, 0, fbW, fbH, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(0, fbW, fbH, 32, SDL_PIXELFORMAT_ABGR8888);
+    if (!surface) return false;
+    const int pitch = surface->pitch;
+    auto* dst       = static_cast<unsigned char*>(surface->pixels);
+    for (int y = 0; y < fbH; ++y) {
+        const int srcY = fbH - 1 - y;
+        for (int x = 0; x < fbW; ++x) {
+            const unsigned char* src = &rgba[(static_cast<std::size_t>(srcY) * static_cast<std::size_t>(fbW)
+                                             + static_cast<std::size_t>(x))
+                                            * 4];
+            unsigned char* out       = dst + y * pitch + x * 4;
+            out[0]                   = src[0];
+            out[1]                   = src[1];
+            out[2]                   = src[2];
+            out[3]                   = 255;
+        }
+    }
+    const bool ok = SDL_SaveBMP(surface, path.c_str()) == 0;
+    SDL_FreeSurface(surface);
+    m.pathsLegacyOverride.clear();
+    return ok;
 }
 
 } // namespace launcher

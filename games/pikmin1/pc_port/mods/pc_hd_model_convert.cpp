@@ -11,6 +11,8 @@
 #include "pc_hd_model_convert.h"
 
 #include "nectar_paths/paths.h"
+#include "texture_pack_catalog.h"
+#include "../launcher/texture_pack_storage.h"
 #include "stb_image.h"
 
 #include <algorithm>
@@ -2015,7 +2017,7 @@ fs::path findPikmin2Szs()
 // ".../Load/Textures/<pack>/..." van a Load/Textures/<pack>/...; si el zip
 // no lleva esa carpeta, todo cuelga de Load/Textures/<nombre del zip>/.
 // Misma regla que el instalador Android (TexturePack.java).
-int pc_texpack_install_zip(const char* zipPath, char* message, unsigned long messageSize)
+int pc_texpack_install_zip(const char* zipPath, char* message, unsigned long messageSize, const char* variant)
 {
 	auto say = [&](const std::string& text) {
 		if (message && messageSize) std::snprintf(message, messageSize, "%s", text.c_str());
@@ -2023,15 +2025,45 @@ int pc_texpack_install_zip(const char* zipPath, char* message, unsigned long mes
 	ZipSource zip;
 	if (!zipPath || !zip.open(zipPath)) { say("Not a readable .zip file."); return 0; }
 	const fs::path root = fs::path("Load") / "Textures";
+	const std::string id = variant ? variant : "";
+	if (!id.empty() && !nectar::textures::managedId(id)) { say("Unknown texture pack variant."); return 0; }
 	const std::string stem = fs::path(zipPath).stem().string();
 	std::error_code ec;
 	fs::create_directories(root, ec);
+	if (ec || !nectar::textures::plainDirectory(root)) { say("Unsafe texture folder."); return 0; }
+	// Now the ZIP index is available, replace the click-time estimate with its
+	// actual uncompressed size. The ZIP still occupies disk while we stage all
+	// extracted files, so require extraction space plus 10% before staging.
+	std::uint64_t expandedBytes = 0;
+	for (const auto& entry : zip.entries) expandedBytes += entry.usize;
+	const auto storage = fs::space(root, ec);
+	if (!ec && storage.available < pikmin::launcher::texturePackStorageBytes(
+	        expandedBytes, pikmin::launcher::kTexturePackExtractionHeadroom)) {
+		say("Not enough space to extract this ZIP (including 10% headroom). No pack was installed.");
+		return 0;
+	}
+	ec.clear();
+	fs::path target = root;
+	if (!id.empty()) {
+		if (fs::exists(root / id, ec) || fs::is_symlink(root / id, ec)) {
+			say("That pack is already installed. Delete it before replacing it."); return 0;
+		}
+		target = root / (".install-" + id);
+		if (!fs::create_directory(target, ec) || ec) { say("Another install is pending; leave its folder untouched."); return 0; }
+	}
+	// Only our newly-created staging directory is cleaned up on failure.
+	struct Staging {
+		fs::path path;
+		~Staging() { if (!path.empty()) { std::error_code error; fs::remove_all(path, error); } }
+	} staging { id.empty() ? fs::path() : target };
+
 	// Los packs de Dolphin traen más cosas (el emulador, Config, Shaders):
 	// si el zip tiene Load/Textures, solo se instala eso.
 	bool hasLoadTextures = false;
 	for (const ZipSource::Entry& e : zip.entries)
 		if (e.lowerName.find("load/textures/") != std::string::npos) { hasLoadTextures = true; break; }
 	int written = 0;
+	bool hasTextures = false;
 	for (const ZipSource::Entry& e : zip.entries) {
 		if (e.name.empty() || e.name.back() == '/') continue;
 		std::string rel;
@@ -2039,22 +2071,55 @@ int pc_texpack_install_zip(const char* zipPath, char* message, unsigned long mes
 		if (idx != std::string::npos) rel = e.name.substr(idx + std::strlen("load/textures/"));
 		else if (hasLoadTextures) continue;
 		else rel = stem + "/" + e.name;
-		if (rel.empty() || rel.find("..") != std::string::npos) continue;
-		const fs::path out = root / rel;
+		if (!id.empty() && idx == std::string::npos) {
+			// Raw GameID/texture zips and flat texture zips are also accepted.
+			rel = e.name;
+			const auto first = fs::path(rel).begin()->string();
+			if (!nectar::textures::gameId(first)) rel = "GPI/" + rel;
+		}
+		const fs::path relative(rel);
+		bool safe = !relative.empty() && !relative.is_absolute() && !relative.has_root_name()
+			&& rel.find('\\') == std::string::npos && rel.find(':') == std::string::npos;
+		for (const auto& component : relative) if (component == ".." || component == ".") safe = false;
+		if (!safe) { say("Unsafe path in texture zip; installation stopped."); return 0; }
+		if (!id.empty() && !nectar::textures::gameId(relative.begin()->string())) continue;
+		const fs::path out = target / relative;
+		// Existing legacy folders must never redirect extraction through links.
+		fs::path parent = target;
+		for (const auto& component : relative.parent_path()) {
+			parent /= component;
+			if (fs::is_symlink(parent, ec)) { say("Symlink in texture destination."); return 0; }
+			ec.clear();
+		}
+		if (fs::is_symlink(out, ec)) { say("Symlink in texture destination."); return 0; }
+		ec.clear();
 		try {
 			std::vector<char> bytes = zip.readEntry(e);
 			fs::create_directories(out.parent_path(), ec);
 			std::ofstream f(out, std::ios::binary);
-			if (!f) continue;
-			f.write(bytes.data(), (std::streamsize)bytes.size());
+			if (!f || !f.write(bytes.data(), (std::streamsize)bytes.size())) { say("Could not write texture file."); return 0; }
 			written++;
+			const std::string filename = lower(out.filename().string());
+			const std::string ext = lower(out.extension().string());
+			if (filename.rfind("tex1_", 0) == 0 && (ext == ".png" || ext == ".dds")) hasTextures = true;
 		} catch (const Error& err) {
 			say(err.message);
-			return written;
+			return 0;
 		}
+	}
+	if (!id.empty() && !hasTextures) { say("The zip contains no replacement textures."); return 0; }
+	if (written > 0 && !id.empty()) {
+		std::ofstream marker(target / ".nectar-pack");
+		marker << (id == "hd-4k" ? "4K" : "1080p") << '\n';
+		marker.close();
+		if (!marker) { say("Could not mark the installed pack."); return 0; }
+		fs::rename(target, root / id, ec);
+		if (ec) { say("Could not finish the texture install."); return 0; }
+		staging.path.clear();
 	}
 	if (written == 0) say("The zip has no files to install.");
 	else say("Texture pack installed (" + std::to_string(written) + " files). Activate it in the list.");
+	if (written > 0) nectar::textures::invalidate();
 	return written;
 }
 
@@ -2080,35 +2145,63 @@ int pc_hd_models_convert_sources(void)
 	return written;
 }
 
+namespace {
+constexpr int kKindCount = (int)(sizeof(kKinds) / sizeof(kKinds[0]));
+const char* const kKindNames[kKindCount] = { "Olimar", "Louie", "Louie HD", "Pikmin", "Bulborb", "Dwarf Bulborb" };
+const char* const kKindInstalled[kKindCount] = { "Olimar HD", "Louie", "Louie HD", "Pikmin HD", "Bulborb HD", "Dwarf Bulborb HD" };
+
+std::unique_ptr<Source> openSource(const fs::path& source, const char** error)
+{
+	std::error_code ec;
+	if (fs::is_directory(source, ec)) {
+		auto dir = std::make_unique<DirSource>();
+		if (!dir->open(source)) { if (error) *error = "The folder is empty."; return nullptr; }
+		return dir;
+	}
+	auto zip = std::make_unique<ZipSource>();
+	if (!zip->open(source)) { if (error) *error = "Not a readable .zip file."; return nullptr; }
+	return zip;
+}
+
+int identifySource(const Source& src)
+{
+	for (int k = 0; k < kKindCount; k++)
+		if (src.has(kKinds[k].marker)) return k;
+	return -1;
+}
+} // namespace
+
+int pc_hd_models_identify(const char* pathStr)
+{
+	std::unique_ptr<Source> src = openSource(fs::path(pathStr ? pathStr : ""), nullptr);
+	return src ? identifySource(*src) : -1;
+}
+
+std::vector<std::string> pc_hd_models_row_files(int row)
+{
+	std::vector<std::string> files;
+	if (row < 0 || row >= kKindCount) return files;
+	for (const char* file : kKinds[row].outputs) files.push_back(std::string(kKinds[row].pack) + "/" + file);
+	return files;
+}
+
 int pc_hd_models_convert_file(const char* pathStr, int expected, char* message, unsigned long messageSize)
 {
 	auto say = [&](const char* text) {
 		if (message && messageSize) std::snprintf(message, messageSize, "%s", text);
 	};
 	const fs::path modelsRoot = fs::path("Load") / "Models";
-	const fs::path source(pathStr ? pathStr : "");
-	std::error_code ec;
-	std::unique_ptr<Source> src;
-	if (fs::is_directory(source, ec)) {
-		auto dir = std::make_unique<DirSource>();
-		if (!dir->open(source)) { say("The folder is empty."); return 0; }
-		src = std::move(dir);
-	} else {
-		auto zip = std::make_unique<ZipSource>();
-		if (!zip->open(source)) { say("Not a readable .zip file."); return 0; }
-		src = std::move(zip);
-	}
-	int found = -1;
-	for (int k = 0; k < (int)(sizeof(kKinds) / sizeof(kKinds[0])); k++)
-		if (src->has(kKinds[k].marker)) { found = k; break; }
+	const char* openError = "";
+	std::unique_ptr<Source> src = openSource(fs::path(pathStr ? pathStr : ""), &openError);
+	if (!src) { say(openError); return 0; }
+	const int found = identifySource(*src);
 	if (found < 0) {
 		say("Not a known model zip (Olimar, Louie, Louie HD, Pikmin, Bulborb or Dwarf Bulborb).");
 		return 0;
 	}
-	static const char* kNames[] = { "Olimar", "Louie", "Louie HD", "Pikmin", "Bulborb", "Dwarf Bulborb" };
-	if (expected >= 0 && expected != found) {
+	if (expected >= 0 && expected < kKindCount && expected != found) {
 		char buf[160];
-		std::snprintf(buf, sizeof(buf), "This zip is the %s model, not %s.", kNames[found], kNames[expected]);
+		std::snprintf(buf, sizeof(buf), "This zip is the %s model, not %s.", kKindNames[found], kKindNames[expected]);
 		say(buf);
 		return 0;
 	}
@@ -2122,8 +2215,15 @@ int pc_hd_models_convert_file(const char* pathStr, int expected, char* message, 
 		say(e.what());
 		return 0;
 	}
-	char buf[160];
-	std::snprintf(buf, sizeof(buf), "%s HD installed (%d files). Restart to use it.", kNames[found], (int)kind.outputs.size());
+	std::uintmax_t bytes = 0;
+	std::error_code ec;
+	for (const char* file : kind.outputs) {
+		const std::uintmax_t size = fs::file_size(modelsRoot / kind.pack / file, ec);
+		if (!ec) bytes += size;
+	}
+	char buf[192];
+	std::snprintf(buf, sizeof(buf), "%s installed: %s in Load/Models/%s. Restart the game to use it.", kKindInstalled[found],
+	              nectar::textures::sizeText(bytes).c_str(), kind.pack);
 	say(buf);
 	return (int)kind.outputs.size();
 }

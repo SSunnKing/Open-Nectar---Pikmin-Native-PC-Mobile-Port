@@ -301,7 +301,7 @@ int main(int argc, char** argv)
         if (choice.action == HubAction::TexturePack) {
             if (!state.games[index].installed) continue;
             const std::string gameDir = state.games[index].directory;
-            runTexturePackDownload(hub, index, gameDir, [&gameDir](const fs::path& zip, std::string& failure) {
+            runTexturePackDownload(hub, index, gameDir, [&gameDir](const fs::path& zip, const std::string&, std::string& failure) {
                 return installTexturePackZip(zip, gameDir, failure);
             });
             continue;

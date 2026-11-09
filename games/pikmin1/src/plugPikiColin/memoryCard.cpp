@@ -11,6 +11,7 @@
 #include "pc_permadeath.h"
 #include "pc_day_history.h"
 #include "quicksave/pc_quicksave.h"
+#include "save/pc_progression_game.h"
 #include "randomizer/pc_randomizer.h"
 #include "netplay/pc_netplay_loadguard.h"
 // Netplay keep-alive (pc_netplay_loadguard.h): a save waits here for the card
@@ -920,6 +921,10 @@ void MemoryCard::loadCurrentGame()
 {
 	int val         = gameflow.mGamePrefs.mMemCardSaveIndex - 1;
 	RamStream* data = getGameFileStream(val);
+#if defined(PIKI_PC_PORT)
+	// The file as it is on the card, kept in case a repair has to be backed up before the next save.
+	pc_progression_note_loaded_image(getGameFilePtr(val), 0x8000);
+#endif
 	readCurrentGame(data);
 
 	STACK_PAD_VAR(2);
@@ -937,6 +942,12 @@ void MemoryCard::saveCurrentGame()
 		mDidSaveFail       = true;
 		gsys->mIsCardSaving = FALSE;
 		OSReport("[PC Port] Refusing save with invalid backup slot %d\n", gameflow.mGamePrefs.mSpareMemCardSaveIndex);
+		return;
+	}
+	// A repaired game is only written after the file it was loaded from has been copied aside.
+	if (!pc_progression_before_save()) {
+		mDidSaveFail        = true;
+		gsys->mIsCardSaving = FALSE;
 		return;
 	}
 #endif
@@ -978,6 +989,8 @@ void MemoryCard::saveCurrentGame()
 	gameflow.mGamePrefs.mHasSaveGame = true;
 	gsys->mIsCardSaving              = FALSE;
 #if defined(PIKI_PC_PORT)
+	// The slots were swapped above: the current index now holds the file just written.
+	pc_progression_after_save(!mDidSaveFail, getGameFilePtr(gameflow.mGamePrefs.mMemCardSaveIndex - 1), 0x8000);
 	// On the first save after direct boot, the previous current slot is zero.
 	// It cannot become a backup: derive the unused/redundant block from the
 	// card directory, as the file-selection screen normally does.
@@ -1038,6 +1051,8 @@ void MemoryCard::readCurrentGame(RandomAccessStream* data)
 	// that played day 1 normally does not match and is left untouched.
 	if (gameflow.mPlayState.mSaveStatus == PlayState::ReadyToSave && playerState) {
 		playerState->mResultFlags.repairUnrecordedDayOne(gameflow.mWorldClock.mCurrentDay);
+		// Stuck-save repair, first phase: counters and area access follow the parts the save owns.
+		pc_progression_global_phase();
 	}
 #endif
 }

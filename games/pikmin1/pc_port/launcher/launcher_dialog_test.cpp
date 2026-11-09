@@ -69,6 +69,10 @@ void testBuilders()
     checkEqual(chooseFolderScript("Open Nectar - Choose the install folder"),
                "POSIX path of (choose folder with prompt \"Open Nectar - Choose the install folder\")",
                "choose folder script");
+    checkEqual(chooseFolderScript("Open Nectar - Choose the install folder", "/tmp/open-nectar"),
+               "POSIX path of (choose folder with prompt \"Open Nectar - Choose the install folder\" default location "
+               "POSIX file \"/tmp/open-nectar\")",
+               "choose folder script with default location");
     checkEqual(messageScript("T", "M", true),
                "display dialog \"M\" with title \"T\" buttons {\"OK\"} default button \"OK\" with icon stop",
                "error message script");

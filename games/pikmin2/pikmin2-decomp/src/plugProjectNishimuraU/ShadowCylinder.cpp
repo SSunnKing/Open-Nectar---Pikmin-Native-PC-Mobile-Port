@@ -1,3 +1,8 @@
+#include <cstdio>
+#include <cstdlib>
+#ifdef PIKI_PC_PORT
+extern "C" int pc_gfx_efb_copy_info(const void* addr, unsigned* hits);
+#endif
 #include "Game/shadowMgr.h"
 #include "Game/pcCoop.h"
 #include "Game/GameSystem.h"
@@ -470,6 +475,13 @@ void ShadowCylinder2::drawCylinder(Matrixf& mtx, int id)
 	GXSetBlendMode(GX_BM_BLEND, GX_BL_ONE, GX_BL_ONE, GX_LO_NOOP);
 	GXCallDisplayList(mDisplayListObj[id]->mDLData, mDisplayListObj[id]->mSize & 0xffffffe0);
 
+#ifdef PIKI_PC_PORT
+	// PIKMIN_SHADOW_ADDONLY=1: diagnóstico, solo la pasada que suma (#243).
+	static const bool addOnly = getenv("PIKMIN_SHADOW_ADDONLY") != nullptr;
+	if (addOnly) {
+		return;
+	}
+#endif
 	GXSetCullMode(GX_CULL_FRONT);
 	GXSetBlendMode(GX_BM_SUBTRACT, GX_BL_ONE, GX_BL_ONE, GX_LO_NOOP);
 	GXCallDisplayList(mDisplayListObj[id]->mDLData, mDisplayListObj[id]->mSize & 0xffffffe0);
@@ -493,6 +505,19 @@ void ShadowCylinder2::drawFinish()
 	copyShadowTexture();
 	setupTextureFilterGX();
 	drawTextureFilter();
+#ifdef PIKI_PC_PORT
+	// PIKMIN_SHADOW_DEBUG=1: el filtro final, ¿usa la copia de la máscara? (#243)
+	static const bool dbg = getenv("PIKMIN_SHADOW_DEBUG") != nullptr;
+	static int dbgFrame   = 0;
+	if (dbg && ++dbgFrame % 120 == 0) {
+		GXEnd();
+		unsigned hits = 0;
+		int found     = pc_gfx_efb_copy_info(mTexImg[mTexIdx], &hits);
+		GXColor c     = mColor->toGXColor();
+		fprintf(stderr, "[shadow] filter copyFound=%d hits=%u color=(%d,%d,%d,%d) rect=(%.0f,%.0f)-(%.0f,%.0f)\n", found, hits, c.r, c.g,
+		        c.b, c.a, mScreenBounds.p1.x, mScreenBounds.p1.y, mScreenBounds.p2.x, mScreenBounds.p2.y);
+	}
+#endif
 }
 
 /**

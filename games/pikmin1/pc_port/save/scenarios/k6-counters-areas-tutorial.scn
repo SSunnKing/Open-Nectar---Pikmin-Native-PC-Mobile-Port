@@ -1,0 +1,18 @@
+# K6: the engine and eleven more parts are owned. Counts are zero, several areas are closed,
+# and the tutorial flag is stale.
+name = k6-counters-areas-tutorial
+[saved]
+mode = story
+day = 9
+owned = ust1 ust2 ust3 ust4 ust5 uf01 uf02 uf03 uf04 uf05 uf06 uf07
+curr = 0
+required = 0
+level = 0
+ship_effect = 8
+course_open = 1
+tutorial = 1
+collect_engine = 1
+red = unlocked booted displayed discovered plucked
+red.stored = 25
+[world]
+red.onion = present expected

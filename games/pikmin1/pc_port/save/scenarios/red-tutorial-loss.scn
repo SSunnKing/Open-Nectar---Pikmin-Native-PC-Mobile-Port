@@ -1,0 +1,8 @@
+# Interrupted startup (S03, T): red is booted and discovered but no starter exists.
+name = red-tutorial-loss
+[saved]
+mode = story
+day = 2
+red = unlocked displayed booted discovered
+[world]
+red.onion = present expected

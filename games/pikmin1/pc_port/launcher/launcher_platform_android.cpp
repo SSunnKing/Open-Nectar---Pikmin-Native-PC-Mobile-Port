@@ -100,7 +100,7 @@ bool downloadFile(const std::string& url, const fs::path& destination, std::stri
 
 fs::path askForFile(const std::string&, const std::string&, const std::string&) { return {}; }
 
-fs::path askForInstallDirectory(const std::string&) { return filesDirectory(); }
+fs::path askForInstallDirectory(const std::string&, const fs::path&) { return filesDirectory(); }
 
 void showMessage(const std::string& title, const std::string& message, bool error)
 {

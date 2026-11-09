@@ -15,14 +15,27 @@
 int pc_hd_models_convert_sources(void);
 /// Escritorio: extrae un zip de pack de texturas en Load/Textures (misma
 /// regla de rutas que el instalador Android). Devuelve ficheros escritos.
-int pc_texpack_install_zip(const char* zipPath, char* message, unsigned long messageSize);
+int pc_texpack_install_zip(const char* zipPath, char* message, unsigned long messageSize, const char* variant = nullptr);
 
 // Converts one zip or folder chosen by the user (the F1 picker). `expected`
-// is the HD Models submenu row (0 Olimar, 1 Pikmin, 2 Bulborb, 3 Dwarf
-// Bulborb) or -1 for any. Returns the number of packs written (0 when the
+// is the HD Models submenu row (0 Olimar, 1 Louie, 2 Louie HD, 3 Pikmin,
+// 4 Bulborb, 5 Dwarf Bulborb) or -1 for any. Returns the number of packs written (0 when the
 // source is not a recognised rip); `message` receives a one-line result for
 // the menu. The packs are always rebuilt, even if up to date.
 int pc_hd_models_convert_file(const char* path, int expected, char* message, unsigned long messageSize);
+
+#include <string>
+#include <vector>
+
+/// Which HD Models row (0 Olimar, 1 Louie, 2 Louie HD, 3 Pikmin, 4 Bulborb,
+/// 5 Dwarf Bulborb) the zip or folder at `path` is, by the same marker .dae
+/// the converter uses. -1 if it is not readable or not a known rip. Only
+/// reads the zip's directory: the file is never moved or changed.
+int pc_hd_models_identify(const char* path);
+
+/// Files that row's rip writes, relative to Load/Models
+/// ("OlimarHD/olimar_hd.nhm"). Empty for an unknown row.
+std::vector<std::string> pc_hd_models_row_files(int row);
 
 #include <string>
 

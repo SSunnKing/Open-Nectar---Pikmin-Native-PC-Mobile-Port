@@ -57,8 +57,15 @@ const std::vector<Use>& launcherButtons()
         { "Reset all", role::kSettingsGroup, 44 }, { "Sure? Click", role::kSettingsGroup, 44 },
         { "Retry", role::kSmallAction, 44 },
         { "Install a pack from a .zip", role::kWide, 46 },
+        { "Install a pack from a .zip", role::kWide, 34 },
+        { "Install", role::kTexturePackDelete, 30 },
+        { "Install", role::kTexturePackDelete, 34 },
+        { "Working...", role::kTexturePackDelete, 30 },
+        { "Working...", role::kTexturePackDelete, 34 },
+        { "Delete", role::kTexturePackDelete, 30 },
+        { "Delete", role::kTexturePackDelete, 34 },
         { "On", role::kToggle, 40 }, { "Off", role::kToggle, 40 },
-        { "Replace...", role::kSettingsRow, 40 }, { "Install...", role::kSettingsRow, 40 },
+        { "Replace", role::kSettingsRow, 40 }, { "Install", role::kSettingsRow, 40 },
         // Move Install.
         { "Browse", role::kSmallAction, 44 }, { "Move", role::kMove, 44 }, { "Moving...", role::kMove, 44 },
         // Aviso de versión, co-op, instalador.
@@ -137,7 +144,7 @@ void testWidths()
     check(capInset(38, 21) > capInset(50, 21) && capInset(50, 21) > 0, "cap inset follows the pill curve");
     check(capInset(44, 0) == 0, "no cap inset for an empty line");
     // Filas de dos: mismos tamaños.
-    check(role::kToggle == role::kSettingsRow, "On/Off and Replace... share a size");
+    check(role::kToggle == role::kSettingsRow, "On/Off and Replace share a size");
     // Las dos rejillas bajo las portadas no se tocan ni a 960 ni a la medida
     // por defecto, y caben en la ventana.
     for (float window : { 960.0f, 1180.0f, 1600.0f }) {

@@ -252,7 +252,7 @@ void pc_texpack_init(void)
     fs::path root = fs::path("Load") / "Textures";
     if (!fs::is_directory(root, ec)) {
         printf("[PC TexPack] Load/Textures not found under %s\n",
-               fs::current_path().c_str());
+               fs::current_path().string().c_str());
         snprintf(sStatus, sizeof(sStatus), "Load/Textures not found");
         return;
     }

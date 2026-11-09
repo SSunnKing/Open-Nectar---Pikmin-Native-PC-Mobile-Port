@@ -46,6 +46,7 @@ void pc_texpack_stats(size_t* replaced, size_t* missing, size_t* failed);
 // Sube la textura `name` al texId que el llamador ya tiene vinculado a
 // GL_TEXTURE_2D. Devuelve true si la subió o false si no hay pack, el driver
 // no lo soporta o el fichero no vale: entonces el llamador usa la original.
+// Completes missing/invalid mip tails down to 1x1 while retaining valid pack levels.
 // glLevels/gpuBytes devuelven los niveles GL y bytes en VRAM (0 si false).
 bool pc_texpack_try_upload(const char* name, GLuint texId, int* glLevels, size_t* gpuBytes);
 

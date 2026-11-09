@@ -101,30 +101,33 @@ int main()
 
     // ── Anchos estrechos ──
     {
-        auto measure = [](const std::string& s) { return 10.0f * float(s.size()); };
+        // Líneas de una etiqueta de `labelW` px partida a un ancho (sin palabras
+        // más anchas que el ancho, como las etiquetas reales).
+        auto linesFor = [](float labelW) {
+            return [labelW](float width) { return int(std::ceil(labelW / std::max(1.0f, width))); };
+        };
         // Panel de 640x700: interior ~340. "Instant Whistle Response" (240) no
         // cabe al lado del control: va encima, nunca debajo.
-        SettingRowFit r = fitSettingRow(340.0f, 240.0f);
+        SettingRowFit r = fitSettingRow(340.0f, 240.0f, linesFor(240.0f));
         check(r.mode == SettingRowMode::Stacked && near(r.controlW, 300.0f), "narrow panel stacks the label");
-        r = fitSettingRow(340.0f, 120.0f);
+        r = fitSettingRow(340.0f, 120.0f, linesFor(120.0f));
         check(r.mode == SettingRowMode::Inline && 120.0f + kSettingLabelGap + r.controlW <= 340.0f, "short label stays inline");
-        r = fitSettingRow(600.0f, 400.0f);
-        check(r.mode == SettingRowMode::Ellipsized && r.labelMaxW + kSettingLabelGap + r.controlW <= 600.01f, "wide panel ellipsizes");
+        // Issue #191: en paneles anchos la etiqueta larga se parte en dos, no se recorta.
+        r = fitSettingRow(600.0f, 400.0f, linesFor(400.0f));
+        check(r.mode == SettingRowMode::Wrapped && r.labelMaxW + kSettingLabelGap + r.controlW <= 600.01f, "wide panel wraps");
+        // Si ni en dos líneas cabe, va entera encima del control.
+        r = fitSettingRow(600.0f, 900.0f, linesFor(900.0f));
+        check(r.mode == SettingRowMode::Stacked && near(r.labelMaxW, 600.0f), "very long label stacks");
         for (float w = 100.0f; w <= 900.0f; w += 7.0f)
-            for (float lw = 10.0f; lw <= 600.0f; lw += 13.0f) {
-                const SettingRowFit f = fitSettingRow(w, lw);
+            for (float lw = 10.0f; lw <= 900.0f; lw += 13.0f) {
+                const SettingRowFit f = fitSettingRow(w, lw, linesFor(lw));
                 if (f.mode == SettingRowMode::Inline) check(lw + kSettingLabelGap + f.controlW <= w + 0.01f, "inline never overlaps");
-                if (f.mode == SettingRowMode::Ellipsized) check(f.labelMaxW + kSettingLabelGap + f.controlW <= w + 0.01f, "cut label never overlaps");
-                if (f.mode == SettingRowMode::Stacked) check(f.controlW <= w + 0.01f, "stacked control fits");
+                if (f.mode == SettingRowMode::Wrapped) {
+                    check(f.labelMaxW + kSettingLabelGap + f.controlW <= w + 0.01f, "wrapped label never overlaps");
+                    check(linesFor(lw)(f.labelMaxW) <= kSettingLabelMaxLines, "wrapped label takes at most two lines");
+                }
+                if (f.mode == SettingRowMode::Stacked) check(f.controlW <= w + 0.01f && near(f.labelMaxW, w), "stacked label and control fit");
             }
-        check(ellipsizeEnd("Better Pathfinding", 500.0f, measure) == "Better Pathfinding", "fitting text unchanged");
-        const std::string cut = ellipsizeEnd("Chain Pikmin Actions", 120.0f, measure);
-        check(measure(cut) <= 120.0f && cut.size() > 3 && cut.substr(cut.size() - 3) == "...", "ellipsized fits");
-        check(cut == "Chain Pik...", "cut keeps as much as fits");
-        check(ellipsizeEnd("Chain Pikmin Actions", 90.0f, measure) == "Chain...", "cut drops trailing spaces");
-        check(ellipsizeEnd("abc", 5.0f, measure) == "...", "nothing fits: dots");
-        const std::string utf = ellipsizeEnd("Ñandú corriendo", 60.0f, [](const std::string& s) { return 5.0f * float(s.size()); });
-        check((static_cast<unsigned char>(utf[utf.size() - 4]) & 0xC0) != 0xC0, "never cut inside a UTF-8 character");
     }
     {
         // Botones del diálogo.

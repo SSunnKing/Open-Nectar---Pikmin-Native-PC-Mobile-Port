@@ -17,6 +17,10 @@ struct PcCardSaveRootOptions {
 
 std::filesystem::path pc_card_resolve_save_root(PcCardSaveRootOptions options = {});
 
+/// When `installDir/save/card0` is missing but a legacy save folder has one,
+/// returns that legacy folder (the source a first-run install would copy from).
+std::filesystem::path pc_card_legacy_save_migration_source(const std::filesystem::path& installDir);
+
 inline std::filesystem::path pc_card_card0_directory(PcCardSaveRootOptions options = {})
 {
     return pc_card_resolve_save_root(options) / "card0";

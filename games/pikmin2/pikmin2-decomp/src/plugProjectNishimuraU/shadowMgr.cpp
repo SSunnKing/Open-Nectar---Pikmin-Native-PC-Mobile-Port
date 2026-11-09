@@ -1,9 +1,17 @@
+#include <cstdio>
+#include <cstdlib>
 #include "Game/shadowMgr.h"
 #include "Game/Creature.h"
 #include "JSystem/JKernel/JKRDvdRipper.h"
 #include "Viewport.h"
 #include "Camera.h"
 #include "nans.h"
+
+#ifdef PIKI_PC_PORT
+extern "C" void pc_gfx_p2_force_stretch(int enabled);
+// Vista con la que update() colocó los cilindros, por viewport (#243).
+static Mtx sPcShadowUpdateView[4];
+#endif
 
 namespace Game {
 
@@ -212,8 +220,35 @@ void ShadowMgr::update()
 	if (mEnabled) {
 		for (int i = 0; i < getViewportCount(); i++) {
 			getActiveCylinder()->setCameraParms(getViewport(i)->getCamera(), i);
+#ifdef PIKI_PC_PORT
+			if (i < 4) {
+				PSMTXCopy(getViewport(i)->getCamera()->getViewMatrix(false)->mMatrix.mtxView, sPcShadowUpdateView[i]);
+			}
+#endif
 		}
 
+#ifdef PIKI_PC_PORT
+		// PIKMIN_SHADOW_DEBUG=1: sombras de enemigos cada ~2 s (#243).
+		static const bool shadowDbg = getenv("PIKMIN_SHADOW_DEBUG") != nullptr;
+		static int shadowDbgFrame   = 0;
+		if (shadowDbg && ++shadowDbgFrame % 120 == 0) {
+			fprintf(stderr, "[shadow] ---- frame %d\n", shadowDbgFrame);
+			FOREACH_NODE(ShadowNode, mActiveShadows->getNext(), node)
+			{
+				Creature* c = node->getGameObject();
+				if (!c->isTeki()) {
+					continue;
+				}
+				ShadowParam param;
+				c->getShadowParam(param);
+				int cylType = getActiveCylinder()->getCylinderType(param, 0);
+				fprintf(stderr, "[shadow] %s need=%d pos=(%.0f,%.0f,%.0f) size=%.1f height=%.1f dir=(%.2f,%.2f,%.2f) cyl=%d flags=%08x\n",
+				        c->getCreatureName(), (int)c->needShadow(), param.mPosition.x, param.mPosition.y, param.mPosition.z, param.mSize,
+				        param.mBoundingSphere.mRadius, param.mBoundingSphere.mPosition.x, param.mBoundingSphere.mPosition.y,
+				        param.mBoundingSphere.mPosition.z, cylType, (unsigned)node->mFlags);
+			}
+		}
+#endif
 		FOREACH_NODE(ShadowNode, mActiveShadows->getNext(), node)
 		{
 			if (node->getGameObject()->needShadow()) {
@@ -275,6 +310,13 @@ void ShadowMgr::draw(Graphics&)
 void ShadowMgr::draw(Graphics& gfx, int idx)
 {
 	sys->mTimers->_start("shadow", true);
+#ifdef PIKI_PC_PORT
+	// The cylinder pass sets orthographic projections for its clear, mask
+	// copy and filter. The port reads an ortho projection as interface and
+	// switches to the centred 4:3 box, so those landed in a different area
+	// than the cylinders and the world they test against: no shadows (#243).
+	pc_gfx_p2_force_stretch(1);
+#endif
 	if (mEnabled && getViewport(idx)->viewable()) {
 		Rectf box = getViewport(idx)->mBounds2;
 		getActiveCylinder()->setShadowRect(box);
@@ -284,11 +326,32 @@ void ShadowMgr::draw(Graphics& gfx, int idx)
 		getViewport(idx)->setProjection();
 		getViewport(idx)->setViewport();
 
+#ifdef PIKI_PC_PORT
+		// The cylinders were placed in update() with the camera's tick view
+		// (getViewMatrix(false)); the world draws with the current one
+		// (getViewMatrix(true)), which the port's interpolation and camera
+		// options change. On the console both match; here the cylinders landed
+		// smaller and offset from the ground they test against, leaving only
+		// specks of shadow (#243). Re-base them on the view the world used.
+		Mtx pcViewFix;
+		PSMTXIdentity(pcViewFix);
+		if (idx < 4) {
+			Mtx inv;
+			if (PSMTXInverse(sPcShadowUpdateView[idx], inv)) {
+				PSMTXConcat(getViewport(idx)->getCamera()->getViewMatrix(true)->mMatrix.mtxView, inv, pcViewFix);
+			}
+		}
+		Matrixf pcMtx;
+#define PC_SHADOW_MTX(m) (PSMTXConcat(pcViewFix, (m).mMatrix.mtxView, pcMtx.mMatrix.mtxView), pcMtx)
+#else
+#define PC_SHADOW_MTX(m) (m)
+#endif
+
 		FOREACH_NODE(ShadowNode, mActiveShadows->getNext(), node)
 		{
 			if (isDrawNormalShadow(node, idx)) {
 				int type = getShadowType(node->mFlags, idx);
-				getActiveCylinder()->drawCylinder(*node->getMtx(idx), type);
+				getActiveCylinder()->drawCylinder(PC_SHADOW_MTX(*node->getMtx(idx)), type);
 			}
 		}
 
@@ -297,13 +360,17 @@ void ShadowMgr::draw(Graphics& gfx, int idx)
 			if (isDrawJointShadow(node, idx)) {
 				FOREACH_NODE(JointShadowNode, node->getNext(), childNode)
 				{
-					getActiveCylinder()->drawCylinder(*childNode->getMtxB(idx), childNode->mCylinderID);
+					getActiveCylinder()->drawCylinder(PC_SHADOW_MTX(*childNode->getMtxB(idx)), childNode->mCylinderID);
 				}
 			}
 		}
+#undef PC_SHADOW_MTX
 
 		getActiveCylinder()->drawFinish();
 	}
+#ifdef PIKI_PC_PORT
+	pc_gfx_p2_force_stretch(0);
+#endif
 
 	sys->mTimers->_stop("shadow");
 }
