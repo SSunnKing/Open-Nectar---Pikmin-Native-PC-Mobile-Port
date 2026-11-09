@@ -1682,6 +1682,8 @@ struct Hub {
             ImGui::PushID(model.row);
             const ImVec2 origin = ImGui::GetCursorScreenPos();
             const float controlsY = origin.y + (layout.stacked ? nameHeight + 8.0f : 0.0f);
+            // Beside the 40 px buttons, centre the name on them.
+            if (!layout.stacked) ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + std::max(0.0f, (40.0f - nameHeight) * 0.5f)));
             ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + (layout.stacked ? width : nameW));
             ImGui::TextColored(ImVec4(1.0f, 0.93f, 0.80f, 1.0f), "%s", model.name.c_str());
             ImGui::PopTextWrapPos();
@@ -2037,6 +2039,26 @@ struct Hub {
         }
     }
 
+    // Etiqueta de una fila de ajustes (ver fitSettingRow): en una línea, partida
+    // en dos al lado del control o entera encima de él; nunca recortada. Deja el
+    // cursor donde va el control y devuelve su ancho.
+    float settingRowLabel(const std::string& text, const ImVec4& colour, float innerW)
+    {
+        const float lineH = std::max(1.0f, ImGui::GetTextLineHeight());
+        auto lines = [&](float width) {
+            return int(std::lround(ImGui::CalcTextSize(text.c_str(), nullptr, false, width).y / lineH));
+        };
+        const SettingRowFit fit = fitSettingRow(innerW, ImGui::CalcTextSize(text.c_str()).x, lines);
+        ImGui::AlignTextToFramePadding();
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + fit.labelMaxW);
+        ImGui::TextColored(colour, "%s", text.c_str());
+        ImGui::PopTextWrapPos();
+        const float controlX = ImGui::GetContentRegionMax().x - fit.controlW;
+        if (fit.mode == SettingRowMode::Stacked) ImGui::SetCursorPosX(controlX);
+        else ImGui::SameLine(controlX);
+        return fit.controlW;
+    }
+
     // Settings > Launcher: where the launcher keeps its own settings. Same
     // layout as a game's settings page (list, rows, help bar).
     void drawLauncherSettings(float top, ImVec2 size)
@@ -2064,19 +2086,8 @@ struct Hub {
         ImGui::BeginChild("launcherRows", ImVec2(panelW, panelFit.rowsH), ImGuiChildFlags_Borders,
                           ImGuiWindowFlags_NoScrollWithMouse);
         const float innerW = ImGui::GetContentRegionAvail().x;
-        auto measure = [](const std::string& s) { return ImGui::CalcTextSize(s.c_str()).x; };
-        // Como en las filas de un juego: etiqueta encima del control si no cabe
-        // al lado (paneles estrechos) o recortada con "..." (anchos).
-        auto rowLabel = [&](const char* text, const ImVec4& colour) {
-            const SettingRowFit fit = fitSettingRow(innerW, measure(text));
-            const std::string shown = fit.mode == SettingRowMode::Inline ? std::string(text) : ellipsizeEnd(text, fit.labelMaxW, measure);
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextColored(colour, "%s", shown.c_str());
-            if (shown != text && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", text);
-            if (fit.mode == SettingRowMode::Stacked) ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - fit.controlW);
-            else ImGui::SameLine(ImGui::GetContentRegionMax().x - fit.controlW);
-            return fit.controlW;
-        };
+        // Como en las filas de un juego (settingRowLabel).
+        auto rowLabel = [&](const char* text, const ImVec4& colour) { return settingRowLabel(text, colour, innerW); };
         const ImVec4 label(1.0f, 0.93f, 0.80f, 1.0f), dim(0.62f, 0.58f, 0.44f, 1.0f);
         ImGui::Dummy(ImVec2(0, 4));
         ImGui::PushFont(fonts.caption);
@@ -2272,7 +2283,7 @@ struct Hub {
         if (shownGroup) {
         const SettingsGroup& group = *shownGroup;
         const float innerW = ImGui::GetContentRegionAvail().x;
-        auto measure = [](const std::string& s) { return ImGui::CalcTextSize(s.c_str()).x; };
+        const ImVec4 dim(0.62f, 0.58f, 0.44f, 1.0f);
         for (const SettingsRow& row : group.rows) {
             if (!row.section.empty()) {
                 ImGui::Dummy(ImVec2(0, 4));
@@ -2283,20 +2294,7 @@ struct Hub {
             }
             ImGui::PushID(row.row);
             const float rowY = ImGui::GetCursorPosY();
-            // La etiqueta nunca queda debajo del control: encima de él en
-            // paneles estrechos, recortada con "..." (entera al pasar el ratón)
-            // en los anchos.
-            const SettingRowFit fit = fitSettingRow(innerW, measure(row.label));
-            const float controlW = fit.controlW;
-            const std::string label = fit.mode == SettingRowMode::Inline ? row.label
-                                                                        : ellipsizeEnd(row.label, fit.labelMaxW, measure);
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextColored(row.enabled ? ImVec4(1.0f, 0.93f, 0.80f, 1.0f) : ImVec4(0.62f, 0.58f, 0.44f, 1.0f), "%s",
-                               label.c_str());
-            if (label != row.label && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                ImGui::SetTooltip("%s", row.label.c_str());
-            if (fit.mode == SettingRowMode::Stacked) ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - controlW);
-            else ImGui::SameLine(ImGui::GetContentRegionMax().x - controlW);
+            const float controlW = settingRowLabel(row.label, row.enabled ? ImVec4(1.0f, 0.93f, 0.80f, 1.0f) : dim, innerW);
             ImGui::SetNextItemWidth(controlW);
             if (row.editable()) {
                 ImGui::BeginDisabled(busy);
@@ -2313,14 +2311,20 @@ struct Hub {
                 }
                 ImGui::EndDisabled();
             } else {
-                // Sin lista: se enseña el valor y, si hace falta, dónde cambiarlo.
-                std::string shown = row.value;
-                if (row.enabled && (row.picker || row.action)) shown += "   (in game: F1 or backtick)";
-                const std::string fitted = ellipsizeEnd(shown, controlW, measure);
+                // Sin lista: se enseña el valor entero (partido si no cabe) y,
+                // si hace falta, dónde cambiarlo en su propia línea debajo.
+                // Antes iba todo en una línea y salía recortado (issue #191).
                 ImGui::AlignTextToFramePadding();
-                ImGui::TextColored(ImVec4(0.62f, 0.58f, 0.44f, 1.0f), "%s", fitted.c_str());
-                if (fitted != shown && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                    ImGui::SetTooltip("%s", shown.c_str());
+                ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x);
+                ImGui::TextColored(dim, "%s", row.value.c_str());
+                if (row.enabled && (row.picker || row.action)) {
+                    // Right under the value, not a whole frame-height line below.
+                    ImGui::SetCursorScreenPos(ImVec2(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y + 2.0f));
+                    ImGui::PushFont(fonts.caption);
+                    ImGui::TextColored(dim, "%s", "In game: F1 or backtick");
+                    ImGui::PopFont();
+                }
+                ImGui::PopTextWrapPos();
             }
             // Ayuda de la fila bajo el ratón.
             const float rowH = ImGui::GetCursorPosY() - rowY;
