@@ -135,55 +135,39 @@ inline SettingsPanelFit fitSettingsPanel(float total)
 // ── Anchos estrechos ───────────────────────────────────────────────────────
 
 // Una fila de ajustes: etiqueta a la izquierda y control a la derecha. Si la
-// etiqueta no cabe, en paneles estrechos va encima del control; en los anchos
-// se recorta con "..." (y la fila enseña la etiqueta entera al pasar el ratón).
-// Nunca queda debajo del control.
-enum class SettingRowMode { Inline, Ellipsized, Stacked };
+// etiqueta no cabe en una línea, en los paneles anchos se parte en dos al lado
+// del control; si ni así cabe (o el panel es estrecho) va entera encima del
+// control. Nunca se recorta ni queda debajo del control.
+enum class SettingRowMode { Inline, Wrapped, Stacked };
 
 struct SettingRowFit {
     SettingRowMode mode = SettingRowMode::Inline;
     float controlW = 0.0f;
-    float labelMaxW = 0.0f; // ancho para la etiqueta (recortarla si no cabe)
+    float labelMaxW = 0.0f; // ancho en el que se parte la etiqueta
 };
 
 inline constexpr float kSettingControlMaxW = 300.0f;
 inline constexpr float kSettingLabelGap = 12.0f;
 inline constexpr float kSettingStackBelowW = 520.0f; // ancho interior del panel
+inline constexpr int kSettingLabelMaxLines = 2;
 
-inline SettingRowFit fitSettingRow(float innerW, float labelW)
+// `labelLines(width)` devuelve cuántas líneas ocupa la etiqueta partida a ese ancho.
+template <class LabelLines>
+SettingRowFit fitSettingRow(float innerW, float labelW, LabelLines labelLines)
 {
     SettingRowFit out;
     innerW = std::max(1.0f, innerW);
     out.controlW = std::min(kSettingControlMaxW, innerW * 0.45f);
     out.labelMaxW = std::max(1.0f, innerW - out.controlW - kSettingLabelGap);
     if (labelW <= out.labelMaxW) return out;
-    if (innerW < kSettingStackBelowW) {
-        out.mode = SettingRowMode::Stacked;
-        out.controlW = std::min(kSettingControlMaxW, innerW);
-        out.labelMaxW = innerW;
-    } else {
-        out.mode = SettingRowMode::Ellipsized;
+    if (innerW >= kSettingStackBelowW && labelLines(out.labelMaxW) <= kSettingLabelMaxLines) {
+        out.mode = SettingRowMode::Wrapped;
+        return out;
     }
+    out.mode = SettingRowMode::Stacked;
+    out.controlW = std::min(kSettingControlMaxW, innerW);
+    out.labelMaxW = innerW;
     return out;
-}
-
-// Recorta `text` por el final con "..." para que mida como mucho `maxW`.
-// `measure(std::string)` devuelve el ancho de un texto.
-template <class Measure>
-std::string ellipsizeEnd(const std::string& text, float maxW, Measure measure)
-{
-    if (measure(text) <= maxW) return text;
-    const std::string dots = "...";
-    // Corta en límites de carácter UTF-8.
-    std::size_t keep = text.size();
-    while (keep > 0) {
-        do { --keep; } while (keep > 0 && (static_cast<unsigned char>(text[keep]) & 0xC0) == 0x80);
-        std::string shown = text.substr(0, keep);
-        while (!shown.empty() && shown.back() == ' ') shown.pop_back();
-        shown += dots;
-        if (measure(shown) <= maxW) return shown;
-    }
-    return dots;
 }
 
 // Botones de un diálogo: Cancelar a la izquierda, las acciones a la derecha.
