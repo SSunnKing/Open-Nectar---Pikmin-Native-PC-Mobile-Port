@@ -35,6 +35,9 @@ struct HdModel {
     std::string name;
     bool installed = false;
     bool enabled = true; // false = el juego usa el original aunque esté instalado
+    std::string path;    // absolute folder of its files (Load/Models/<Pack>)
+    std::string size;    // "12.3 MB": what deleting it frees
+    unsigned long long bytes = 0;
 };
 
 // Modelo de Pikmin propio de un color (Load/Pikmin, del creador de modelos).
@@ -70,6 +73,10 @@ struct SettingsSnapshot {
     std::string activePack;                // "" = ninguno
     std::vector<HdModel> hdModels;
     std::vector<PikminModelChoice> pikminModels;
+    // After --hdmodel-install: the row the zip was recognised as and the row
+    // installed (-1 = none). -2 when the request was something else.
+    int hdModelDetected = -2;
+    int hdModelInstalled = -2;
     std::string message;                   // resultado de instalar un pack o modelo
     bool messageIsError = false;
 };

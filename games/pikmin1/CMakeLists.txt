@@ -992,6 +992,10 @@ if(PIKMIN_BUILD_TESTS AND NOT ANDROID)
         add_test(NAME texture_pack_cli_test COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/texture_pack_cli_test.py" "$<TARGET_FILE:${NECTAR_GAME}>")
         set_tests_properties(texture_pack_cli_test PROPERTIES TIMEOUT 60)
+        # HD model zips: marker detection, unknown zips left untouched, delete.
+        add_test(NAME hd_model_cli_test COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/hd_model_cli_test.py" "$<TARGET_FILE:${NECTAR_GAME}>")
+        set_tests_properties(hd_model_cli_test PROPERTIES TIMEOUT 60)
     endif()
 endif()
 
@@ -1128,6 +1132,7 @@ if(PIKMIN_BUILD_LAUNCHER)
     add_executable(pikmin_launcher
         pc_port/launcher/launcher_main.cpp
         pc_port/launcher/launcher_gui.cpp
+        pc_port/launcher/hd_model_downloads.cpp
         pc_port/launcher/install_directory.cpp
         pc_port/launcher/install_note_layout.cpp
         pc_port/launcher/gci_save_import.cpp
@@ -1261,6 +1266,15 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
     add_executable(launcher_sidebar_layout_test pc_port/launcher/launcher_sidebar_layout_test.cpp)
     target_compile_options(launcher_sidebar_layout_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME launcher_sidebar_layout_test COMMAND launcher_sidebar_layout_test)
+
+    # Get HD models (#189): Downloads watcher, folder lookup and row states.
+    add_executable(hd_model_downloads_test pc_port/launcher/hd_model_downloads_test.cpp
+        pc_port/launcher/hd_model_downloads.cpp)
+    target_compile_options(hd_model_downloads_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    if (WIN32)
+        target_link_libraries(hd_model_downloads_test PRIVATE ole32 shell32 uuid)
+    endif()
+    add_test(NAME hd_model_downloads_test COMMAND hd_model_downloads_test)
 
     add_executable(settings_row_layout_test pc_port/launcher/settings_row_layout_test.cpp)
     target_compile_options(settings_row_layout_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
