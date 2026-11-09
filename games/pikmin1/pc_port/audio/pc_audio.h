@@ -74,6 +74,10 @@ void pc_audio_update_wave(int voice, float volume, float pan, float pitch,
 void pc_audio_release_wave(int voice, u32 releaseFrames, u16 releaseParam = 0);
 void pc_audio_report_levels(void);
 void pc_audio_set_bus_volume(PCAudioBus bus, float volume);
+// Silences the output while the mixer runs on (a quick save load replays a
+// day unthrottled behind it). The native JAudio sink honours it too.
+void pc_audio_set_output_muted(bool muted);
+bool pc_audio_output_muted(void);
 void pc_audio_stop_bus(PCAudioBus bus);
 void pc_audio_set_stereo(bool stereo);
 bool pc_audio_send_system_se(u16 id, bool stop);
