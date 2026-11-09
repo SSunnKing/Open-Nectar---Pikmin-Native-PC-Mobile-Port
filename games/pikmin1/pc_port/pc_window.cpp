@@ -1352,7 +1352,9 @@ void pc_window_poll_events(PADStatus* pad) {
     // polls again with a null pad and must not drop a click the menu has not
     // seen yet.
     if (pad) {
-        pc_menu_click_set_enabled(!(sGameplayActive && pc_netplay_deterministic()));
+        // Quick Save / netplay: pointer menus stay off for the whole deterministic launch
+        // (not only during gameplay). Keys and pad still drive every menu.
+        pc_menu_click_set_enabled(pc_menu_click_allowed(pc_netplay_deterministic()));
         pc_menu_click_begin_tick();
     }
 #if PIKI_USE_JAUDIO
@@ -1603,7 +1605,7 @@ void pc_window_poll_events(PADStatus* pad) {
     // menus, the pause overlay and screens holding a pointer claim take prompt clicks.
     std::uint16_t promptButton = 0;
     {
-        const bool promptLive = !sSettingsMenuOpen && !(sGameplayActive && pc_netplay_deterministic())
+        const bool promptLive = !sSettingsMenuOpen && pc_menu_click_allowed(pc_netplay_deterministic())
                              && (!sGameplayActive || sMenuOverlayOpen || pc_menu_click_pointer_menu_active());
         int dw = 0, dh = 0;
         pc_gfx_get_drawable_size(&dw, &dh);

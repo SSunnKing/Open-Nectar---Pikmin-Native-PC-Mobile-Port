@@ -400,6 +400,11 @@ void pc_menu_click_set_enabled(bool enabled)
 	}
 }
 
+bool pc_menu_click_allowed(bool deterministicMode)
+{
+	return !deterministicMode;
+}
+
 bool pc_menu_click_hand_wanted(void)
 {
 	return sHandShown && sHasPointer && pc_menu_click_pointer_menu_active();

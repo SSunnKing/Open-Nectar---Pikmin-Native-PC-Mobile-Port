@@ -122,8 +122,15 @@ bool pc_menu_click_pending(float* nx, float* ny);
 bool pc_menu_click_take(float* nx, float* ny);
 bool pc_menu_click_take_graph(int virtW, int virtH, float* x, float* y);
 
-// Off during a deterministic netplay day: no pointer clicks, highlight, claim, or back.
+// Off while deterministic mode is on for the launch (Quick Save, netplay record/replay):
+// no pointer clicks, highlight, claim, or back. Pointer menu clicks are not in the input
+// log, so a click would desync a replay. Keys and pad keep working. F1/settings uses a
+// separate path and is unchanged.
 void pc_menu_click_set_enabled(bool enabled);
+
+// Whether pointer menus may accept clicks in this launch mode. False whenever
+// deterministic mode is on. Pure helper so the gate is unit-tested without SDL.
+bool pc_menu_click_allowed(bool deterministicMode);
 
 // Hand cursor. Every hover test (pc_menu_click_hover, and targets_hit / targets_hit_row for
 // projected targets) records whether the pointer is over an active target. A locked row is a

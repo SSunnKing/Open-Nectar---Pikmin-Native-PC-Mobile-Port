@@ -118,6 +118,13 @@ void testMapCenters()
 	check(!pc_menu_click_map_to_graph(bad, 0.5f, 0.5f, &x, &y), "a zero window does not convert");
 }
 
+void testAllowedGate()
+{
+	// #31: while Quick Save (or any deterministic launch) is on, pointer menus do nothing.
+	check(pc_menu_click_allowed(false), "pointer menus are allowed outside deterministic mode");
+	check(!pc_menu_click_allowed(true), "pointer menus are ignored in deterministic mode");
+}
+
 void testDisabled()
 {
 	pc_menu_click_reset();
@@ -171,6 +178,7 @@ int main()
 {
 	testOutputArea();
 	testMapCenters();
+	testAllowedGate();
 	testDisabled();
 	testPendingPeek();
 	// A full-screen backdrop is not a button. A short strip and a small pane are.
