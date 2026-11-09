@@ -19,6 +19,10 @@
 #include "system.h"
 #include <stdio.h>
 #include <string.h>
+#if defined(PIKI_PC_PORT)
+#include "pc_window.h"
+#include <chrono>
+#endif
 
 /// Specialised global game flow controller for single-player gameplay (story or challenge mode).
 FlowController flowCont;
@@ -421,15 +425,36 @@ void OnePlayerSection::init()
 			_cPrint  = FALSE;
 #endif
 
+#if !defined(PIKI_PC_PORT)
 			if (!gsys->mIsLoadingActive) {
 				gsys->startLoading(&gameflow.mGameLoadIdler, true, 60);
 			}
+#endif
 
 #if defined(VERSION_GPIP01)
 			char bannerTex[128];
 			setBannerTex(flowCont.mCurrentStage->mStageID, bannerTex);
 #else
 			setBannerTex(flowCont.mCurrentStage->mStageID);
+#endif
+#if defined(PIKI_PC_PORT)
+			// The host video callback only runs when a frame is presented, so
+			// the GameCube loading thread cannot animate while this thread loads.
+			// Present the area banner here, on the thread owning the GL context.
+			if (gsys->mIsLoadingActive) {
+				gsys->endLoading();
+			}
+			if (gameflow.mLevelBannerTex) {
+				const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+				do {
+					gsys->beginRender();
+					gameflow.mLevelBannerFadeValue = 1.0f;
+					gameflow.mGameLoadIdler.draw(*gsys->mDGXGfx);
+					gsys->doneRender();
+					gsys->waitRetrace();
+				} while (!pc_window_should_close() && std::chrono::steady_clock::now() < until);
+			}
+			gsys->startLoading(&gameflow.mGameLoadIdler, true, 60);
 #endif
 			PRINT("making new MAINGAME\n");
 			currentSection = new NewPikiGameSection();
