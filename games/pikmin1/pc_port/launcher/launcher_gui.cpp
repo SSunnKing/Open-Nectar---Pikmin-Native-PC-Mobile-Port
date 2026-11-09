@@ -730,6 +730,9 @@ struct Hub {
     std::shared_ptr<MoveJob> moveJob;
     TexturePackInfo deletingPack;
     HdModel deletingModel;
+    // Set by an Uninstall button; drawDeleteHdModel opens the confirm at its
+    // own ID level (the buttons sit under PushID/child windows).
+    bool uninstallPending = false;
 #ifndef __ANDROID__
     // Get HD models (#189): see drawGetHdModels.
     struct HdJob {
@@ -1747,16 +1750,16 @@ struct Hub {
                     queue({ "--hdmodel-enable", std::to_string(model.row), model.enabled ? "0" : "1" });
                 }
                 ImGui::SetCursorScreenPos(ImVec2(origin.x + controlsX + toggleW + 12.0f, controlsY));
-                if (glassButton("Delete", role::kSmallAction, 40.0f, false, busy)) {
+                if (glassButton("Uninstall", role::kSmallAction, 40.0f, false, busy)) {
                     deletingModel = model;
-                    ImGui::OpenPopup("Delete HD model?");
+                    uninstallPending = true;
                 }
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                     ImGui::BeginTooltip();
                     ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
                     ImGui::Text("Frees %s.", model.size.empty() ? "its space" : model.size.c_str());
                     ImGui::Text("From: %s", model.path.c_str());
-                    ImGui::TextUnformatted("Deletes only this model's files. You can install it again.");
+                    ImGui::TextUnformatted("Uninstalls only this model's files. You can install it again.");
                     ImGui::PopTextWrapPos();
                     ImGui::EndTooltip();
                 }
@@ -1790,12 +1793,16 @@ struct Hub {
 
     void drawDeleteHdModel()
     {
+        if (uninstallPending) {
+            uninstallPending = false;
+            ImGui::OpenPopup("Uninstall HD model?");
+        }
         ImGui::SetNextWindowSize(ImVec2(std::min(560.0f, ImGui::GetIO().DisplaySize.x - 32.0f), 0), ImGuiCond_Always);
-        if (!ImGui::BeginPopupModal("Delete HD model?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
+        if (!ImGui::BeginPopupModal("Uninstall HD model?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
             return;
         ImGui::PushFont(fonts.caption);
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::Text("Delete %s (%s)?", deletingModel.name.c_str(), deletingModel.size.c_str());
+        ImGui::Text("Uninstall %s? This frees %s.", deletingModel.name.c_str(), deletingModel.size.c_str());
         ImGui::PopTextWrapPos();
         ImGui::TextUnformatted("Its files are permanently deleted from:");
         ImGui::SetNextItemWidth(-1);
@@ -1810,8 +1817,8 @@ struct Hub {
         ImGui::SetItemDefaultFocus();
         if (ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
         ImGui::SameLine();
-        if (glassButton("Delete model", ImVec2(150, 38), true)) {
-            queue({ "--hdmodel-delete", std::to_string(deletingModel.row) }, "Deleting the model...");
+        if (glassButton("Uninstall", ImVec2(150, 38), true)) {
+            queue({ "--hdmodel-delete", std::to_string(deletingModel.row) }, "Uninstalling the model...");
             ImGui::CloseCurrentPopup();
         }
         ImGui::PopFont();
@@ -1981,7 +1988,25 @@ struct Hub {
             const ImVec2 buttonAt = stacked ? ImVec2(origin.x, textBottom + 4.0f)
                                             : ImVec2(origin.x + width - buttonW, origin.y + std::max(0.0f, (textBottom - origin.y - 40.0f) * 0.5f));
             ImGui::SetCursorScreenPos(buttonAt);
-            if (glassButton("Download", role::kSettingsRow, 40.0f, false, rowState == HdRowState::Importing)) {
+            const HdRowAction action = hdRowAction(in);
+            if (action == HdRowAction::Uninstall) {
+                if (glassButton("Uninstall", role::kSettingsRow, 40.0f, false, busy)) {
+                    for (const HdModel& model : snap.hdModels)
+                        if (model.row == source.row) deletingModel = model;
+                    hdRowErrors.erase(source.row);
+                    uninstallPending = true;
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    ImGui::BeginTooltip();
+                    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                    ImGui::Text("Frees %s. Uninstalls only this model's files; the game goes back to the original.",
+                                in.size.empty() ? "its space" : in.size.c_str());
+                    for (const HdModel& model : snap.hdModels)
+                        if (model.row == source.row) ImGui::TextColored(dim, "From: %s", model.path.c_str());
+                    ImGui::PopTextWrapPos();
+                    ImGui::EndTooltip();
+                }
+            } else if (glassButton(hdRowActionLabel(action), role::kSettingsRow, 40.0f, false, action == HdRowAction::Busy)) {
                 hdRowErrors.erase(source.row);
                 hdWaitingRows.insert(source.row);
                 if (!hdWatcher.watching()) startHdWatch();
@@ -1990,7 +2015,7 @@ struct Hub {
                     hdWaitingRows.erase(source.row);
                 }
             }
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            if (action != HdRowAction::Uninstall && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                 ImGui::BeginTooltip();
                 ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
                 ImGui::Text("Opens the %s page in your browser. Download the zip there (it has %s); this window installs it.",
@@ -2047,7 +2072,7 @@ struct Hub {
             ImGui::CloseCurrentPopup();
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Stops watching Downloads.");
-        (void)busy;
+        drawDeleteHdModel(); // Uninstall: the same confirm as the HD Models page
         ImGui::EndPopup();
     }
 #endif

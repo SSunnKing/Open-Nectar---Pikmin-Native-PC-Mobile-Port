@@ -115,7 +115,7 @@ with tempfile.TemporaryDirectory(prefix='nectar-hdmodel-cli-') as tmp:
     assert rows[0]['bytes'] == 1500 and not rows[3]['installed'] and rows[3]['bytes'] == 0
     p, s = run('--hdmodel-delete', '5')
     assert p.returncode == 0 and not s['messageError'], s['message']
-    assert s['message'] == f"Deleted Dwarf Bulborb HD (2.0 KB freed) from {models / 'BulborbHD'}.", s['message']
+    assert s['message'] == f"Uninstalled Dwarf Bulborb HD (2.0 KB freed) from {models / 'BulborbHD'}.", s['message']
     assert not (models / 'BulborbHD' / 'bulborb_dwarf.nhm').exists()
     assert (models / 'BulborbHD' / 'bulborb.nhm').exists() and (models / 'BulborbHD' / 'notes.txt').exists()
     rows = {m['row']: m for m in s['hdModels']}

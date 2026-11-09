@@ -63,18 +63,20 @@ void setEnv(const char* key, const char* value)
 void testSources()
 {
     const auto& sources = hdModelSources();
-    CHECK(sources.size() == 5);
-    const std::map<int, std::string> markers = { { 0, "playerE.dae" }, { 3, "piki_p3_red.dae" },
-        { 4, "Red Bulborb/model.dae" }, { 5, "kochappy.dae" }, { 2, "playerD.dae" } };
+    // One row per zip kind the converter handles (kKinds), in row order.
+    CHECK(sources.size() == 6);
+    const std::map<int, std::string> markers = { { 0, "playerE.dae" }, { 1, "luzy_565.png" }, { 2, "playerD.dae" },
+        { 3, "piki_p3_red.dae" }, { 4, "Red Bulborb/model.dae" }, { 5, "kochappy.dae" } };
     std::set<int> rows;
     for (const HdModelSource& s : sources) {
         CHECK(markers.at(s.row) == s.marker);
         CHECK(rows.insert(s.row).second);
-        CHECK(std::string(s.url).rfind("https://www.models-resource.com/wii_u/pikmin3/asset/", 0) == 0);
+        const std::string url = s.url;
+        CHECK(url.rfind(s.row == 1 ? "https://www.models-resource.com/gamecube/pikmin2/asset/"
+                                   : "https://www.models-resource.com/wii_u/pikmin3/asset/", 0) == 0);
+        CHECK(s.row == int(rows.size()) - 1); // row order
         CHECK(hdModelSourceForRow(s.row) == &s);
     }
-    CHECK(sources.front().row == 0); // Olimar first, as in the issue
-    CHECK(!hdModelSourceForRow(1));  // the Pikmin 2 Louie zip is not offered here
     CHECK(!hdModelSourceForRow(-1) && !hdModelSourceForRow(6));
 }
 
@@ -230,6 +232,27 @@ void testRowState()
     CHECK(hdRowStatusText(row) == "Installed (12.3 MB)");
     row.waiting = true; // downloading it again
     CHECK(hdRowState(row) == HdRowState::Waiting);
+
+    // The row's button: Download until installed, then Uninstall; disabled
+    // while its zip converts.
+    HdRowInput fresh;
+    CHECK(hdRowAction(fresh) == HdRowAction::Download && std::string(hdRowActionLabel(hdRowAction(fresh))) == "Download");
+    fresh.waiting = true;
+    CHECK(hdRowAction(fresh) == HdRowAction::Download);
+    fresh.error = "broken";
+    CHECK(hdRowAction(fresh) == HdRowAction::Download);
+    fresh.importing = true;
+    CHECK(hdRowAction(fresh) == HdRowAction::Busy);
+    HdRowInput installed;
+    installed.installed = true;
+    installed.size = "1.4 MB";
+    CHECK(hdRowAction(installed) == HdRowAction::Uninstall);
+    CHECK(std::string(hdRowActionLabel(HdRowAction::Uninstall)) == "Uninstall");
+    installed.importing = true; // replacing it from a new zip
+    CHECK(hdRowAction(installed) == HdRowAction::Busy);
+    installed.importing = false;
+    installed.installed = false; // after Uninstall the game reports it gone
+    CHECK(hdRowAction(installed) == HdRowAction::Download && hdRowState(installed) == HdRowState::NotInstalled);
 }
 } // namespace
 

@@ -66,14 +66,18 @@ std::uintmax_t folderSize(const fs::path& folder, fs::file_time_type& newest)
 
 const std::vector<HdModelSource>& hdModelSources()
 {
-    // Pages checked on The Models Resource (Wii U > Pikmin 3); each zip holds
-    // the marker the game looks for.
+    // Every zip the converter handles (kKinds in pc_hd_model_convert.cpp), in
+    // HD Models row order. Pages checked on The Models Resource; each zip
+    // holds the marker the game looks for. The President, White and Purple
+    // Pikmin and Bulbmin are not here: they come from an installed Pikmin 2
+    // (pikis.szs), not from a download.
     static const std::vector<HdModelSource> sources = {
         { 0, "Olimar", "playerE.dae", "https://www.models-resource.com/wii_u/pikmin3/asset/334524/" },
+        { 1, "Louie (Pikmin 2)", "luzy_565.png", "https://www.models-resource.com/gamecube/pikmin2/asset/291435/" },
+        { 2, "Louie (Pikmin 3)", "playerD.dae", "https://www.models-resource.com/wii_u/pikmin3/asset/334525/" },
         { 3, "Pikmin (red, yellow and blue)", "piki_p3_red.dae", "https://www.models-resource.com/wii_u/pikmin3/asset/302842/" },
         { 4, "Red Bulborb", "Red Bulborb/model.dae", "https://www.models-resource.com/wii_u/pikmin3/asset/298541/" },
         { 5, "Dwarf Bulborb", "kochappy.dae", "https://www.models-resource.com/wii_u/pikmin3/asset/355076/" },
-        { 2, "Louie", "playerD.dae", "https://www.models-resource.com/wii_u/pikmin3/asset/334525/" },
     };
     return sources;
 }
@@ -228,6 +232,17 @@ fs::path downloadsDirectory()
     return xdgDownloadsDirectory(userDirs, home);
 #endif
 #endif
+}
+
+HdRowAction hdRowAction(const HdRowInput& row)
+{
+    if (row.importing) return HdRowAction::Busy;
+    return row.installed ? HdRowAction::Uninstall : HdRowAction::Download;
+}
+
+const char* hdRowActionLabel(HdRowAction action)
+{
+    return action == HdRowAction::Uninstall ? "Uninstall" : "Download";
 }
 
 HdRowState hdRowState(const HdRowInput& row)

@@ -10670,7 +10670,7 @@ int pc_settings_cli(int argc, char** argv) {
         const char* name = row >= 0 && row < 6 ? pc_settings_row_label(PC_SET_PICKER_HDMODELS, row) : "That model";
         if (failed) {
             message = files.empty() ? std::string("That HD model does not exist.")
-                                    : std::string("Could not delete every file of ") + name + " in " + where + ".";
+                                    : std::string("Could not uninstall every file of ") + name + " in " + where + ".";
             messageIsError = true;
             result = 1;
         } else if (!removed) {
@@ -10682,7 +10682,7 @@ int pc_settings_cli(int argc, char** argv) {
             sConfig.hdModelsDisabled &= ~(1 << row);
             sPending = sConfig;
             saveConfig();
-            message = std::string("Deleted ") + name + " (" + nectar::textures::sizeText(freed) + " freed) from " + where + ".";
+            message = std::string("Uninstalled ") + name + " (" + nectar::textures::sizeText(freed) + " freed) from " + where + ".";
         }
     } else if (!strcmp(argv[at], "--settings-set")) {
         for (int i = at + 1; i + 2 < argc; i += 3) {

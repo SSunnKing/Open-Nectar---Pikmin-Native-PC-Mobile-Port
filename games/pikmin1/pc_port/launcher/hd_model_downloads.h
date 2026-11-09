@@ -30,7 +30,7 @@ struct HdModelSource {
     const char* url;
 };
 
-// Olimar, Louie HD, Pikmin, Bulborb and Dwarf Bulborb, in the order shown.
+// Every model zip the game converts, in HD Models row order (0..5).
 const std::vector<HdModelSource>& hdModelSources();
 const HdModelSource* hdModelSourceForRow(int row);
 
@@ -88,6 +88,13 @@ struct HdRowInput {
 };
 
 HdRowState hdRowState(const HdRowInput& row);
+
+// The row's button: Uninstall once the game reports the model installed
+// (--hdmodel-delete, same confirm as the HD Models page), Download
+// otherwise, and disabled (Busy, still reading Download) while its zip converts.
+enum class HdRowAction { Download, Uninstall, Busy };
+HdRowAction hdRowAction(const HdRowInput& row);
+const char* hdRowActionLabel(HdRowAction action);
 std::string hdRowStatusText(const HdRowInput& row);
 
 } // namespace pikmin::launcher
