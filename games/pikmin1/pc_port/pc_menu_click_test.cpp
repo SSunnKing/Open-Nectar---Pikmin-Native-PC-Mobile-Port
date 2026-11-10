@@ -118,6 +118,27 @@ void testMapCenters()
 	check(!pc_menu_click_map_to_graph(bad, 0.5f, 0.5f, &x, &y), "a zero window does not convert");
 }
 
+void testAllowedGate()
+{
+	// #31: while Quick Save (or any deterministic launch) is on, pointer menus do nothing.
+	check(pc_menu_click_allowed(false), "pointer menus are allowed outside deterministic mode");
+	check(!pc_menu_click_allowed(true), "pointer menus are ignored in deterministic mode");
+
+	// Settings-touch path: F1 always posts; campaign map only when menus are allowed.
+	check(pc_menu_click_settings_touch_should_post(true, false, true),
+	      "F1 settings taps stay allowed in deterministic mode");
+	check(pc_menu_click_settings_touch_should_post(true, true, true),
+	      "F1 stays allowed even if the campaign map flag is also set");
+	check(pc_menu_click_settings_touch_should_post(false, true, false),
+	      "campaign map taps are allowed outside deterministic mode");
+	check(!pc_menu_click_settings_touch_should_post(false, true, true),
+	      "campaign map taps are ignored in deterministic mode");
+	check(!pc_menu_click_settings_touch_should_post(false, false, false),
+	      "neither overlay: do not post a settings touch");
+	check(!pc_menu_click_settings_touch_should_post(false, false, true),
+	      "neither overlay in deterministic mode: still do not post");
+}
+
 void testDisabled()
 {
 	pc_menu_click_reset();
@@ -171,6 +192,7 @@ int main()
 {
 	testOutputArea();
 	testMapCenters();
+	testAllowedGate();
 	testDisabled();
 	testPendingPeek();
 	// A full-screen backdrop is not a button. A short strip and a small pane are.

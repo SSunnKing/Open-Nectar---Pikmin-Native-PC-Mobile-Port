@@ -7731,7 +7731,10 @@ void pcCampaignMapInput()
     if (!sCmapOpen || !cmapPack()) return;
     // Ratón o toque: el punto del lienzo (encajado en la ventana, centrado).
     int tapNode = -1;
-    if (sTouchTapPending && !sCmapIntro && !sCmapQuit && sCmapTarget < 0) {
+    // Pointer/touch zone picks are not in the input log; ignore them while
+    // deterministic (Quick Save / netplay). Keys and pad still choose a zone.
+    if (sTouchTapPending && pc_menu_click_allowed(pc_netplay_deterministic()) && !sCmapIntro
+        && !sCmapQuit && sCmapTarget < 0) {
         int dw = 0, dh = 0;
         pc_gfx_get_drawable_size(&dw, &dh);
         if (dw > 0 && dh > 0) {

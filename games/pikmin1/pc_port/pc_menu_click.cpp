@@ -400,6 +400,23 @@ void pc_menu_click_set_enabled(bool enabled)
 	}
 }
 
+bool pc_menu_click_allowed(bool deterministicMode)
+{
+	return !deterministicMode;
+}
+
+bool pc_menu_click_settings_touch_should_post(bool settingsOpen, bool campaignMapActive,
+                                              bool deterministicMode)
+{
+	if (settingsOpen) {
+		return true;
+	}
+	if (campaignMapActive) {
+		return pc_menu_click_allowed(deterministicMode);
+	}
+	return false;
+}
+
 bool pc_menu_click_hand_wanted(void)
 {
 	return sHandShown && sHasPointer && pc_menu_click_pointer_menu_active();
