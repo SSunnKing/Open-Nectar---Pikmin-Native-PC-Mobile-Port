@@ -836,6 +836,7 @@ struct ProgramLocations {
 	GLint perPixel = -1;
 	GLint numStages = -1;
 	GLint fastPath = -1;
+	GLint lodBias = -1;
 	GLint tevPrev = -1;
 	GLint tevReg0 = -1;
 	GLint tevReg1 = -1;
@@ -2280,6 +2281,7 @@ static const char* fShaderTail =
     "uniform sampler2D uTex7;\n"
     "uniform int uNumStages;\n"
     "uniform int uFastPath;\n" // 1=texture, 2=raster, 3=texture*raster
+    "uniform float uLodBias;\n" // <0 samples sharper mips; set for the interface
     "uniform vec4 uMaterialColor;\n"
     "uniform bool uUseMaterialRgb;\n"
     "uniform bool uUseMaterialAlpha;\n"
@@ -2327,14 +2329,14 @@ static const char* fShaderTail =
     "}\n"
     "vec4 resolveTex(int texIdx, int coordIdx) {\n"
     "    vec2 uv = resolveCoord(coordIdx);\n"
-    "    if (texIdx == 0) return texture(uTex0, uv);\n"
-    "    if (texIdx == 1) return texture(uTex1, uv);\n"
-    "    if (texIdx == 2) return texture(uTex2, uv);\n"
-    "    if (texIdx == 3) return texture(uTex3, uv);\n"
-    "    if (texIdx == 4) return texture(uTex4, uv);\n"
-    "    if (texIdx == 5) return texture(uTex5, uv);\n"
-    "    if (texIdx == 6) return texture(uTex6, uv);\n"
-    "    return texture(uTex7, uv);\n"
+    "    if (texIdx == 0) return texture(uTex0, uv, uLodBias);\n"
+    "    if (texIdx == 1) return texture(uTex1, uv, uLodBias);\n"
+    "    if (texIdx == 2) return texture(uTex2, uv, uLodBias);\n"
+    "    if (texIdx == 3) return texture(uTex3, uv, uLodBias);\n"
+    "    if (texIdx == 4) return texture(uTex4, uv, uLodBias);\n"
+    "    if (texIdx == 5) return texture(uTex5, uv, uLodBias);\n"
+    "    if (texIdx == 6) return texture(uTex6, uv, uLodBias);\n"
+    "    return texture(uTex7, uv, uLodBias);\n"
     "}\n"
     "float swapComponent(vec4 value, int component) {\n"
     "    if (component == 0) return value.r;\n"
@@ -2416,9 +2418,9 @@ static const char* fShaderTail =
     "    if (uFastPath != 0) {\n"
     "        vec4 fastRast = (uTevChan[0].x == 1) ? rast1 : rast0;\n"
     "        vec4 fastCol;\n"
-    "        if (uFastPath == 1) fastCol = texture(uTex0, vTexCoord0);\n"
+    "        if (uFastPath == 1) fastCol = texture(uTex0, vTexCoord0, uLodBias);\n"
     "        else if (uFastPath == 2) fastCol = fastRast;\n"
-    "        else fastCol = texture(uTex0, vTexCoord0) * fastRast;\n"
+    "        else fastCol = texture(uTex0, vTexCoord0, uLodBias) * fastRast;\n"
     "        bool fastTest0 = alphaCompare(fastCol.a, uAlphaRef0, uAlphaComp0);\n"
     "        bool fastTest1 = alphaCompare(fastCol.a, uAlphaRef1, uAlphaComp1);\n"
     "        bool fastPass = (uAlphaOp == 0) ? (fastTest0 && fastTest1) :\n"
@@ -2698,6 +2700,7 @@ static void query_program_locations(GLuint program, ProgramLocations& out) {
     out.perPixel = glGetUniformLocation_ptr(program, "uPerPixel");
     out.numStages = glGetUniformLocation_ptr(program, "uNumStages");
     out.fastPath = glGetUniformLocation_ptr(program, "uFastPath");
+    out.lodBias = glGetUniformLocation_ptr(program, "uLodBias");
     out.tevPrev = glGetUniformLocation_ptr(program, "uTevPrev");
     out.tevReg0 = glGetUniformLocation_ptr(program, "uTevReg0");
     out.tevReg1 = glGetUniformLocation_ptr(program, "uTevReg1");
@@ -5515,6 +5518,9 @@ void pc_gfx_set_tev_swap_mode_table(GXTevSwapSel table, GXTevColorChan red, GXTe
 // none to choose from.
 static void apply_texture_filtering(GLuint texId, bool gameRequestedMipmaps);
 
+// Mip bias for orthographic (title, menu, HUD) draws. See the uLodBias set.
+static constexpr float kInterfaceLodBias = -1.0f;
+
 // Replaces whatever this key was costing. An upload into an existing texture
 // swaps the old figure rather than adding to it.
 static void note_texture_bytes(uintptr_t key, size_t bytes)
@@ -7862,6 +7868,12 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
         else if (simpleOp && modulateTextureRaster) fastPath = 3;
     }
     glUniform1i_ptr(sLoc.fastPath, fastPath);
+    // Pack replacements are several times larger than the interface boxes they
+    // fill, and trilinear between two mips smears thin glyphs. The interface is
+    // everything drawn after the world's perspective projection ends, so bias
+    // it one level sharper. World textures keep the unbiased mips that stop
+    // distant grain.
+    cached_uniform1f(sLoc.lodBias, sShadowProjPerspective ? 0.0f : kInterfaceLodBias);
     if (fastPath != 0) {
         ++sPerfFastDraws;
         ++sPerfFastPathDraws[fastPath];
