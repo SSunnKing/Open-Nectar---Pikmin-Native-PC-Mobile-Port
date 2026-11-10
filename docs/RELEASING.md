@@ -77,3 +77,15 @@ prints a warning. The draft release then has no APK and it can be added by hand.
 - **Online play** is not built into releases (`NECTAR_RELEASE_ONLINE` stays off).
   Pikmin 1 netplay is dead code: do not enable it.
 - The tag filter accepts `1.3`, `1.3.1` and `1.3.1.1`.
+
+## Status
+
+Update this list when something changes.
+
+- [x] Workflow merged (#297, 2026-11-10).
+- [x] Linux: the build image now fails when apt fails and retries downloads
+  (a mirror error had left the image without gcc-13).
+- [x] Secrets `ANDROID_KEYSTORE_BASE64` and `ANDROID_KEYSTORE_PASSWORD` uploaded.
+- [x] First manual run (Run workflow) with all four jobs green and the APK as
+  `release-android`.
+- [ ] First release from a tag.
