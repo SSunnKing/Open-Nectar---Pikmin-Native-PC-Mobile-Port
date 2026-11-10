@@ -337,18 +337,29 @@ void GameState::on_demo_timer(SingleGameSection* game, u32 id)
 				bagObj = dwfl;
 			}
 		}
+#ifdef PIKI_PC_PORT
+		// The timer starts from any area once 15 Pikmin are out and the demo
+		// flag is unset. The bag it points at only exists in the first area,
+		// so a save moved elsewhere (Unlock All Zones, All Onions) used to
+		// panic here three minutes later. Without the bag there is no scene.
+		if (!bagObj) {
+			gameSystem->mSection->disableTimer(DEMOTIMER_YouAppearLost);
+		} else
+#endif
+		{
 #if defined(VERSION_JP)
-		JUT_ASSERTLINE(1022, bagObj, "no down floor 20\n"); // This panic seems to imply the bag once weighed 20 instead of 15
+			JUT_ASSERTLINE(1022, bagObj, "no down floor 20\n"); // This panic seems to imply the bag once weighed 20 instead of 15
 #else
-		JUT_ASSERTLINE(1025, bagObj, "no down floor 20\n"); // This panic seems to imply the bag once weighed 20 instead of 15
+			JUT_ASSERTLINE(1025, bagObj, "no down floor 20\n"); // This panic seems to imply the bag once weighed 20 instead of 15
 #endif
 
-		MoviePlayArg moviePlayArg("x17_join_guide", nullptr, nullptr, 0);
-		moviePlayArg.mOrigin       = bagObj->getPosition();
-		moviePlayArg.mAngle        = bagObj->getFaceDir();
-		moviePlayer->mTargetObject = bagObj;
-		moviePlayer->play(moviePlayArg);
-		gameSystem->mSection->disableTimer(DEMOTIMER_YouAppearLost);
+			MoviePlayArg moviePlayArg("x17_join_guide", nullptr, nullptr, 0);
+			moviePlayArg.mOrigin       = bagObj->getPosition();
+			moviePlayArg.mAngle        = bagObj->getFaceDir();
+			moviePlayer->mTargetObject = bagObj;
+			moviePlayer->play(moviePlayArg);
+			gameSystem->mSection->disableTimer(DEMOTIMER_YouAppearLost);
+		}
 	}
 	if (id == DEMOTIMER_Reds_Purples_Tutorial) {
 #ifdef PIKI_PC_PORT
