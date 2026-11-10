@@ -830,22 +830,32 @@ void App::drawStartScreen(float width, float height)
 	std::string lastSource;
 	int lastTarget = T_CAPTAIN;
 	const bool hasRecent = gameReady_ && loadProject(lastSource, lastTarget);
+	// La fila de botones, del mismo ancho que las tarjetas, con su misma
+	// separación y esquinas; «Continuar» destaca como acción principal.
+	const float langW = std::max(140.0f, contentW * 0.16f), quitW = std::max(140.0f, contentW * 0.16f);
+	const float contW = contentW - langW - quitW - gap * 2.0f;
+	ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
 	ImGui::BeginDisabled(!hasRecent);
-	if (ImGui::Button(L("Continuar el último proyecto", "Continue last project"), ImVec2(contentW * 0.58f, 48))) {
+	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.36f, 0.47f, 0.19f, 1));
+	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.45f, 0.58f, 0.24f, 1));
+	ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.52f, 0.66f, 0.27f, 1));
+	if (ImGui::Button(L("Continuar el último proyecto", "Continue last project"), ImVec2(contW, 48))) {
 		setTarget(lastTarget);
 		showStart_ = false;
 		editorStep_ = 0;
 		loadModel(lastSource, true);
 	}
+	ImGui::PopStyleColor(3);
 	ImGui::EndDisabled();
-	ImGui::SameLine();
-	if (ImGui::Button(spanish() ? "English" : "Español", ImVec2(contentW * 0.18f, 48))) {
+	ImGui::SameLine(0, gap);
+	if (ImGui::Button(spanish() ? "English" : "Español", ImVec2(langW, 48))) {
 		setSpanish(!spanish());
 		cfg_.language = spanish() ? "es" : "en";
 		cfg_.save();
 	}
-	ImGui::SameLine();
-	if (ImGui::Button(L("Salir", "Quit"), ImVec2(-1, 48))) quit_ = true;
+	ImGui::SameLine(0, gap);
+	if (ImGui::Button(L("Salir", "Quit"), ImVec2(quitW, 48))) quit_ = true;
+	ImGui::PopStyleVar();
 	if (!gameReady_) {
 		ImGui::Spacing();
 		ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.35f, 1), "%s", L("Selecciona primero la carpeta del juego.", "Select the game folder first."));
