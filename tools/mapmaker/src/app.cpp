@@ -15,6 +15,7 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -754,7 +755,8 @@ void App::drawWelcome()
 	const float welcomeW = std::max(600.0f, std::min(1080.0f, vp->WorkSize.x - 48.0f));
 	const float welcomeH = std::max(540.0f, std::min(900.0f, vp->WorkSize.y - 48.0f));
 	ImGui::SetNextWindowSize(ImVec2(welcomeW, welcomeH));
-	ImGui::Begin(tr("¿Qué quieres hacer?"), nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
+	const std::string title = std::string(startMode_ ? tr("Mapa nuevo") : tr("¿Qué quieres hacer?")) + "###welcome";
+	ImGui::Begin(title.c_str(), nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 	{
 		const ImVec2 p = ImGui::GetCursorScreenPos();
 		ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -765,20 +767,214 @@ void App::drawWelcome()
 		hint(tr("Crea mapas para VS, misiones y campañas."));
 		ImGui::Spacing();
 	}
-	std::error_code ec;
-	if (!cfg_.lastMap.empty() && fs::exists(cfg_.lastMap, ec)) {
-		std::string text, err;
-		MapDoc d;
-		std::string name = fs::path(cfg_.lastMap).parent_path().filename().string();
-		if (readText(cfg_.lastMap, text) && nectar::parseMapDoc(text, d, err)) name = d.name;
-		if (wideButton((tr("Seguir con «") + name + "»").c_str(), 46)) {
-			openMap(cfg_.lastMap);
-			screen_ = Screen::Editor;
-		}
-		ImGui::Spacing();
-	}
+	if (startMode_ == 0)
+		drawStartHome();
+	else
+		drawStartNew();
+	ImGui::End();
+}
+
+// Paso 1: como en Blender o Roblox, a la izquierda lo nuevo (primero el modo
+// de juego, que decide qué se puede poner) y lo que ya tienes; a la derecha,
+// los recientes.
+void App::drawStartHome()
+{
+	const float avail  = ImGui::GetContentRegionAvail().x;
+	const float rightW = std::max(250.0f, std::min(380.0f, avail * 0.36f));
+	const float leftW  = avail - rightW - 24.0f;
+	ImGui::BeginChild("##home_left", ImVec2(leftW, 0));
 	ImGui::SeparatorText(tr("Crear un mapa nuevo"));
-	hint(tr("Elige la forma del suelo para empezar. Después puedes cambiarla como quieras."));
+	hint(tr("Primero, ¿a qué se va a jugar en este mapa? Después eliges cómo empezar."));
+	ImGui::Spacing();
+	const unsigned modes[] = { nectar::MAPMODE_VS, nectar::MAPMODE_SOLO, nectar::MAPMODE_COOP, kStartCampaign };
+	const float cardW      = (ImGui::GetContentRegionAvail().x - 16.0f) * 0.5f;
+	for (int i = 0; i < 4; i++) {
+		if (i % 2) ImGui::SameLine(0, 16);
+		if (modeCard(int(modes[i]), cardW, 118.0f)) startMode_ = modes[i];
+		if (i % 2) ImGui::Dummy(ImVec2(0, 6));
+	}
+	ImGui::Spacing();
+	ImGui::SeparatorText(tr("O trae uno que ya tienes"));
+	if (ImGui::Button(tr("Abrir un archivo de mapa..."), ImVec2(320, 34))) openMapFile();
+	hint(tr("Un map.json de cualquier carpeta: tuyo o que te hayan pasado."));
+	ImGui::Spacing();
+	if (ImGui::Button(tr("Importar un modelo (OBJ o DAE)..."), ImVec2(320, 34))) newMapFromModel();
+	hint(tr("Un escenario hecho en Blender o sacado de otro juego: su malla es el suelo y encima pones cebollas, piezas y enemigos."));
+	ImGui::Spacing();
+	if (ImGui::Button(tr("Abrir uno de mis mapas"), ImVec2(320, 34))) {
+		refreshOpenList();
+		openOpen_ = true;
+		newMap(nectar::TerrainShape::Rectangle);
+		screen_ = Screen::Editor;
+	}
+	ImGui::EndChild();
+	ImGui::SameLine(0, 24);
+	ImGui::BeginChild("##home_right", ImVec2(rightW, 0));
+	recentList(rightW);
+	ImGui::EndChild();
+}
+
+bool App::modeCard(int mode, float w, float h)
+{
+	const char* title;
+	const char* blurb;
+	ImU32 accent;
+	switch (unsigned(mode)) {
+	case nectar::MAPMODE_VS: title = "VS", blurb = tr("Dos jugadores, uno contra el otro."), accent = IM_COL32(214, 92, 74, 255); break;
+	case nectar::MAPMODE_SOLO:
+		title = tr("Solo"), blurb = tr("Una misión para un jugador: capitán, nave, cebollas y un objetivo."), accent = IM_COL32(90, 140, 220, 255);
+		break;
+	case nectar::MAPMODE_COOP: title = tr("Coop"), blurb = tr("La misma misión, pero para dos jugadores a la vez."), accent = IM_COL32(110, 190, 90, 255); break;
+	default: title = tr("Campaña"), blurb = tr("Varios niveles (zonas) que se van abriendo, como la historia del juego."), accent = IM_COL32(225, 200, 90, 255); break;
+	}
+	ImGui::PushID(mode);
+	const ImVec2 p     = ImGui::GetCursorScreenPos();
+	const bool pressed = ImGui::Button("##card", ImVec2(w, h));
+	ImDrawList* dl     = ImGui::GetWindowDrawList();
+	dl->AddRectFilled(p, ImVec2(p.x + 6, p.y + h), accent, 4.0f, ImDrawFlags_RoundCornersLeft);
+	// Dibujo: cuántos juegan y cómo.
+	const ImVec2 c(p.x + 52, p.y + h * 0.5f + 6);
+	switch (unsigned(mode)) {
+	case nectar::MAPMODE_VS:
+		drawSprout(dl, ImVec2(c.x - 18, c.y), 0.8f);
+		drawSprout(dl, ImVec2(c.x + 18, c.y), 0.8f);
+		dl->AddText(nullptr, ImGui::GetFontSize() * 0.9f, ImVec2(c.x - 8, c.y - 34), accent, "vs");
+		break;
+	case nectar::MAPMODE_SOLO: drawSprout(dl, c, 1.1f); break;
+	case nectar::MAPMODE_COOP:
+		drawSprout(dl, ImVec2(c.x - 13, c.y), 0.85f);
+		drawSprout(dl, ImVec2(c.x + 13, c.y + 4), 0.85f);
+		break;
+	default:
+		drawSprout(dl, ImVec2(c.x - 22, c.y + 6), 0.6f);
+		drawSprout(dl, ImVec2(c.x, c.y - 6), 0.6f);
+		drawSprout(dl, ImVec2(c.x + 22, c.y + 6), 0.6f);
+		break;
+	}
+	const float tx = p.x + 104;
+	dl->AddText(nullptr, ImGui::GetFontSize() * 1.35f, ImVec2(tx, p.y + 16), IM_COL32(236, 230, 200, 255), title);
+	dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(tx, p.y + 16 + ImGui::GetFontSize() * 1.6f), IM_COL32(190, 190, 180, 255), blurb, nullptr,
+	            std::max(40.0f, w - (tx - p.x) - 12));
+	ImGui::PopID();
+	return pressed;
+}
+
+void App::recentList(float w)
+{
+	ImGui::SeparatorText(tr("Recientes"));
+	struct Recent {
+		std::string name, path, modes, when;
+	};
+	static std::vector<Recent> sList;
+	static double sAt = -10.0;
+	if (now() - sAt > 3.0) {
+		sAt = now();
+		sList.clear();
+		std::vector<std::string> paths = cfg_.recentMaps;
+		if (!cfg_.lastMap.empty() && std::find(paths.begin(), paths.end(), cfg_.lastMap) == paths.end()) paths.insert(paths.begin(), cfg_.lastMap);
+		std::error_code ec;
+		for (const std::string& path : paths) {
+			if (!fs::exists(path, ec) || sList.size() >= 10) continue;
+			Recent r;
+			r.path = path;
+			r.name = fs::path(path).parent_path().filename().string();
+			std::string text, err;
+			MapDoc d;
+			if (readText(path, text) && nectar::parseMapDoc(text, d, err)) {
+				r.name = d.name;
+				for (unsigned m : { unsigned(nectar::MAPMODE_VS), unsigned(nectar::MAPMODE_SOLO), unsigned(nectar::MAPMODE_COOP) }) {
+					if (!(d.modes & m)) continue;
+					if (!r.modes.empty()) r.modes += " · ";
+					r.modes += m == nectar::MAPMODE_VS ? "VS" : m == nectar::MAPMODE_SOLO ? tr("Solo") : tr("Coop");
+				}
+			}
+			const auto ft = fs::last_write_time(path, ec);
+			if (!ec) {
+				const auto sys  = std::chrono::time_point_cast<std::chrono::system_clock::duration>(ft - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
+				const auto days = std::chrono::duration_cast<std::chrono::hours>(std::chrono::system_clock::now() - sys).count() / 24;
+				char buf[64];
+				if (days <= 0)
+					r.when = tr("hoy");
+				else if (days == 1)
+					r.when = tr("ayer");
+				else
+					std::snprintf(buf, sizeof(buf), tr("hace %d días"), int(days)), r.when = buf;
+			}
+			sList.push_back(r);
+		}
+	}
+	if (sList.empty()) {
+		hint(tr("Aquí saldrán los mapas que abras o guardes."));
+		return;
+	}
+	const float rowH = 76.0f;
+	for (std::size_t i = 0; i < sList.size(); i++) {
+		const Recent& r = sList[i];
+		ImGui::PushID(int(i));
+		const ImVec2 p     = ImGui::GetCursorScreenPos();
+		const bool pressed = ImGui::Selectable("##recent", false, 0, ImVec2(w - 8, rowH));
+		ImGui::SetItemTooltip("%s", r.path.c_str());
+		ImDrawList* dl   = ImGui::GetWindowDrawList();
+		const ImVec2 a(p.x + 4, p.y + 6), b(p.x + 4 + rowH - 12, p.y + rowH - 6);
+		const std::string thumbPath = (fs::path(r.path).parent_path() / "thumb.png").string();
+		std::error_code ec;
+		const unsigned tex = fs::exists(thumbPath, ec) ? thumb(thumbPath) : 0;
+		if (tex)
+			dl->AddImage(ImTextureID(std::intptr_t(tex)), a, b);
+		else
+			dl->AddRectFilled(a, b, IM_COL32(60, 80, 50, 255), 4.0f);
+		const float tx = b.x + 12, lh = ImGui::GetFontSize() + 4;
+		dl->PushClipRect(ImVec2(tx, p.y), ImVec2(p.x + w - 12, p.y + rowH), true);
+		dl->AddText(ImVec2(tx, p.y + 10), IM_COL32(236, 230, 200, 255), r.name.c_str());
+		dl->AddText(ImVec2(tx, p.y + 10 + lh), IM_COL32(170, 200, 140, 255), r.modes.c_str());
+		dl->AddText(ImVec2(tx, p.y + 10 + lh * 2), IM_COL32(150, 150, 140, 255), r.when.c_str());
+		dl->PopClipRect();
+		ImGui::PopID();
+		if (pressed) {
+			openMap(r.path);
+			if (ed_.path == r.path) screen_ = Screen::Editor;
+			break;
+		}
+	}
+}
+
+// Paso 2: como en Unreal, ya con el modo elegido; siempre hay uno en blanco.
+void App::drawStartNew()
+{
+	if (ImGui::Button(tr("< Cambiar modo"), ImVec2(170, 34))) {
+		startMode_ = 0;
+		return;
+	}
+	ImGui::SameLine(0, 16);
+	const char* modeName = startMode_ == nectar::MAPMODE_VS     ? "VS"
+	                       : startMode_ == nectar::MAPMODE_SOLO ? tr("Solo")
+	                       : startMode_ == nectar::MAPMODE_COOP ? tr("Coop")
+	                                                             : tr("Campaña");
+	ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 7);
+	ImGui::TextColored(ImVec4(0.90f, 0.87f, 0.62f, 1), "%s%s", tr("Mapa nuevo para: "), modeName);
+	ImGui::Spacing();
+	if (startMode_ == kStartCampaign) {
+		drawCampaignPickers();
+		return;
+	}
+	ImGui::SeparatorText(tr("Empieza en blanco"));
+	hint(tr("Elige el tamaño y la forma del suelo para empezar. Después puedes cambiarlos como quieras."));
+	// Tamaño del mapa en blanco: el de siempre (mediano) o a escala.
+	static const double kSizeScale[3] = { 0.75, 1.0, 1.5 };
+	{
+		const char* sizes[3] = { tr("Pequeño"), tr("Mediano"), tr("Grande") };
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextUnformatted(tr("Tamaño"));
+		for (int i = 0; i < 3; i++) {
+			ImGui::SameLine(0, i ? 8 : 16);
+			if (choiceButton(sizes[i], startSize_ == i, ImVec2(130, 30))) startSize_ = i;
+		}
+		ImGui::SameLine(0, 16);
+		char dims[64];
+		std::snprintf(dims, sizeof(dims), "%.0f × %.0f", 3200.0 * kSizeScale[startSize_], 1800.0 * kSizeScale[startSize_]);
+		hint(dims);
+	}
+	ImGui::Spacing();
 	struct S {
 		const char* id;
 		nectar::TerrainShape shape;
@@ -791,34 +987,56 @@ void App::drawWelcome()
 	for (int i = 0; i < 5; i++) {
 		if (i) ImGui::SameLine(0, 18);
 		if (shapeButton(shapes[i].id, shapes[i].shape, shapes[i].label, shapeSize)) {
-			newMap(shapes[i].shape);
+			newMap(shapes[i].shape, kSizeScale[startSize_]);
+			applyStartMode();
 			screen_ = Screen::Editor;
 		}
 	}
 	ImGui::Spacing();
-	if (ImGui::Button(tr("Nivel desde un modelo (OBJ o DAE)..."), ImVec2(320, 34))) newMapFromModel();
-	hint(tr("Un escenario hecho en Blender o sacado de otro juego: su malla es el suelo y encima pones cebollas, piezas y enemigos."));
-	ImGui::Spacing();
 	const float templateSize = std::max(112.0f, std::min(148.0f, (ImGui::GetContentRegionAvail().x - 80.0f) / 6.0f));
-	if (templatePickers(templateSize)) screen_ = Screen::Editor;
-	ImGui::Spacing();
-	if (coursePickers()) screen_ = Screen::Editor;
-	ImGui::Spacing();
-	drawCampaignPickers();
-	ImGui::Spacing();
-	ImGui::SeparatorText(tr("O bien"));
-	if (ImGui::Button(tr("Abrir uno de mis mapas"), ImVec2(240, 40))) {
-		refreshOpenList();
-		openOpen_ = true;
-		newMap(nectar::TerrainShape::Rectangle);
+	if (templatePickers(templateSize, startMode_)) {
+		applyStartMode();
 		screen_ = Screen::Editor;
 	}
-	ImGui::SameLine();
-	if (ImGui::Button(tr("Copiar la arena del juego"), ImVec2(240, 40))) {
-		openBuiltIn();
+	ImGui::Spacing();
+	if (coursePickers()) {
+		applyStartMode();
 		screen_ = Screen::Editor;
 	}
-	ImGui::End();
+	if (startMode_ == nectar::MAPMODE_VS) {
+		ImGui::Spacing();
+		ImGui::SeparatorText(tr("O bien"));
+		if (ImGui::Button(tr("Copiar la arena del juego"), ImVec2(240, 40))) {
+			openBuiltIn();
+			screen_ = Screen::Editor;
+		}
+	}
+}
+
+void App::applyStartMode()
+{
+	if (!startMode_ || startMode_ == kStartCampaign) return;
+	MapDoc d = ed_.doc;
+	// La misión se coloca mirando dónde empieza el Jugador 1 en VS: antes de quitarlo.
+	if (startMode_ & (nectar::MAPMODE_SOLO | nectar::MAPMODE_COOP)) nm::ensureStory(d, startMode_ == nectar::MAPMODE_COOP);
+	d.modes = startMode_;
+	ed_.reset(d, ed_.path);
+}
+
+void App::rememberRecent(const std::string& path)
+{
+	auto& list = cfg_.recentMaps;
+	list.erase(std::remove(list.begin(), list.end(), path), list.end());
+	list.insert(list.begin(), path);
+	if (list.size() > 12) list.resize(12);
+}
+
+void App::openMapFile()
+{
+	const fs::path file = pikmin::launcher::platform::askForFile(tr("Elige un mapa"), tr("Mapa (map.json)"), "*.json");
+	if (file.empty()) return;
+	openMap(file.string());
+	if (ed_.path == file.string()) screen_ = Screen::Editor;
 }
 
 // ── Archivo ─────────────────────────────────────────────────────────────────
@@ -830,10 +1048,28 @@ void App::notify(int level, const std::string& text)
 	fprintf(stderr, "[mapmaker] %s\n", text.c_str());
 }
 
-void App::newMap(nectar::TerrainShape shape)
+void App::newMap(nectar::TerrainShape shape, double scale)
 {
 	editingZoneOf_.clear();
 	MapDoc d = nectar::defaultMapDoc();
+	if (scale != 1.0) {
+		// Otro tamaño: todo a escala (bordes, bases, cebollas, piezas y
+		// murallas) y el terreno rehecho del tamaño nuevo.
+		for (const ItemRef& r : allItems(d)) {
+			if (r.type == ItemType::Wall) continue;
+			Xform x = getXform(d, r);
+			x.x *= scale;
+			x.z *= scale;
+			setXform(d, r, x);
+		}
+		for (nectar::DocWall& w : d.walls) {
+			w.ax *= scale, w.az *= scale, w.bx *= scale, w.bz *= scale;
+			w.cx *= scale, w.cz *= scale, w.radius *= scale;
+		}
+		d.minX *= scale, d.maxX *= scale, d.minZ *= scale, d.maxZ *= scale;
+		d.terrain = nectar::DocTerrain();
+		nectar::makeTerrainGrid(d);
+	}
 	if (shape != nectar::TerrainShape::Rectangle) {
 		nectar::applyTerrainShape(d, shape);
 		// Que salidas, cebollas y piezas no se queden sin suelo con la forma.
@@ -946,24 +1182,40 @@ unsigned App::templateThumb(const TemplateInfo& t)
 	return thumb(path);
 }
 
-bool App::templatePickers(float size)
+bool App::templatePickers(float size, unsigned modes)
 {
+	// Las sencillas primero, para que quien empieza sepa por dónde ir.
+	std::vector<const TemplateInfo*> order;
+	for (const TemplateInfo& t : mapTemplates()) {
+		if (t.modes & modes) order.push_back(&t);
+	}
+	if (order.empty()) return false;
 	ImGui::SeparatorText(tr("O empieza con una plantilla"));
 	hint(tr("Mapas ya hechos, listos para jugar o para cambiarlos a tu gusto."));
 	const TemplateInfo* chosen = nullptr;
 	const int perRow           = std::max(1, int(ImGui::GetContentRegionAvail().x / (size + 16.0f)));
 	int col                    = 0;
-	for (const TemplateInfo& t : mapTemplates()) {
+	std::stable_sort(order.begin(), order.end(), [](const TemplateInfo* a, const TemplateInfo* b) { return a->easy > b->easy; });
+	for (const TemplateInfo* tp : order) {
+		const TemplateInfo& t = *tp;
 		ImGui::PushID(t.id);
 		ImGui::BeginGroup();
 		const unsigned tex = templateThumb(t);
 		const bool pressed = tex ? ImGui::ImageButton("##t", ImTextureID(std::intptr_t(tex)), ImVec2(size, size * 0.75f))
 		                         : ImGui::Button("...", ImVec2(size + 8, size * 0.75f + 8));
+		{
+			const char* tag  = t.easy ? tr("Fácil") : tr("Completa");
+			const ImVec2 at  = ImVec2(ImGui::GetItemRectMin().x + 6, ImGui::GetItemRectMin().y + 6);
+			const ImVec2 ts  = ImGui::CalcTextSize(tag);
+			ImDrawList* dl   = ImGui::GetWindowDrawList();
+			dl->AddRectFilled(at, ImVec2(at.x + ts.x + 12, at.y + ts.y + 4), t.easy ? IM_COL32(70, 150, 70, 230) : IM_COL32(170, 120, 40, 230), 8.0f);
+			dl->AddText(ImVec2(at.x + 6, at.y + 2), IM_COL32(255, 255, 255, 255), tag);
+		}
 		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + size + 8);
 		ImGui::TextUnformatted(tr(t.name));
 		ImGui::PopTextWrapPos();
 		ImGui::EndGroup();
-		ImGui::SetItemTooltip("%s", tr(t.blurb));
+		ImGui::SetItemTooltip("%s\n\n%s", tr(t.blurb), t.easy ? tr("Fácil: sencilla, buena para empezar.") : tr("Completa: con de todo, para quien ya sabe."));
 		if (pressed) chosen = &t;
 		ImGui::PopID();
 		if (++col % perRow) ImGui::SameLine(0, 12);
@@ -1039,6 +1291,7 @@ void App::openMap(const std::string& path)
 	hiddenItems_.clear();
 	lockedItems_.clear();
 	cfg_.lastMap = path;
+	rememberRecent(path);
 	cfg_.save();
 	cam_.target   = V3(float((doc.minX + doc.maxX) * 0.5), 0, float((doc.minZ + doc.maxZ) * 0.5));
 	cam_.distance = float(std::max(doc.maxX - doc.minX, doc.maxZ - doc.minZ)) * 1.25f;
@@ -1080,6 +1333,7 @@ bool App::saveMap(const std::string& path)
 	ed_.path     = path;
 	ed_.dirty    = false;
 	cfg_.lastMap = path;
+	rememberRecent(path);
 	cfg_.save();
 	notify(0, tr("Guardado. Lo encontrarás en el juego: modo VS > Mapa."));
 	return true;
@@ -1746,6 +2000,10 @@ M4 App::itemMatrix(const ItemRef& r, bool twin) const
 	}
 	if (r.type != ItemType::Prop && r.type != ItemType::Gen) {
 		x.scale = 1;
+		// La puerta con cerradura, al tamaño del juego (DoorItem, kDoorScale).
+		constexpr double kKeyDoorScale = 6.0;
+		if (r.type == ItemType::Object && r.index >= 0 && r.index < int(ed_.doc.objects.size()) && ed_.doc.objects[std::size_t(r.index)].kind == "key_door")
+			x.scale = kKeyDoorScale;
 		// Apoyados en el terreno (las construcciones, a su altura sobre él).
 		x.y = docHeight(float(x.x), float(x.z)) + (r.type == ItemType::Object ? x.y : 0.0);
 	}
@@ -3586,6 +3844,7 @@ void App::drawMapPanel()
 			if (!m) {
 				notify(1, tr("El mapa tiene que servir para algún modo."));
 			} else {
+				if (d.modes & ~m) notify(0, tr("Lo de ese modo no se borra: vuelve si lo marcas otra vez."));
 				d.modes = m;
 				if (solo || coop) nm::ensureStory(d, coop);
 				ed_.pruneSelection();

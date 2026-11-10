@@ -15,6 +15,7 @@ struct Config {
 	/// Mi biblioteca de piezas recortadas de escenarios: (nombre, "cut:...").
 	std::vector<std::pair<std::string, std::string>> pieces;
 	std::string lastMap;   ///< último map.json abierto o guardado
+	std::vector<std::string> recentMaps; ///< map.json abiertos o guardados, el más nuevo primero
 	bool snap = true;
 	bool tutorialDone = false;
 	std::string language = "en"; ///< "en" o "es"

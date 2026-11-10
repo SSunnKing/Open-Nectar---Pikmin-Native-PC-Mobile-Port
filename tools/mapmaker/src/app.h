@@ -75,6 +75,13 @@ private:
 	void drawSetup();
 	void drawBuilding();
 	void drawWelcome();
+	void drawStartHome();      ///< paso 1: modo, abrir, importar y recientes
+	void drawStartNew();       ///< paso 2: plantillas del modo elegido
+	bool modeCard(int mode, float w, float h);
+	void recentList(float w);
+	void applyStartMode();     ///< pone el modo elegido al mapa recién creado
+	void rememberRecent(const std::string& path);
+	void openMapFile();
 	void startCatalog();
 	void enterEditor();
 	bool shapeButton(const char* id, nectar::TerrainShape shape, const char* label, float size);
@@ -200,11 +207,11 @@ private:
 	void exportPackOf(const std::string& dir);
 
 	// ── Archivo ──
-	void newMap(nectar::TerrainShape shape);
+	void newMap(nectar::TerrainShape shape, double scale = 1.0); ///< scale: tamaño respecto al de siempre (3200 × 1800)
 	/// Mapa sin suelo propio: el suelo es un nivel entero de un .obj o .dae.
 	void newMapFromModel();
 	bool coursePickers();
-	bool templatePickers(float size);
+	bool templatePickers(float size, unsigned modes = ~0u); ///< solo las plantillas de esos modos
 	unsigned templateThumb(const TemplateInfo& t);
 	bool courseMode() const { return !ed_.doc.course.empty(); }
 	void openMap(const std::string& path);
@@ -349,6 +356,9 @@ private:
 	std::vector<std::pair<std::string, std::string>> openList_; // (nombre, ruta)
 	int tutorialStep_ = -1;
 	std::string openAtStart_;
+	unsigned startMode_ = 0; ///< inicio: 0 = elegir modo; si no, MapMode o kStartCampaign
+	int startSize_ = 1; ///< inicio: tamaño del mapa en blanco (0 pequeño, 1 mediano, 2 grande)
+	static constexpr unsigned kStartCampaign = 8u;
 
 	// Campaña en edición
 	nectar::CampaignDoc camp_;

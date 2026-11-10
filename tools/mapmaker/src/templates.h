@@ -15,6 +15,8 @@ struct TemplateInfo {
 	const char* name;  ///< en español (se traduce al mostrarlo)
 	const char* blurb; ///< una línea: tema y dificultad
 	nectar::MapDoc (*build)();
+	bool easy = false; ///< sencilla: buena para empezar (si no, completa)
+	unsigned modes = nectar::MAPMODE_VS; ///< modos para los que se ofrece
 };
 const std::vector<TemplateInfo>& mapTemplates();
 /// Datos del juego para los objetos del juego (plantas, hierba...) de las

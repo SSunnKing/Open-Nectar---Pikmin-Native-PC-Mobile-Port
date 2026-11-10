@@ -15,6 +15,7 @@
 #include "pc_art.h"
 #include "pc_coop.h"
 #include "PikiMgr.h"
+#include "mods/pc_mission.h"
 #endif
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
@@ -978,7 +979,13 @@ void zen::DrawGameInfo::draw(Graphics& gfx)
 	if (!pc_vs_active()) // VS: sin indicador del sol (el día no avanza)
 		mUpperScreenMgr->draw(&perspGraph, dx / 2);
 	mLowerScreenMgr->draw(&perspGraph, 0);
+	// Mapas propios: sin el logo «Challenge» de play_cha.blo (arriba a la
+	// derecha; sus panes no tienen nombre, van en la fila de arriba con los
+	// del día, como en la pantalla partida).
+	const bool customMap = pc_vs_active() || pc_mission_active();
+	if (customMap) setDatePanesVisible(false);
 	mModeScreenMgr->draw(&perspGraph, dx);
+	if (customMap) setDatePanesVisible(true);
 	pc_gfx_set_hud_wide(0);
 #else
 	P2DPerspGraph perspGraph(0, 0, 640, 480, 30.0f, 1.0f, 5000.0f);
