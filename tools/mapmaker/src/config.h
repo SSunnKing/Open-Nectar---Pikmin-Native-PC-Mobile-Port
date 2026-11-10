@@ -23,6 +23,8 @@ struct Config {
 	// Disposición del editor. Se guardan en píxeles lógicos de ImGui para que
 	// el usuario conserve el espacio dedicado a herramientas y propiedades.
 	float toolboxWidth = 300.0f, sidePanelWidth = 360.0f;
+	float sideSplit = 0.58f; ///< panel derecho: parte de arriba (propiedades) sobre el total
+	std::vector<std::string> placeRecents; ///< «Poner cosas»: lo último puesto, como "tipo|asset|etiqueta"
 	bool showToolbox = true, showSidePanel = true;
 	bool ignoreDecorSelection = false;
 	bool localGizmo = false;

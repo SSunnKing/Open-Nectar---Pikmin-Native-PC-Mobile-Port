@@ -97,6 +97,11 @@ public:
 	bool canRedo() const { return !redo_.empty(); }
 	void undo();
 	void redo();
+	/// Historial: qué fue cada paso que se puede deshacer (0 = el último).
+	int undoCount() const { return int(undoLabels_.size()); }
+	const std::string& undoLabel(int i) const { return undoLabels_[undoLabels_.size() - 1 - std::size_t(i)]; }
+	/// Nombre del cambio que se está haciendo (se guarda con él al confirmarlo).
+	std::string label;
 
 	bool selected(const ItemRef& r) const;
 	void select(const ItemRef& r, bool add);
@@ -108,6 +113,7 @@ private:
 	nectar::MapDoc stable_;
 	bool pending_ = false;
 	std::vector<nectar::MapDoc> undo_, redo_;
+	std::vector<std::string> undoLabels_, redoLabels_;
 };
 
 } // namespace nm

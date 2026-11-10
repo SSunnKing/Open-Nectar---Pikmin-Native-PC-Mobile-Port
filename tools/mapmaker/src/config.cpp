@@ -63,6 +63,8 @@ bool Config::load()
 		snapAngle    = j.value("snapAngle", 15.0f);
 		toolboxWidth = j.value("toolboxWidth", 300.0f);
 		sidePanelWidth = j.value("sidePanelWidth", 360.0f);
+		sideSplit    = j.value("sideSplit", 0.58f);
+		placeRecents = j.value("placeRecents", std::vector<std::string>());
 		showToolbox  = j.value("showToolbox", true);
 		showSidePanel = j.value("showSidePanel", true);
 		ignoreDecorSelection = j.value("ignoreDecorSelection", false);
@@ -80,7 +82,7 @@ bool Config::save() const
 	const json j = { { "assetsDir", assetsDir }, { "gameExe", gameExe }, { "lastMap", lastMap }, { "recentMaps", recentMaps }, { "favorites", favorites },
 		             { "recents", recents },     { "snap", snap },       { "snapStep", snapStep }, { "snapAngle", snapAngle },
 		             { "tutorialDone", tutorialDone }, { "language", language },
-		             { "toolboxWidth", toolboxWidth }, { "sidePanelWidth", sidePanelWidth },
+		             { "toolboxWidth", toolboxWidth }, { "sidePanelWidth", sidePanelWidth }, { "sideSplit", sideSplit }, { "placeRecents", placeRecents },
 		             { "showToolbox", showToolbox }, { "showSidePanel", showSidePanel },
 		             { "ignoreDecorSelection", ignoreDecorSelection }, { "localGizmo", localGizmo }, { "pieces", pieces } };
 	std::ofstream f(fs::path(directory()) / "config.json");
