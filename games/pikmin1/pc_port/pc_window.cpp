@@ -1425,10 +1425,13 @@ void pc_window_poll_events(PADStatus* pad) {
                 if (event.button.which != SDL_TOUCH_MOUSEID) pc_menu_click_disarm_hover();
                 if (event.button.button == SDL_BUTTON_RIGHT && event.button.which != SDL_TOUCH_MOUSEID)
                     pc_menu_click_post_back();
-                // Menú F1 abierto: el clic izquierdo es un toque (misma lógica
-                // que la pantalla táctil: seleccionar fila / pulsar la ya elegida).
-                // (También en el mapa de zonas de las campañas: elegir zona con el ratón.)
-                if ((sSettingsMenuOpen || pc_campaign_map_active()) && event.button.button == SDL_BUTTON_LEFT
+                // F1: left click is a tap (same as touch: select a row / press the
+                // selected one). Campaign map shares this tap path for zone picks,
+                // but that changes sim state, so it stays off in deterministic mode
+                // (Quick Save / netplay). F1 itself is host UI and keeps the mouse.
+                if (pc_menu_click_settings_touch_should_post(sSettingsMenuOpen, pc_campaign_map_active(),
+                                                            pc_netplay_deterministic())
+                    && event.button.button == SDL_BUTTON_LEFT
                     && event.button.which != SDL_TOUCH_MOUSEID) {
                     int ww = 0, wh = 0;
                     SDL_GetWindowSize(sWindow, &ww, &wh);

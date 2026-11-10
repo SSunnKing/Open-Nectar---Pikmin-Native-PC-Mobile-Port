@@ -132,6 +132,12 @@ void pc_menu_click_set_enabled(bool enabled);
 // deterministic mode is on. Pure helper so the gate is unit-tested without SDL.
 bool pc_menu_click_allowed(bool deterministicMode);
 
+// Whether a left-click should be posted to pc_settings_touch_tap this frame.
+// F1/settings (settingsOpen) is host UI and always allowed. Campaign map zone
+// pick shares that tap path but changes sim state, so it follows allowed().
+bool pc_menu_click_settings_touch_should_post(bool settingsOpen, bool campaignMapActive,
+                                              bool deterministicMode);
+
 // Hand cursor. Every hover test (pc_menu_click_hover, and targets_hit / targets_hit_row for
 // projected targets) records whether the pointer is over an active target. A locked row is a
 // miss, so it never asks for the hand. begin_tick() latches the tick that ended:
