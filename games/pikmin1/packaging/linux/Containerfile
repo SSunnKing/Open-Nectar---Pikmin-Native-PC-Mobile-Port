@@ -10,6 +10,9 @@
 FROM docker.io/library/ubuntu:20.04
 
 ENV DEBIAN_FRONTEND=noninteractive
+# Los mirrors fallan a veces (sobre todo desde CI): reintenta las descargas.
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80retries
+# "&& rm": si apt falla, la imagen no se crea a medias (sin gcc-13).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl file git pkg-config python3 python3-pip \
         build-essential g++-10 gcc-10 \
@@ -17,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxkbcommon-dev libwayland-dev libwayland-bin wayland-protocols \
         libgl1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev \
         libpulse-dev libasound2-dev libdbus-1-dev libudev-dev libusb-1.0-0-dev libsamplerate0-dev \
-    ; rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
 # El online de Pikmin 1 compila con -ftrivial-auto-var-init=zero (GCC 12+).
 # GCC 13 del PPA de toolchain: el runtime de C++ va estático y la glibc sigue
@@ -25,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common gpg-agent \
     && add-apt-repository -y ppa:ubuntu-toolchain-r/test \
     && apt-get update && apt-get install -y --no-install-recommends gcc-13 g++-13 \
-    ; rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
 # CMake de Ubuntu 20.04 es 3.16; pip trae uno reciente.
 RUN pip3 install --no-cache-dir "cmake>=3.24" ninja
