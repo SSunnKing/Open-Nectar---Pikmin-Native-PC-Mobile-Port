@@ -1,0 +1,301 @@
+# Build every release file (Linux, Windows, macOS, Android) and put them on a
+# DRAFT GitHub release when a version tag is pushed.
+#
+# This runs the same scripts a release has always used, so the files come out
+# the same way:
+#   scripts/release-linux.sh     Ubuntu 20.04 container (podman), AppImage
+#   scripts/release-windows.sh   MinGW cross build from Linux
+#   scripts/release-macos.sh     on a Mac runner (arm64, ad-hoc signed)
+#   games/pikmin1/packaging/android/package-apk.sh   signed APK
+# and scripts/release/make_release.py writes the archives and manifest.json.
+#
+# How to release: edit versions.json, merge, then push a tag that equals
+# versions.json "release" (for example `git tag 1.3 && git push origin 1.3`).
+# The draft release is only a draft. Nothing reaches users until it is
+# published by hand, so the files can be checked first.
+#
+# Running it by hand (Actions > Release > Run workflow) builds everything and
+# keeps the files as workflow artifacts. It never creates a release.
+#
+# The Android job needs the signing key as repository secrets. Without them a
+# tag run skips the APK (a debug-signed APK cannot update an installed app) and
+# says so. See docs/RELEASING.md.
+name: Release
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Keep in sync with android.yml and games/pikmin1/android/app/build.gradle.
+  NDK_VERSION: 28.2.13676358
+  CMAKE_VERSION: 3.22.1
+  ANDROID_DIR: games/pikmin1/android
+
+jobs:
+  check:
+    name: Check the version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: version
+        run: |
+          version="$(python3 -c "import json;print(json.load(open('versions.json'))['release'])")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            if [ "${GITHUB_REF_NAME}" != "${version}" ]; then
+              echo "::error::The tag is ${GITHUB_REF_NAME} but versions.json says release ${version}. Fix versions.json or tag again."
+              exit 1
+            fi
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Manual run: the files are kept as artifacts and no release is created."
+          fi
+
+  linux:
+    name: Linux
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build (container, AppImage)
+        run: |
+          podman --version
+          bash scripts/release-linux.sh
+      - name: Collect
+        run: |
+          mkdir -p dist
+          find release-out/linux -maxdepth 1 -type f -exec cp {} dist/ \;
+          ls -l dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-linux
+          path: dist
+          if-no-files-found: error
+
+  windows:
+    name: Windows
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the MinGW cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64 pkg-config
+      # The Windows build links SDL2 statically from third_party/SDL2-mingw64 (it is not
+      # committed). This is the setup the README describes, with the same SDL version the
+      # Linux and macOS scripts build.
+      - name: Download SDL2 for MinGW
+        env:
+          SDL_VERSION: '2.32.10'
+        run: |
+          curl -fsSL -o sdl2-mingw.tar.gz \
+            "https://github.com/libsdl-org/SDL/releases/download/release-${SDL_VERSION}/SDL2-devel-${SDL_VERSION}-mingw.tar.gz"
+          tar -xzf sdl2-mingw.tar.gz
+          for game in pikmin1 pikmin2; do
+            mkdir -p "games/${game}/third_party/SDL2-mingw64"
+            cp -R "SDL2-${SDL_VERSION}/x86_64-w64-mingw32/." "games/${game}/third_party/SDL2-mingw64/"
+          done
+          test -f games/pikmin1/third_party/SDL2-mingw64/lib/libSDL2.a
+      - name: Build
+        run: bash scripts/release-windows.sh
+      - name: Collect
+        run: |
+          mkdir -p dist
+          find release-out/windows -maxdepth 1 -type f -exec cp {} dist/ \;
+          ls -l dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-windows
+          path: dist
+          if-no-files-found: error
+
+  macos:
+    name: macOS (arm64)
+    needs: check
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install build tools
+        run: brew install cmake ninja coreutils
+      - name: Build
+        run: bash scripts/release-macos.sh
+      - name: Collect
+        run: |
+          mkdir -p dist
+          find release-out/macos -maxdepth 1 -type f -exec cp {} dist/ \;
+          ls -l dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-macos
+          path: dist
+          if-no-files-found: error
+
+  android:
+    name: Android
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+
+      # The key must be the same for every release: Android refuses to install an
+      # update signed with a different one. It lives in repository secrets only.
+      - name: Signing key
+        id: key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          PUBLISH: ${{ needs.check.outputs.publish }}
+        run: |
+          if [ -n "${KEYSTORE_BASE64}" ] && [ -n "${STORE_PASSWORD}" ]; then
+            ks="${RUNNER_TEMP}/release.keystore"
+            printf '%s' "${KEYSTORE_BASE64}" | base64 --decode > "${ks}"
+            {
+              echo "storeFile=${ks}"
+              echo "storePassword=${STORE_PASSWORD}"
+              echo "keyAlias=${KEY_ALIAS:-opennectar}"
+              echo "keyPassword=${KEY_PASSWORD:-${STORE_PASSWORD}}"
+            } > "${ANDROID_DIR}/keystore.properties"
+            echo "mode=signed" >> "$GITHUB_OUTPUT"
+          elif [ "${PUBLISH}" = "true" ]; then
+            echo "::warning::No Android signing key is set (secrets ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD). The APK is skipped and the draft release has no APK. See docs/RELEASING.md."
+            echo "mode=skip" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No Android signing key: building with the debug key for a test. This APK is not for release."
+            echo "mode=debug" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-java@v6
+        if: steps.key.outputs.mode != 'skip'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+        if: steps.key.outputs.mode != 'skip'
+        with:
+          validate-wrappers: false
+
+      - name: Locate the Android SDK
+        if: steps.key.outputs.mode != 'skip'
+        id: sdk
+        run: |
+          test -d "${ANDROID_HOME}"
+          echo "home=${ANDROID_HOME%/}" >> "$GITHUB_OUTPUT"
+      - name: Restore NDK and CMake
+        if: steps.key.outputs.mode != 'skip'
+        id: ndk-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ steps.sdk.outputs.home }}/ndk/${{ env.NDK_VERSION }}
+            ${{ steps.sdk.outputs.home }}/cmake/${{ env.CMAKE_VERSION }}
+          key: android-ndk-${{ env.NDK_VERSION }}-cmake-${{ env.CMAKE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+      - name: Install NDK and CMake
+        if: steps.key.outputs.mode != 'skip' && steps.ndk-cache.outputs.cache-hit != 'true'
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION"
+
+      - name: Build the APK
+        if: steps.key.outputs.mode != 'skip'
+        env:
+          MODE: ${{ steps.key.outputs.mode }}
+        run: |
+          echo "sdk.dir=${ANDROID_HOME}" > "${ANDROID_DIR}/local.properties"
+          flags=()
+          if [ "${MODE}" = "debug" ]; then flags+=(--debug-key); fi
+          bash games/pikmin1/packaging/android/package-apk.sh "${flags[@]}"
+
+      - name: Collect
+        if: steps.key.outputs.mode != 'skip'
+        run: |
+          mkdir -p dist
+          cp games/pikmin1/packaging/android/out/open_nectar_*.apk* dist/
+          ls -l dist
+      - uses: actions/upload-artifact@v7
+        if: steps.key.outputs.mode != 'skip'
+        with:
+          # A debug-signed APK is named so it cannot be mistaken for a release one.
+          name: ${{ steps.key.outputs.mode == 'signed' && 'release-android' || 'test-android-debug-key' }}
+          path: dist
+          if-no-files-found: error
+
+  publish:
+    name: Draft release
+    needs: [check, linux, windows, macos, android]
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: parts
+      - name: Gather the files
+        run: |
+          mkdir -p upload
+          for dir in parts/release-*; do
+            for f in "${dir}"/*; do
+              name="$(basename "${f}")"
+              if [ "${name}" = "manifest.json" ]; then
+                # Every system writes the same manifest. A difference is a bug.
+                if [ -f upload/manifest.json ] && ! cmp -s "${f}" upload/manifest.json; then
+                  echo "::error::manifest.json differs between systems (${dir})"
+                  exit 1
+                fi
+              fi
+              cp "${f}" "upload/${name}"
+            done
+          done
+          ls -l upload
+          for need in nectar-linux.tar.gz nectar-windows.zip nectar-macos.tar.gz Open_Nectar-x86_64.AppImage manifest.json; do
+            test -f "upload/${need}" || { echo "::error::${need} is missing"; exit 1; }
+          done
+          ls upload/open_nectar_*.apk >/dev/null 2>&1 || echo "::warning::No APK in this release (no signing key). Add it by hand before publishing."
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          notes="RELEASE_NOTES_${VERSION}.md"
+          if [ ! -f "${notes}" ]; then
+            printf 'Open Nectar %s\n' "${VERSION}" > "${RUNNER_TEMP}/notes.md"
+            notes="${RUNNER_TEMP}/notes.md"
+          fi
+          if gh release view "${VERSION}" >/dev/null 2>&1; then
+            # Re-running for a draft replaces its files. A published release is never touched.
+            if [ "$(gh release view "${VERSION}" --json isDraft -q .isDraft)" != "true" ]; then
+              echo "::error::Release ${VERSION} is already published. Nothing was changed."
+              exit 1
+            fi
+            echo "Draft ${VERSION} exists: replacing its files."
+            gh release upload "${VERSION}" upload/* --clobber
+          else
+            gh release create "${VERSION}" upload/* --draft --verify-tag \
+              --title "Open Nectar ${VERSION}" --notes-file "${notes}"
+          fi
+          echo "Draft release ${VERSION} is ready for review. Publish it when the files check out." >> "$GITHUB_STEP_SUMMARY"
