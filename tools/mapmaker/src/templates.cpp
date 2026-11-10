@@ -1044,6 +1044,284 @@ MapDoc impactCrater()
 	return b.done();
 }
 
+// ── Hondonada del Rocío (solo) ──────────────────────────────────────────────
+// Misión de un día: 9 de 10 piezas. El terreno (alturas, materiales y agua) y
+// la decoración salen de la guía de construcción, que también los dibuja:
+// games/pikmin1/docs/plantillas/hondonada_rocio/make_guide.py genera
+// dew_hollow_data.inc. Lo jugable va aquí, con las mismas posiciones.
+#include "dew_hollow_data.inc"
+
+std::vector<std::uint8_t> fromBase64Parts(const char* const* parts, std::size_t count)
+{
+	static const std::string kAbc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	std::vector<std::uint8_t> out;
+	unsigned buf = 0;
+	int bits     = 0;
+	for (std::size_t k = 0; k < count; k++) {
+		for (const char* c = parts[k]; *c && *c != '='; c++) {
+			const std::size_t v = kAbc.find(*c);
+			if (v == std::string::npos) continue;
+			buf = (buf << 6) | unsigned(v);
+			bits += 6;
+			if (bits >= 8) {
+				bits -= 8;
+				out.push_back(std::uint8_t((buf >> bits) & 0xFF));
+			}
+		}
+	}
+	return out;
+}
+
+/// Tramos (valor, repeticiones) a valores sueltos.
+std::vector<std::uint8_t> unpackRuns(const std::vector<std::uint8_t>& runs, std::size_t count)
+{
+	std::vector<std::uint8_t> out;
+	out.reserve(count);
+	for (std::size_t k = 0; k + 1 < runs.size(); k += 2) out.insert(out.end(), runs[k + 1], runs[k]);
+	out.resize(count, 0);
+	return out;
+}
+
+MapDoc dewHollow()
+{
+	MapDoc d    = defaultMapDoc();
+	d.name      = tr("Hondonada del Rocío");
+	d.author    = "Open Nectar";
+	d.baseStage = "stages/chal1.ini";
+	d.modes     = MAPMODE_SOLO;
+	d.symmetric = false;
+	d.music     = "forest";
+	d.minX      = kDewMinX;
+	d.maxX      = kDewMaxX;
+	d.minZ      = kDewMinZ;
+	d.maxZ      = kDewMaxZ;
+	d.cell      = kDewCell;
+	d.routeStep = 100; // pasillos estrechos
+	d.walls.clear();
+	d.ponds.clear();
+	d.props.clear();
+	d.gens.clear();
+	d.pellets.clear();
+	d.pieces.clear();
+	d.guards.clear();
+	d.enemies.clear();
+	d.objects.clear();
+	d.barrierX.clear();
+	d.passes.clear();
+
+	// Terreno: todo es suelo; el borde es una ladera alta que tapa lo de fuera.
+	DocTerrain& g           = d.terrain;
+	const DocMaterial border = g.border;
+	g                       = DocTerrain();
+	g.border                = border;
+	g.grid                  = true;
+	g.nx                    = kDewNX;
+	g.nz                    = kDewNZ;
+	const std::size_t nv    = g.vertexCount();
+	const std::vector<std::uint8_t> h = fromBase64Parts(kDewHeights, sizeof(kDewHeights) / sizeof(kDewHeights[0]));
+	g.heights.assign(nv, 0);
+	for (std::size_t v = 0; v < nv && 2 * v + 1 < h.size(); v++) g.heights[v] = std::int16_t(std::uint16_t(h[2 * v] | (h[2 * v + 1] << 8)));
+	g.floor.assign(nv, 255);
+	g.water = unpackRuns(fromBase64Parts(kDewWater, sizeof(kDewWater) / sizeof(kDewWater[0])), nv);
+	const std::vector<std::uint8_t> mats = unpackRuns(fromBase64Parts(kDewMats, sizeof(kDewMats) / sizeof(kDewMats[0])), nv);
+	// Materiales en el orden de la guía; cada capa se suaviza un poco para que
+	// los cambios de material sean curvas y no escalones.
+	const Mat* const palette[] = { &kForest, &kGrass, &kMoss, &kLush, &kOrange, &kSand, &kPebble, &kStones, &kDirt, &kRock };
+	static_assert(sizeof(palette) / sizeof(palette[0]) == kDewMatCount, "dew_hollow_data.inc: materiales distintos");
+	for (const Mat* m : palette) {
+		DocMaterial dm;
+		dm.source    = m->source;
+		dm.index     = m->index;
+		dm.attribute = m->attribute;
+		g.palette.push_back(dm);
+		const std::size_t k = g.palette.size() - 1;
+		std::vector<std::uint8_t> raw(nv);
+		for (std::size_t v = 0; v < nv; v++) raw[v] = mats[v] == k ? 255 : 0;
+		std::vector<std::uint8_t> soft(nv);
+		for (int iz = 0; iz <= g.nz; iz++) {
+			for (int ix = 0; ix <= g.nx; ix++) {
+				int sum = 0, n = 0;
+				for (int dz = -1; dz <= 1; dz++) {
+					for (int dx = -1; dx <= 1; dx++) {
+						const int x = ix + dx, z = iz + dz;
+						if (x < 0 || z < 0 || x > g.nx || z > g.nz) continue;
+						sum += raw[std::size_t(g.vertexIndex(x, z))] * (dx == 0 && dz == 0 ? 4 : 1);
+						n += dx == 0 && dz == 0 ? 4 : 1;
+					}
+				}
+				soft[std::size_t(g.vertexIndex(ix, iz))] = std::uint8_t(sum / n);
+			}
+		}
+		g.layers.push_back(std::move(soft));
+	}
+
+	// Decoración: plantas y piedras del juego y piezas de sus niveles.
+	for (const DewDecor& e : kDewDecor) {
+		DocProp pr;
+		const std::string asset = e.asset;
+		if (asset.rfind("piece:", 0) == 0) {
+			const OfficialPiece* pc = findOfficialPiece(asset.substr(6));
+			if (!pc) continue;
+			pr.asset = pc->asset();
+		} else {
+			pr.asset = asset;
+		}
+		pr.x       = e.x;
+		pr.y       = e.y;
+		pr.z       = e.z;
+		pr.ry      = e.ry;
+		pr.scale   = e.scale;
+		pr.collide = e.collide;
+		d.props.push_back(pr);
+	}
+
+	// Lo jugable (ver la guía: misma numeración).
+	auto enemy = [&](const char* type, double x, double z, double face = 0) { d.enemies.push_back({ type, x, z, face }); };
+	enemy("chappy", 1300, -1400, 270); // E1-E2: guardan P2
+	enemy("chappy", 1650, -1600, 270);
+	enemy("mizigen", -350, -600);
+	enemy("qurione", -150, -800);
+	enemy("qurione", 250, -700);
+	enemy("tank", 1150, -500, 270); // E6: a la entrada de la cresta
+	enemy("hibaA", 1325, -250);     // E7-E9: el desfiladero
+	enemy("hibaA", 1325, -200);
+	enemy("hibaA", 1325, -150);
+	enemy("swallow", 1750, 250, 200); // E10: dormido, junto a P4
+	enemy("beatle", -1550, 100, 180); // E11: mira al sur, ante la roca negra
+	enemy("frog", -1300, -600);
+	enemy("napkid", -1800, -300);
+	enemy("kabekuiA", -1100, 250);
+	enemy("kabekuiB", -1200, 450);
+	enemy("kabekuiC", -1080, 480);
+	enemy("namazu", -1000, 1300); // E17-E18: en el agua
+	enemy("namazu", -750, 950);
+	enemy("otama", -1650, 1150);
+	enemy("otama", -1450, 1300);
+	enemy("otama", -1000, 1400);
+	enemy("otama", -650, 1400);
+	enemy("frow", -300, 1230); // E23: en la isla
+	enemy("collec", -1700, -1560);
+	enemy("hollec", -1980, -1280);
+	enemy("kogane", 1350, 1050);
+	enemy("kumo", 1650, 1250, 180); // E27: el jefe
+	enemy("palm", -700, -1250);     // flores de pastillas
+	enemy("palm", 550, -800);
+
+	auto object = [&](const char* kind, double x, double z, double face, double push = 300) {
+		DocObject o;
+		o.kind = kind;
+		o.x    = x;
+		o.z    = z;
+		o.face = face;
+		o.push = push;
+		d.objects.push_back(o);
+	};
+	object("gate_soft", 1000, -1448, 98.3);     // 0 (O1): en medio del pasillo SE
+	object("push_rock", -1250, -1350, 270, 300); // 1 (O2): se empuja desde el pasillo, al oeste, hasta dentro del rincón
+	object("slope_up", -1000, -225, 270);       // 2 (O3): 130 de largo y 40 de desnivel; la parte alta apoya en la terraza (borde x -1125)
+	object("gate_bomb", -1550, 235, 0);         // 3 (O4)
+	object("bridge_long", -350, 600, 0);        // 4 (O5): a la isla
+	object("key", -300, 1080, 0);               // 5 (O6)
+	object("key_door", 790, 900, 90);           // 6 (O7)
+	object("bridge", 0, 520, 180);              // 7 (O8): atajo del arroyo, entre orillas a Y 40
+	object("nectar", 150, -1280, 0);            // 8 (O9)
+
+	// Caminos a mano por donde los objetos abren paso (la red automática no
+	// los ve): los dos puentes y el hueco de la roca negra de la cantera; y
+	// uno de la orilla al fondo del lago (el fondo se hunde 25 bajo el agua).
+	auto link = [&](double ax, double ay, double az, double bx, double by, double bz) {
+		MapDoc::RouteLink l;
+		l.a[0] = ax, l.a[1] = ay, l.a[2] = az;
+		l.b[0] = bx, l.b[1] = by, l.b[2] = bz;
+		d.routeLinks.push_back(l);
+	};
+	link(0, 40, 545, 0, 40, 315);           // puente del arroyo
+	link(-350, 40, 580, -350, 40, 980);     // puente de la isla
+	link(-1550, 40, 110, -1550, 40, 340);   // roca negra de la cantera
+	link(-1250, 40, 600, -1250, 15, 900);   // al fondo del lago (P7): el escalón del agua corta la red automática
+
+	d.pellets = { { "pr01", -200, -480 }, { "pr01", 400, -1350 }, { "pr01", 200, -300 }, { "pr05", 1150, 250 },
+		          { "py01", -1850, -600 }, { "py01", -1100, -620 }, { "py05", -1200, -100 }, { "pb05", -1900, 600 } };
+
+	DocStory& s     = d.story;
+	s               = DocStory();
+	s.present       = true;
+	s.captainCount  = 1;
+	s.captains[0]   = { 0, -50, -1250, 0, {} };
+	s.ship          = { 0, -300, -1200, 0, {} };
+	s.onions        = { { 1, 300, -1100, false }, { 2, 1650, 560, true }, { 0, -1850, 450, true } };
+	s.parts         = { { "uf06", -550, -1050 }, { "uf08", 1450, -1500 }, { "un05", 1500, 50 },   { "uf01", 1900, 400 },  { "un08", -1350, -200 },
+		                { "un02", -1550, 420 },  { "un13", -1250, 1100 }, { "un09", -400, 1180 }, { "un14", -1850, -1480 }, { "un11", 1800, 1350 } };
+	s.rules              = DocRules();
+	s.rules.objective    = "parts";
+	s.rules.target       = 9;
+	s.rules.days         = 1;
+	s.rules.startPikmin[0] = 0;
+	s.rules.startPikmin[1] = 20;
+	s.rules.startPikmin[2] = 0;
+	s.rules.medals[0]    = 40;
+	s.rules.medals[1]    = 70;
+	s.rules.medals[2]    = 100;
+
+	auto when = [](const char* type, int count = 1, int color = -1, int index = 0, double x = 0, double z = 0, double radius = 200) {
+		DocCondition c;
+		c.type   = type;
+		c.count  = count;
+		c.color  = color;
+		c.index  = index;
+		c.x      = x;
+		c.z      = z;
+		c.radius = radius;
+		return c;
+	};
+	auto say = [](const char* type, const char* text) {
+		DocAction a;
+		a.type = type;
+		a.text = tr(text);
+		return a;
+	};
+	auto spawn = [](double x, double z, const char* what, const char* value, int count) {
+		DocAction a;
+		a.type            = "spawn";
+		a.x               = x;
+		a.z               = z;
+		a.reaction.action = what;
+		a.reaction.value  = value;
+		a.reaction.count  = count;
+		a.reaction.radius = 70;
+		return a;
+	};
+	auto trigger = [&](DocCondition c, std::vector<DocAction> actions) {
+		DocTrigger t;
+		t.conditions = { c };
+		t.actions    = std::move(actions);
+		s.triggers.push_back(t);
+	};
+	trigger(when("time", 2), { say("textbox", "La nave ha caído en la hondonada. Recupera 9 piezas antes de que anochezca.") });
+	trigger(when("pikmin", 1, 2), { spawn(-1230, 300, "bomb", "", 6),
+	                                say("message", "Los amarillos pueden llevar las rocas bomba de la cantera.") });
+	trigger(when("parts", 5), { spawn(250, -450, "enemy", "chappb", 2), say("message", "Algo se mueve cerca de la nave...") });
+	{
+		DocAction cam;
+		cam.type    = "camera";
+		cam.x       = 1650;
+		cam.z       = 1250;
+		cam.seconds = 3;
+		trigger(when("area", 1, -1, 0, 1350, 1000, 250), { cam, say("message", "¡Patas Largas guarda la última pieza!") });
+	}
+	trigger(when("object", 1, -1, 7), { say("message", "¡Atajo abierto!") });
+	trigger(when("area", 1, -1, 0, 1450, 820, 130), { say("message", "Desde aquí se puede saltar a la cresta.") });
+	trigger(when("object", 1, -1, 1), { say("message", "¡Has encontrado un rincón escondido!") });
+	trigger(when("hour", 16), { say("message", "Queda poco de día.") });
+
+	d.brightness = 1.0;
+	d.fogScale   = 1.0;
+	d.tint[0]    = 255;
+	d.tint[1]    = 248;
+	d.tint[2]    = 236;
+	return d;
+}
+
 } // namespace
 
 void setTemplateDataDir(const std::string& dataDir) { gTemplateDataDir = dataDir; }
@@ -1118,13 +1396,15 @@ const std::vector<TemplateInfo>& mapTemplates()
 		{ "islands", "Archipiélago del manantial", "Islas en un gran lago: calzadas, un puente al centro y mucho para los azules.", springIslands },
 		{ "terraces", "Jardín en terrazas", "Cuatro alturas en anillos con rampas en espiral, agujeros y la cima tras una puerta.", gardenTerraces },
 		{ "crater", "Cráter del impacto", "Un cráter con su charca, un arroyo con puente y un rincón escondido.", impactCrater },
-		{ "meadow", "Prado tranquilo", "Sencillo: colinas suaves, flores y lo justo para jugar.", meadow },
-		{ "river", "Río y puentes", "Un río que solo cruzan los azules o los puentes que se construyen.", river },
-		{ "mushrooms", "Bosque de setas", "Colinas oscuras con Puffstools, Breadbugs y setas.", mushrooms },
-		{ "lakes", "Lagos azules", "Agua por todas partes: piezas sumergidas y bichos de charca.", lakes },
+		{ "meadow", "Prado tranquilo", "Sencillo: colinas suaves, flores y lo justo para jugar.", meadow, true },
+		{ "river", "Río y puentes", "Un río que solo cruzan los azules o los puentes que se construyen.", river, true },
+		{ "mushrooms", "Bosque de setas", "Colinas oscuras con Puffstools, Breadbugs y setas.", mushrooms, true },
+		{ "lakes", "Lagos azules", "Agua por todas partes: piezas sumergidas y bichos de charca.", lakes, true },
 		{ "volcano", "Volcán", "Fuego: un cráter con géiseres y Blowhogs. Los rojos mandan.", volcano },
 		{ "plateaus", "Mesetas amarillas", "Tres alturas, acantilados y puertas de roca negra: lanza amarillos.", plateaus },
 		{ "fortress", "Fortaleza", "De todo: foso, calzadas, llaves, puertas con cerradura, néctar y murallas.", fortress },
+		{ "dew", "Hondonada del Rocío", "Misión de un día: consigue 9 de las 10 piezas. Rojos, amarillos y azules, atajos y un jefe al final.", dewHollow, false,
+		  MAPMODE_SOLO },
 	};
 	return list;
 }

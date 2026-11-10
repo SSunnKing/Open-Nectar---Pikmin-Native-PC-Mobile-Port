@@ -168,6 +168,19 @@ void KeyItem::refresh(Graphics& gfx)
 	gfx.mCamera->setBoundOffset(nullptr);
 }
 
+#if defined(PIKI_PC_PORT)
+// La puerta con cerradura de los mapas propios (el juego no la usa): a escala
+// 2 medía 52 de ancho y tapaba poco más que su esfera de 60, así que en los
+// pasos de los mapas quedaban huecos a los lados. Más grande y con su esfera
+// a juego tapa un paso de ~160 sin muretes. El editor de mapas la dibuja igual
+// (kKeyDoorScale en tools/mapmaker/src/app.cpp).
+static const f32 kDoorScale = 6.0f;
+static const f32 kDoorSize  = 80.0f;
+#else
+static const f32 kDoorScale = 2.0f;
+static const f32 kDoorSize  = 60.0f;
+#endif
+
 /**
  * @todo: Documentation
  */
@@ -209,7 +222,7 @@ void DoorItem::becomeGate()
 f32 DoorItem::getSize()
 {
 	if (mObjType == OBJTYPE_Gate) {
-		return 60.0f;
+		return kDoorSize;
 	}
 
 	return 30.0f;
@@ -223,7 +236,7 @@ void DoorItem::init(immut Vector3f& pos)
 	ItemCreature::init(pos);
 	f32 scale = 1.0f;
 	if (mObjType == OBJTYPE_Gate) {
-		scale = 2.0f;
+		scale = kDoorScale;
 	}
 	mSRT.s.set(scale, scale, scale);
 	mStateId = DoorState::Inactive;
@@ -249,10 +262,10 @@ void DoorItem::update()
 		const f32 dt = gsys->getFrameTime();
 #endif
 		mFadeTimer -= dt;
-		f32 yscale = (mFadeTimer / 2.5f) * 2.0f;
+		f32 yscale = (mFadeTimer / 2.5f) * kDoorScale;
 		mSRT.t.y -= dt * 3.0f;
 
-		mSRT.s.set(2.0f, yscale, 2.0f);
+		mSRT.s.set(kDoorScale, yscale, kDoorScale);
 
 		if (mFadeTimer < 0.0f) {
 			mStateId = DoorState::Killed;

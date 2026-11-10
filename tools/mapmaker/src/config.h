@@ -15,6 +15,7 @@ struct Config {
 	/// Mi biblioteca de piezas recortadas de escenarios: (nombre, "cut:...").
 	std::vector<std::pair<std::string, std::string>> pieces;
 	std::string lastMap;   ///< último map.json abierto o guardado
+	std::vector<std::string> recentMaps; ///< map.json abiertos o guardados, el más nuevo primero
 	bool snap = true;
 	bool tutorialDone = false;
 	std::string language = "en"; ///< "en" o "es"
@@ -22,6 +23,8 @@ struct Config {
 	// Disposición del editor. Se guardan en píxeles lógicos de ImGui para que
 	// el usuario conserve el espacio dedicado a herramientas y propiedades.
 	float toolboxWidth = 300.0f, sidePanelWidth = 360.0f;
+	float sideSplit = 0.58f; ///< panel derecho: parte de arriba (propiedades) sobre el total
+	std::vector<std::string> placeRecents; ///< «Poner cosas»: lo último puesto, como "tipo|asset|etiqueta"
 	bool showToolbox = true, showSidePanel = true;
 	bool ignoreDecorSelection = false;
 	bool localGizmo = false;

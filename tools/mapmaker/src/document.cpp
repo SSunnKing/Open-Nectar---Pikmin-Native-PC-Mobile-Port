@@ -705,6 +705,8 @@ void EditorDoc::reset(const MapDoc& d, const std::string& p)
 	pending_ = false;
 	undo_.clear();
 	redo_.clear();
+	undoLabels_.clear();
+	redoLabels_.clear();
 	selection.clear();
 	generation++;
 	liveGeneration++;
@@ -720,7 +722,9 @@ void EditorDoc::commit(bool interacting)
 {
 	if (!pending_ || interacting) return;
 	undo_.push_back(stable_);
+	undoLabels_.push_back(label);
 	redo_.clear();
+	redoLabels_.clear();
 	stable_  = doc;
 	pending_ = false;
 	dirty    = true;
@@ -734,6 +738,8 @@ void EditorDoc::undo()
 	redo_.push_back(doc);
 	doc = undo_.back();
 	undo_.pop_back();
+	redoLabels_.push_back(undoLabels_.back());
+	undoLabels_.pop_back();
 	stable_  = doc;
 	pending_ = false;
 	dirty    = true;
@@ -748,6 +754,8 @@ void EditorDoc::redo()
 	undo_.push_back(doc);
 	doc = redo_.back();
 	redo_.pop_back();
+	undoLabels_.push_back(redoLabels_.back());
+	redoLabels_.pop_back();
 	stable_  = doc;
 	pending_ = false;
 	dirty    = true;

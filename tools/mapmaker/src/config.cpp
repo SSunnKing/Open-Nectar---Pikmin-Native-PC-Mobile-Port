@@ -52,6 +52,7 @@ bool Config::load()
 		assetsDir    = j.value("assetsDir", "");
 		gameExe      = j.value("gameExe", "");
 		lastMap      = j.value("lastMap", "");
+		recentMaps   = j.value("recentMaps", std::vector<std::string>());
 		favorites    = j.value("favorites", std::vector<std::string>());
 		recents      = j.value("recents", std::vector<std::string>());
 		pieces       = j.value("pieces", std::vector<std::pair<std::string, std::string>>());
@@ -62,6 +63,8 @@ bool Config::load()
 		snapAngle    = j.value("snapAngle", 15.0f);
 		toolboxWidth = j.value("toolboxWidth", 300.0f);
 		sidePanelWidth = j.value("sidePanelWidth", 360.0f);
+		sideSplit    = j.value("sideSplit", 0.58f);
+		placeRecents = j.value("placeRecents", std::vector<std::string>());
 		showToolbox  = j.value("showToolbox", true);
 		showSidePanel = j.value("showSidePanel", true);
 		ignoreDecorSelection = j.value("ignoreDecorSelection", false);
@@ -76,10 +79,10 @@ bool Config::save() const
 {
 	std::error_code ec;
 	fs::create_directories(directory(), ec);
-	const json j = { { "assetsDir", assetsDir }, { "gameExe", gameExe }, { "lastMap", lastMap }, { "favorites", favorites },
+	const json j = { { "assetsDir", assetsDir }, { "gameExe", gameExe }, { "lastMap", lastMap }, { "recentMaps", recentMaps }, { "favorites", favorites },
 		             { "recents", recents },     { "snap", snap },       { "snapStep", snapStep }, { "snapAngle", snapAngle },
 		             { "tutorialDone", tutorialDone }, { "language", language },
-		             { "toolboxWidth", toolboxWidth }, { "sidePanelWidth", sidePanelWidth },
+		             { "toolboxWidth", toolboxWidth }, { "sidePanelWidth", sidePanelWidth }, { "sideSplit", sideSplit }, { "placeRecents", placeRecents },
 		             { "showToolbox", showToolbox }, { "showSidePanel", showSidePanel },
 		             { "ignoreDecorSelection", ignoreDecorSelection }, { "localGizmo", localGizmo }, { "pieces", pieces } };
 	std::ofstream f(fs::path(directory()) / "config.json");

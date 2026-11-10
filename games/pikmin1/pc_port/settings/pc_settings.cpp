@@ -8374,6 +8374,16 @@ void drawMissionEndScreen(DGXGraphics* gfx, int screenW, int screenH, bool es)
 
 // Custom Maps: el objetivo arriba en el centro y, al acabar, el resultado.
 void pc_settings_draw_mission_hud(void) {
+    // Cuadro de texto: el mundo se para mientras está abierto. Va antes de
+    // cualquier salida: con el mundo parado no hay fotogramas de juego (ni
+    // `live`), así que si esto se saltara al cerrarlo, el mundo no volvería a
+    // andar (solo el capitán, que no depende de mPauseAll).
+    static bool sPausedByBox = false;
+    const char* box          = pc_mission_active() ? pc_mission_textbox() : nullptr;
+    if ((box != nullptr) != sPausedByBox) {
+        sPausedByBox       = box != nullptr;
+        gameflow.mPauseAll = sPausedByBox ? TRUE : FALSE;
+    }
     if (!pc_mission_active()) return;
     if (sMenuOpen || pc_glass_menu_active()) return;
     const bool live = sLastGameplayFrameMs != 0 && SDL_GetTicks() - sLastGameplayFrameMs <= 250;
@@ -8405,13 +8415,6 @@ void pc_settings_draw_mission_hud(void) {
         const int secs = int(left + 0.999f);
         snprintf(clock, sizeof(clock), "%d:%02d", secs / 60, secs % 60);
         drawTextOutline(cx - menuTextWidth(clock) / 2, 44, "%s", secs <= 10 ? Colour(255, 110, 90, 255) : Colour(255, 229, 120, 255), shadow, clock);
-    }
-    // Cuadro de texto: el mundo se para mientras está abierto.
-    static bool sPausedByBox = false;
-    const char* box          = pc_mission_textbox();
-    if ((box != nullptr) != sPausedByBox) {
-        sPausedByBox       = box != nullptr;
-        gameflow.mPauseAll = sPausedByBox ? TRUE : FALSE;
     }
     if (box) {
         const int bw = std::min(620, screenW - 40), bh = 150;

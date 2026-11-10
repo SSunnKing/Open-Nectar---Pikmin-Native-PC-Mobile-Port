@@ -15,6 +15,7 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -40,7 +41,7 @@ using nectar::MapDoc;
 namespace {
 
 constexpr double kAutosaveSeconds = 120.0;
-constexpr float kTopBarH = 64.0f, kDefaultToolboxW = 300.0f, kDefaultSideW = 360.0f;
+constexpr float kTopBarH = 64.0f, kStatusBarH = 30.0f, kRailW = 60.0f, kToolRowH = 46.0f, kDefaultToolboxW = 300.0f, kDefaultSideW = 360.0f;
 constexpr float kMinToolboxW = 240.0f, kMinSideW = 280.0f, kMinViewportW = 420.0f;
 
 const ImVec4 kGood(0.57f, 0.84f, 0.37f, 1), kWarn(0.96f, 0.76f, 0.28f, 1), kBad(0.96f, 0.40f, 0.30f, 1), kDim(0.59f, 0.62f, 0.56f, 1);
@@ -257,7 +258,7 @@ std::string sceneName(const std::string& path)
 }
 
 // ── Iconos dibujados a trazos (sin imágenes ni emojis) ──
-enum class Icon { Move, Place, Floor, Height, Plateau, Paint, Water, Walls, Parts, Pellets, Enemies, Bosses, Structures, Decor, More };
+enum class Icon { Move, Place, Floor, Height, Plateau, Paint, Water, Walls, Parts, Pellets, Enemies, Bosses, Structures, Decor, More, Ramp, Trace };
 
 /// Dibuja `icon` centrado en `c`, dentro de un cuadrado de lado 2·h.
 void drawIcon(ImDrawList* dl, ImVec2 c, float h, Icon icon, ImU32 col)
@@ -265,6 +266,19 @@ void drawIcon(ImDrawList* dl, ImVec2 c, float h, Icon icon, ImU32 col)
 	const float t = std::max(1.5f, h * 0.16f);
 	auto P        = [&](float x, float y) { return ImVec2(c.x + x * h, c.y + y * h); };
 	switch (icon) {
+	case Icon::Ramp: { // dos alturas unidas por una cuesta
+		const ImVec2 pts[] = { P(-0.95f, 0.7f), P(-0.35f, 0.7f), P(0.35f, -0.45f), P(0.95f, -0.45f) };
+		dl->AddPolyline(pts, 4, col, 0, t * 1.2f);
+		dl->AddLine(P(-0.95f, 0.85f), P(0.95f, 0.85f), col, t * 0.7f);
+		dl->AddLine(P(0.95f, -0.45f), P(0.95f, 0.85f), col, t * 0.7f);
+		break;
+	}
+	case Icon::Trace: // camino de puntos
+		dl->AddBezierCubic(P(-0.85f, 0.7f), P(-0.4f, -0.9f), P(0.3f, 0.9f), P(0.85f, -0.7f), col, t);
+		dl->AddCircleFilled(P(-0.85f, 0.7f), h * 0.18f, col);
+		dl->AddCircleFilled(P(0.0f, 0.0f), h * 0.18f, col);
+		dl->AddCircleFilled(P(0.85f, -0.7f), h * 0.18f, col);
+		break;
 	case Icon::Move: // cruz de flechas
 		dl->AddLine(P(-0.9f, 0), P(0.9f, 0), col, t);
 		dl->AddLine(P(0, -0.9f), P(0, 0.9f), col, t);
@@ -754,7 +768,8 @@ void App::drawWelcome()
 	const float welcomeW = std::max(600.0f, std::min(1080.0f, vp->WorkSize.x - 48.0f));
 	const float welcomeH = std::max(540.0f, std::min(900.0f, vp->WorkSize.y - 48.0f));
 	ImGui::SetNextWindowSize(ImVec2(welcomeW, welcomeH));
-	ImGui::Begin(tr("¿Qué quieres hacer?"), nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
+	const std::string title = std::string(startMode_ ? tr("Mapa nuevo") : tr("¿Qué quieres hacer?")) + "###welcome";
+	ImGui::Begin(title.c_str(), nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 	{
 		const ImVec2 p = ImGui::GetCursorScreenPos();
 		ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -765,20 +780,214 @@ void App::drawWelcome()
 		hint(tr("Crea mapas para VS, misiones y campañas."));
 		ImGui::Spacing();
 	}
-	std::error_code ec;
-	if (!cfg_.lastMap.empty() && fs::exists(cfg_.lastMap, ec)) {
-		std::string text, err;
-		MapDoc d;
-		std::string name = fs::path(cfg_.lastMap).parent_path().filename().string();
-		if (readText(cfg_.lastMap, text) && nectar::parseMapDoc(text, d, err)) name = d.name;
-		if (wideButton((tr("Seguir con «") + name + "»").c_str(), 46)) {
-			openMap(cfg_.lastMap);
-			screen_ = Screen::Editor;
-		}
-		ImGui::Spacing();
-	}
+	if (startMode_ == 0)
+		drawStartHome();
+	else
+		drawStartNew();
+	ImGui::End();
+}
+
+// Paso 1: como en Blender o Roblox, a la izquierda lo nuevo (primero el modo
+// de juego, que decide qué se puede poner) y lo que ya tienes; a la derecha,
+// los recientes.
+void App::drawStartHome()
+{
+	const float avail  = ImGui::GetContentRegionAvail().x;
+	const float rightW = std::max(250.0f, std::min(380.0f, avail * 0.36f));
+	const float leftW  = avail - rightW - 24.0f;
+	ImGui::BeginChild("##home_left", ImVec2(leftW, 0));
 	ImGui::SeparatorText(tr("Crear un mapa nuevo"));
-	hint(tr("Elige la forma del suelo para empezar. Después puedes cambiarla como quieras."));
+	hint(tr("Primero, ¿a qué se va a jugar en este mapa? Después eliges cómo empezar."));
+	ImGui::Spacing();
+	const unsigned modes[] = { nectar::MAPMODE_VS, nectar::MAPMODE_SOLO, nectar::MAPMODE_COOP, kStartCampaign };
+	const float cardW      = (ImGui::GetContentRegionAvail().x - 16.0f) * 0.5f;
+	for (int i = 0; i < 4; i++) {
+		if (i % 2) ImGui::SameLine(0, 16);
+		if (modeCard(int(modes[i]), cardW, 118.0f)) startMode_ = modes[i];
+		if (i % 2) ImGui::Dummy(ImVec2(0, 6));
+	}
+	ImGui::Spacing();
+	ImGui::SeparatorText(tr("O trae uno que ya tienes"));
+	if (ImGui::Button(tr("Abrir un archivo de mapa..."), ImVec2(320, 34))) openMapFile();
+	hint(tr("Un map.json de cualquier carpeta: tuyo o que te hayan pasado."));
+	ImGui::Spacing();
+	if (ImGui::Button(tr("Importar un modelo (OBJ o DAE)..."), ImVec2(320, 34))) newMapFromModel();
+	hint(tr("Un escenario hecho en Blender o sacado de otro juego: su malla es el suelo y encima pones cebollas, piezas y enemigos."));
+	ImGui::Spacing();
+	if (ImGui::Button(tr("Abrir uno de mis mapas"), ImVec2(320, 34))) {
+		refreshOpenList();
+		openOpen_ = true;
+		newMap(nectar::TerrainShape::Rectangle);
+		screen_ = Screen::Editor;
+	}
+	ImGui::EndChild();
+	ImGui::SameLine(0, 24);
+	ImGui::BeginChild("##home_right", ImVec2(rightW, 0));
+	recentList(rightW);
+	ImGui::EndChild();
+}
+
+bool App::modeCard(int mode, float w, float h)
+{
+	const char* title;
+	const char* blurb;
+	ImU32 accent;
+	switch (unsigned(mode)) {
+	case nectar::MAPMODE_VS: title = "VS", blurb = tr("Dos jugadores, uno contra el otro."), accent = IM_COL32(214, 92, 74, 255); break;
+	case nectar::MAPMODE_SOLO:
+		title = tr("Solo"), blurb = tr("Una misión para un jugador: capitán, nave, cebollas y un objetivo."), accent = IM_COL32(90, 140, 220, 255);
+		break;
+	case nectar::MAPMODE_COOP: title = tr("Coop"), blurb = tr("La misma misión, pero para dos jugadores a la vez."), accent = IM_COL32(110, 190, 90, 255); break;
+	default: title = tr("Campaña"), blurb = tr("Varios niveles (zonas) que se van abriendo, como la historia del juego."), accent = IM_COL32(225, 200, 90, 255); break;
+	}
+	ImGui::PushID(mode);
+	const ImVec2 p     = ImGui::GetCursorScreenPos();
+	const bool pressed = ImGui::Button("##card", ImVec2(w, h));
+	ImDrawList* dl     = ImGui::GetWindowDrawList();
+	dl->AddRectFilled(p, ImVec2(p.x + 6, p.y + h), accent, 4.0f, ImDrawFlags_RoundCornersLeft);
+	// Dibujo: cuántos juegan y cómo.
+	const ImVec2 c(p.x + 52, p.y + h * 0.5f + 6);
+	switch (unsigned(mode)) {
+	case nectar::MAPMODE_VS:
+		drawSprout(dl, ImVec2(c.x - 18, c.y), 0.8f);
+		drawSprout(dl, ImVec2(c.x + 18, c.y), 0.8f);
+		dl->AddText(nullptr, ImGui::GetFontSize() * 0.9f, ImVec2(c.x - 8, c.y - 34), accent, "vs");
+		break;
+	case nectar::MAPMODE_SOLO: drawSprout(dl, c, 1.1f); break;
+	case nectar::MAPMODE_COOP:
+		drawSprout(dl, ImVec2(c.x - 13, c.y), 0.85f);
+		drawSprout(dl, ImVec2(c.x + 13, c.y + 4), 0.85f);
+		break;
+	default:
+		drawSprout(dl, ImVec2(c.x - 22, c.y + 6), 0.6f);
+		drawSprout(dl, ImVec2(c.x, c.y - 6), 0.6f);
+		drawSprout(dl, ImVec2(c.x + 22, c.y + 6), 0.6f);
+		break;
+	}
+	const float tx = p.x + 104;
+	dl->AddText(nullptr, ImGui::GetFontSize() * 1.35f, ImVec2(tx, p.y + 16), IM_COL32(236, 230, 200, 255), title);
+	dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(tx, p.y + 16 + ImGui::GetFontSize() * 1.6f), IM_COL32(190, 190, 180, 255), blurb, nullptr,
+	            std::max(40.0f, w - (tx - p.x) - 12));
+	ImGui::PopID();
+	return pressed;
+}
+
+void App::recentList(float w)
+{
+	ImGui::SeparatorText(tr("Recientes"));
+	struct Recent {
+		std::string name, path, modes, when;
+	};
+	static std::vector<Recent> sList;
+	static double sAt = -10.0;
+	if (now() - sAt > 3.0) {
+		sAt = now();
+		sList.clear();
+		std::vector<std::string> paths = cfg_.recentMaps;
+		if (!cfg_.lastMap.empty() && std::find(paths.begin(), paths.end(), cfg_.lastMap) == paths.end()) paths.insert(paths.begin(), cfg_.lastMap);
+		std::error_code ec;
+		for (const std::string& path : paths) {
+			if (!fs::exists(path, ec) || sList.size() >= 10) continue;
+			Recent r;
+			r.path = path;
+			r.name = fs::path(path).parent_path().filename().string();
+			std::string text, err;
+			MapDoc d;
+			if (readText(path, text) && nectar::parseMapDoc(text, d, err)) {
+				r.name = d.name;
+				for (unsigned m : { unsigned(nectar::MAPMODE_VS), unsigned(nectar::MAPMODE_SOLO), unsigned(nectar::MAPMODE_COOP) }) {
+					if (!(d.modes & m)) continue;
+					if (!r.modes.empty()) r.modes += " · ";
+					r.modes += m == nectar::MAPMODE_VS ? "VS" : m == nectar::MAPMODE_SOLO ? tr("Solo") : tr("Coop");
+				}
+			}
+			const auto ft = fs::last_write_time(path, ec);
+			if (!ec) {
+				const auto sys  = std::chrono::time_point_cast<std::chrono::system_clock::duration>(ft - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
+				const auto days = std::chrono::duration_cast<std::chrono::hours>(std::chrono::system_clock::now() - sys).count() / 24;
+				char buf[64];
+				if (days <= 0)
+					r.when = tr("hoy");
+				else if (days == 1)
+					r.when = tr("ayer");
+				else
+					std::snprintf(buf, sizeof(buf), tr("hace %d días"), int(days)), r.when = buf;
+			}
+			sList.push_back(r);
+		}
+	}
+	if (sList.empty()) {
+		hint(tr("Aquí saldrán los mapas que abras o guardes."));
+		return;
+	}
+	const float rowH = 76.0f;
+	for (std::size_t i = 0; i < sList.size(); i++) {
+		const Recent& r = sList[i];
+		ImGui::PushID(int(i));
+		const ImVec2 p     = ImGui::GetCursorScreenPos();
+		const bool pressed = ImGui::Selectable("##recent", false, 0, ImVec2(w - 8, rowH));
+		ImGui::SetItemTooltip("%s", r.path.c_str());
+		ImDrawList* dl   = ImGui::GetWindowDrawList();
+		const ImVec2 a(p.x + 4, p.y + 6), b(p.x + 4 + rowH - 12, p.y + rowH - 6);
+		const std::string thumbPath = (fs::path(r.path).parent_path() / "thumb.png").string();
+		std::error_code ec;
+		const unsigned tex = fs::exists(thumbPath, ec) ? thumb(thumbPath) : 0;
+		if (tex)
+			dl->AddImage(ImTextureID(std::intptr_t(tex)), a, b);
+		else
+			dl->AddRectFilled(a, b, IM_COL32(60, 80, 50, 255), 4.0f);
+		const float tx = b.x + 12, lh = ImGui::GetFontSize() + 4;
+		dl->PushClipRect(ImVec2(tx, p.y), ImVec2(p.x + w - 12, p.y + rowH), true);
+		dl->AddText(ImVec2(tx, p.y + 10), IM_COL32(236, 230, 200, 255), r.name.c_str());
+		dl->AddText(ImVec2(tx, p.y + 10 + lh), IM_COL32(170, 200, 140, 255), r.modes.c_str());
+		dl->AddText(ImVec2(tx, p.y + 10 + lh * 2), IM_COL32(150, 150, 140, 255), r.when.c_str());
+		dl->PopClipRect();
+		ImGui::PopID();
+		if (pressed) {
+			openMap(r.path);
+			if (ed_.path == r.path) screen_ = Screen::Editor;
+			break;
+		}
+	}
+}
+
+// Paso 2: como en Unreal, ya con el modo elegido; siempre hay uno en blanco.
+void App::drawStartNew()
+{
+	if (ImGui::Button(tr("< Cambiar modo"), ImVec2(170, 34))) {
+		startMode_ = 0;
+		return;
+	}
+	ImGui::SameLine(0, 16);
+	const char* modeName = startMode_ == nectar::MAPMODE_VS     ? "VS"
+	                       : startMode_ == nectar::MAPMODE_SOLO ? tr("Solo")
+	                       : startMode_ == nectar::MAPMODE_COOP ? tr("Coop")
+	                                                             : tr("Campaña");
+	ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 7);
+	ImGui::TextColored(ImVec4(0.90f, 0.87f, 0.62f, 1), "%s%s", tr("Mapa nuevo para: "), modeName);
+	ImGui::Spacing();
+	if (startMode_ == kStartCampaign) {
+		drawCampaignPickers();
+		return;
+	}
+	ImGui::SeparatorText(tr("Empieza en blanco"));
+	hint(tr("Elige el tamaño y la forma del suelo para empezar. Después puedes cambiarlos como quieras."));
+	// Tamaño del mapa en blanco: el de siempre (mediano) o a escala.
+	static const double kSizeScale[3] = { 0.75, 1.0, 1.5 };
+	{
+		const char* sizes[3] = { tr("Pequeño"), tr("Mediano"), tr("Grande") };
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextUnformatted(tr("Tamaño"));
+		for (int i = 0; i < 3; i++) {
+			ImGui::SameLine(0, i ? 8 : 16);
+			if (choiceButton(sizes[i], startSize_ == i, ImVec2(130, 30))) startSize_ = i;
+		}
+		ImGui::SameLine(0, 16);
+		char dims[64];
+		std::snprintf(dims, sizeof(dims), "%.0f × %.0f", 3200.0 * kSizeScale[startSize_], 1800.0 * kSizeScale[startSize_]);
+		hint(dims);
+	}
+	ImGui::Spacing();
 	struct S {
 		const char* id;
 		nectar::TerrainShape shape;
@@ -791,34 +1000,56 @@ void App::drawWelcome()
 	for (int i = 0; i < 5; i++) {
 		if (i) ImGui::SameLine(0, 18);
 		if (shapeButton(shapes[i].id, shapes[i].shape, shapes[i].label, shapeSize)) {
-			newMap(shapes[i].shape);
+			newMap(shapes[i].shape, kSizeScale[startSize_], (startMode_ & nectar::MAPMODE_VS) != 0);
+			applyStartMode();
 			screen_ = Screen::Editor;
 		}
 	}
 	ImGui::Spacing();
-	if (ImGui::Button(tr("Nivel desde un modelo (OBJ o DAE)..."), ImVec2(320, 34))) newMapFromModel();
-	hint(tr("Un escenario hecho en Blender o sacado de otro juego: su malla es el suelo y encima pones cebollas, piezas y enemigos."));
-	ImGui::Spacing();
 	const float templateSize = std::max(112.0f, std::min(148.0f, (ImGui::GetContentRegionAvail().x - 80.0f) / 6.0f));
-	if (templatePickers(templateSize)) screen_ = Screen::Editor;
-	ImGui::Spacing();
-	if (coursePickers()) screen_ = Screen::Editor;
-	ImGui::Spacing();
-	drawCampaignPickers();
-	ImGui::Spacing();
-	ImGui::SeparatorText(tr("O bien"));
-	if (ImGui::Button(tr("Abrir uno de mis mapas"), ImVec2(240, 40))) {
-		refreshOpenList();
-		openOpen_ = true;
-		newMap(nectar::TerrainShape::Rectangle);
+	if (templatePickers(templateSize, startMode_)) {
+		applyStartMode();
 		screen_ = Screen::Editor;
 	}
-	ImGui::SameLine();
-	if (ImGui::Button(tr("Copiar la arena del juego"), ImVec2(240, 40))) {
-		openBuiltIn();
+	ImGui::Spacing();
+	if (coursePickers()) {
+		applyStartMode();
 		screen_ = Screen::Editor;
 	}
-	ImGui::End();
+	if (startMode_ == nectar::MAPMODE_VS) {
+		ImGui::Spacing();
+		ImGui::SeparatorText(tr("O bien"));
+		if (ImGui::Button(tr("Copiar la arena del juego"), ImVec2(240, 40))) {
+			openBuiltIn();
+			screen_ = Screen::Editor;
+		}
+	}
+}
+
+void App::applyStartMode()
+{
+	if (!startMode_ || startMode_ == kStartCampaign) return;
+	MapDoc d = ed_.doc;
+	// La misión se coloca mirando dónde empieza el Jugador 1 en VS: antes de quitarlo.
+	if (startMode_ & (nectar::MAPMODE_SOLO | nectar::MAPMODE_COOP)) nm::ensureStory(d, startMode_ == nectar::MAPMODE_COOP);
+	d.modes = startMode_;
+	ed_.reset(d, ed_.path);
+}
+
+void App::rememberRecent(const std::string& path)
+{
+	auto& list = cfg_.recentMaps;
+	list.erase(std::remove(list.begin(), list.end(), path), list.end());
+	list.insert(list.begin(), path);
+	if (list.size() > 12) list.resize(12);
+}
+
+void App::openMapFile()
+{
+	const fs::path file = pikmin::launcher::platform::askForFile(tr("Elige un mapa"), tr("Mapa (map.json)"), "*.json");
+	if (file.empty()) return;
+	openMap(file.string());
+	if (ed_.path == file.string()) screen_ = Screen::Editor;
 }
 
 // ── Archivo ─────────────────────────────────────────────────────────────────
@@ -830,10 +1061,29 @@ void App::notify(int level, const std::string& text)
 	fprintf(stderr, "[mapmaker] %s\n", text.c_str());
 }
 
-void App::newMap(nectar::TerrainShape shape)
+void App::newMap(nectar::TerrainShape shape, double scale, bool vsWalls)
 {
 	editingZoneOf_.clear();
 	MapDoc d = nectar::defaultMapDoc();
+	if (!vsWalls) d.walls.clear(); // las murallas de las bases solo pintan algo en VS
+	if (scale != 1.0) {
+		// Otro tamaño: todo a escala (bordes, bases, cebollas, piezas y
+		// murallas) y el terreno rehecho del tamaño nuevo.
+		for (const ItemRef& r : allItems(d)) {
+			if (r.type == ItemType::Wall) continue;
+			Xform x = getXform(d, r);
+			x.x *= scale;
+			x.z *= scale;
+			setXform(d, r, x);
+		}
+		for (nectar::DocWall& w : d.walls) {
+			w.ax *= scale, w.az *= scale, w.bx *= scale, w.bz *= scale;
+			w.cx *= scale, w.cz *= scale, w.radius *= scale;
+		}
+		d.minX *= scale, d.maxX *= scale, d.minZ *= scale, d.maxZ *= scale;
+		d.terrain = nectar::DocTerrain();
+		nectar::makeTerrainGrid(d);
+	}
 	if (shape != nectar::TerrainShape::Rectangle) {
 		nectar::applyTerrainShape(d, shape);
 		// Que salidas, cebollas y piezas no se queden sin suelo con la forma.
@@ -946,24 +1196,40 @@ unsigned App::templateThumb(const TemplateInfo& t)
 	return thumb(path);
 }
 
-bool App::templatePickers(float size)
+bool App::templatePickers(float size, unsigned modes)
 {
+	// Las sencillas primero, para que quien empieza sepa por dónde ir.
+	std::vector<const TemplateInfo*> order;
+	for (const TemplateInfo& t : mapTemplates()) {
+		if (t.modes & modes) order.push_back(&t);
+	}
+	if (order.empty()) return false;
 	ImGui::SeparatorText(tr("O empieza con una plantilla"));
 	hint(tr("Mapas ya hechos, listos para jugar o para cambiarlos a tu gusto."));
 	const TemplateInfo* chosen = nullptr;
 	const int perRow           = std::max(1, int(ImGui::GetContentRegionAvail().x / (size + 16.0f)));
 	int col                    = 0;
-	for (const TemplateInfo& t : mapTemplates()) {
+	std::stable_sort(order.begin(), order.end(), [](const TemplateInfo* a, const TemplateInfo* b) { return a->easy > b->easy; });
+	for (const TemplateInfo* tp : order) {
+		const TemplateInfo& t = *tp;
 		ImGui::PushID(t.id);
 		ImGui::BeginGroup();
 		const unsigned tex = templateThumb(t);
 		const bool pressed = tex ? ImGui::ImageButton("##t", ImTextureID(std::intptr_t(tex)), ImVec2(size, size * 0.75f))
 		                         : ImGui::Button("...", ImVec2(size + 8, size * 0.75f + 8));
+		{
+			const char* tag  = t.easy ? tr("Fácil") : tr("Completa");
+			const ImVec2 at  = ImVec2(ImGui::GetItemRectMin().x + 6, ImGui::GetItemRectMin().y + 6);
+			const ImVec2 ts  = ImGui::CalcTextSize(tag);
+			ImDrawList* dl   = ImGui::GetWindowDrawList();
+			dl->AddRectFilled(at, ImVec2(at.x + ts.x + 12, at.y + ts.y + 4), t.easy ? IM_COL32(70, 150, 70, 230) : IM_COL32(170, 120, 40, 230), 8.0f);
+			dl->AddText(ImVec2(at.x + 6, at.y + 2), IM_COL32(255, 255, 255, 255), tag);
+		}
 		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + size + 8);
 		ImGui::TextUnformatted(tr(t.name));
 		ImGui::PopTextWrapPos();
 		ImGui::EndGroup();
-		ImGui::SetItemTooltip("%s", tr(t.blurb));
+		ImGui::SetItemTooltip("%s\n\n%s", tr(t.blurb), t.easy ? tr("Fácil: sencilla, buena para empezar.") : tr("Completa: con de todo, para quien ya sabe."));
 		if (pressed) chosen = &t;
 		ImGui::PopID();
 		if (++col % perRow) ImGui::SameLine(0, 12);
@@ -1039,6 +1305,7 @@ void App::openMap(const std::string& path)
 	hiddenItems_.clear();
 	lockedItems_.clear();
 	cfg_.lastMap = path;
+	rememberRecent(path);
 	cfg_.save();
 	cam_.target   = V3(float((doc.minX + doc.maxX) * 0.5), 0, float((doc.minZ + doc.maxZ) * 0.5));
 	cam_.distance = float(std::max(doc.maxX - doc.minX, doc.maxZ - doc.minZ)) * 1.25f;
@@ -1079,7 +1346,9 @@ bool App::saveMap(const std::string& path)
 	}
 	ed_.path     = path;
 	ed_.dirty    = false;
+	lastSaved_   = now();
 	cfg_.lastMap = path;
+	rememberRecent(path);
 	cfg_.save();
 	notify(0, tr("Guardado. Lo encontrarás en el juego: modo VS > Mapa."));
 	return true;
@@ -1096,7 +1365,7 @@ void App::saveOrAsk(bool thenTest)
 	if (saveMap(ed_.path) && thenTest) testInGame();
 }
 
-void App::testInGame()
+void App::testInGame(bool fromHere)
 {
 	if (ed_.path.empty() || ed_.dirty) {
 		saveOrAsk(true);
@@ -1120,9 +1389,34 @@ void App::testInGame()
 		return;
 	}
 	std::string err;
-	const std::string mapPath = fs::absolute(ed_.path, ec).string();
+	std::string mapPath = fs::absolute(ed_.path, ec).string();
+	if (fromHere) {
+		// Una copia del mapa (en su carpeta, por sus mallas) con el capitán en
+		// el centro de la vista.
+		if (!ed_.doc.story.present || !(ed_.doc.modes & (nectar::MAPMODE_SOLO | nectar::MAPMODE_COOP))) {
+			notify(1, tr("Probar desde la cámara es para solo y coop."));
+			return;
+		}
+		const float x = cam_.target.x, z = cam_.target.z;
+		if (!docSolid(x, z)) {
+			notify(1, tr("En el centro de la vista no hay suelo: mira a un sitio donde se pueda estar."));
+			return;
+		}
+		MapDoc copy                = ed_.doc;
+		copy.story.captains[0].x = x;
+		copy.story.captains[0].z = z;
+		copy.story.captains[1].x = x;
+		copy.story.captains[1].z = z + 120;
+		const fs::path tmp        = fs::path(ed_.path).parent_path() / "test_here.json";
+		if (!writeText(tmp.string(), nectar::writeMapDoc(copy))) {
+			notify(2, tr("No se pudo preparar la prueba (¿falta permiso en la carpeta del mapa?)."));
+			return;
+		}
+		mapPath = fs::absolute(tmp, ec).string();
+		if (testMode_ == nectar::MAPMODE_VS) testMode_ = (ed_.doc.modes & nectar::MAPMODE_SOLO) ? nectar::MAPMODE_SOLO : nectar::MAPMODE_COOP;
+	}
 	// El último modo elegido si el mapa lo tiene; si no, el primero que tenga.
-	if (!(ed_.doc.modes & testMode_)) {
+	if (!(ed_.doc.modes & testMode_) && !fromHere) {
 		for (unsigned m = nectar::MAPMODE_VS; m <= nectar::MAPMODE_COOP; m <<= 1) {
 			if (ed_.doc.modes & m) {
 				testMode_ = m;
@@ -1746,6 +2040,10 @@ M4 App::itemMatrix(const ItemRef& r, bool twin) const
 	}
 	if (r.type != ItemType::Prop && r.type != ItemType::Gen) {
 		x.scale = 1;
+		// La puerta con cerradura, al tamaño del juego (DoorItem, kDoorScale).
+		constexpr double kKeyDoorScale = 6.0;
+		if (r.type == ItemType::Object && r.index >= 0 && r.index < int(ed_.doc.objects.size()) && ed_.doc.objects[std::size_t(r.index)].kind == "key_door")
+			x.scale = kKeyDoorScale;
 		// Apoyados en el terreno (las construcciones, a su altura sobre él).
 		x.y = docHeight(float(x.x), float(x.z)) + (r.type == ItemType::Object ? x.y : 0.0);
 	}
@@ -1788,31 +2086,32 @@ void App::drawEditor()
 	// Los dos laterales son ajustables, pero el lienzo siempre conserva un
 	// mínimo útil. Las preferencias antiguas no tienen estas claves y reciben
 	// los tamaños por defecto desde Config.
-	float toolW = cfg_.showToolbox ? std::max(kMinToolboxW, cfg_.toolboxWidth) : 0.0f;
-	float sideW = cfg_.showSidePanel ? std::max(kMinSideW, cfg_.sidePanelWidth) : 0.0f;
-	const float availableForSides = std::max(kMinToolboxW + kMinSideW, W - kMinViewportW);
-	if (cfg_.showToolbox && cfg_.showSidePanel && toolW + sideW > availableForSides) {
-		const float excess = toolW + sideW - availableForSides;
-		const float shrinkTool = std::min(excess * 0.5f, toolW - kMinToolboxW);
-		toolW -= shrinkTool;
-		sideW = std::max(kMinSideW, availableForSides - toolW);
-	} else if (cfg_.showToolbox) {
-		toolW = std::min(toolW, W - kMinViewportW);
-	} else if (cfg_.showSidePanel) {
-		sideW = std::min(sideW, W - kMinViewportW);
+	// A la izquierda, la columna de iconos (ancho fijo); a la derecha, el
+	// panel de propiedades (ajustable); en medio, la fila de opciones de la
+	// herramienta, el visor y, si está abierto, el catálogo.
+	const float toolW = cfg_.showToolbox ? kRailW : 0.0f;
+	float sideW       = cfg_.showSidePanel ? std::max(kMinSideW, cfg_.sidePanelWidth) : 0.0f;
+	if (cfg_.showSidePanel) {
+		sideW               = std::max(kMinSideW, std::min(sideW, W - toolW - kMinViewportW));
+		cfg_.sidePanelWidth = sideW;
 	}
-	if (cfg_.showToolbox) cfg_.toolboxWidth = toolW;
-	if (cfg_.showSidePanel) cfg_.sidePanelWidth = sideW;
+	const float bodyH   = H - kTopBarH - kStatusBarH;
+	const float viewW   = W - toolW - sideW;
+	const bool drawer   = catalogOpen_ && tool_ == Tool::Place;
+	const float drawerH = drawer ? std::min(320.0f, (bodyH - kToolRowH) * 0.45f) : 0.0f;
 	drawTopBar({ X, Y, W, kTopBarH });
-	if (cfg_.showToolbox) drawToolbox({ X, Y + kTopBarH, toolW, H - kTopBarH });
-	drawViewport({ X + toolW, Y + kTopBarH, W - toolW - sideW, H - kTopBarH });
-	if (cfg_.showSidePanel) drawSidePanel({ X + W - sideW, Y + kTopBarH, sideW, H - kTopBarH });
+	if (cfg_.showToolbox) drawToolbox({ X, Y + kTopBarH, toolW, bodyH });
+	drawToolHeader({ X + toolW, Y + kTopBarH, viewW, kToolRowH });
+	drawViewport({ X + toolW, Y + kTopBarH + kToolRowH, viewW, bodyH - kToolRowH - drawerH });
+	if (drawer) drawCatalogDrawer({ X + toolW, Y + kTopBarH + bodyH - drawerH, viewW, drawerH });
+	if (cfg_.showSidePanel) drawSidePanel({ X + W - sideW, Y + kTopBarH, sideW, bodyH });
+	drawStatusBar({ X, Y + H - kStatusBarH, W, kStatusBarH });
 
 	// Captura directa por coordenadas: no depende del orden de hover de las
 	// ventanas del visor y los paneles, que comparten exactamente este borde.
 	auto splitter = [&](int which, float x, float& value, float sign, float defaultValue) {
 		ImGuiIO& io = ImGui::GetIO();
-		const bool insideY = io.MousePos.y >= Y + kTopBarH && io.MousePos.y <= Y + H;
+		const bool insideY = io.MousePos.y >= Y + kTopBarH && io.MousePos.y <= Y + H - kStatusBarH;
 		const bool hovered = insideY && std::fabs(io.MousePos.x - x) <= 7.0f;
 		if (splitterDrag_ == 0 && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) splitterDrag_ = which;
 		const bool active = splitterDrag_ == which;
@@ -1829,17 +2128,26 @@ void App::drawEditor()
 
 		ImDrawList* fg = ImGui::GetForegroundDrawList();
 		const ImU32 col = active ? IM_COL32(215, 222, 98, 255) : hovered ? IM_COL32(171, 196, 76, 255) : IM_COL32(94, 117, 49, 190);
-		fg->AddLine(ImVec2(x, Y + kTopBarH), ImVec2(x, Y + H), col, active || hovered ? 3.0f : 2.0f);
-		const float cy = Y + kTopBarH + (H - kTopBarH) * 0.5f;
+		fg->AddLine(ImVec2(x, Y + kTopBarH), ImVec2(x, Y + H - kStatusBarH), col, active || hovered ? 3.0f : 2.0f);
+		const float cy = Y + kTopBarH + (H - kTopBarH - kStatusBarH) * 0.5f;
 		fg->AddRectFilled(ImVec2(x - 4, cy - 24), ImVec2(x + 4, cy + 24), col, 4.0f);
 		for (int i = -1; i <= 1; i++) fg->AddLine(ImVec2(x - 2, cy + i * 7.0f), ImVec2(x + 2, cy + i * 7.0f), IM_COL32(26, 45, 20, 230), 1.0f);
 	};
-	if (cfg_.showToolbox) splitter(1, X + toolW, cfg_.toolboxWidth, 1.0f, kDefaultToolboxW);
 	if (cfg_.showSidePanel) splitter(2, X + W - sideW, cfg_.sidePanelWidth, -1.0f, kDefaultSideW);
 	drawModals();
 	drawTutorial();
+	drawRadialMenu();
 	handleShortcuts();
 
+	// Nombre del cambio en curso, para el historial.
+	if (viewportHovered_ && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+		ed_.label = tool_ != Tool::Move                            ? toolName(tool_)
+		          : transformMode_ == TransformMode::Rotate ? tr("Girar")
+		          : transformMode_ == TransformMode::Scale  ? tr("Escalar")
+		                                                    : tr("Mover");
+	} else if (ImGui::IsAnyItemActive()) {
+		ed_.label = tr("Ajustes");
+	}
 	ed_.commit(ImGui::IsAnyItemActive() || dragging_ || drawingWall_ || ImGui::IsMouseDown(ImGuiMouseButton_Left));
 	autosave();
 }
@@ -1856,13 +2164,16 @@ void App::drawTopBar(const Rect& r)
 	// Barra de aplicación sobria: las acciones destacan sobre una superficie
 	// neutra y una línea Nectar identifica el producto sin teñir todo el editor.
 	dl->AddRectFilled(wp, ImVec2(wp.x + r.w, wp.y + r.h), IM_COL32(24, 28, 25, 255));
-	dl->AddRectFilled(ImVec2(wp.x, wp.y + r.h - 3), ImVec2(wp.x + r.w, wp.y + r.h), IM_COL32(123, 155, 56, 255));
+	// Línea inferior del color del modo (como en la pantalla de inicio).
+	const unsigned modes = ed_.doc.modes;
+	const ImU32 modeCol  = modes == nectar::MAPMODE_VS ? IM_COL32(214, 92, 74, 255) : modes == nectar::MAPMODE_SOLO ? IM_COL32(90, 140, 220, 255)
+	                     : modes == nectar::MAPMODE_COOP ? IM_COL32(110, 190, 90, 255) : IM_COL32(123, 155, 56, 255);
+	dl->AddRectFilled(ImVec2(wp.x, wp.y + r.h - 3), ImVec2(wp.x + r.w, wp.y + r.h), modeCol);
 	drawSprout(dl, ImVec2(wp.x + 28, wp.y + 30), 0.86f);
 	dl->AddText(ImVec2(wp.x + 49, wp.y + 12), IM_COL32(232, 235, 220, 255), "NECTAR");
 	dl->AddText(ImVec2(wp.x + 49, wp.y + 33), IM_COL32(139, 153, 126, 255), "MAP MAKER");
 
 	ImGui::SetCursorPos(ImVec2(168, 13));
-	const ImVec2 b(82, 34);
 	// Editando el nivel de una zona: volver a su campaña (guardando el nivel).
 	if (!editingZoneOf_.empty()) {
 		if (ImGui::Button(tr("< Campaña"), ImVec2(104, 34))) {
@@ -1872,44 +2183,98 @@ void App::drawTopBar(const Rect& r)
 		ImGui::SetItemTooltip("%s", tr("Guarda este nivel y vuelve al mapa de la campaña"));
 		ImGui::SameLine();
 	}
-	if (ImGui::Button(tr("Nuevo"), b)) openNew_ = true;
-	ImGui::SetItemTooltip("%s", tr("Empezar otro mapa"));
-	ImGui::SameLine();
-	if (ImGui::Button(tr("Abrir"), b)) {
-		refreshOpenList();
-		openOpen_ = true;
+	// Archivo: nuevo, abrir, guardar y exportar, en un menú.
+	if (ImGui::Button((std::string(tr("Archivo")) + "  v").c_str(), ImVec2(112, 34))) ImGui::OpenPopup("##file_menu");
+	ImGui::SetItemTooltip("%s", tr("Nuevo, abrir, guardar y exportar"));
+	if (ImGui::BeginPopup("##file_menu")) {
+		if (ImGui::MenuItem(tr("Nuevo..."))) openNew_ = true;
+		if (ImGui::MenuItem(tr("Abrir..."))) {
+			refreshOpenList();
+			openOpen_ = true;
+		}
+		ImGui::Separator();
+		if (ImGui::MenuItem(tr("Guardar"), "Ctrl+S")) saveOrAsk(false);
+		if (ImGui::MenuItem(tr("Guardar como..."))) {
+			copyStr(saveName_, sizeof(saveName_), ed_.doc.name);
+			testAfterSave_ = false;
+			openSaveAs_    = true;
+		}
+		ImGui::Separator();
+		if (ImGui::MenuItem(tr("Exportar para compartir (.nectarpack)"))) {
+			if (ed_.path.empty() || ed_.dirty) saveOrAsk(false);
+			if (!ed_.path.empty() && !ed_.dirty) exportPackOf(fs::path(ed_.path).parent_path().string());
+		}
+		ImGui::EndPopup();
 	}
-	ImGui::SetItemTooltip("%s", tr("Abrir uno de tus mapas"));
-	ImGui::SameLine();
-	if (ImGui::Button(tr("Guardar"), b)) saveOrAsk(false);
-	ImGui::SetItemTooltip("%s", tr("Guardar (Ctrl+S)"));
-	ImGui::SameLine();
-	if (ImGui::Button(tr("Exportar"), b)) {
-		if (ed_.path.empty() || ed_.dirty) saveOrAsk(false);
-		if (!ed_.path.empty() && !ed_.dirty) exportPackOf(fs::path(ed_.path).parent_path().string());
-	}
-	ImGui::SetItemTooltip("%s", tr("Guardar un .nectarpack para compartir este mapa"));
 	ImGui::SameLine(0, 14);
-	ImGui::BeginDisabled(!ed_.canUndo());
-	if (ImGui::Button(tr("Deshacer"), ImVec2(88, 34))) ed_.undo();
-	ImGui::SetItemTooltip("%s", tr("Volver atrás el último cambio (Ctrl+Z)"));
-	ImGui::EndDisabled();
-	ImGui::SameLine();
-	ImGui::BeginDisabled(!ed_.canRedo());
-	if (ImGui::Button(tr("Rehacer"), ImVec2(84, 34))) ed_.redo();
-	ImGui::SetItemTooltip("%s", tr("Repetir lo que deshiciste (Ctrl+Y)"));
-	ImGui::EndDisabled();
+	// Deshacer y rehacer, como iconos (flecha curva).
+	auto arrowButton = [&](const char* id, bool redo, bool enabled, const char* tip) {
+		ImGui::BeginDisabled(!enabled);
+		const bool pressed = ImGui::Button(id, ImVec2(40, 34));
+		ImGui::EndDisabled();
+		ImGui::SetItemTooltip("%s", tip);
+		const ImVec2 a = ImGui::GetItemRectMin(), bb = ImGui::GetItemRectMax();
+		const ImVec2 c((a.x + bb.x) * 0.5f, (a.y + bb.y) * 0.5f + 3);
+		const ImU32 col = enabled ? IM_COL32(230, 232, 214, 255) : IM_COL32(105, 112, 100, 255);
+		const float rr  = 8.0f;
+		dl->PathArcTo(c, rr, 3.14159f, 6.28318f, 16);
+		dl->PathStroke(col, 0, 2.2f);
+		const float ex = redo ? c.x + rr : c.x - rr;
+		dl->AddTriangleFilled(ImVec2(ex - 4.5f, c.y - 1), ImVec2(ex + 4.5f, c.y - 1), ImVec2(ex, c.y + 5), col);
+		return pressed;
+	};
+	if (arrowButton("##undo", false, ed_.canUndo(), tr("Deshacer (Ctrl+Z)"))) ed_.undo();
+	ImGui::SameLine(0, 4);
+	if (arrowButton("##redo", true, ed_.canRedo(), tr("Rehacer (Ctrl+Y)"))) ed_.redo();
+	ImGui::SameLine(0, 4);
+	drawHistoryMenu();
+	// A la derecha: comprobaciones, vista, ayuda y probar.
+	const float testW = 170, arrowW = 30, helpW = 82, viewW = 78;
+	int blocking = 0;
+	for (const Issue& i : issues()) blocking += i.blocking ? 1 : 0;
+	const char* readyText = blocking ? (blocking == 1 ? tr("1 cosa por arreglar") : tr("%d cosas por arreglar")) : tr("Listo para jugar");
+	const float readyW    = ImGui::CalcTextSize(readyText).x + 54;
+	const float rightX    = r.w - testW - arrowW - helpW - viewW - readyW - 50;
 	const float mapX = ImGui::GetItemRectMax().x - wp.x + 18.0f;
-	if (mapX < r.w - 370.0f) {
+	if (mapX < rightX - 160.0f) {
 		ImGui::SameLine(0, 18);
+		ImGui::SetCursorPosY(13);
+		// El nombre (se cambia aquí mismo) y sus modos, con el color de cada uno.
+		char nameBuf[128];
+		copyStr(nameBuf, sizeof(nameBuf), ed_.doc.name);
+		ImGui::SetNextItemWidth(std::max(120.0f, std::min(280.0f, rightX - mapX - 140.0f)));
+		ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.11f, 0.13f, 0.11f, 1));
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(9, (34 - ImGui::GetFontSize()) * 0.5f));
+		if (ImGui::InputText("##mapname", nameBuf, sizeof(nameBuf))) {
+			ed_.doc.name = nameBuf;
+			ed_.touch();
+		}
+		ImGui::PopStyleVar();
+		ImGui::PopStyleColor();
+		ImGui::SetItemTooltip("%s", tr("Nombre del mapa: pulsa para cambiarlo"));
+		if (ed_.dirty) {
+			ImGui::SameLine(0, 6);
+			ImGui::SetCursorPosY(20);
+			ImGui::TextColored(kWarn, "*");
+			ImGui::SetItemTooltip("%s", tr("Cambios sin guardar"));
+		}
 		ImGui::SetCursorPosY(20);
-		ImGui::TextColored(ImVec4(0.68f, 0.72f, 0.65f, 1), "%s%s", ed_.doc.name.c_str(), ed_.dirty ? tr("  (sin guardar)") : "");
+		const struct {
+			unsigned mode;
+			const char* label;
+			ImVec4 col;
+		} chips[] = { { nectar::MAPMODE_VS, "VS", ImVec4(0.84f, 0.36f, 0.29f, 1) }, { nectar::MAPMODE_SOLO, "SOLO", ImVec4(0.35f, 0.55f, 0.86f, 1) },
+			          { nectar::MAPMODE_COOP, "COOP", ImVec4(0.43f, 0.75f, 0.35f, 1) } };
+		for (const auto& c : chips) {
+			if (!(modes & c.mode)) continue;
+			ImGui::SameLine(0, 10);
+			ImGui::TextColored(c.col, "%s", c.label);
+		}
 	}
-
-	// A la derecha: ayuda y probar.
-	const float testW = 196, helpW = 82, viewW = 78;
-	ImGui::SameLine(r.w - testW - helpW - viewW - 28);
+	ImGui::SameLine(rightX);
 	ImGui::SetCursorPosY(13);
+	drawReadyPill();
+	ImGui::SameLine(0, 10);
 	if (ImGui::Button(tr("Vista"), ImVec2(viewW, 34))) ImGui::OpenPopup("##view_menu");
 	if (ImGui::BeginPopup("##view_menu")) {
 		bool changed = false;
@@ -1921,6 +2286,7 @@ void App::drawTopBar(const Rect& r)
 		ImGui::Checkbox(tr("Pendientes no transitables"), &showSlopesOverlay_);
 		ImGui::Checkbox(tr("Superficie del agua"), &showWaterOverlay_);
 		ImGui::Checkbox(tr("Nombres de elementos"), &showLabels_);
+		ImGui::Checkbox(tr("Minimapa (abajo a la derecha)"), &showMinimap_);
 		ImGui::Separator();
 		if (ImGui::MenuItem(tr("Restablecer disposición"))) {
 			cfg_.toolboxWidth  = kDefaultToolboxW;
@@ -1946,7 +2312,18 @@ void App::drawTopBar(const Rect& r)
 	}
 	const ImVec2 tmin = ImGui::GetItemRectMin(), tmax = ImGui::GetItemRectMax();
 	testButtonRect_   = { tmin.x, tmin.y, tmax.x - tmin.x, tmax.y - tmin.y };
+	ImGui::SameLine(0, 2);
+	if (ImGui::Button("v##test_more", ImVec2(arrowW, 34))) ImGui::OpenPopup("##test_more");
 	ImGui::PopStyleColor(3);
+	ImGui::SetItemTooltip("%s", tr("Más formas de probar"));
+	if (ImGui::BeginPopup("##test_more")) {
+		if (ImGui::Selectable(tr("Probar desde el principio (F5)"))) testInGame();
+		ImGui::BeginDisabled(!ed_.doc.story.present || !(ed_.doc.modes & (nectar::MAPMODE_SOLO | nectar::MAPMODE_COOP)));
+		if (ImGui::Selectable(tr("Probar desde donde mira la cámara (Mayús+F5)"))) testInGame(true);
+		ImGui::EndDisabled();
+		ImGui::TextColored(kDim, "%s", tr("Desde la cámara: en solo y coop, el capitán empieza en el centro de la vista."));
+		ImGui::EndPopup();
+	}
 	if (ImGui::BeginPopup("##test_mode")) {
 		const struct {
 			unsigned mode;
@@ -1967,67 +2344,255 @@ void App::drawTopBar(const Rect& r)
 
 void App::drawToolbox(const Rect& r)
 {
+	// Columna de iconos (como la barra de herramientas de Blender): el nombre
+	// y su tecla salen al pasar el ratón; las opciones van en la fila de
+	// encima del visor y, las detalladas, en la pestaña «Herramienta».
 	ImGui::SetNextWindowPos(ImVec2(r.x, r.y));
 	ImGui::SetNextWindowSize(ImVec2(r.w, r.h));
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 10));
 	ImGui::Begin("##tools", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings);
+	ImGui::PopStyleVar();
 	toolboxRect_ = { r.x, r.y, r.w, r.h };
-	panelHeading(tr("Herramientas"), tr("Esculpe, coloca y decora"));
 	struct T {
 		Tool tool;
 		const char* label;
 		const char* tip;
 		bool terrain;
-		Icon icon = Icon::Move;
+		Icon icon;
+		int key; ///< tecla numérica (-1 = ninguna)
 	};
-	const T tools[] = { { Tool::Move, tr("Mover y girar"), tr("Coge cosas del mapa y arrástralas"), false, Icon::Move },
-		                { Tool::Place, tr("Poner cosas"), tr("Piezas, pastillas, enemigos y decoración"), false, Icon::Place },
-		                { Tool::Floor, tr("Dibujar suelo"), tr("Da forma al mapa: añade suelo o haz huecos"), true, Icon::Floor },
-		                { Tool::Height, tr("Montañas y hoyos"), tr("Sube y baja el terreno con suavidad"), true, Icon::Height },
-		                { Tool::Plateau, tr("Elevar o hundir zona"), tr("Plataformas y fosos planos, con bordes de acantilado"), true, Icon::Plateau },
-		                { Tool::Paint, tr("Pintar el suelo"), tr("Cambia el aspecto del suelo"), true, Icon::Paint },
-		                { Tool::Water, tr("Agua"), tr("Pinta lagos (solo los Pikmin azules entran)"), true, Icon::Water },
-		                { Tool::Walls, tr("Muros"), tr("Dibuja muros arrastrando"), false, Icon::Walls },
-		                { Tool::Ramp, tr("Rampas"), tr("Une dos alturas con una pendiente transitable"), true, Icon::Plateau },
-		                { Tool::Scatter, tr("Decorar"), tr("Esparce hierbas, flores y piedras pintando"), false, Icon::Decor },
-		                { Tool::Trace, tr("Trazos"), tr("Caminos, ríos y calzadas por puntos, o zonas de suelo con contorno a mano"), true, Icon::Floor } };
-	int n = 1;
-	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(7, 4));
-	for (const T& t : tools) {
-		char label[64];
-		std::snprintf(label, sizeof(label), "%s##tool%d", t.label, n++);
-		// Con un escenario del juego, el suelo y los muros no se tocan.
+	const T tools[] = { { Tool::Move, tr("Mover y girar"), tr("Coge cosas del mapa y arrástralas"), false, Icon::Move, 1 },
+		                { Tool::Floor, tr("Dibujar suelo"), tr("Da forma al mapa: añade suelo o haz huecos"), true, Icon::Floor, 3 },
+		                { Tool::Height, tr("Montañas y hoyos"), tr("Sube y baja el terreno con suavidad"), true, Icon::Height, 4 },
+		                { Tool::Plateau, tr("Elevar o hundir zona"), tr("Plataformas y fosos planos, con bordes de acantilado"), true, Icon::Plateau, 5 },
+		                { Tool::Ramp, tr("Rampas"), tr("Une dos alturas con una pendiente transitable"), true, Icon::Ramp, 9 },
+		                { Tool::Water, tr("Agua"), tr("Pinta lagos (solo los Pikmin azules entran)"), true, Icon::Water, 7 },
+		                { Tool::Paint, tr("Pintar el suelo"), tr("Cambia el aspecto del suelo"), true, Icon::Paint, 6 },
+		                { Tool::Trace, tr("Trazos"), tr("Caminos, ríos y calzadas por puntos, o zonas de suelo con contorno a mano"), true, Icon::Trace, -1 },
+		                { Tool::Place, tr("Poner cosas"), tr("Piezas, pastillas, enemigos y decoración"), false, Icon::Place, 2 },
+		                { Tool::Scatter, tr("Decorar"), tr("Esparce hierbas, flores y piedras pintando"), false, Icon::Decor, 0 },
+		                { Tool::Walls, tr("Muros"), tr("Dibuja muros arrastrando"), false, Icon::Walls, 8 } };
+	// Por grupos: elegir, dar forma al terreno y poner cosas.
+	const int groupStart[] = { 0, 1, 8 };
+	ImDrawList* dl = ImGui::GetWindowDrawList();
+	const float bw = r.w - 16.0f, bh = 42.0f;
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 4));
+	for (int k = 0; k < 11; k++) {
+		if (k == groupStart[1] || k == groupStart[2]) {
+			const ImVec2 p = ImGui::GetCursorScreenPos();
+			dl->AddLine(ImVec2(p.x + 6, p.y + 5), ImVec2(p.x + bw - 6, p.y + 5), IM_COL32(80, 96, 70, 255), 1.5f);
+			ImGui::Dummy(ImVec2(bw, 8));
+		}
+		const T& t = tools[k];
+		ImGui::PushID(k);
+		const bool on     = tool_ == t.tool;
 		const bool locked = courseMode() && (t.terrain || t.tool == Tool::Walls || t.tool == Tool::Scatter);
 		if (locked) ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.4f);
-		const bool pressedTool = choiceButton(label, tool_ == t.tool, ImVec2(-1, 34));
+		if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.36f, 0.47f, 0.19f, 1));
+		const bool pressed = ImGui::Button("##tool", ImVec2(bw, bh));
+		if (on) ImGui::PopStyleColor();
 		if (locked) ImGui::PopStyleVar();
-		if (pressedTool) {
+		const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+		if (on) dl->AddRectFilled(a, ImVec2(a.x + 3.0f, b.y), IM_COL32(183, 207, 75, 255), 2.0f);
+		drawIcon(dl, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), 11.0f, t.icon, on ? IM_COL32(255, 255, 240, 255) : ImGui::GetColorU32(ImGuiCol_Text));
+		if (t.key >= 0) {
+			char key[4];
+			std::snprintf(key, sizeof(key), "%d", t.key);
+			dl->AddText(nullptr, ImGui::GetFontSize() * 0.72f, ImVec2(b.x - 10.0f, b.y - ImGui::GetFontSize() * 0.78f), IM_COL32(150, 158, 140, 255), key);
+		}
+		if (t.key >= 0) ImGui::SetItemTooltip("%s  (%d)\n%s", t.label, t.key, t.tip);
+		else ImGui::SetItemTooltip("%s\n%s", t.label, t.tip);
+		if (pressed) {
 			if (courseMode() && (t.tool == Tool::Walls || t.tool == Tool::Scatter)) notify(1, tr("En los escenarios del juego todavía no se pueden poner muros ni decoración."));
 			else if (!t.terrain || ensureTerrain()) {
 				tool_ = t.tool;
 				if (tool_ != Tool::Ramp) drawingRamp_ = false;
 			}
 		}
-		{
-			// Icono a la izquierda y el atajo (número) a la derecha.
-			const ImVec2 ra = ImGui::GetItemRectMin(), rb = ImGui::GetItemRectMax();
-			ImDrawList* dl  = ImGui::GetWindowDrawList();
-			if (tool_ == t.tool) dl->AddRectFilled(ra, ImVec2(ra.x + 3.0f, rb.y), IM_COL32(183, 207, 75, 255), 2.0f);
-			const ImU32 ink = ImGui::GetColorU32(ImGuiCol_Text);
-			drawIcon(dl, ImVec2(ra.x + 22.0f, (ra.y + rb.y) * 0.5f), 10.0f, t.icon, ink);
-			char key[4];
-			std::snprintf(key, sizeof(key), "%d", n - 1 == 10 ? 0 : n - 1);
-			dl->AddText(ImVec2(rb.x - 20.0f, (ra.y + rb.y) * 0.5f - ImGui::GetFontSize() * 0.5f), ImGui::GetColorU32(ImGuiCol_TextDisabled), key);
-		}
-		ImGui::SetItemTooltip("%s", t.tip);
-		const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
 		if (t.tool == Tool::Floor) floorButtonRect_ = { a.x, a.y, b.x - a.x, b.y - a.y };
 		if (t.tool == Tool::Place) placeButtonRect_ = { a.x, a.y, b.x - a.x, b.y - a.y };
+		ImGui::PopID();
 	}
 	ImGui::PopStyleVar();
-	ImGui::Separator();
-	ImGui::BeginChild("toolopts");
-	drawToolOptions();
-	ImGui::EndChild();
+	ImGui::End();
+}
+
+void App::drawToolHeader(const Rect& r)
+{
+	// Fila de opciones de la herramienta, sobre el visor (como la de Blender):
+	// lo que se cambia a menudo. Lo detallado, en «Más opciones».
+	ImGui::SetNextWindowPos(ImVec2(r.x, r.y));
+	ImGui::SetNextWindowSize(ImVec2(r.w, r.h));
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 7));
+	ImGui::Begin("##toolrow", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse);
+	ImGui::PopStyleVar();
+	ImDrawList* dl = ImGui::GetWindowDrawList();
+	dl->AddRectFilled(ImVec2(r.x, r.y), ImVec2(r.x + r.w, r.y + r.h), IM_COL32(30, 35, 31, 255));
+	dl->AddLine(ImVec2(r.x, r.y + r.h - 1), ImVec2(r.x + r.w, r.y + r.h - 1), IM_COL32(60, 72, 58, 255));
+	const float H = 30.0f;
+	auto next     = [&](float spacing) {
+        ImGui::SameLine(0, spacing);
+        ImGui::SetCursorPosY((r.h - H) * 0.5f);
+	};
+	// Nombre de la herramienta.
+	ImGui::SetCursorPosY((r.h - ImGui::GetFontSize()) * 0.5f);
+	ImGui::TextColored(ImVec4(0.90f, 0.87f, 0.62f, 1), "%s", toolName(tool_));
+	ImGui::SameLine(0, 18);
+	ImGui::SetCursorPosY((r.h - H) * 0.5f);
+	auto seg = [&](const char* label, bool on, float w = 0.0f) {
+		const bool p = choiceButton(label, on, ImVec2(w > 0 ? w : ImGui::CalcTextSize(label).x + 22, H));
+		next(4);
+		return p;
+	};
+	auto gap = [&] {
+		next(14);
+		const ImVec2 p = ImGui::GetCursorScreenPos();
+		dl->AddLine(ImVec2(p.x - 7, r.y + 9), ImVec2(p.x - 7, r.y + r.h - 9), IM_COL32(70, 84, 62, 255), 1.0f);
+	};
+	auto slider = [&](const char* id, float* v, float lo, float hi, const char* fmt, const char* tip, float w = 150) {
+		ImGui::SetNextItemWidth(w);
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6, (H - ImGui::GetFontSize()) * 0.5f));
+		ImGui::SliderFloat(id, v, lo, hi, fmt);
+		ImGui::PopStyleVar();
+		if (tip) ImGui::SetItemTooltip("%s", tip);
+		next(4);
+	};
+	auto check = [&](const char* label, bool* v, const char* tip) {
+		ImGui::SetCursorPosY((r.h - ImGui::GetFrameHeight()) * 0.5f);
+		const bool c = ImGui::Checkbox(label, v);
+		if (tip) ImGui::SetItemTooltip("%s", tip);
+		next(10);
+		return c;
+	};
+	auto brush = [&] {
+		gap();
+		slider("##brush", &brushRadius_, 25, 1000, tr("Pincel %.0f"), tr("Tamaño del pincel ([ y ], o Ctrl + rueda)"), 130);
+		if (seg(tr("Círculo"), brushShape_ == BrushShape::Circle)) brushShape_ = BrushShape::Circle;
+		if (seg(tr("Cuadrado"), brushShape_ == BrushShape::Square)) brushShape_ = BrushShape::Square;
+		gap();
+		if (seg(tr("Suave"), brushFalloff_ == BrushFalloff::Smooth)) brushFalloff_ = BrushFalloff::Smooth;
+		if (seg(tr("Duro"), brushFalloff_ == BrushFalloff::Hard)) brushFalloff_ = BrushFalloff::Hard;
+	};
+	switch (tool_) {
+	case Tool::Move:
+		if (seg(tr("Mover (W)"), transformMode_ == TransformMode::Move)) transformMode_ = TransformMode::Move;
+		if (seg(tr("Girar (E)"), transformMode_ == TransformMode::Rotate)) transformMode_ = TransformMode::Rotate;
+		if (seg(tr("Escalar (R)"), transformMode_ == TransformMode::Scale)) transformMode_ = TransformMode::Scale;
+		gap();
+		if (check(tr("Cuadrícula"), &cfg_.snap, tr("Encajar en la cuadrícula"))) cfg_.save();
+		if (check(tr("Ejes locales"), &cfg_.localGizmo, tr("Orienta X/Z según el último objeto seleccionado, en vez de usar los ejes del mapa."))) cfg_.save();
+		if (check(tr("Ignorar decoración"), &cfg_.ignoreDecorSelection, tr("Permite elegir objetivos y construcciones a través de plantas y adornos."))) cfg_.save();
+		ImGui::BeginDisabled(!selectionCanGround());
+		if (ImGui::Button(tr("Al suelo"), ImVec2(0, H))) placeSelectionOnGround();
+		ImGui::EndDisabled();
+		ImGui::SetItemTooltip("%s", tr("Baja al suelo la decoración y los objetos seleccionados que estén flotando o enterrados."));
+		next(4);
+		break;
+	case Tool::Place:
+		if (seg(catalogOpen_ ? tr("Cerrar catálogo") : tr("Catálogo (C)"), catalogOpen_)) catalogOpen_ = !catalogOpen_;
+		gap();
+		if (check(tr("Cuadrícula"), &cfg_.snap, tr("Encajar en la cuadrícula"))) cfg_.save();
+		break;
+	case Tool::Floor:
+		if (seg(tr("Añadir suelo"), !floorErase_)) floorErase_ = false;
+		if (seg(tr("Hacer hueco"), floorErase_)) floorErase_ = true;
+		brush();
+		break;
+	case Tool::Height: {
+		const char* ops[] = { tr("Subir"), tr("Bajar"), tr("Allanar"), tr("Suavizar"), tr("Ruido"), tr("Colina"), tr("Cráter"), tr("Meseta") };
+		int op            = int(heightOp_);
+		ImGui::SetNextItemWidth(140);
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, (H - ImGui::GetFontSize()) * 0.5f));
+		if (ImGui::Combo("##heightop", &op, ops, 8)) heightOp_ = HeightOp(op);
+		ImGui::PopStyleVar();
+		next(4);
+		slider("##strength", &brushStrength_, 20, 600, tr("Fuerza %.0f"), nullptr, 120);
+		brush();
+		break;
+	}
+	case Tool::Plateau: {
+		if (seg(tr("Elevar"), plateauUp_)) plateauUp_ = true;
+		if (seg(tr("Hundir"), !plateauUp_)) plateauUp_ = false;
+		gap();
+		const struct {
+			const char* label;
+			float amount;
+		} amounts[] = { { tr("Poco"), 50 }, { tr("Medio"), 100 }, { tr("Mucho"), 200 }, { tr("Muchísimo"), 400 } };
+		for (const auto& a : amounts) {
+			if (seg(a.label, plateauAmount_ == a.amount)) plateauAmount_ = a.amount;
+		}
+		brush();
+		break;
+	}
+	case Tool::Paint: {
+		// El suelo con el que se pinta (los demás, en «Más opciones»).
+		nectar::DocTerrain& g = ed_.doc.terrain;
+		if (!g.palette.empty()) {
+			paintMaterial_   = std::max(0, std::min(paintMaterial_, int(g.palette.size()) - 1));
+			const unsigned t = swatch(g.palette[std::size_t(paintMaterial_)].source, g.palette[std::size_t(paintMaterial_)].index);
+			if (t ? ImGui::ImageButton("##paintmat", ImTextureID(std::intptr_t(t)), ImVec2(H - 6, H - 6)) : ImGui::Button("?", ImVec2(H, H))) focusToolTab_ = true;
+			ImGui::SetItemTooltip("%s", tr("El suelo con el que pintas: pulsa para elegir otro"));
+			next(4);
+		}
+		brush();
+		break;
+	}
+	case Tool::Water:
+		if (seg(tr("Poner agua"), !waterErase_)) waterErase_ = false;
+		if (seg(tr("Quitar agua"), waterErase_)) waterErase_ = true;
+		brush();
+		break;
+	case Tool::Walls:
+		if (seg(tr("Bajo"), wallHeight_ == 60)) wallHeight_ = 60;
+		if (seg(tr("Medio"), wallHeight_ == 150)) wallHeight_ = 150;
+		if (seg(tr("Alto"), wallHeight_ == 300)) wallHeight_ = 300;
+		gap();
+		slider("##thick", &wallThickness_, 10, 200, tr("Grosor %.0f"), nullptr, 130);
+		break;
+	case Tool::Ramp:
+		ImGui::SetCursorPosY((r.h - ImGui::GetFontSize()) * 0.5f);
+		ImGui::TextColored(drawingRamp_ ? kGood : kWarn, "%s", drawingRamp_ ? tr("Paso 2 de 2: clic en el extremo alto") : tr("Paso 1 de 2: clic en el extremo bajo"));
+		ImGui::SameLine(0, 12);
+		ImGui::SetCursorPosY((r.h - H) * 0.5f);
+		slider("##rampw", &rampWidth_, 100, 1000, tr("Anchura %.0f"), nullptr, 140);
+		if (seg(tr("Suavizado"), rampSmooth_)) rampSmooth_ = true;
+		if (seg(tr("Lineal"), !rampSmooth_)) rampSmooth_ = false;
+		if (drawingRamp_ && seg(tr("Cancelar"), false)) drawingRamp_ = false;
+		break;
+	case Tool::Scatter:
+		if (seg(tr("Poner"), !scatterErase_)) scatterErase_ = false;
+		if (seg(tr("Quitar"), scatterErase_)) scatterErase_ = true;
+		gap();
+		slider("##density", &scatterDensity_, 1, 30, tr("Cuánta %.0f"), nullptr, 120);
+		brush();
+		break;
+	case Tool::Trace: {
+		const char* modes[] = { tr("Camino"), tr("Río"), tr("Calzada"), tr("Zona de suelo"), tr("Hueco"), tr("Unir caminos"), tr("Sin caminos") };
+		int m               = int(traceMode_);
+		ImGui::SetNextItemWidth(150);
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, (H - ImGui::GetFontSize()) * 0.5f));
+		if (ImGui::Combo("##tracemode", &m, modes, 7)) traceMode_ = TraceMode(m);
+		ImGui::PopStyleVar();
+		next(4);
+		const bool line = traceMode_ == TraceMode::Path || traceMode_ == TraceMode::River || traceMode_ == TraceMode::Causeway;
+		if (line) slider("##tracew", &traceWidth_, 30, 600, tr("Anchura %.0f"), nullptr, 130);
+		gap();
+		const std::size_t need = line || traceMode_ == TraceMode::RouteLink ? 2 : 3;
+		ImGui::BeginDisabled(traceNodes_.size() < need);
+		if (seg(tr("Aplicar (Intro)"), false)) applyTrace();
+		ImGui::EndDisabled();
+		if (seg(tr("Borrar puntos"), false)) traceNodes_.clear();
+		break;
+	}
+	}
+	// A la derecha: lo detallado.
+	const char* more = tr("Más opciones");
+	const float moreW = ImGui::CalcTextSize(more).x + 26;
+	if (ImGui::GetCursorPosX() < r.w - moreW - 12) ImGui::SameLine(r.w - moreW - 10);
+	else ImGui::SameLine(0, 10);
+	ImGui::SetCursorPosY((r.h - H) * 0.5f);
+	if (ImGui::Button(more, ImVec2(moreW, H))) focusToolTab_ = true;
+	ImGui::SetItemTooltip("%s", tr("Todas las opciones de la herramienta, en el panel de la derecha"));
 	ImGui::End();
 }
 
@@ -2042,9 +2607,11 @@ void App::drawToolOptions()
 		if (choiceButton(tr("Girar (E)"), transformMode_ == TransformMode::Rotate, ImVec2(modeW, 32))) transformMode_ = TransformMode::Rotate;
 		ImGui::SameLine();
 		if (choiceButton(tr("Escalar (R)"), transformMode_ == TransformMode::Scale, ImVec2(modeW, 32))) transformMode_ = TransformMode::Scale;
-		hint(tr("Haz clic en algo para elegirlo y arrástralo por el suelo. Con Ctrl eliges varias cosas a la vez."));
-		hint(tr("W mueve por los ejes, E gira con el aro y R cambia el tamaño de la decoración."));
-		hint(tr("Alt + clic recorre las cosas superpuestas. Q gira por pasos. Supr borra. Ctrl+D duplica."));
+		hint(tr("Haz clic en algo para elegirlo y arrástralo por el suelo."));
+		ImGui::TextDisabled("(?) %s", tr("Más atajos"));
+		ImGui::SetItemTooltip("%s\n%s\n%s", tr("Con Ctrl eliges varias cosas a la vez; arrastrando en vacío, todas las de un recuadro."),
+		                      tr("W mueve por los ejes, E gira con el aro y R cambia el tamaño de la decoración."),
+		                      tr("Alt + clic recorre las cosas superpuestas. Q gira por pasos. Supr borra. Ctrl+D duplica."));
 		if (ImGui::Checkbox(tr("Ejes locales"), &cfg_.localGizmo)) cfg_.save();
 		ImGui::SetItemTooltip("%s", tr("Orienta X/Z según el último objeto seleccionado, en vez de usar los ejes del mapa."));
 		ImGui::BeginDisabled(!selectionCanGround());
@@ -2057,7 +2624,16 @@ void App::drawToolOptions()
 		ImGui::SetItemTooltip("%s", tr("Permite elegir objetivos y construcciones a través de plantas y adornos."));
 		break;
 	}
-	case Tool::Place: drawPlaceOptions(); break;
+	case Tool::Place:
+		if (catalogOpen_) {
+			ImGui::SeparatorText(tr("Poner cosas"));
+			hint(tr("El catálogo está abierto abajo, a lo ancho del mapa."));
+			if (ImGui::Button(tr("Traerlo aquí (C)"), ImVec2(-1, 32))) catalogOpen_ = false;
+		} else {
+			if (ImGui::Button(tr("Abrir el catálogo grande (C)"), ImVec2(-1, 30))) catalogOpen_ = true;
+			drawPlaceOptions();
+		}
+		break;
 	case Tool::Floor: drawFloorOptions(); break;
 	case Tool::Height: drawHeightOptions(); break;
 	case Tool::Plateau: drawPlateauOptions(); break;
@@ -2092,7 +2668,8 @@ void App::drawPlaceOptions()
 	// Rejilla de miniaturas de modelos del juego.
 	auto grid = [&](const char* id, const std::vector<std::pair<PlaceChoice, std::string>>& items, const char* tipFmt) {
 		ImGui::PushID(id);
-		int col = 0;
+		int col          = 0;
+		const int perRow = std::max(3, int(ImGui::GetContentRegionAvail().x / 84.0f));
 		for (const auto& it : items) {
 			const PlaceChoice& c = it.first;
 			ImGui::PushID(c.label.c_str());
@@ -2104,7 +2681,7 @@ void App::drawPlaceOptions()
 			if (pressed) choose(c);
 			ImGui::SetItemTooltip(tipFmt, it.second.c_str());
 			ImGui::PopID();
-			if (++col < 3) ImGui::SameLine();
+			if (++col < perRow) ImGui::SameLine();
 			else col = 0;
 		}
 		if (col) ImGui::NewLine();
@@ -2863,22 +3440,65 @@ void App::drawSidePanel(const Rect& r)
 	ImGui::SetNextWindowSize(ImVec2(r.w, r.h));
 	ImGui::Begin("##side", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
 	ed_.pruneSelection();
-	panelHeading(ed_.selection.empty() ? tr("Tu mapa") : tr("Selección"), ed_.selection.empty() ? tr("Resumen y ambiente") : tr("Ajusta lo que has elegido"));
+	panelHeading(tr("Propiedades"), tr("De lo elegido, del mapa o de la herramienta"));
 	const float headingH = ImGui::GetCursorPosY();
-	ImGui::BeginChild("top", ImVec2(0, r.h * 0.6f - headingH));
-	if (!ed_.selection.empty()) drawSelected();
-	else drawMapPanel();
+	const float bodyH    = r.h - headingH - 22.0f;
+	const float topH     = std::max(120.0f, std::min(bodyH - 120.0f, bodyH * cfg_.sideSplit));
+	ImGui::BeginChild("top", ImVec2(0, topH));
+	{
+		// Se cambia de pestaña sola: al elegir algo, a «Selección»; al
+		// soltarlo, a «Mapa»; al cambiar de herramienta (o con «Más opciones»),
+		// a «Herramienta».
+		static bool hadSelection = false;
+		static Tool lastTool     = Tool::Move;
+		const bool hasSelection  = !ed_.selection.empty();
+		int want                 = -1;
+		if (hasSelection && !hadSelection) want = 0;
+		if (!hasSelection && hadSelection) want = 1;
+		if (tool_ != lastTool && tool_ != Tool::Move) want = 2;
+		if (focusToolTab_) want = 2;
+		focusToolTab_ = false;
+		hadSelection  = hasSelection;
+		lastTool      = tool_;
+		if (ImGui::BeginTabBar("##props")) {
+			if (hasSelection && ImGui::BeginTabItem(tr("Selección"), nullptr, want == 0 ? ImGuiTabItemFlags_SetSelected : 0)) {
+				drawSelected();
+				ImGui::EndTabItem();
+			}
+			if (ImGui::BeginTabItem(tr("Mapa"), nullptr, want == 1 ? ImGuiTabItemFlags_SetSelected : 0)) {
+				drawMapPanel();
+				ImGui::EndTabItem();
+			}
+			if (ImGui::BeginTabItem(tr("Herramienta"), nullptr, want == 2 ? ImGuiTabItemFlags_SetSelected : 0)) {
+				drawToolOptions();
+				ImGui::EndTabItem();
+			}
+			ImGui::EndTabBar();
+		}
+	}
 	ImGui::EndChild();
+	// Divisor entre propiedades y escena (se arrastra; doble clic: como al principio).
+	{
+		ImGui::InvisibleButton("##side_split", ImVec2(-1, 10));
+		const bool hot = ImGui::IsItemHovered() || ImGui::IsItemActive();
+		if (ImGui::IsItemActive()) cfg_.sideSplit = std::max(0.2f, std::min(0.85f, (topH + ImGui::GetIO().MouseDelta.y) / bodyH));
+		if (ImGui::IsItemDeactivated()) cfg_.save();
+		if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+			cfg_.sideSplit = 0.58f;
+			cfg_.save();
+		}
+		if (hot) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+		const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+		const float cy = (a.y + b.y) * 0.5f;
+		ImGui::GetWindowDrawList()->AddLine(ImVec2(a.x, cy), ImVec2(b.x, cy), hot ? IM_COL32(171, 196, 76, 255) : IM_COL32(70, 84, 60, 255), hot ? 3.0f : 1.5f);
+		ImGui::GetWindowDrawList()->AddRectFilled(ImVec2((a.x + b.x) * 0.5f - 22, cy - 3), ImVec2((a.x + b.x) * 0.5f + 22, cy + 3), hot ? IM_COL32(171, 196, 76, 255) : IM_COL32(94, 117, 49, 220), 3.0f);
+	}
 	const ImVec2 cmin = ImGui::GetCursorScreenPos();
-	checklistRect_    = { cmin.x, cmin.y, r.w - 16, r.h * 0.4f - 16 };
+	checklistRect_    = { cmin.x, cmin.y, r.w - 16, bodyH - topH - 16 };
 	ImGui::BeginChild("check");
 	if (ImGui::BeginTabBar("##side_bottom_tabs")) {
-		if (ImGui::BeginTabItem(tr("Jerarquía"))) {
+		if (ImGui::BeginTabItem(tr("Escena"))) {
 			drawHierarchy();
-			ImGui::EndTabItem();
-		}
-		if (ImGui::BeginTabItem(tr("Comprobaciones"))) {
-			drawChecklist();
 			ImGui::EndTabItem();
 		}
 		if (ImGui::BeginTabItem(tr("Informe"))) {
@@ -2891,29 +3511,32 @@ void App::drawSidePanel(const Rect& r)
 	ImGui::End();
 }
 
-void App::drawMinimap()
+void App::drawMinimap(const ImVec2& o, float w, float h, bool& hoveredOut)
 {
 	const MapDoc& d             = ed_.doc;
 	const nectar::DocTerrain& g = d.terrain;
 	const float spanX = float(d.maxX - d.minX), spanZ = float(d.maxZ - d.minZ);
 	if (spanX <= 0 || spanZ <= 0) return;
-	ImGui::SeparatorText(tr("Vista del mapa"));
-	const float w = ImGui::GetContentRegionAvail().x;
-	const float h = std::min(w * spanZ / spanX, w * 1.2f);
-	const ImVec2 o = ImGui::GetCursorScreenPos();
-	ImGui::InvisibleButton("##minimap", ImVec2(w, h));
-	const bool hovered = ImGui::IsItemHovered();
+	// Sobre el visor: el clic y el arrastre se miran a mano (un botón
+	// invisible taparía el visor).
+	const bool hovered = ImGui::IsMouseHoveringRect(o, ImVec2(o.x + w, o.y + h));
+	hoveredOut |= hovered;
+	static bool dragging = false;
+	if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) dragging = true;
+	if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) dragging = false;
 	const float sx = w / spanX, sz = h / spanZ;
 	// Mundo -> minimapa (x a la derecha, z hacia abajo, como la vista cenital).
 	auto toMap   = [&](float x, float z) { return ImVec2(o.x + (x - float(d.minX)) * sx, o.y + (z - float(d.minZ)) * sz); };
 	auto toWorld = [&](const ImVec2& p) { return V3(float(d.minX) + (p.x - o.x) / sx, 0, float(d.minZ) + (p.y - o.y) / sz); };
-	if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-		const V3 p = toWorld(ImGui::GetIO().MousePos);
-		cam_.target = V3(p.x, docHeight(p.x, p.z), p.z);
+	if (dragging) {
+		const V3 p  = toWorld(ImGui::GetIO().MousePos);
+		cam_.target = V3(std::max(float(d.minX), std::min(float(d.maxX), p.x)), 0, std::max(float(d.minZ), std::min(float(d.maxZ), p.z)));
+		cam_.target.y = docHeight(cam_.target.x, cam_.target.z);
 	}
-	if (hovered) ImGui::SetTooltip("%s", tr("Haz clic para mover la vista ahí."));
+	if (hovered) ImGui::SetTooltip("%s", tr("Haz clic (o arrastra) para mover la vista ahí."));
 
 	ImDrawList* dl = ImGui::GetWindowDrawList();
+	dl->AddRectFilled(ImVec2(o.x - 4, o.y - 4), ImVec2(o.x + w + 4, o.y + h + 4), IM_COL32(16, 22, 16, 215), 10.0f);
 	dl->AddRectFilled(o, ImVec2(o.x + w, o.y + h), IM_COL32(21, 34, 20, 255), 8.0f);
 	// Suelo: celdas sombreadas por altura; agua en azul; huecos vacíos.
 	const int cols = std::max(1, std::min(96, g.grid ? g.nx : 48));
@@ -2970,7 +3593,8 @@ void App::drawMinimap()
 	for (const ItemRef& it : allItems(d)) {
 		if (itemHidden(it)) continue;
 		const ItemCaps caps = itemCaps(it.type);
-		if (it.type == ItemType::Wall || it.type == ItemType::Pond) continue;
+		// La decoración no: solo lo que importa para jugar (si no, tapa el dibujo).
+		if (it.type == ItemType::Wall || it.type == ItemType::Pond || it.type == ItemType::Prop || it.type == ItemType::Gen) continue;
 		const Xform x = getXform(d, it);
 		ImU32 c       = IM_COL32(235, 235, 235, 255);
 		if (caps.perPlayer) {
@@ -3552,8 +4176,8 @@ void App::drawMapPanel()
 {
 	MapDoc& d = ed_.doc;
 	bool ch   = false;
-	ImGui::SeparatorText(tr("Tu mapa"));
 	char buf[256];
+	if (ImGui::CollapsingHeader(tr("General"), ImGuiTreeNodeFlags_DefaultOpen)) {
 	copyStr(buf, sizeof(buf), d.name);
 	ImGui::SetNextItemWidth(-90);
 	if (ImGui::InputText(tr("Nombre"), buf, sizeof(buf))) {
@@ -3567,14 +4191,17 @@ void App::drawMapPanel()
 		ch       = true;
 	}
 	ImGui::Spacing();
-	ch |= ImGui::Checkbox(tr("Mapa espejo"), &d.symmetric);
-	hint(d.symmetric ? tr("Lo que pongas en un lado aparece igual en el otro, para que sea justo para los dos jugadores.")
-	                 : tr("Cada lado es distinto: tú decides dónde va todo."));
-	if (d.symmetric) ImGui::Checkbox(tr("Mover a la vez lo de los dos jugadores"), &mirrorEdits_);
-	ImGui::Checkbox(tr("Ver el lado del otro jugador"), &showTwins_);
+	// El espejo es cosa del VS (dos jugadores, un lado cada uno).
+	if (d.modes & nectar::MAPMODE_VS) {
+		ch |= ImGui::Checkbox(tr("Mapa espejo"), &d.symmetric);
+		hint(d.symmetric ? tr("Lo que pongas en un lado aparece igual en el otro, para que sea justo para los dos jugadores.")
+		                 : tr("Cada lado es distinto: tú decides dónde va todo."));
+		if (d.symmetric) ImGui::Checkbox(tr("Mover a la vez lo de los dos jugadores"), &mirrorEdits_);
+		ImGui::Checkbox(tr("Ver el lado del otro jugador"), &showTwins_);
+	}
+	}
 
-	ImGui::SeparatorText(tr("Modos de juego"));
-	{
+	if (ImGui::CollapsingHeader(tr("Modos de juego"), ImGuiTreeNodeFlags_DefaultOpen)) {
 		bool vs = (d.modes & nectar::MAPMODE_VS) != 0, solo = (d.modes & nectar::MAPMODE_SOLO) != 0, coop = (d.modes & nectar::MAPMODE_COOP) != 0;
 		bool changed = ImGui::Checkbox("VS", &vs);
 		ImGui::SameLine();
@@ -3586,6 +4213,7 @@ void App::drawMapPanel()
 			if (!m) {
 				notify(1, tr("El mapa tiene que servir para algún modo."));
 			} else {
+				if (d.modes & ~m) notify(0, tr("Lo de ese modo no se borra: vuelve si lo marcas otra vez."));
 				d.modes = m;
 				if (solo || coop) nm::ensureStory(d, coop);
 				ed_.pruneSelection();
@@ -3594,8 +4222,7 @@ void App::drawMapPanel()
 		}
 		hint(tr("VS: dos jugadores, uno contra otro. Solo y coop: una misión con capitanes, nave, cebollas y un objetivo."));
 	}
-	if (d.story.present && (d.modes & (nectar::MAPMODE_SOLO | nectar::MAPMODE_COOP))) {
-		ImGui::SeparatorText(tr("Misión (solo y coop)"));
+	if (d.story.present && (d.modes & (nectar::MAPMODE_SOLO | nectar::MAPMODE_COOP)) && ImGui::CollapsingHeader(tr("Misión (solo y coop)"), ImGuiTreeNodeFlags_DefaultOpen)) {
 		nectar::DocRules& rules = d.story.rules;
 		static const char* const kGoalIds[] = { "parts", "pellets", "pikmin", "boss", "survive", "waves" };
 		const char* goals[] = { tr("Recuperar piezas de la nave"), tr("Llevar pastillas a las cebollas"), tr("Conseguir Pikmin"), tr("Derrotar a los jefes"),
@@ -3893,9 +4520,7 @@ void App::drawMapPanel()
 			}
 		}
 	}
-	ImGui::Spacing();
 	hint(tr("Elige algo del mapa con «Mover y girar» para ver sus opciones aquí."));
-	drawMinimap();
 
 	if (ImGui::CollapsingHeader(tr("Ambiente"))) {
 		if (d.story.present) {
@@ -4129,7 +4754,7 @@ void App::drawHierarchy()
 void App::drawChecklist()
 {
 	ImGui::SeparatorText(tr("¿Está listo para jugar?"));
-	const std::vector<Issue> issues = checkMap();
+	const std::vector<Issue> issues = this->issues();
 	bool blocking = false;
 	for (const Issue& i : issues) blocking = blocking || i.blocking;
 	if (preview_.busy() && compiled_.generation != ed_.liveGeneration) ImGui::TextColored(kDim, "%s", tr("Comprobando..."));
@@ -4390,6 +5015,7 @@ void App::drawHelp()
 	ImGui::SeparatorText(tr("Teclas"));
 	ImGui::TextWrapped("%s%s", tr("1-9: herramientas · Ctrl+Z: deshacer · Ctrl+Y: rehacer · Ctrl+S: guardar · F5: probar · "),
 	                   tr("W: mover · E: girar · R: escalar · Q: giro por pasos · Supr: borrar · Ctrl+D: duplicar · F: ver de cerca · T: vista desde arriba"));
+	ImGui::TextWrapped("%s", tr("Inicio: ver todo el mapa · C: catálogo grande · Mayús+A: menú rápido con lo último puesto · [ y ]: tamaño del pincel · Mayús+F5: probar desde donde mira la cámara · F1: esta ayuda"));
 	ImGui::Spacing();
 	if (ImGui::Button(tr("Ver el tutorial otra vez"))) {
 		tutorialStep_ = 0;
@@ -4477,10 +5103,22 @@ void App::handleShortcuts()
 	}
 	if (ctrl && ImGui::IsKeyPressed(ImGuiKey_Y, false)) ed_.redo();
 	if (ctrl && ImGui::IsKeyPressed(ImGuiKey_C, false)) copySelection();
-	if (ctrl && ImGui::IsKeyPressed(ImGuiKey_V, false)) paste();
-	if (ctrl && ImGui::IsKeyPressed(ImGuiKey_D, false)) duplicateSelection();
-	if (ImGui::IsKeyPressed(ImGuiKey_F5, false)) testInGame();
-	if (ImGui::IsKeyPressed(ImGuiKey_Delete, false)) deleteSelection();
+	if (ctrl && ImGui::IsKeyPressed(ImGuiKey_V, false)) {
+		ed_.label = tr("Pegar");
+		paste();
+	}
+	if (ctrl && ImGui::IsKeyPressed(ImGuiKey_D, false)) {
+		ed_.label = tr("Duplicar");
+		duplicateSelection();
+	}
+	if (ImGui::IsKeyPressed(ImGuiKey_F5, false)) testInGame(io.KeyShift);
+	if (ImGui::IsKeyPressed(ImGuiKey_F1, false)) openHelp_ = true;
+	if (ImGui::IsKeyPressed(ImGuiKey_Home, false)) viewWholeMap();
+	if (ImGui::IsKeyPressed(ImGuiKey_Delete, false)) {
+		ed_.label = tr("Borrar");
+		deleteSelection();
+	}
+	if (radialOpen_) return; // el menú rápido se lleva las teclas
 	if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
 		ed_.clearSelection();
 		drawingWall_ = false;
@@ -4500,7 +5138,29 @@ void App::handleShortcuts()
 			tool_ = Tool::Move;
 			transformMode_ = TransformMode::Scale;
 		}
-		if (ImGui::IsKeyPressed(ImGuiKey_Q, false)) rotateSelection(io.KeyShift ? cfg_.snapAngle : -cfg_.snapAngle);
+		if (ImGui::IsKeyPressed(ImGuiKey_Q, false)) {
+			ed_.label = tr("Girar");
+			rotateSelection(io.KeyShift ? cfg_.snapAngle : -cfg_.snapAngle);
+		}
+		// Mayús+A: menú rápido con lo último puesto, donde está el ratón.
+		if (io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_A, false)) {
+			radialOpen_ = true;
+			radialX_    = io.MousePos.x;
+			radialY_    = io.MousePos.y;
+		}
+		// C: catálogo grande de «Poner cosas».
+		if (!io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_C, false)) {
+			if (tool_ != Tool::Place) {
+				tool_        = Tool::Place;
+				catalogOpen_ = true;
+			} else {
+				catalogOpen_ = !catalogOpen_;
+			}
+		}
+		// [ y ]: tamaño del pincel (también Ctrl + rueda).
+		const bool brushTool = tool_ == Tool::Floor || tool_ == Tool::Height || tool_ == Tool::Plateau || tool_ == Tool::Paint || tool_ == Tool::Water || tool_ == Tool::Scatter;
+		if (brushTool && ImGui::IsKeyPressed(ImGuiKey_LeftBracket)) brushRadius_ = std::max(25.0f, brushRadius_ / 1.15f);
+		if (brushTool && ImGui::IsKeyPressed(ImGuiKey_RightBracket)) brushRadius_ = std::min(1000.0f, brushRadius_ * 1.15f);
 		if (ImGui::IsKeyPressed(ImGuiKey_PageUp)) liftSelection(io.KeyShift ? 100 : 20);
 		if (ImGui::IsKeyPressed(ImGuiKey_PageDown)) liftSelection(io.KeyShift ? -100 : -20);
 		if (ImGui::IsKeyPressed(ImGuiKey_T, false)) cam_.topDown = !cam_.topDown;
@@ -4669,6 +5329,466 @@ void App::drawMoveGizmo(const ImVec2& origin, const ImVec2& size)
 	dl->AddCircle(c, 7.0f, IM_COL32(20, 30, 16, 240), 16, 2.0f);
 }
 
+// ── Interfaz: barra de estado, avisos, brújula, recientes y catálogo ───────
+
+const char* App::toolName(Tool t) const
+{
+	switch (t) {
+	case Tool::Move: return tr("Mover y girar");
+	case Tool::Place: return tr("Poner cosas");
+	case Tool::Floor: return tr("Dibujar suelo");
+	case Tool::Height: return tr("Montañas y hoyos");
+	case Tool::Plateau: return tr("Elevar o hundir zona");
+	case Tool::Paint: return tr("Pintar el suelo");
+	case Tool::Water: return tr("Agua");
+	case Tool::Walls: return tr("Muros");
+	case Tool::Ramp: return tr("Rampas");
+	case Tool::Scatter: return tr("Decorar");
+	case Tool::Trace: return tr("Trazos");
+	}
+	return "";
+}
+
+const std::vector<App::Issue>& App::issues()
+{
+	// checkMap() mira el mapa y su compilación: se rehace cuando cambia alguno
+	// (y cada poco, por si el catálogo termina de cargar modelos).
+	static double at = -10.0;
+	if (issuesGen_ != ed_.liveGeneration || issuesCompiledGen_ != compiled_.generation || now() - at > 1.0) {
+		issuesGen_         = ed_.liveGeneration;
+		issuesCompiledGen_ = compiled_.generation;
+		at                 = now();
+		issuesCache_       = checkMap();
+	}
+	return issuesCache_;
+}
+
+void App::viewWholeMap()
+{
+	const MapDoc& d = ed_.doc;
+	cam_.target     = V3(float((d.minX + d.maxX) * 0.5), 0, float((d.minZ + d.maxZ) * 0.5));
+	cam_.distance   = float(std::max(d.maxX - d.minX, d.maxZ - d.minZ));
+	cam_.topZoom    = float(std::max((d.maxX - d.minX) / viewAspect_, d.maxZ - d.minZ)) * 0.55f;
+}
+
+void App::rememberPlace(const PlaceChoice& c)
+{
+	const std::string key = std::to_string(int(c.type)) + "|" + c.asset + "|" + c.label;
+	auto& list            = cfg_.placeRecents;
+	list.erase(std::remove(list.begin(), list.end(), key), list.end());
+	list.insert(list.begin(), key);
+	if (list.size() > 10) list.resize(10);
+	cfg_.save();
+}
+
+std::vector<App::PlaceChoice> App::placeRecents() const
+{
+	std::vector<PlaceChoice> out;
+	for (const std::string& key : cfg_.placeRecents) {
+		const std::size_t a = key.find('|'), b = a == std::string::npos ? a : key.find('|', a + 1);
+		if (b == std::string::npos) continue;
+		PlaceChoice c;
+		c.type  = ItemType(std::atoi(key.substr(0, a).c_str()));
+		c.asset = key.substr(a + 1, b - a - 1);
+		c.label = key.substr(b + 1);
+		// Lo de un modo que el mapa no tiene, no.
+		if (isVsItem(c.type) && !(ed_.doc.modes & nectar::MAPMODE_VS)) continue;
+		if (isStoryItem(c.type) && !ed_.doc.story.present) continue;
+		out.push_back(c);
+	}
+	return out;
+}
+
+void App::drawReadyPill()
+{
+	const std::vector<Issue>& list = issues();
+	int blocking = 0;
+	for (const Issue& i : list) blocking += i.blocking ? 1 : 0;
+	const bool checking = preview_.busy() && compiled_.generation != ed_.liveGeneration;
+	char text[96];
+	ImVec4 col;
+	if (checking) {
+		std::snprintf(text, sizeof(text), "%s", tr("Comprobando..."));
+		col = kDim;
+	} else if (blocking) {
+		std::snprintf(text, sizeof(text), blocking == 1 ? tr("1 cosa por arreglar") : tr("%d cosas por arreglar"), blocking);
+		col = kWarn;
+	} else {
+		std::snprintf(text, sizeof(text), "%s", tr("Listo para jugar"));
+		col = kGood;
+	}
+	const ImVec2 at = ImGui::GetCursorScreenPos();
+	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.13f, 1));
+	const bool pressed = ImGui::Button((std::string("    ") + text + "##ready").c_str(), ImVec2(ImGui::CalcTextSize(text).x + 44, 34));
+	ImGui::PopStyleColor();
+	ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(at.x + 17, at.y + 17), 6.0f, ImGui::GetColorU32(col));
+	ImGui::SetItemTooltip("%s", tr("¿Está listo para jugar? Pulsa para ver la lista."));
+	if (pressed) ImGui::OpenPopup("##ready_list");
+	ImGui::SetNextWindowSize(ImVec2(440, 0));
+	if (ImGui::BeginPopup("##ready_list")) {
+		drawChecklist();
+		ImGui::EndPopup();
+	}
+}
+
+void App::drawHistoryMenu()
+{
+	ImGui::BeginDisabled(!ed_.canUndo());
+	if (ImGui::Button("...##history", ImVec2(30, 34))) ImGui::OpenPopup("##history");
+	ImGui::EndDisabled();
+	ImGui::SetItemTooltip("%s", tr("Historial: vuelve a cualquier paso anterior"));
+	if (ImGui::BeginPopup("##history")) {
+		ImGui::TextColored(kDim, "%s", tr("Haz clic en un paso para deshacerlo (y todo lo que vino después)."));
+		ImGui::Separator();
+		const int n = ed_.undoCount();
+		for (int i = 0; i < n && i < 40; i++) {
+			ImGui::PushID(i);
+			const std::string& label = ed_.undoLabel(i);
+			char row[160];
+			std::snprintf(row, sizeof(row), "%d.  %s", n - i, label.empty() ? tr("Cambio") : label.c_str());
+			if (ImGui::Selectable(row)) {
+				for (int k = 0; k <= i; k++) ed_.undo();
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::PopID();
+		}
+		ImGui::EndPopup();
+	}
+}
+
+void App::drawStatusBar(const Rect& r)
+{
+	ImGui::SetNextWindowPos(ImVec2(r.x, r.y));
+	ImGui::SetNextWindowSize(ImVec2(r.w, r.h));
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+	ImGui::Begin("##status", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar);
+	ImGui::PopStyleVar();
+	ImDrawList* dl = ImGui::GetWindowDrawList();
+	dl->AddRectFilled(ImVec2(r.x, r.y), ImVec2(r.x + r.w, r.y + r.h), IM_COL32(24, 28, 25, 255));
+	dl->AddLine(ImVec2(r.x, r.y), ImVec2(r.x + r.w, r.y), IM_COL32(60, 72, 58, 255));
+	const float ty      = r.y + (r.h - ImGui::GetFontSize()) * 0.5f;
+	const ImU32 ink     = IM_COL32(214, 216, 200, 255), dim = IM_COL32(150, 158, 140, 255);
+
+	// Derecha: coordenadas, selección, guardado y presupuesto (de derecha a izquierda).
+	float x = r.x + r.w - 12;
+	auto rightText = [&](const std::string& s, ImU32 c) {
+		const float w = ImGui::CalcTextSize(s.c_str()).x;
+		x -= w;
+		dl->AddText(ImVec2(x, ty), c, s.c_str());
+		x -= 22;
+		dl->AddText(ImVec2(x + 8, ty), IM_COL32(80, 92, 76, 255), "|");
+	};
+	if (compiled_.ok) {
+		const float use = float(double(compiled_.vertices) / double(nectar::kMapMaxVertices));
+		const float bw = 90, bh = 8;
+		x -= bw;
+		const ImVec2 a(x, r.y + (r.h - bh) * 0.5f);
+		dl->AddRectFilled(a, ImVec2(a.x + bw, a.y + bh), IM_COL32(50, 58, 48, 255), 4.0f);
+		dl->AddRectFilled(a, ImVec2(a.x + bw * std::min(1.0f, use), a.y + bh), use < 0.75f ? IM_COL32(146, 214, 94, 255) : use <= 1.0f ? IM_COL32(245, 194, 71, 255) : IM_COL32(245, 102, 76, 255), 4.0f);
+		if (ImGui::IsMouseHoveringRect(ImVec2(a.x, r.y), ImVec2(a.x + bw, r.y + r.h)))
+			ImGui::SetTooltip(tr("Tamaño del mapa para el juego: %zu de %zu vértices"), compiled_.vertices, nectar::kMapMaxVertices);
+		x -= 10;
+		rightText(tr("Tamaño"), dim);
+	}
+	{
+		std::string saved;
+		if (ed_.path.empty()) saved = tr("Sin guardar");
+		else if (ed_.dirty) saved = tr("Cambios sin guardar");
+		else if (lastSaved_ >= 0) {
+			const int mins = int((now() - lastSaved_) / 60.0);
+			char buf[64];
+			if (mins < 1) std::snprintf(buf, sizeof(buf), "%s", tr("Guardado ahora mismo"));
+			else std::snprintf(buf, sizeof(buf), tr("Guardado hace %d min"), mins);
+			saved = buf;
+		} else saved = tr("Guardado");
+		rightText(saved, ed_.dirty || ed_.path.empty() ? IM_COL32(245, 194, 71, 255) : dim);
+	}
+	if (!ed_.selection.empty()) {
+		char buf[64];
+		std::snprintf(buf, sizeof(buf), ed_.selection.size() == 1 ? tr("1 cosa elegida") : tr("%zu cosas elegidas"), ed_.selection.size());
+		rightText(buf, ink);
+	}
+	if (hoverValid_) {
+		char buf[96];
+		std::snprintf(buf, sizeof(buf), "X %.0f   Z %.0f   %s %.0f", hoverPos_.x, hoverPos_.z, tr("Altura"), hoverPos_.y);
+		rightText(buf, dim);
+	}
+
+	// Izquierda: qué hace el ratón con esta herramienta y con la vista.
+	std::string left = std::string(toolName(tool_)) + ":  " + toolHelp() + "     ";
+	left += cam_.topDown ? tr("Botón derecho o central: desplazar · Rueda: acercar") : tr("Botón derecho: girar · Central: desplazar · Rueda: acercar · Derecho + WASD: volar");
+	dl->PushClipRect(ImVec2(r.x, r.y), ImVec2(std::max(r.x, x - 8), r.y + r.h), true);
+	drawIcon(dl, ImVec2(r.x + 18, r.y + r.h * 0.5f), 7.0f, Icon::Move, IM_COL32(183, 207, 75, 255));
+	dl->AddText(ImVec2(r.x + 34, ty), ink, left.c_str());
+	dl->PopClipRect();
+	ImGui::End();
+}
+
+void App::drawNavGizmo(const ImVec2& origin, const ImVec2& size, bool& hovered)
+{
+	// Brújula de vistas (como el gizmo de navegación de Blender): los ejes
+	// tal como se ven ahora; un clic en uno mira desde ese lado y el del
+	// centro cambia entre la vista desde arriba y la 3D.
+	ImDrawList* dl = ImGui::GetWindowDrawList();
+	ImGuiIO& io    = ImGui::GetIO();
+	const float R  = 38.0f;
+	const ImVec2 c(origin.x + size.x - R - 24, origin.y + R + 24);
+	V3 right, up, fwd;
+	if (cam_.topDown) {
+		right = V3(1, 0, 0);
+		up    = V3(0, 0, -1);
+		fwd   = V3(0, -1, 0);
+	} else {
+		fwd   = (cam_.target - cam_.eye()).normalized();
+		right = fwd.cross(V3(0, 1, 0)).normalized();
+		up    = right.cross(fwd);
+	}
+	const bool over = std::hypot(io.MousePos.x - c.x, io.MousePos.y - c.y) <= R + 14;
+	hovered |= over;
+	dl->AddCircleFilled(c, R + 13, over ? IM_COL32(32, 40, 32, 215) : IM_COL32(24, 30, 24, 150));
+	struct Axis {
+		V3 dir;
+		ImU32 col;
+		const char* label;
+		int view; // 0 desde arriba, 1 +X, 2 -X, 3 +Z, 4 -Z
+		ImVec2 p;
+		float depth;
+	};
+	Axis axes[] = { { V3(1, 0, 0), IM_COL32(231, 80, 67, 255), "X", 1, {}, 0 },  { V3(-1, 0, 0), IM_COL32(140, 66, 60, 235), "", 2, {}, 0 },
+		            { V3(0, 0, 1), IM_COL32(74, 154, 236, 255), "Z", 3, {}, 0 }, { V3(0, 0, -1), IM_COL32(58, 96, 146, 235), "", 4, {}, 0 },
+		            { V3(0, 1, 0), IM_COL32(126, 204, 92, 255), "Y", 0, {}, 0 } };
+	for (Axis& a : axes) {
+		a.p     = ImVec2(c.x + a.dir.dot(right) * R, c.y - a.dir.dot(up) * R);
+		a.depth = a.dir.dot(fwd);
+	}
+	std::sort(std::begin(axes), std::end(axes), [](const Axis& a, const Axis& b) { return a.depth > b.depth; });
+	int hot = -1;
+	float best = 11.0f;
+	for (int i = 0; i < 5; i++) {
+		const float dd = std::hypot(io.MousePos.x - axes[i].p.x, io.MousePos.y - axes[i].p.y);
+		if (dd < best) {
+			best = dd;
+			hot  = i;
+		}
+	}
+	const bool centreHot = hot < 0 && std::hypot(io.MousePos.x - c.x, io.MousePos.y - c.y) < 10.0f;
+	for (int i = 0; i < 5; i++) {
+		const Axis& a = axes[i];
+		if (a.label[0]) dl->AddLine(c, a.p, a.col, 2.5f);
+		dl->AddCircleFilled(a.p, a.label[0] ? 9.5f : 7.0f, a.col);
+		if (i == hot) dl->AddCircle(a.p, 11.5f, IM_COL32(255, 255, 255, 230), 0, 2.0f);
+		if (a.label[0]) dl->AddText(ImVec2(a.p.x - ImGui::CalcTextSize(a.label).x * 0.5f, a.p.y - ImGui::GetFontSize() * 0.5f), IM_COL32(20, 24, 20, 255), a.label);
+	}
+	dl->AddCircleFilled(c, 7.0f, centreHot ? IM_COL32(255, 255, 255, 240) : IM_COL32(210, 214, 196, 200));
+	if (hot >= 0) {
+		const char* tips[] = { tr("Ver desde arriba"), tr("Mirar desde el lado X"), tr("Mirar desde el lado −X"), tr("Mirar desde el lado Z"), tr("Mirar desde el lado −Z") };
+		ImGui::SetTooltip("%s", tips[axes[hot].view]);
+	} else if (centreHot) {
+		ImGui::SetTooltip("%s", cam_.topDown ? tr("Volver a la vista 3D (T)") : tr("Ver desde arriba (T)"));
+	}
+	if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+		if (hot >= 0) {
+			const int v = axes[hot].view;
+			if (v == 0) cam_.topDown = true;
+			else {
+				const float yaws[] = { 0.0f, 1.5708f, -1.5708f, 0.0f, 3.14159f };
+				cam_.topDown = false;
+				cam_.yaw     = yaws[v];
+				cam_.pitch   = 0.5f;
+			}
+		} else if (centreHot) cam_.topDown = !cam_.topDown;
+	}
+	// Debajo: ver todo el mapa.
+	const ImVec2 ba(c.x - 44, c.y + R + 22), bb(c.x + 44, c.y + R + 46);
+	const bool overAll = ImGui::IsMouseHoveringRect(ba, bb);
+	hovered |= overAll;
+	dl->AddRectFilled(ba, bb, overAll ? IM_COL32(70, 88, 52, 235) : IM_COL32(32, 40, 32, 215), 6.0f);
+	const char* all = tr("Ver todo");
+	dl->AddText(ImVec2((ba.x + bb.x - ImGui::CalcTextSize(all).x) * 0.5f, ba.y + 4), IM_COL32(230, 232, 214, 255), all);
+	if (overAll) ImGui::SetTooltip("%s", tr("Ver todo el mapa (Inicio)"));
+	if (overAll && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) viewWholeMap();
+}
+
+void App::drawIssueMarkers(const ImVec2& origin, const ImVec2& size, bool& hovered)
+{
+	// Cada aviso de la lista, como un globo en su sitio del mapa.
+	ImDrawList* dl = ImGui::GetWindowDrawList();
+	ImGuiIO& io    = ImGui::GetIO();
+	for (const Issue& i : issues()) {
+		if (!i.hasItem || !itemExists(ed_.doc, i.item)) continue;
+		const Xform x = getXform(ed_.doc, i.item);
+		const float gy = docHeight(float(x.x), float(x.z));
+		ImVec2 p, g;
+		if (!project(V3(float(x.x), gy + 90.0f, float(x.z)), origin, size, p) || !project(V3(float(x.x), gy, float(x.z)), origin, size, g)) continue;
+		if (p.x < origin.x || p.y < origin.y || p.x > origin.x + size.x || p.y > origin.y + size.y) continue;
+		const ImU32 col = i.blocking ? IM_COL32(222, 70, 55, 245) : IM_COL32(236, 172, 44, 245);
+		dl->AddLine(p, g, col, 2.0f);
+		dl->AddCircleFilled(p, 11.0f, col);
+		dl->AddCircle(p, 11.0f, IM_COL32(255, 255, 255, 200), 0, 1.5f);
+		dl->AddText(ImVec2(p.x - ImGui::CalcTextSize("!").x * 0.5f, p.y - ImGui::GetFontSize() * 0.5f), IM_COL32(255, 255, 255, 255), "!");
+		if (std::hypot(io.MousePos.x - p.x, io.MousePos.y - p.y) <= 13.0f) {
+			hovered = true;
+			ImGui::SetTooltip("%s\n\n%s", i.text.c_str(), tr("Clic: elegirlo"));
+			if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+				ed_.selection = { i.item };
+				tool_         = Tool::Move;
+			}
+		}
+	}
+}
+
+namespace {
+/// Nombre para mostrar de lo que se pone (enemigos y construcciones por su nombre).
+std::string placeLabel(ItemType type, const std::string& asset, const std::string& label)
+{
+	if (type == ItemType::Enemy) {
+		for (const nectar::EnemyInfo& e : nectar::enemyTypes()) {
+			if (label == e.id) return tr(e.label);
+		}
+	}
+	if (type == ItemType::Object) {
+		for (const nectar::ObjectInfo& o : nectar::objectKinds()) {
+			if (label == o.id) return tr(o.label);
+		}
+	}
+	if (type == ItemType::Prop && !asset.empty() && label.empty()) return fs::path(asset).stem().string();
+	return label;
+}
+} // namespace
+
+void App::drawRecentsBar(const ImVec2& origin, const ImVec2& size, bool& hovered)
+{
+	// «Poner cosas»: lo último puesto, a mano (como la barra de Mario Maker),
+	// y el botón del catálogo grande.
+	if (tool_ != Tool::Place) return;
+	const std::vector<PlaceChoice> list = placeRecents();
+	ImDrawList* dl   = ImGui::GetWindowDrawList();
+	ImGuiIO& io      = ImGui::GetIO();
+	const float tile = 50, gap = 6, catW = 116;
+	const float emptyW = list.empty() ? ImGui::CalcTextSize(tr("Lo que pongas saldrá aquí")).x + 20 : 0.0f;
+	const float w      = float(list.size()) * (tile + gap) + emptyW + catW + 20;
+	const ImVec2 a(origin.x + size.x * 0.5f - w * 0.5f, origin.y + size.y - tile - 26);
+	const ImVec2 b(a.x + w, a.y + tile + 14);
+	const bool over = ImGui::IsMouseHoveringRect(a, b);
+	hovered |= over;
+	dl->AddRectFilled(a, b, IM_COL32(22, 28, 22, 225), 10.0f);
+	dl->AddRect(a, b, IM_COL32(94, 117, 49, 200), 10.0f);
+	float x = a.x + 10;
+	for (std::size_t i = 0; i < list.size(); i++) {
+		const PlaceChoice& c = list[i];
+		const ImVec2 ta(x, a.y + 7), tb(x + tile, a.y + 7 + tile);
+		const bool on  = place_.type == c.type && place_.label == c.label && place_.asset == c.asset;
+		const bool hot = ImGui::IsMouseHoveringRect(ta, tb);
+		dl->AddRectFilled(ta, tb, on ? IM_COL32(110, 140, 52, 255) : hot ? IM_COL32(58, 70, 50, 255) : IM_COL32(40, 48, 38, 255), 6.0f);
+		const unsigned t = assetThumb(placeAsset(c));
+		if (t) dl->AddImage(ImTextureID(std::intptr_t(t)), ImVec2(ta.x + 3, ta.y + 3), ImVec2(tb.x - 3, tb.y - 3));
+		else {
+			const std::string s = placeLabel(c.type, c.asset, c.label).substr(0, 5);
+			dl->AddText(ImVec2(ta.x + 5, ta.y + tile * 0.5f - 8), IM_COL32(230, 230, 214, 255), s.c_str());
+		}
+		if (hot) {
+			ImGui::SetTooltip("%s", placeLabel(c.type, c.asset, c.label).c_str());
+			if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) place_ = c;
+		}
+		x += tile + gap;
+	}
+	if (list.empty()) {
+		dl->AddText(ImVec2(x, a.y + 7 + tile * 0.5f - ImGui::GetFontSize() * 0.5f), IM_COL32(150, 158, 140, 255), tr("Lo que pongas saldrá aquí"));
+		x += emptyW;
+	}
+	const ImVec2 ca(x + 4, a.y + 7), cb(x + 4 + catW, a.y + 7 + tile);
+	const bool catHot = ImGui::IsMouseHoveringRect(ca, cb);
+	dl->AddRectFilled(ca, cb, catalogOpen_ ? IM_COL32(110, 140, 52, 255) : catHot ? IM_COL32(70, 88, 52, 255) : IM_COL32(48, 58, 40, 255), 6.0f);
+	const char* cat = catalogOpen_ ? tr("Cerrar catálogo") : tr("Catálogo (C)");
+	dl->AddText(ImVec2((ca.x + cb.x - ImGui::CalcTextSize(cat).x) * 0.5f, ca.y + tile * 0.5f - ImGui::GetFontSize() * 0.5f), IM_COL32(236, 236, 220, 255), cat);
+	if (catHot) {
+		ImGui::SetTooltip("%s", tr("Todo lo que se puede poner, a lo ancho bajo el mapa"));
+		if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) catalogOpen_ = !catalogOpen_;
+	}
+	(void)io;
+}
+
+void App::drawRadialMenu()
+{
+	// Mayús+A: lo último puesto en un círculo bajo el ratón (como los menús
+	// circulares de Blender). Un clic elige; fuera o Esc, se cierra.
+	if (!radialOpen_) return;
+	const std::vector<PlaceChoice> list = placeRecents();
+	ImDrawList* dl = ImGui::GetForegroundDrawList();
+	ImGuiIO& io    = ImGui::GetIO();
+	const ImVec2 c(radialX_, radialY_);
+	const float R = 110.0f;
+	dl->AddCircleFilled(c, R + 42, IM_COL32(16, 20, 16, 150));
+	dl->AddCircle(c, 22.0f, IM_COL32(200, 210, 180, 160), 0, 2.0f);
+	if (list.empty()) {
+		const char* msg = tr("Pon algo con «Poner cosas» y saldrá aquí");
+		dl->AddText(ImVec2(c.x - ImGui::CalcTextSize(msg).x * 0.5f, c.y + 30), IM_COL32(230, 230, 214, 255), msg);
+	}
+	const int n = std::min<int>(8, int(list.size()));
+	int hot = -1;
+	const float md = std::hypot(io.MousePos.x - c.x, io.MousePos.y - c.y);
+	if (n > 0 && md > 26.0f) {
+		float ang = std::atan2(io.MousePos.y - c.y, io.MousePos.x - c.x) + 1.5708f;
+		if (ang < 0) ang += 6.28318f;
+		hot = int(std::floor(ang / (6.28318f / float(n)) + 0.5f)) % n;
+	}
+	for (int i = 0; i < n; i++) {
+		const float a = -1.5708f + 6.28318f * float(i) / float(n);
+		const ImVec2 p(c.x + std::cos(a) * R, c.y + std::sin(a) * R);
+		dl->AddCircleFilled(p, 36.0f, i == hot ? IM_COL32(110, 140, 52, 245) : IM_COL32(40, 48, 38, 240));
+		const unsigned t = assetThumb(placeAsset(list[std::size_t(i)]));
+		if (t) dl->AddImage(ImTextureID(std::intptr_t(t)), ImVec2(p.x - 24, p.y - 26), ImVec2(p.x + 24, p.y + 22));
+		const std::string s = placeLabel(list[std::size_t(i)].type, list[std::size_t(i)].asset, list[std::size_t(i)].label);
+		const float tw      = ImGui::CalcTextSize(s.c_str()).x;
+		dl->AddText(ImVec2(p.x - tw * 0.5f, p.y + 38), IM_COL32(240, 240, 226, 255), s.c_str());
+	}
+	if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+		if (hot >= 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+			place_ = list[std::size_t(hot)];
+			tool_  = Tool::Place;
+		}
+		radialOpen_ = false;
+	}
+}
+
+void App::drawCatalogDrawer(const Rect& r)
+{
+	ImGui::SetNextWindowPos(ImVec2(r.x, r.y));
+	ImGui::SetNextWindowSize(ImVec2(r.w, r.h));
+	ImGui::Begin("##catalog", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+	ImGui::TextColored(ImVec4(0.90f, 0.87f, 0.62f, 1), "%s", tr("Catálogo: elige algo y haz clic en el mapa"));
+	ImGui::SameLine(ImGui::GetWindowWidth() - 130);
+	if (ImGui::Button(tr("Cerrar (C)"), ImVec2(118, 0))) catalogOpen_ = false;
+	ImGui::Separator();
+	ImGui::BeginChild("##catalog_body");
+	drawPlaceOptions();
+	ImGui::EndChild();
+	ImGui::End();
+}
+
+void App::drawGrid()
+{
+	// La cuadrícula de encaje alrededor del ratón (al mover, poner o dibujar muros).
+	if (!cfg_.snap || !hoverValid_ || !(tool_ == Tool::Move || tool_ == Tool::Place || tool_ == Tool::Walls)) return;
+	const float snapStep = std::max(1.0f, cfg_.snapStep);
+	const float step     = snapStep * std::max(1.0f, std::ceil(50.0f / snapStep));
+	const int cells      = 8;
+	const float cx = std::round(hoverPos_.x / step) * step, cz = std::round(hoverPos_.z / step) * step, half = step * float(cells);
+	std::vector<V3> lines;
+	lines.reserve(std::size_t(cells * 2 + 1) * 2 * std::size_t(cells * 4) * 2);
+	for (int k = -cells; k <= cells; k++) {
+		for (int axis = 0; axis < 2; axis++) {
+			for (float t = -half; t < half - 0.01f; t += step * 0.5f) {
+				const float x0 = axis ? cx + float(k) * step : cx + t, z0 = axis ? cz + t : cz + float(k) * step;
+				const float x1 = axis ? x0 : x0 + step * 0.5f, z1 = axis ? z0 + step * 0.5f : z0;
+				lines.push_back(V3(x0, docHeight(x0, z0) + 3, z0));
+				lines.push_back(V3(x1, docHeight(x1, z1) + 3, z1));
+			}
+		}
+	}
+	renderer_.drawLines(lines, Rgba { 0.86f, 0.95f, 0.74f, 0.26f });
+}
+
 void App::drawViewport(const Rect& r)
 {
 	ImGui::SetNextWindowPos(ImVec2(r.x, r.y));
@@ -4692,6 +5812,7 @@ void App::drawViewport(const Rect& r)
 	renderScene(vw, vh);
 	ImGui::Image(ImTextureID(std::intptr_t(target_.color)), avail, ImVec2(0, 1), ImVec2(1, 0));
 	const bool imageHovered = ImGui::IsItemHovered();
+	hoverValid_             = imageHovered && terrainRay(mouseRay, hoverPos_);
 	// Debe ir inmediatamente después de Image: Dear ImGui usa el último item
 	// como destino. Los controles flotantes se dibujan después para no romperlo.
 	if (ImGui::BeginDragDropTarget()) {
@@ -4712,32 +5833,24 @@ void App::drawViewport(const Rect& r)
 	// Marco fino y neutro; el acento queda reservado para selección y acciones.
 	dl->AddRect(origin, ImVec2(origin.x + avail.x, origin.y + avail.y), IM_COL32(75, 86, 77, 230), 0.0f, 0, 1.0f);
 
-	// Barra de transformación junto al lienzo, como en los editores 3D. Los
-	// mismos modos siguen disponibles en el panel y mediante W/E/R.
 	bool viewportControlHovered = false;
-	ImGui::SetCursorScreenPos(ImVec2(origin.x + 12, origin.y + 12));
-	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(3, 0));
-	if (choiceButton("W", tool_ == Tool::Move && transformMode_ == TransformMode::Move, ImVec2(38, 30))) {
-		tool_ = Tool::Move;
-		transformMode_ = TransformMode::Move;
+	drawIssueMarkers(origin, avail, viewportControlHovered);
+	drawNavGizmo(origin, avail, viewportControlHovered);
+	drawRecentsBar(origin, avail, viewportControlHovered);
+	if (showMinimap_) {
+		const MapDoc& d   = ed_.doc;
+		const float spanX = float(d.maxX - d.minX), spanZ = float(d.maxZ - d.minZ);
+		if (spanX > 0 && spanZ > 0) {
+			float mw = std::max(150.0f, std::min(260.0f, avail.x * 0.22f));
+			float mh = mw * spanZ / spanX;
+			if (mh > avail.y * 0.38f) {
+				mh = avail.y * 0.38f;
+				mw = mh * spanX / spanZ;
+			}
+			drawMinimap(ImVec2(origin.x + avail.x - mw - 16, origin.y + avail.y - mh - 16), mw, mh, viewportControlHovered);
+		}
 	}
-	viewportControlHovered |= ImGui::IsItemHovered();
-	ImGui::SetItemTooltip("%s", tr("Mover (W)"));
-	ImGui::SameLine();
-	if (choiceButton("E", tool_ == Tool::Move && transformMode_ == TransformMode::Rotate, ImVec2(38, 30))) {
-		tool_ = Tool::Move;
-		transformMode_ = TransformMode::Rotate;
-	}
-	viewportControlHovered |= ImGui::IsItemHovered();
-	ImGui::SetItemTooltip("%s", tr("Girar (E)"));
-	ImGui::SameLine();
-	if (choiceButton("R", tool_ == Tool::Move && transformMode_ == TransformMode::Scale, ImVec2(38, 30))) {
-		tool_ = Tool::Move;
-		transformMode_ = TransformMode::Scale;
-	}
-	viewportControlHovered |= ImGui::IsItemHovered();
-	ImGui::SetItemTooltip("%s", tr("Escalar (R)"));
-	ImGui::PopStyleVar();
+	if (radialOpen_) viewportControlHovered = true;
 	viewportHovered_ = imageHovered && !viewportControlHovered;
 
 	if (showLabels_) drawLabels(origin, avail);
@@ -4766,29 +5879,10 @@ void App::drawViewport(const Rect& r)
 		dl->AddRect(a, b, IM_COL32(215, 222, 98, 245), 3.0f, 0, 2.0f);
 	}
 
-	// Ayuda de la herramienta, arriba.
-	const char* help = toolHelp();
-	const ImVec2 ts  = ImGui::CalcTextSize(help);
-	dl->AddRectFilled(ImVec2(origin.x + avail.x * 0.5f - ts.x * 0.5f - 14, origin.y + 8), ImVec2(origin.x + avail.x * 0.5f + ts.x * 0.5f + 14, origin.y + 17 + ts.y),
-	                  IM_COL32(20, 39, 20, 222), 10);
-	dl->AddRect(ImVec2(origin.x + avail.x * 0.5f - ts.x * 0.5f - 14, origin.y + 8), ImVec2(origin.x + avail.x * 0.5f + ts.x * 0.5f + 14, origin.y + 17 + ts.y),
-	            IM_COL32(139, 158, 68, 185), 10);
-	dl->AddText(ImVec2(origin.x + avail.x * 0.5f - ts.x * 0.5f, origin.y + 12), IM_COL32(239, 231, 194, 255), help);
+	// (La ayuda de la herramienta y del ratón va en la barra de estado.)
 
-	// Botones de cámara, abajo a la derecha.
-	ImGui::SetCursorScreenPos(ImVec2(origin.x + avail.x - 410, origin.y + avail.y - 44));
-	if (ImGui::Button(cam_.topDown ? tr("Vista en 3D (T)") : tr("Vista desde arriba (T)"), ImVec2(190, 34))) cam_.topDown = !cam_.topDown;
-	ImGui::SameLine();
-	if (ImGui::Button(tr("Ver todo el mapa"), ImVec2(200, 34))) {
-		const MapDoc& d = ed_.doc;
-		cam_.target     = V3(float((d.minX + d.maxX) * 0.5), 0, float((d.minZ + d.maxZ) * 0.5));
-		cam_.distance   = float(std::max(d.maxX - d.minX, d.maxZ - d.minZ));
-		cam_.topZoom    = float(std::max((d.maxX - d.minX) / viewAspect_, d.maxZ - d.minZ)) * 0.55f;
-	}
-	dl->AddText(ImVec2(origin.x + 12, origin.y + avail.y - 25), IM_COL32(230, 226, 191, 190), tr("Botón derecho: girar la vista  ·  Rueda: acercar  ·  Botón central: desplazar"));
-
-	// Avisos.
-	float ty = origin.y + avail.y - 60;
+	// Avisos (encima de la barra de recientes si está).
+	float ty = origin.y + avail.y - (tool_ == Tool::Place ? 92.0f : 18.0f);
 	for (auto it = toasts_.rbegin(); it != toasts_.rend(); ++it) {
 		if (it->until < now()) continue;
 		const ImVec2 sz = ImGui::CalcTextSize(it->text.c_str(), nullptr, false, avail.x * 0.6f);
@@ -4805,7 +5899,7 @@ void App::drawViewport(const Rect& r)
 void App::viewportMouse(const Ray& ray, const ImVec2& origin, const ImVec2& size)
 {
 	ImGuiIO& io = ImGui::GetIO();
-	const bool overButtons = io.MousePos.y > origin.y + size.y - 48 && io.MousePos.x > origin.x + size.x - 420;
+	const bool overButtons = false; // los controles flotantes ya quitan el ratón al visor (viewportHovered_)
 	const bool hovered     = viewportHovered_ && !overButtons && tutorialStep_ < 0;
 	const bool leftDown = ImGui::IsMouseDown(ImGuiMouseButton_Left), leftClick = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
 	const bool brushTool = tool_ == Tool::Floor || tool_ == Tool::Height || tool_ == Tool::Plateau || tool_ == Tool::Paint || tool_ == Tool::Water
@@ -4876,7 +5970,10 @@ void App::viewportMouse(const Ray& ray, const ImVec2& origin, const ImVec2& size
 
 	// Poner cosas y agua: vista previa bajo el ratón y clic para poner.
 	placeValid_ = tool_ == Tool::Place && hovered && terrainRay(ray, placePos_);
-	if (placeValid_ && leftClick) placeAt(placePos_);
+	if (placeValid_ && leftClick) {
+		placeAt(placePos_);
+		rememberPlace(place_);
+	}
 
 	// Trazos: clic para cada punto; Retroceso quita el último; Intro aplica.
 	if (tool_ == Tool::Trace) {
@@ -5160,6 +6257,7 @@ void App::renderScene(int w, int h)
 		if (!lines.empty()) renderer_.drawLines(lines, Rgba { 1, 0.85f, 0.2f, 1 });
 	}
 	if (tool_ == Tool::Move) drawSelection();
+	drawGrid();
 
 	// Pincel.
 	if (brushValid_) {
@@ -5197,9 +6295,20 @@ void App::renderScene(int w, int h)
 	if (placeValid_) {
 		const std::string asset      = placeAsset(place_);
 		std::shared_ptr<GpuModel> gm = asset.empty() ? nullptr : model(asset);
-		const M4 m                   = M4::translate(V3(float(snap(placePos_.x)), placePos_.y, float(snap(placePos_.z))));
-		if (gm) renderer_.drawModel(*gm, m, Rgba { 1, 1, 1, 0.55f });
-		else renderer_.drawCylinder(m * M4::scale(30, 60, 30), Rgba { 1, 0.85f, 0.2f, 0.55f });
+		const float gx = float(snap(placePos_.x)), gz = float(snap(placePos_.z));
+		const M4 m     = M4::translate(V3(gx, placePos_.y, gz));
+		// En rojo si no cabe: sin suelo o (salvo la decoración) en pendiente.
+		bool fits = docSolid(gx, gz);
+		if (fits && place_.type != ItemType::Prop && place_.type != ItemType::Gen) {
+			const float h0 = docHeight(gx, gz);
+			for (int k = 0; k < 4 && fits; k++) {
+				const float ox = k == 0 ? 30.0f : k == 1 ? -30.0f : 0.0f, oz = k == 2 ? 30.0f : k == 3 ? -30.0f : 0.0f;
+				fits = std::fabs(docHeight(gx + ox, gz + oz) - h0) < 22.0f;
+			}
+		}
+		const Rgba tint = fits ? Rgba { 1, 1, 1, 0.55f } : Rgba { 1, 0.3f, 0.25f, 0.65f };
+		if (gm) renderer_.drawModel(*gm, m, tint);
+		else renderer_.drawCylinder(m * M4::scale(30, 60, 30), fits ? Rgba { 1, 0.85f, 0.2f, 0.55f } : Rgba { 1, 0.3f, 0.25f, 0.65f });
 	}
 	// El muro que se está dibujando.
 	if (drawingWall_ && (placePos_ - wallStart_).length() > 1) {

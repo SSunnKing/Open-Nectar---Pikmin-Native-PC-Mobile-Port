@@ -75,6 +75,13 @@ private:
 	void drawSetup();
 	void drawBuilding();
 	void drawWelcome();
+	void drawStartHome();      ///< paso 1: modo, abrir, importar y recientes
+	void drawStartNew();       ///< paso 2: plantillas del modo elegido
+	bool modeCard(int mode, float w, float h);
+	void recentList(float w);
+	void applyStartMode();     ///< pone el modo elegido al mapa recién creado
+	void rememberRecent(const std::string& path);
+	void openMapFile();
 	void startCatalog();
 	void enterEditor();
 	bool shapeButton(const char* id, nectar::TerrainShape shape, const char* label, float size);
@@ -82,12 +89,27 @@ private:
 	// ── Editor ──
 	void drawEditor();
 	void drawTopBar(const Rect& r);
+	void drawToolHeader(const Rect& r);      ///< fila de opciones de la herramienta, sobre el visor
+	void drawStatusBar(const Rect& r);       ///< abajo: ratón, coordenadas, selección, guardado y presupuesto
+	void drawReadyPill();                    ///< «Listo para jugar» / «N por arreglar», con la lista al pulsar
+	void drawHistoryMenu();                  ///< historial de deshacer
+	void drawNavGizmo(const ImVec2& origin, const ImVec2& size, bool& hovered); ///< brújula de vistas
+	void drawIssueMarkers(const ImVec2& origin, const ImVec2& size, bool& hovered); ///< avisos en el mundo
+	void drawRecentsBar(const ImVec2& origin, const ImVec2& size, bool& hovered);   ///< lo último puesto
+	void drawRadialMenu();                   ///< Mayús+A: lo último puesto en un círculo
+	void drawCatalogDrawer(const Rect& r);   ///< «Poner cosas» a lo ancho, bajo el visor
+	void drawGrid();                         ///< cuadrícula de encaje bajo el ratón
+	void viewWholeMap();
+	void rememberPlace(const PlaceChoice& c);
+	std::vector<PlaceChoice> placeRecents() const;
+	const std::vector<Issue>& issues();      ///< checkMap(), recalculado solo si cambia el mapa
+	const char* toolName(Tool t) const;
 	void drawToolbox(const Rect& r);
 	void drawViewport(const Rect& r);
 	void drawSidePanel(const Rect& r);
 	void drawSelected();
 	void drawMapPanel();
-	void drawMinimap();
+	void drawMinimap(const ImVec2& o, float w, float h, bool& hovered); ///< en el visor, abajo a la derecha
 	void drawHierarchy();
 	void drawChecklist();
 	void drawTechnicalReport();
@@ -200,11 +222,11 @@ private:
 	void exportPackOf(const std::string& dir);
 
 	// ── Archivo ──
-	void newMap(nectar::TerrainShape shape);
+	void newMap(nectar::TerrainShape shape, double scale = 1.0, bool vsWalls = true); ///< scale: tamaño respecto al de siempre (3200 × 1800); vsWalls: las murallas de las bases
 	/// Mapa sin suelo propio: el suelo es un nivel entero de un .obj o .dae.
 	void newMapFromModel();
 	bool coursePickers();
-	bool templatePickers(float size);
+	bool templatePickers(float size, unsigned modes = ~0u); ///< solo las plantillas de esos modos
 	unsigned templateThumb(const TemplateInfo& t);
 	bool courseMode() const { return !ed_.doc.course.empty(); }
 	void openMap(const std::string& path);
@@ -212,7 +234,7 @@ private:
 	bool saveMap(const std::string& path);
 	void saveOrAsk(bool thenTest);
 	/// Prueba el mapa en el juego en testMode_ (o en el primer modo que tenga).
-	void testInGame();
+	void testInGame(bool fromHere = false); ///< fromHere: el capitán empieza donde mira la cámara
 	unsigned testMode_ = nectar::MAPMODE_VS;
 	void autosave();
 	void notify(int level, const std::string& text);
@@ -349,6 +371,20 @@ private:
 	std::vector<std::pair<std::string, std::string>> openList_; // (nombre, ruta)
 	int tutorialStep_ = -1;
 	std::string openAtStart_;
+	// Interfaz: barra de estado, avisos, recientes y catálogo.
+	std::vector<Issue> issuesCache_;
+	int issuesGen_ = -1, issuesCompiledGen_ = -1;
+	V3 hoverPos_;
+	bool hoverValid_ = false;
+	double lastSaved_ = -1;
+	bool catalogOpen_ = false;
+	bool focusToolTab_ = false;
+	bool showMinimap_ = true; ///< abrir la pestaña «Herramienta» del panel derecho
+	bool radialOpen_ = false;
+	float radialX_ = 0, radialY_ = 0;
+	unsigned startMode_ = 0; ///< inicio: 0 = elegir modo; si no, MapMode o kStartCampaign
+	int startSize_ = 1; ///< inicio: tamaño del mapa en blanco (0 pequeño, 1 mediano, 2 grande)
+	static constexpr unsigned kStartCampaign = 8u;
 
 	// Campaña en edición
 	nectar::CampaignDoc camp_;
