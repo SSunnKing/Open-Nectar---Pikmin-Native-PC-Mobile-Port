@@ -74,6 +74,6 @@ prints a warning. The draft release then has no APK and it can be added by hand.
 - **Windows antivirus.** The cross-built `.exe` files come from the same script as
   before, but the build machine is different. After the first automated release,
   upload the Windows files to a scanner before publishing.
-- **Online play** stays off in release builds, as in the scripts
-  (`NECTAR_RELEASE_ONLINE`). Set it in the workflow when it is ready to ship.
+- **Online play** is not built into releases (`NECTAR_RELEASE_ONLINE` stays off).
+  Pikmin 1 netplay is dead code: do not enable it.
 - The tag filter accepts `1.3`, `1.3.1` and `1.3.1.1`.
