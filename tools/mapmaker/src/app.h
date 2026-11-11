@@ -99,6 +99,7 @@ private:
 	void drawRadialMenu();                   ///< Mayús+A: lo último puesto en un círculo
 	void drawCatalogDrawer(const Rect& r);   ///< «Poner cosas» a lo ancho, bajo el visor
 	void drawGrid();                         ///< cuadrícula de encaje bajo el ratón
+	void drawReferenceGrid();                ///< cuadrícula tenue del suelo cuando no hay terreno pintado
 	void viewWholeMap();
 	void rememberPlace(const PlaceChoice& c);
 	std::vector<PlaceChoice> placeRecents() const;

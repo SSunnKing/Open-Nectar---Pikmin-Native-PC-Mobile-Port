@@ -5895,6 +5895,32 @@ void App::drawGrid()
 	renderer_.drawLines(lines, Rgba { 0.86f, 0.95f, 0.74f, 0.26f });
 }
 
+void App::drawReferenceGrid()
+{
+	// Sin terreno pintado (mapas en blanco de modelo o escenarios del juego):
+	// una cuadrícula tenue sobre el suelo da escala y orientación.
+	const MapDoc& d = ed_.doc;
+	if (d.terrain.grid) return;
+	const float spanX = float(d.maxX - d.minX), spanZ = float(d.maxZ - d.minZ);
+	if (!(spanX > 0 && spanZ > 0)) return;
+	const float step = spanX > 6000 || spanZ > 6000 ? 500.0f : 250.0f;
+	std::vector<V3> minor, major;
+	auto push = [&](std::vector<V3>& out, float x0, float z0, float x1, float z1) {
+		out.push_back(V3(x0, docHeight(x0, z0) + 2, z0));
+		out.push_back(V3(x1, docHeight(x1, z1) + 2, z1));
+	};
+	for (float x = std::ceil(float(d.minX) / step) * step; x <= float(d.maxX); x += step) {
+		std::vector<V3>& out = std::fabs(x) < 0.5f ? major : minor;
+		for (float z = float(d.minZ); z < float(d.maxZ) - 0.01f; z += step) push(out, x, z, x, std::min(z + step, float(d.maxZ)));
+	}
+	for (float z = std::ceil(float(d.minZ) / step) * step; z <= float(d.maxZ); z += step) {
+		std::vector<V3>& out = std::fabs(z) < 0.5f ? major : minor;
+		for (float x = float(d.minX); x < float(d.maxX) - 0.01f; x += step) push(out, x, z, std::min(x + step, float(d.maxX)), z);
+	}
+	if (!minor.empty()) renderer_.drawLines(minor, Rgba { 0.80f, 0.88f, 0.72f, 0.10f });
+	if (!major.empty()) renderer_.drawLines(major, Rgba { 0.86f, 0.95f, 0.74f, 0.22f });
+}
+
 void App::drawViewport(const Rect& r)
 {
 	ImGui::SetNextWindowPos(ImVec2(r.x, r.y));
@@ -5916,6 +5942,15 @@ void App::drawViewport(const Rect& r)
 	const Ray mouseRay = cameraRay(cam_, viewAspect_, nx, ny);
 
 	renderScene(vw, vh);
+	{
+		// Cielo: azul grisáceo arriba, pizarra cálida en el horizonte, más
+		// oscuro abajo (donde queda el suelo visto desde arriba).
+		ImDrawList* bg   = ImGui::GetWindowDrawList();
+		const ImVec2 end(origin.x + avail.x, origin.y + avail.y);
+		const float hz = origin.y + avail.y * (cam_.topDown ? 1.0f : 0.55f);
+		bg->AddRectFilledMultiColor(origin, ImVec2(end.x, hz), IM_COL32(52, 68, 84, 255), IM_COL32(52, 68, 84, 255), IM_COL32(74, 86, 92, 255), IM_COL32(74, 86, 92, 255));
+		if (!cam_.topDown) bg->AddRectFilledMultiColor(ImVec2(origin.x, hz), end, IM_COL32(74, 86, 92, 255), IM_COL32(74, 86, 92, 255), IM_COL32(36, 44, 46, 255), IM_COL32(36, 44, 46, 255));
+	}
 	ImGui::Image(ImTextureID(std::intptr_t(target_.color)), avail, ImVec2(0, 1), ImVec2(1, 0));
 	// Mientras se arrastra algo del catálogo, el visor sigue «bajo el ratón»
 	// para enseñar la vista previa de lo que se va a soltar.
@@ -6343,9 +6378,9 @@ void App::viewportMouse(const Ray& ray, const ImVec2& origin, const ImVec2& size
 void App::renderScene(int w, int h)
 {
 	const M4 view = cam_.view(), proj = cam_.projection(float(w) / float(h));
-	// Fondo pizarra ligeramente frío: separa bien siluetas y gizmos sin
-	// competir con los colores naturales del mapa.
-	renderer_.begin(target_, view, proj, Rgba { 0.16f, 0.20f, 0.23f, 1 });
+	// Fondo transparente: el cielo (un degradado) lo pinta el visor debajo
+	// de la imagen, así cambia con la altura y no compite con el mapa.
+	renderer_.begin(target_, view, proj, Rgba { 0, 0, 0, 0 });
 	const MapDoc& d = ed_.doc;
 	if (baseGpu_) renderer_.drawModel(*baseGpu_, M4());
 
@@ -6375,6 +6410,7 @@ void App::renderScene(int w, int h)
 	}
 	if (tool_ == Tool::Move) drawSelection();
 	drawGrid();
+	drawReferenceGrid();
 
 	// Pincel.
 	if (brushValid_) {
