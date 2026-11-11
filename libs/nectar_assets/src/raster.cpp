@@ -82,8 +82,10 @@ Image renderModel(const Model& model, const RenderOptions& options)
 		const int y0 = std::max(0, int(std::floor(std::min({ s[0].y, s[1].y, s[2].y }))));
 		const int y1 = std::min(size - 1, int(std::ceil(std::max({ s[0].y, s[1].y, s[2].y }))));
 		const Tex* tex = t.material >= 0 && std::size_t(t.material) < mats.size() ? &mats[std::size_t(t.material)] : nullptr;
-		const Rgba8 matCol = t.material >= 0 && std::size_t(t.material) < model.materials.size() ? model.materials[std::size_t(t.material)].colour : Rgba8();
+		const Rgba8 matCol = t.material >= 0 && std::size_t(t.material) < model.materials.size() ? model.materials[std::size_t(t.material)].shade : Rgba8();
 		const bool textured = tex && !tex->img.empty();
+		const bool texAdd   = t.material >= 0 && std::size_t(t.material) < model.materials.size() && model.materials[std::size_t(t.material)].texAdditive;
+		const bool envMap   = t.material >= 0 && std::size_t(t.material) < model.materials.size() && model.materials[std::size_t(t.material)].envMap;
 
 		for (int y = y0; y <= y1; y++) {
 			for (int x = x0; x <= x1; x++) {
@@ -96,10 +98,17 @@ Image renderModel(const Model& model, const RenderOptions& options)
 				float& zb         = depth[std::size_t(y) * size + x];
 				if (z <= zb) continue;
 
+				const Vec3 nn { w0 * n[0].x + w1 * n[1].x + w2 * n[2].x, w0 * n[0].y + w1 * n[1].y + w2 * n[2].y,
+					            w0 * n[0].z + w1 * n[1].z + w2 * n[2].z };
+				const float nl = std::sqrt(nn.x * nn.x + nn.y * nn.y + nn.z * nn.z);
 				float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
 				if (textured) {
-					const float u = w0 * t.uv[0].x + w1 * t.uv[1].x + w2 * t.uv[2].x;
-					const float v = w0 * t.uv[0].y + w1 * t.uv[1].y + w2 * t.uv[2].y;
+					float u = w0 * t.uv[0].x + w1 * t.uv[1].x + w2 * t.uv[2].x;
+					float v = w0 * t.uv[0].y + w1 * t.uv[1].y + w2 * t.uv[2].y;
+					if (envMap && nl > 0.0f) { // mapa de entorno: la normal en espacio de vista
+						u = 0.5f + 0.5f * nn.x / nl;
+						v = 0.5f - 0.5f * nn.y / nl;
+					}
 					int tx = int(std::floor(u * tex->img.width)) % tex->img.width;
 					int ty = int(std::floor(v * tex->img.height)) % tex->img.height;
 					if (tx < 0) tx += tex->img.width;
@@ -114,13 +123,19 @@ Image renderModel(const Model& model, const RenderOptions& options)
 					g = matCol.g / 255.0f;
 					b = matCol.b / 255.0f;
 				}
+				if (textured && texAdd) {
+					r = std::min(1.0f, r + matCol.r / 255.0f);
+					g = std::min(1.0f, g + matCol.g / 255.0f);
+					b = std::min(1.0f, b + matCol.b / 255.0f);
+				} else if (textured) {
+					r *= matCol.r / 255.0f;
+					g *= matCol.g / 255.0f;
+					b *= matCol.b / 255.0f;
+				}
 				if (tex && tex->cutout && a < 0.5f) continue;
 				const float vr = (w0 * t.col[0].r + w1 * t.col[1].r + w2 * t.col[2].r) / 255.0f;
 				const float vg = (w0 * t.col[0].g + w1 * t.col[1].g + w2 * t.col[2].g) / 255.0f;
 				const float vb = (w0 * t.col[0].b + w1 * t.col[1].b + w2 * t.col[2].b) / 255.0f;
-				const Vec3 nn { w0 * n[0].x + w1 * n[1].x + w2 * n[2].x, w0 * n[0].y + w1 * n[1].y + w2 * n[2].y,
-					            w0 * n[0].z + w1 * n[1].z + w2 * n[2].z };
-				const float nl    = std::sqrt(nn.x * nn.x + nn.y * nn.y + nn.z * nn.z);
 				const float dot   = nl > 0.0f ? std::fabs((nn.x * light.x + nn.y * light.y + nn.z * light.z) / (nl * ll)) : 1.0f;
 				const float shade = 0.45f + 0.55f * dot;
 

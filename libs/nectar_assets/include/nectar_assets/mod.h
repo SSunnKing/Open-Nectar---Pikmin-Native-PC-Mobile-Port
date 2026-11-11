@@ -59,6 +59,17 @@ struct ModMaterial {
 	std::uint32_t flags = MOD_MAT_OPAQUE;
 	int texAttr         = -1; ///< primera textura del material
 	Rgba8 colour;             ///< color del material (y del polígono en los PVW)
+	/// Color con el que se ve el material sin reproducir el TEV: el del polígono
+	/// si no es negro; si no, el primer registro o constante del TEV que usan
+	/// sus etapas; si no, blanco. Muchas piezas de la nave llevan el color ahí.
+	Rgba8 shade;
+	/// El TEV suma la textura al color (brillos y reflejos de las piezas de la
+	/// nave: la textura es casi negra) en vez de multiplicarla.
+	bool texAdditive = false;
+	/// Las coordenadas de textura salen de la normal (mapa de entorno: los
+	/// reflejos metálicos de las piezas de la nave), no de la malla.
+	bool envMap = false;
+	int tevInfoIndex = -1; ///< TevInfo del material (solo PVW)
 
 	// Para copiar el material a otro .mod: sus bytes y dónde están (dentro de
 	// raw) los enteros que apuntan a otras tablas.

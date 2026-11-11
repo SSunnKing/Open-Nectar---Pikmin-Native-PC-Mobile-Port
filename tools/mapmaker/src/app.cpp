@@ -2002,6 +2002,41 @@ unsigned App::cutThumb(const std::string& asset)
 	return thumb(path);
 }
 
+bool App::thumbCard(unsigned tex, const std::string& name, bool on, float w, bool favourite)
+{
+	const float lineH = ImGui::GetFontSize() + 2.0f;
+	const float h     = w + lineH * 2 + 8.0f;
+	const ImVec2 p    = ImGui::GetCursorScreenPos();
+	const bool pressed = ImGui::InvisibleButton("##card", ImVec2(w, h));
+	const bool hot     = ImGui::IsItemHovered();
+	ImDrawList* dl     = ImGui::GetWindowDrawList();
+	const ImVec2 q(p.x + w, p.y + h);
+	const ImU32 bg = on ? IM_COL32(74, 98, 42, 255) : hot ? IM_COL32(54, 64, 50, 255) : favourite ? IM_COL32(58, 66, 40, 255) : IM_COL32(42, 50, 40, 255);
+	dl->AddRectFilled(p, q, bg, 8.0f);
+	if (on || hot) dl->AddRect(p, q, on ? IM_COL32(183, 207, 75, 255) : IM_COL32(120, 140, 100, 255), 8.0f, 0, on ? 2.0f : 1.0f);
+	// La miniatura va sobre un fondo claro degradado: así se distinguen también
+	// los modelos oscuros.
+	const ImVec2 ia(p.x + 5, p.y + 5), ib(q.x - 5, p.y + w - 5);
+	dl->AddRectFilled(ia, ib, IM_COL32(128, 140, 120, 255), 6.0f);
+	dl->AddRectFilledMultiColor(ImVec2(ia.x, ia.y + (ib.y - ia.y) * 0.5f), ib, IM_COL32(128, 140, 120, 255), IM_COL32(128, 140, 120, 255), IM_COL32(88, 100, 82, 255), IM_COL32(88, 100, 82, 255));
+	if (tex) {
+		dl->AddImage(ImTextureID(std::intptr_t(tex)), ImVec2(ia.x + 2, ia.y + 2), ImVec2(ib.x - 2, ib.y - 2));
+	} else {
+		// Sin miniatura: la inicial, grande.
+		char initial[5] = { 0 };
+		std::snprintf(initial, sizeof(initial), "%c", name.empty() ? '?' : char(std::toupper(static_cast<unsigned char>(name[0]))));
+		const float fs    = ImGui::GetFontSize() * 2.2f;
+		const ImVec2 size = ImGui::GetFont()->CalcTextSizeA(fs, FLT_MAX, 0.0f, initial);
+		dl->AddText(nullptr, fs, ImVec2((ia.x + ib.x - size.x) * 0.5f, (ia.y + ib.y - size.y) * 0.5f), IM_COL32(30, 38, 28, 255), initial);
+	}
+	if (favourite) dl->AddText(ImVec2(ib.x - ImGui::GetFontSize() - 2, ia.y + 2), IM_COL32(255, 215, 80, 255), "*");
+	// Nombre: hasta dos líneas, recortado.
+	dl->PushClipRect(ImVec2(p.x + 4, ib.y), ImVec2(q.x - 4, q.y - 3), true);
+	dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(p.x + 6, ib.y + 4), on ? IM_COL32(236, 244, 196, 255) : IM_COL32(205, 210, 195, 255), name.c_str(), nullptr, w - 12);
+	dl->PopClipRect();
+	return pressed;
+}
+
 unsigned App::assetThumb(const std::string& asset)
 {
 	if (asset.rfind("cut:", 0) == 0) return cutThumb(asset);
@@ -2704,31 +2739,22 @@ void App::drawPlaceOptions()
 	// Rejilla de miniaturas de modelos del juego.
 	auto grid = [&](const char* id, const std::vector<std::pair<PlaceChoice, std::string>>& items, const char* tipFmt) {
 		ImGui::PushID(id);
-		int col          = 0;
-		const int perRow = std::max(3, int(ImGui::GetContentRegionAvail().x / 84.0f));
+		int col            = 0;
+		const float cardW  = 88.0f, gap = 6.0f;
+		const int perRow   = std::max(2, int((ImGui::GetContentRegionAvail().x + gap) / (cardW + gap)));
 		for (const auto& it : items) {
 			const PlaceChoice& c = it.first;
 			ImGui::PushID(c.label.c_str());
 			const unsigned t = assetThumb(placeAsset(c));
 			const bool on    = place_.type == c.type && place_.label == c.label;
-			// Nombre (la primera línea de la descripción) debajo de la miniatura,
-			// para no tener que pasar el ratón por cada una.
+			// Nombre (la primera línea de la descripción) debajo de la miniatura.
 			const std::string name = it.second.substr(0, it.second.find('\n'));
-			ImGui::BeginGroup();
-			if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.52f, 0.66f, 0.25f, 1));
-			const bool pressed = t ? ImGui::ImageButton("##g", ImTextureID(std::intptr_t(t)), ImVec2(72, 72)) : ImGui::Button("##g", ImVec2(80, 80));
-			if (on) ImGui::PopStyleColor();
-			const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+			const bool pressed     = thumbCard(t, name, on, cardW);
 			beginPlaceDrag(c, t, name);
-			if (!t) ImGui::GetWindowDrawList()->AddText(ImVec2(a.x + 6, a.y + 6), ImGui::GetColorU32(ImGuiCol_Text), name.c_str(), nullptr);
-			ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + (b.x - a.x));
-			ImGui::TextColored(on ? ImVec4(0.90f, 0.95f, 0.70f, 1) : kDim, "%s", name.c_str());
-			ImGui::PopTextWrapPos();
-			ImGui::EndGroup();
 			if (pressed) choose(c);
 			ImGui::SetItemTooltip(tipFmt, it.second.c_str());
 			ImGui::PopID();
-			if (++col < perRow) ImGui::SameLine();
+			if (++col < perRow) ImGui::SameLine(0, gap);
 			else col = 0;
 		}
 		if (col) ImGui::NewLine();
@@ -2965,10 +2991,10 @@ void App::drawPlaceOptions()
 		ImGui::PushID(it.path);
 		const unsigned t = assetThumb(it.path);
 		const bool on    = place_.type == ItemType::Prop && place_.asset == it.path;
-		if (on || favorite(it.path)) ImGui::PushStyleColor(ImGuiCol_Button, on ? ImVec4(0.52f, 0.66f, 0.25f, 1) : ImVec4(0.37f, 0.43f, 0.20f, 1));
-		const bool pressed = assetGrid ? (t ? ImGui::ImageButton("##d", ImTextureID(std::intptr_t(t)), ImVec2(72, 72)) : ImGui::Button(tr(it.name), ImVec2(80, 80)))
+		if (!assetGrid && (on || favorite(it.path))) ImGui::PushStyleColor(ImGuiCol_Header, on ? ImVec4(0.52f, 0.66f, 0.25f, 1) : ImVec4(0.37f, 0.43f, 0.20f, 1));
+		const bool pressed = assetGrid ? thumbCard(t, name, on, 88.0f, favorite(it.path))
 		                               : ImGui::Selectable((std::string(favorite(it.path) ? "[F] " : "") + tr(it.name) + "##" + it.path).c_str(), on);
-		if (on || favorite(it.path)) ImGui::PopStyleColor();
+		if (!assetGrid && (on || favorite(it.path))) ImGui::PopStyleColor();
 		if (pressed) choose({ ItemType::Prop, it.path, tr(it.name) });
 		if (const nectar::CatalogEntry* e = catalogEntry(it.path)) {
 			const char* warning = e->triangles > 10000 ? tr("Aviso: modelo muy pesado") : (e->boundsMax.x - e->boundsMin.x > 3000 || e->boundsMax.y - e->boundsMin.y > 3000 || e->boundsMax.z - e->boundsMin.z > 3000) ? tr("Aviso: modelo muy grande") : "";
@@ -3010,11 +3036,11 @@ void App::drawPlaceOptions()
 			if (!passesFilter(e.path)) continue;
 			const bool on = place_.type == ItemType::Prop && place_.asset == e.path;
 			ImGui::PushID(e.path.c_str());
-			if (on || favorite(e.path)) ImGui::PushStyleColor(ImGuiCol_Button, on ? ImVec4(0.52f, 0.66f, 0.25f, 1) : ImVec4(0.37f, 0.43f, 0.20f, 1));
+			if (!assetGrid && (on || favorite(e.path))) ImGui::PushStyleColor(ImGuiCol_Header, on ? ImVec4(0.52f, 0.66f, 0.25f, 1) : ImVec4(0.37f, 0.43f, 0.20f, 1));
 			const unsigned t = assetThumb(e.path);
-			const bool pressed = assetGrid ? (t ? ImGui::ImageButton("##catalog_asset", ImTextureID(std::intptr_t(t)), ImVec2(72, 72)) : ImGui::Button(e.path.c_str(), ImVec2(80, 80)))
+			const bool pressed = assetGrid ? thumbCard(t, fs::path(e.path).stem().string(), on, 88.0f, favorite(e.path))
 			                               : ImGui::Selectable((std::string(favorite(e.path) ? "[F] " : "") + e.path).c_str(), on);
-			if (on || favorite(e.path)) ImGui::PopStyleColor();
+			if (!assetGrid && (on || favorite(e.path))) ImGui::PopStyleColor();
 			if (pressed) choose({ ItemType::Prop, e.path, e.path });
 			const char* warning = e.triangles > 10000 ? tr("Aviso: modelo muy pesado") : (e.boundsMax.x - e.boundsMin.x > 3000 || e.boundsMax.y - e.boundsMin.y > 3000 || e.boundsMax.z - e.boundsMin.z > 3000) ? tr("Aviso: modelo muy grande") : "";
 			ImGui::SetItemTooltip("%s\n%s: %d\n%s: %d\n%s: %.0f × %.0f × %.0f%s%s", e.path.c_str(), tr("Triángulos"), e.triangles,

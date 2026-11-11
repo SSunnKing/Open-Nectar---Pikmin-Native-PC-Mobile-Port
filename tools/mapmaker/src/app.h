@@ -197,6 +197,8 @@ private:
 	M4 itemMatrix(const ItemRef& r, bool twin) const;
 	unsigned thumb(const std::string& path);
 	unsigned assetThumb(const std::string& asset);
+	/// Casilla del catálogo: tarjeta con la miniatura sobre fondo claro y el nombre debajo.
+	bool thumbCard(unsigned tex, const std::string& name, bool on, float w, bool favourite = false);
 
 	// ── Campañas (user/campaigns/<id>/) ──
 	std::string campaignsDir() const;

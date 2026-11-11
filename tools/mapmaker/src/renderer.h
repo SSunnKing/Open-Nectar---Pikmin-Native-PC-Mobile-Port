@@ -25,6 +25,9 @@ struct GpuModel {
 		int count  = 0;
 		GLuint tex = 0;
 		bool cutout = false, blend = false;
+		float colour[3] = { 1, 1, 1 }; ///< ModMaterial::shade
+		bool texAdd     = false;       ///< ModMaterial::texAdditive
+		bool envMap     = false;       ///< ModMaterial::envMap
 	};
 	std::vector<Part> parts;
 	std::vector<GLuint> textures;
@@ -63,13 +66,13 @@ private:
 		unsigned char c[4];
 	};
 	GLuint program_ = 0;
-	GLint uMvp_ = -1, uModel_ = -1, uTint_ = -1, uUseTex_ = -1, uCut_ = -1, uLit_ = -1, uTex_ = -1;
+	GLint uMvp_ = -1, uModel_ = -1, uTint_ = -1, uUseTex_ = -1, uCut_ = -1, uLit_ = -1, uTex_ = -1, uEnvMap_ = -1;
 	GLuint boxVao_ = 0, boxVbo_ = 0, cylVao_ = 0, cylVbo_ = 0, dynVao_ = 0, dynVbo_ = 0;
 	int boxCount_ = 0, cylCount_ = 0;
 	M4 viewProj_;
 
 	GLuint makeMesh(const std::vector<Vertex>& v, GLuint& vbo);
-	void setup(const M4& model, const Rgba& tint, bool tex, float cut, bool lit);
+	void setup(const M4& model, const Rgba& tint, int tex, float cut, bool lit);
 	void drawDynamic(const std::vector<Vertex>& v, GLenum mode);
 };
 

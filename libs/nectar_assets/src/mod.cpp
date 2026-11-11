@@ -127,16 +127,47 @@ void skipAnim(Reader& r, int channels)
 	r.skip(std::size_t(n) * (4 + 12 * channels));
 }
 
-void skipTevInfo(Reader& r)
+// Lee un TevInfo y devuelve el color «de referencia» del material: el primer
+// registro (C0..C2) o constante (KONST) que usa el combinador de color de sus
+// etapas y no es negro. Blanco si no hay ninguno.
+struct TevSummary {
+	Rgba8 tint;
+	bool texAdditive = false;
+};
+TevSummary readTevInfo(Reader& r)
 {
+	Rgba8 regs[3], konst[4];
 	for (int i = 0; i < 3; i++) { // PVWTevColReg
-		r.skip(8 + 4 + 4);        // color (4 x s16), fotogramas, velocidad
+		const std::int16_t c[4] = { r.s16(), r.s16(), r.s16(), r.s16() };
+		regs[i] = { std::uint8_t(std::max<int>(0, std::min<int>(255, c[0]))), std::uint8_t(std::max<int>(0, std::min<int>(255, c[1]))),
+			        std::uint8_t(std::max<int>(0, std::min<int>(255, c[2]))), std::uint8_t(std::max<int>(0, std::min<int>(255, c[3]))) };
+		r.skip(4 + 4); // fotogramas, velocidad
 		skipAnim(r, 3);
 		skipAnim(r, 1);
 	}
-	r.skip(4 * 4); // colores constantes
+	for (int i = 0; i < 4; i++) konst[i] = { r.u8(), r.u8(), r.u8(), r.u8() };
 	const int stages = count(r, 32);
-	r.skip(std::size_t(stages) * 32); // 8 bytes + 2 combinadores de 12
+	TevSummary out;
+	bool found = false;
+	auto consider = [&](const Rgba8& c) {
+		if (found || (c.r == 0 && c.g == 0 && c.b == 0)) return;
+		out.tint = { c.r, c.g, c.b, 255 };
+		found    = true;
+	};
+	for (int i = 0; i < stages && r.ok; i++) {
+		r.skip(4);
+		const int kColorSel = r.u8(); // GX_TEV_KCSEL_K0..K3 = 12..15; K0_R.. = 16..
+		r.skip(3);
+		const int in[4] = { r.u8(), r.u8(), r.u8(), r.u8() }; // GX_CC_*: salida = D + lerp(A, B, C)
+		r.skip(8 + 12);
+		for (int a : in) {
+			if (a == 2 || a == 4 || a == 6) consider(regs[(a - 2) / 2]); // C0, C1, C2
+			if (a == 14 && kColorSel >= 12) consider(konst[(kColorSel - 12) % 4]); // KONST
+		}
+		// Textura (TEXC = 8) en D o en A: se suma a lo demás.
+		if (in[3] == 8 || (in[0] == 8 && in[2] != 8)) out.texAdditive = true;
+	}
+	return out;
 }
 
 ModMaterial readMaterial(Reader& r)
@@ -153,8 +184,8 @@ ModMaterial readMaterial(Reader& r)
 		return m;
 	}
 
-	m.tevInfoRef = int(r.pos - start);
-	r.skip(4);                 // índice de TevInfo
+	m.tevInfoRef   = int(r.pos - start);
+	m.tevInfoIndex = r.s32();
 	const Rgba8 polygon = rgba(r); // PVWPolygonColourInfo
 	r.skip(4 + 4);
 	skipAnim(r, 3);
@@ -163,7 +194,12 @@ ModMaterial readMaterial(Reader& r)
 	r.skip(4 * 4);    // PVWPeInfo
 	r.skip(4 + 12);   // PVWTextureInfo: usa escala, escala
 	const int texGens = count(r, 4);
-	r.skip(std::size_t(texGens) * 4);
+	for (int i = 0; i < texGens; i++) { // PVWTexGenData: coord, tipo, fuente, matriz
+		r.skip(2);
+		const int src = r.u8(); // GX_TG_NRM = 1
+		r.skip(1);
+		if (i == 0 && src == 1) m.envMap = true;
+	}
 	const int texData = count(r, 4);
 	m.texAttr         = -1;
 	for (int i = 0; i < texData; i++) { // PVWTextureData
@@ -331,12 +367,23 @@ bool parseMod(const std::uint8_t* data, std::size_t size, Model& out, std::strin
 		case CHUNK_MATERIAL: {
 			const int mats = count(r, 12), tevs = count(r, 4);
 			r.align(0x20);
+			std::vector<TevSummary> tevTints;
 			for (int i = 0; i < tevs && r.ok; i++) {
 				const std::size_t entry = r.pos;
-				skipTevInfo(r);
+				tevTints.push_back(readTevInfo(r));
 				if (r.ok) out.tevInfos.emplace_back(data + entry, data + r.pos);
 			}
-			for (int i = 0; i < mats && r.ok; i++) out.materials.push_back(readMaterial(r));
+			for (int i = 0; i < mats && r.ok; i++) {
+				ModMaterial m = readMaterial(r);
+				m.shade       = m.colour;
+				const bool black = m.colour.r == 0 && m.colour.g == 0 && m.colour.b == 0;
+				const bool hasTev = m.tevInfoIndex >= 0 && std::size_t(m.tevInfoIndex) < tevTints.size();
+				if (black && hasTev) m.shade = tevTints[std::size_t(m.tevInfoIndex)].tint;
+				else if (black) m.shade = Rgba8();
+				if (hasTev) m.texAdditive = tevTints[std::size_t(m.tevInfoIndex)].texAdditive;
+				m.shade.a = 255;
+				out.materials.push_back(m);
+			}
 			break;
 		}
 		case CHUNK_VTXMATRIX: {

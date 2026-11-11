@@ -21,7 +21,7 @@ using json   = nlohmann::json;
 namespace {
 
 // Sube si cambia lo que se guarda: la caché vieja se rehace entera.
-constexpr int kIndexVersion = 2; // 2: matrices de GX arrastradas entre grupos (Mario)
+constexpr int kIndexVersion = 3; // 2: matrices de GX arrastradas entre grupos (Mario); 3: color del TEV en las miniaturas
 
 constexpr int kThumbSize    = 128;
 

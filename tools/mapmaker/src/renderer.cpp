@@ -40,10 +40,14 @@ uniform int uUseTex;
 uniform vec4 uTint;
 uniform float uCut;
 uniform float uLit;
+uniform int uEnvMap;
 out vec4 outColor;
 void main() {
 	vec4 c = vCol * uTint;
-	if (uUseTex != 0) c *= texture(uTex, vUv);
+	vec2 uv = vUv;
+	if (uEnvMap != 0 && length(vNrm) > 0.0) { vec3 nn = normalize(vNrm); uv = vec2(0.5 + 0.5 * nn.x, 0.5 - 0.5 * nn.y); }
+	if (uUseTex == 1) c *= texture(uTex, uv);
+	if (uUseTex == 2) { vec4 t = texture(uTex, uv); c = vec4(min(vec3(1.0), c.rgb + t.rgb), c.a * t.a); }
 	if (c.a < uCut) discard;
 	vec3 l = normalize(vec3(-0.45, 0.8, 0.4));
 	float n = length(vNrm) > 0.0 ? abs(dot(normalize(vNrm), l)) : 1.0;
@@ -152,6 +156,7 @@ bool Renderer::init(std::string& error)
 	uModel_  = glGetUniformLocation(program_, "uModel");
 	uTint_   = glGetUniformLocation(program_, "uTint");
 	uUseTex_ = glGetUniformLocation(program_, "uUseTex");
+	uEnvMap_ = glGetUniformLocation(program_, "uEnvMap");
 	uCut_    = glGetUniformLocation(program_, "uCut");
 	uLit_    = glGetUniformLocation(program_, "uLit");
 	uTex_    = glGetUniformLocation(program_, "uTex");
@@ -242,6 +247,11 @@ std::shared_ptr<GpuModel> Renderer::upload(const nectar::Model& model)
 			const nectar::ModMaterial& m = model.materials[std::size_t(kv.first)];
 			part.cutout                  = (m.flags & nectar::MOD_MAT_ALPHA_TEST) != 0;
 			part.blend                   = (m.flags & nectar::MOD_MAT_ALPHA_BLEND) != 0;
+			part.colour[0]               = m.shade.r / 255.0f;
+			part.colour[1]               = m.shade.g / 255.0f;
+			part.colour[2]               = m.shade.b / 255.0f;
+			part.texAdd                  = m.texAdditive;
+			part.envMap                  = m.envMap;
 			if (m.texAttr >= 0 && std::size_t(m.texAttr) < model.texAttrs.size()) {
 				const int t = model.texAttrs[std::size_t(m.texAttr)].texture;
 				if (t >= 0 && std::size_t(t) < model.textures.size()) {
@@ -288,13 +298,14 @@ void Renderer::end()
 	glDisable(GL_DEPTH_TEST);
 }
 
-void Renderer::setup(const M4& model, const Rgba& tint, bool tex, float cut, bool lit)
+void Renderer::setup(const M4& model, const Rgba& tint, int tex, float cut, bool lit)
 {
 	const M4 mvp = viewProj_ * model;
 	glUniformMatrix4fv(uMvp_, 1, GL_FALSE, mvp.m);
 	glUniformMatrix4fv(uModel_, 1, GL_FALSE, model.m);
 	glUniform4f(uTint_, tint.r, tint.g, tint.b, tint.a);
-	glUniform1i(uUseTex_, tex ? 1 : 0);
+	glUniform1i(uUseTex_, tex);
+	glUniform1i(uEnvMap_, 0);
 	glUniform1f(uCut_, cut);
 	glUniform1f(uLit_, lit ? 1.0f : 0.0f);
 }
@@ -302,7 +313,8 @@ void Renderer::setup(const M4& model, const Rgba& tint, bool tex, float cut, boo
 void Renderer::drawModel(const GpuModel& m, const M4& model, const Rgba& tint)
 {
 	for (const GpuModel::Part& p : m.parts) {
-		setup(model, tint, p.tex != 0, (p.cutout || p.blend) ? 0.3f : 0.0f, true);
+		setup(model, Rgba { tint.r * p.colour[0], tint.g * p.colour[1], tint.b * p.colour[2], tint.a }, p.tex ? (p.texAdd ? 2 : 1) : 0, (p.cutout || p.blend) ? 0.3f : 0.0f, true);
+		glUniform1i(uEnvMap_, p.envMap ? 1 : 0);
 		glBindTexture(GL_TEXTURE_2D, p.tex);
 		glDepthMask(p.blend || tint.a < 1 ? GL_FALSE : GL_TRUE);
 		glBindVertexArray(p.vao);
