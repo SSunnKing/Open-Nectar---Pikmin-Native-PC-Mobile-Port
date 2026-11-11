@@ -41,11 +41,13 @@ static const char* kGxLightingGlsl =
     "    if (k.w < 0.5) return 1.0;\n"
     "    float aat = a.x;\n"
     // Point lights keep a = (1,0,0) and never set a direction, so the axis
-    // may be zero or stale; skip it rather than normalize it.
-    "    if (a.y != 0.0 || a.z != 0.0) {\n"
+    // may be zero or stale; skip it rather than normalize it. A zero axis
+    // reads as cos 0, as on the hardware, instead of a NaN from normalize.
+    "    float dl = length(d.xyz);\n"
+    "    if ((a.y != 0.0 || a.z != 0.0) && dl > 1e-6) {\n"
     // GXInitLightDir stores the direction pointing away from the light, so
     // the cosine the hardware uses is against its negation.
-    "        float cosA = max(dot(L, -normalize(d.xyz)), 0.0);\n"
+    "        float cosA = max(dot(L, -d.xyz / dl), 0.0);\n"
     "        aat += a.y * cosA + a.z * cosA * cosA;\n"
     "    }\n"
     "    float dat = k.x + k.y * dist + k.z * dist * dist;\n"
