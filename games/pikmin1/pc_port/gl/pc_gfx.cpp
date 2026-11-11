@@ -630,7 +630,7 @@ static bool sTexMtxLoaded[64] = {};
 struct GfxLight {
     float pos[3];    // world position (or half-vector for specular light 7)
     float dir[3];    // direction / half-vector
-    float a[3];      // specular attenuation a0,a1,a2 (N.H quadratic curve)
+    float a[3];      // angular attenuation a0,a1,a2 (spot cone, or N.H curve for specular)
     float color[4];  // RGBA 0-1
     float k[3];      // distance attenuation k0,k1,k2
     bool active;
@@ -856,6 +856,8 @@ struct ProgramLocations {
 	GLint lightPos[4] = {};
 	GLint lightColor[4] = {};
 	GLint lightK[4] = {};
+	GLint lightDir[4] = {};
+	GLint lightA[4] = {};
 	GLint ambColor = -1;
 	GLint chan0En = -1;
 	GLint chan0AlphaEn = -1;
@@ -867,6 +869,8 @@ struct ProgramLocations {
 	GLint lightPos1[4] = {};
 	GLint lightColor1[4] = {};
 	GLint lightK1[4] = {};
+	GLint lightDir1[4] = {};
+	GLint lightA1[4] = {};
 	GLint ambColor1 = -1;
 	GLint materialColor1 = -1;
 	GLint useMaterialRgb1 = -1;
@@ -2790,6 +2794,14 @@ static void query_program_locations(GLuint program, ProgramLocations& out) {
         out.lightColor1[i] = glGetUniformLocation_ptr(program, buf);
         snprintf(buf, sizeof(buf), "uLightK1[%d]", i);
         out.lightK1[i] = glGetUniformLocation_ptr(program, buf);
+        snprintf(buf, sizeof(buf), "uLightDir[%d]", i);
+        out.lightDir[i] = glGetUniformLocation_ptr(program, buf);
+        snprintf(buf, sizeof(buf), "uLightA[%d]", i);
+        out.lightA[i] = glGetUniformLocation_ptr(program, buf);
+        snprintf(buf, sizeof(buf), "uLightDir1[%d]", i);
+        out.lightDir1[i] = glGetUniformLocation_ptr(program, buf);
+        snprintf(buf, sizeof(buf), "uLightA1[%d]", i);
+        out.lightA1[i] = glGetUniformLocation_ptr(program, buf);
     }
     for (int i = 0; i < 4; i++) {
         char buf[32];
@@ -8141,6 +8153,8 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
                 bool attnOn = sChannels[0].enabled ? (sChannels[0].attnFn != GX_AF_NONE)
                                                    : (sChannels[0].alphaAttnFn != GX_AF_NONE);
                 glUniform4f_ptr(sLoc.lightK[numLights], k[0], k[1], k[2], attnOn ? 1.0f : 0.0f);
+                glUniform4f_ptr(sLoc.lightDir[numLights], sLights[i].dir[0], sLights[i].dir[1], sLights[i].dir[2], 0.0f);
+                glUniform4f_ptr(sLoc.lightA[numLights], sLights[i].a[0], sLights[i].a[1], sLights[i].a[2], 0.0f);
                 numLights++;
             }
         }
@@ -8168,6 +8182,8 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
                 const float* k1 = sLights[i].k;
                 bool attnOn1 = (sChannels[1].attnFn != GX_AF_NONE);
                 glUniform4f_ptr(sLoc.lightK1[numLights1], k1[0], k1[1], k1[2], attnOn1 ? 1.0f : 0.0f);
+                glUniform4f_ptr(sLoc.lightDir1[numLights1], sLights[i].dir[0], sLights[i].dir[1], sLights[i].dir[2], 0.0f);
+                glUniform4f_ptr(sLoc.lightA1[numLights1], sLights[i].a[0], sLights[i].a[1], sLights[i].a[2], 0.0f);
                 numLights1++;
             }
         }
