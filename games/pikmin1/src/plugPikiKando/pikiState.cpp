@@ -2254,8 +2254,12 @@ void PikiFlyingState::procBounceMsg(Piki* piki, MsgBounce*)
 		// Mod "Better Pathfinding": lanzado a un sitio sin nada que hacer, en
 		// el original se queda plantado hasta que se le silba. Aquí vuelve al
 		// grupo por su cuenta, igual que cuando rebota antes de aterrizar.
-		Creature* target = nullptr;
+		// Solo si cae a la altura del capitán: lanzado a una repisa o a un
+		// desnivel se queda esperando, como en el original (issue #254).
+		const f32 kSameLevelHeight = 30.0f;
+		Creature* target           = nullptr;
 		if (pc_settings_get_better_pathfinding() && piki->mNavi && !playerState->inDayEnd()
+		    && absF(piki->mSRT.t.y - piki->mNavi->mSRT.t.y) <= kSameLevelHeight
 		    && piki->graspSituation(&target) == PIKISITCH_Unk0) {
 			piki->mActiveAction->mCurrActionIdx = PikiAction::Crowd;
 			piki->mActiveAction->mChildActions[PikiAction::Crowd].initialise(piki->mNavi);
