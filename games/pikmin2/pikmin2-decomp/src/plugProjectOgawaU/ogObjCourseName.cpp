@@ -6,6 +6,153 @@
 #include "og/Screen/ogScreen.h"
 #include "JSystem/J2D/J2DMaterial.h"
 #include "System.h"
+#ifdef PIKI_PC_PORT
+#include "JSystem/J2D/J2DPicture.h"
+#include "JSystem/JUtility/JUTTexture.h"
+#include "JSystem/ResTIMG.h"
+#endif
+
+#ifdef PIKI_PC_PORT
+namespace {
+// Titulo para la calima de AW, PP y WW: I8 de 480x80 como e_course_name_01
+// (el "Challenge Cave" de referencia), con el texto en x 61..407 e y 13..73.
+const int kPcHazeW       = 480;
+const int kPcHazeH       = 80;
+const int kPcHazeCourses = 3;
+struct PcHazeTex {
+	ResTIMG mHeader;
+	u8 mPixels[kPcHazeW * kPcHazeH];
+};
+// Una por zona: cada textura conserva su contenido mientras se use.
+PcHazeTex sPcHaze[kPcHazeCourses] ATTRIBUTE_ALIGN(32);
+
+/// Intensidad (0..255) de un texel de las letras: I4, I8, IA4 o IA8.
+int pcHazeTexel(const ResTIMG* img, int x, int y)
+{
+	const u8* data = (const u8*)pc_restimg_image_data(img);
+	const int w    = img->mSizeX;
+	switch (img->mTextureFormat) {
+	case GX_TF_I4: {
+		const u8 b = data[((y / 8) * ((w + 7) / 8) + x / 8) * 32 + (y % 8) * 4 + (x % 8) / 2];
+		return ((x % 2) ? (b & 0xF) : (b >> 4)) * 17;
+	}
+	case GX_TF_I8:
+		return data[((y / 4) * ((w + 7) / 8) + x / 8) * 32 + (y % 4) * 8 + (x % 8)];
+	case GX_TF_IA4: {
+		const u8 b = data[((y / 4) * ((w + 7) / 8) + x / 8) * 32 + (y % 4) * 8 + (x % 8)];
+		return (b & 0xF) * (b >> 4) * 17 * 17 / 255;
+	}
+	case GX_TF_IA8: {
+		const u8* p = data + ((y / 4) * ((w + 3) / 4) + x / 4) * 32 + ((y % 4) * 4 + (x % 4)) * 2;
+		return p[0] * p[1] / 255;
+	}
+	default:
+		return 0;
+	}
+}
+
+/// Caja del panel en coordenadas de su padre, segun el .blo: mBounds es local
+/// al origen del panel y mTranslate lo situa (antes de las animaciones).
+JGeometry::TBox2f pcHazeBox(const J2DPane* pane)
+{
+	return JGeometry::TBox2f(pane->mTranslateX + pane->mBounds.i.x, pane->mTranslateY + pane->mBounds.i.y,
+	                         pane->mTranslateX + pane->mBounds.f.x, pane->mTranslateY + pane->mBounds.f.y);
+}
+
+/// Las letras son las imagenes hijas de la raiz (PICT_0xx en PP y WW, PETxx
+/// en AW); las demas son los adornos fuwa_xx y line_xx.
+bool pcHazeIsLetter(const J2DPane* pane)
+{
+	if (pane->getTypeID() != PANETYPE_Picture) {
+		return false;
+	}
+	char name[9];
+	int len = 0;
+	for (int i = 0; i < 8; i++) {
+		const char c = (char)(pane->mTag >> (56 - 8 * i));
+		if (c) {
+			name[len++] = c;
+		}
+	}
+	name[len] = '\0';
+	return strncmp(name, "fuwa", 4) != 0 && strncmp(name, "line", 4) != 0;
+}
+
+/// Compone el titulo con las letras de la pantalla, escalado y centrado como
+/// en la textura de referencia. nullptr si no hay letras.
+const ResTIMG* pcBuildHazeTitle(J2DPane* root, int slot)
+{
+	J2DPicture* letters[32];
+	int count = 0;
+	f32 x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+	for (J2DPane* pane = root->getFirstChildPane(); pane && count < 32; pane = pane->getNextChildPane()) {
+		if (!pcHazeIsLetter(pane)) {
+			continue;
+		}
+		J2DPicture* pic = static_cast<J2DPicture*>(pane);
+		if (!pic->getTexture(0) || !pic->getTexture(0)->mTexInfo || !pc_restimg_is_host_endian(pic->getTexture(0)->mTexInfo)) {
+			continue;
+		}
+		letters[count++]            = pic;
+		const JGeometry::TBox2f box = pcHazeBox(pane);
+		x0                          = box.i.x < x0 ? box.i.x : x0;
+		y0                          = box.i.y < y0 ? box.i.y : y0;
+		x1                          = box.f.x > x1 ? box.f.x : x1;
+		y1                          = box.f.y > y1 ? box.f.y : y1;
+	}
+	if (count == 0 || x1 <= x0 || y1 <= y0) {
+		return nullptr;
+	}
+
+	PcHazeTex& tex = sPcHaze[slot];
+	memset(&tex.mHeader, 0, sizeof(tex.mHeader));
+	tex.mHeader.mTextureFormat   = GX_TF_I8;
+	tex.mHeader.mSizeX           = kPcHazeW;
+	tex.mHeader.mSizeY           = kPcHazeH;
+	tex.mHeader.mWrapS           = GX_CLAMP;
+	tex.mHeader.mWrapT           = GX_CLAMP;
+	tex.mHeader.mMinFilterType   = GX_LINEAR;
+	tex.mHeader.mMagFilterType   = GX_LINEAR;
+	tex.mHeader.mTotalImageCount = 1;
+	tex.mHeader.mImageDataOffset = 0x20;
+	tex.mHeader._19              = P2_RESTIMG_HOST_ENDIAN_MARK;
+	memset(tex.mPixels, 0, sizeof(tex.mPixels));
+
+	// Caja del texto en la referencia: 346 de ancho como mucho (se deja
+	// llegar a 400 para los nombres largos) y 60 de alto, centro en (234, 43).
+	const f32 sx    = 400.0f / (x1 - x0);
+	const f32 sy    = 60.0f / (y1 - y0);
+	const f32 scale = sx < sy ? sx : sy;
+	const f32 ox    = 234.0f - (x0 + x1) * 0.5f * scale;
+	const f32 oy    = 43.0f - (y0 + y1) * 0.5f * scale;
+
+	for (int i = 0; i < count; i++) {
+		const JGeometry::TBox2f box = pcHazeBox(letters[i]);
+		const ResTIMG* img          = letters[i]->getTexture(0)->mTexInfo;
+		const f32 dx0 = ox + box.i.x * scale, dy0 = oy + box.i.y * scale;
+		const f32 dw = box.getWidth() * scale, dh = box.getHeight() * scale;
+		for (int y = (int)dy0; y < (int)(dy0 + dh) + 1; y++) {
+			for (int x = (int)dx0; x < (int)(dx0 + dw) + 1; x++) {
+				if (x < 0 || y < 0 || x >= kPcHazeW || y >= kPcHazeH) {
+					continue;
+				}
+				const int u = (int)((x + 0.5f - dx0) / dw * img->mSizeX);
+				const int v = (int)((y + 0.5f - dy0) / dh * img->mSizeY);
+				if (u < 0 || v < 0 || u >= img->mSizeX || v >= img->mSizeY) {
+					continue;
+				}
+				const int value = pcHazeTexel(img, u, v);
+				u8& out         = tex.mPixels[((y / 4) * (kPcHazeW / 8) + x / 8) * 32 + (y % 4) * 8 + (x % 8)];
+				if (value > out) {
+					out = (u8)value;
+				}
+			}
+		}
+	}
+	return &tex.mHeader;
+}
+} // namespace
+#endif
 
 /**
  * @note Address: N/A
@@ -86,6 +233,22 @@ void ObjCourseName::doCreate(JKRArchive* arc)
 	J2DBlend info(GX_BM_BLEND, GX_BL_INVDSTALPHA, GX_BL_DSTALPHA, GX_LO_CLEAR);
 	mScreen->setBlendInfo(info, tags);
 
+#ifdef PIKI_PC_PORT
+	// Las copias con calima del titulo (PICT_001/002) solo llevan el titulo
+	// correcto en Valley of Repose. En AW usan result_title_new.bti y en PP y
+	// WW un "Challenge Cave" sobrante (e_course_name_01.bti), asi que se les da
+	// el titulo de la zona compuesto con sus letras (issue #270).
+	if (owner->mCourseIndex > 0 && owner->mCourseIndex <= kPcHazeCourses) {
+		const ResTIMG* title = pcBuildHazeTitle(mScreen, owner->mCourseIndex - 1);
+		const u64 hazeTags[] = { MC8("PICT_001"), MC8("PICT_002") };
+		for (int i = 0; title && i < 2; i++) {
+			J2DPane* haze = mScreen->search(hazeTags[i]);
+			if (haze && haze->getTypeID() == PANETYPE_Picture) {
+				static_cast<J2DPicture*>(haze)->changeTexture(title, 0);
+			}
+		}
+	}
+#endif
 #ifdef PIKI_PC_PORT
 	// TEMP depuracion: PIKMIN_CN_HIDE=PICT_001,PICT_002 oculta esos paneles.
 	if (const char* hide = getenv("PIKMIN_CN_HIDE")) {
