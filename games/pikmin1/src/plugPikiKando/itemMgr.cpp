@@ -7,6 +7,7 @@
 #endif
 #if defined(PIKI_PC_PORT)
 #include "settings/pc_settings.h"
+#include "Generator.h"
 #endif
 #include "AIConstant.h"
 #include "BaseInf.h"
@@ -1419,6 +1420,9 @@ void ItemMgr::update()
 {
 	if (!GameCoreSection::inPause()) {
 		PolyObjectMgr::update();
+#if defined(PIKI_PC_PORT)
+		pc_bomb_respawn_tick();
+#endif
 		mPikiHeadMgr->update();
 	}
 

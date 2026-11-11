@@ -1058,6 +1058,11 @@ protected:
 
 extern GeneratorCache* generatorCache;
 extern GeneratorList* generatorList;
+#if defined(PIKI_PC_PORT)
+void pc_bomb_respawn_clear();
+void pc_bomb_respawn_tick(); // per frame, from ItemMgr::update
+#endif
+
 extern GeneratorMgr* generatorMgr;
 extern GeneratorMgr* onceGeneratorMgr;
 extern GeneratorMgr* dailyGeneratorMgr;

@@ -1,5 +1,6 @@
 #include "Generator.h"
 #include "Age.h"
+#include "BombItem.h"
 #include "DebugLog.h"
 #include "GameStat.h"
 #include "GlobalShape.h"
@@ -10,6 +11,10 @@
 #include "gameflow.h"
 #include "sysNew.h"
 #include "teki.h"
+#if defined(PIKI_PC_PORT)
+#include "settings/pc_settings.h"
+#include "system.h"
+#endif
 #include <cstdio>
 
 /**
@@ -651,6 +656,62 @@ void Generator::init()
 	}
 }
 
+#if defined(PIKI_PC_PORT)
+// Mod "Bomb Rock Respawn": map bomb rocks come from generators that spawn
+// each rock as its own Bomb item, and the original only refills them the
+// next morning. With the mod, each dead rock is replaced by its generator
+// after the chosen interval, so a generator never holds more than it started
+// with. The list is dropped whenever generators are reloaded or re-initialised.
+namespace {
+struct PcBombRespawn {
+	Generator* mGenerator;
+	Vector3f mPos; // where the dead rock was first placed
+	f32 mTimer;
+};
+const int kPcBombRespawnMax = 128;
+PcBombRespawn sPcBombRespawn[kPcBombRespawnMax];
+int sPcBombRespawnCount = 0;
+} // namespace
+
+void pc_bomb_respawn_clear()
+{
+	sPcBombRespawnCount = 0;
+}
+
+void pc_bomb_respawn_tick()
+{
+	const int interval = pc_settings_get_bomb_respawn();
+	if (interval <= 0) {
+		sPcBombRespawnCount = 0;
+		return;
+	}
+
+	const f32 dt = gsys->getFrameTime();
+	for (int i = 0; i < sPcBombRespawnCount;) {
+		PcBombRespawn& entry = sPcBombRespawn[i];
+		entry.mTimer += dt;
+		if (entry.mTimer < f32(interval)) {
+			i++;
+			continue;
+		}
+
+		Generator* gen = entry.mGenerator;
+		const Vector3f pos = entry.mPos;
+		sPcBombRespawn[i] = sPcBombRespawn[--sPcBombRespawnCount];
+		if (gen->mGenObject && gen->mGenType) {
+			BirthInfo info;
+			gen->mGenType->setBirthInfo(info, gen);
+			info.mPosition = pos;
+			if (Creature* spawn = gen->mGenObject->birth(info)) {
+				spawn->mGenerator = gen;
+				gen->mAliveCount++;
+				gen->mLatestSpawnCreature = spawn;
+			}
+		}
+	}
+}
+#endif
+
 /**
  * @todo: Documentation
  */
@@ -661,6 +722,14 @@ void Generator::informDeath(Creature* creature)
 	}
 
 	mAliveCount--;
+#if defined(PIKI_PC_PORT)
+	if (creature->mObjType == OBJTYPE_Bomb && pc_settings_get_bomb_respawn() > 0 && sPcBombRespawnCount < kPcBombRespawnMax) {
+		sPcBombRespawn[sPcBombRespawnCount].mGenerator = this;
+		sPcBombRespawn[sPcBombRespawnCount].mPos       = static_cast<BombItem*>(creature)->mPcSpawnPos;
+		sPcBombRespawn[sPcBombRespawnCount].mTimer     = 0.0f;
+		sPcBombRespawnCount++;
+	}
+#endif
 
 	if (creature->mObjType == OBJTYPE_Teki) {
 		int count = mAliveCount;
@@ -913,6 +982,9 @@ GeneratorMgr::GeneratorMgr()
  */
 void GeneratorMgr::init()
 {
+#if defined(PIKI_PC_PORT)
+	pc_bomb_respawn_clear();
+#endif
 	int recognised = 0;
 	int spawned    = 0;
 	for (Generator* gen = mGenListHead; gen; gen = gen->mNextGenerator) {
@@ -973,6 +1045,9 @@ void GeneratorMgr::render(Graphics& gfx)
  */
 void GeneratorMgr::read(RandomAccessStream& input, bool p2)
 {
+#if defined(PIKI_PC_PORT)
+	pc_bomb_respawn_clear();
+#endif
 	if (mGenListHead) {
 		delete mGenListHead;
 		mGenCount = 0;

@@ -56,6 +56,9 @@ struct BombItem : public ItemCreature {
 	CollInfo mBombColl;      // _3F4
 	CollPart mCollParts[10]; // _408
 	u32 mCollPartIdList[10]; // _818
+#if defined(PIKI_PC_PORT)
+	Vector3f mPcSpawnPos; // where its generator placed it, for mod "Bomb Rock Respawn"
+#endif
 };
 
 /**
