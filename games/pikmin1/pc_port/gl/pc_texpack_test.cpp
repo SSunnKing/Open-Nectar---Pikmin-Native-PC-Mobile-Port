@@ -21,12 +21,11 @@ using GLint = int;
 using GLsizei = int;
 using GLubyte = unsigned char;
 using PFNGLCOMPRESSEDTEXIMAGE2DPROC = void (*)(GLenum, GLint, GLenum, GLsizei, GLsizei, GLint, GLsizei, const void*);
-using PFNGLGENERATEMIPMAPPROC = void (*)(GLenum);
 constexpr GLenum GL_RGBA8 = 0x8058, GL_RGBA = 0x1908, GL_UNSIGNED_BYTE = 0x1401;
 constexpr GLenum GL_SRGB8_ALPHA8 = 0x8C43, GL_TEXTURE_2D = 0x0DE1;
-constexpr GLenum GL_TEXTURE_BASE_LEVEL = 0x813C, GL_TEXTURE_MAX_LEVEL = 0x813D;
+constexpr GLenum GL_TEXTURE_MAX_LEVEL = 0x813D;
 constexpr GLenum GL_EXTENSIONS = 0x1F03, GL_NUM_EXTENSIONS = 0x821D, GL_MAX_TEXTURE_SIZE = 0x0D33;
-constexpr GLenum GL_NO_ERROR = 0, GL_INVALID_OPERATION = 0x0502;
+constexpr GLenum GL_NO_ERROR = 0;
 constexpr GLenum GL_COMPRESSED_RGBA_S3TC_DXT1_EXT = 0x83F1;
 constexpr GLenum GL_COMPRESSED_RGBA_S3TC_DXT3_EXT = 0x83F2;
 constexpr GLenum GL_COMPRESSED_RGBA_S3TC_DXT5_EXT = 0x83F3;
@@ -37,9 +36,7 @@ struct Uploaded {
     std::vector<uint8_t> bytes;
 };
 static std::map<int, Uploaded> uploaded;
-static GLint maxLevel = 0, baseLevel = 0;
-static unsigned generateCalls = 0;
-static bool failGeneration = false;
+static GLint maxLevel = 0;
 static GLenum error = GL_NO_ERROR;
 static void glTexImage2D(GLenum, GLint level, GLint format, GLsizei w, GLsizei h,
                          GLint, GLenum, GLenum, const void* pixels)
@@ -56,24 +53,12 @@ static void glCompressedTexImage2D(GLenum, GLint level, GLenum format, GLsizei w
 static void glTexParameteri(GLenum, GLenum pname, GLint value)
 {
     if (pname == GL_TEXTURE_MAX_LEVEL) maxLevel = value;
-    if (pname == GL_TEXTURE_BASE_LEVEL) baseLevel = value;
 }
 static GLenum glGetError() { const auto value = error; error = GL_NO_ERROR; return value; }
 static void glGetIntegerv(GLenum, GLint* value) { *value = 8192; }
 static const GLubyte* glGetString(GLenum) { return reinterpret_cast<const GLubyte*>(""); }
-static void generate_mipmap(GLenum)
-{
-    ++generateCalls;
-    if (failGeneration) { error = GL_INVALID_OPERATION; return; }
-    const Uploaded source = uploaded.at(baseLevel);
-    unsigned w = source.width, h = source.height;
-    const size_t blockBytes = source.format == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT ? 8 : 16;
-    for (int i = baseLevel + 1; i <= maxLevel; ++i) {
-        w = std::max(1u, w / 2); h = std::max(1u, h / 2);
-        uploaded[i] = {w, h, source.format, true,
-            std::vector<uint8_t>(size_t((w + 3) / 4) * ((h + 3) / 4) * blockBytes)};
-    }
-}
+// The loader builds missing levels itself and never asks the driver for them.
+static void generate_mipmap(GLenum) { assert(!"pack loader called glGenerateMipmap"); }
 [[maybe_unused]] static void* test_get_proc(const char* name)
 {
     if (strcmp(name, "glGenerateMipmap") == 0) return reinterpret_cast<void*>(generate_mipmap);
@@ -156,18 +141,14 @@ int main()
         sS3tcAvailable = sBptcAvailable = false;
         base(8, 8, format); upload(4, 8, 8); // CPU decode BC1/2/3/7.
         sS3tcAvailable = sBptcAvailable = true;
-        failGeneration = true;
-        base(8, 8, format); upload(4, 8, 8); // Failed desktop generation also decodes.
-        failGeneration = false;
+        base(8, 8, format); upload(4, 8, 8, true); // Missing levels encoded in the pack's format.
+        std::vector<uint8_t> top, tip;
+        assert(decode_bc_level(uploaded.at(0).format, 8, 8, uploaded.at(0).bytes, top));
+        assert(decode_bc_level(uploaded.at(3).format, 1, 1, uploaded.at(3).bytes, tip));
+        assert(std::equal(tip.begin(), tip.end(), top.begin()));
         base(8, 8, format, 4); upload(4, 8, 8, true); // Complete supported chains stay compressed.
     }
-#if !PIKI_USE_GLES
-    sS3tcAvailable = true;
-    base(8, 8, 71); sibling(1, 4, 4, 71); upload(4, 8, 8, true);
-    assert(baseLevel == 0 && generateCalls > 0); // Generated tail, binding range restored.
-#else
-    assert(generateCalls == 0); // GLES never calls glGenerateMipmap on compressed data.
-#endif
+    base(8, 8, 71); sibling(1, 4, 4, 71); upload(4, 8, 8, true); // Authored prefix, encoded rest.
     sBptcAvailable = false;
     base(8, 8, 99); upload(4, 8, 8);
     assert(uploaded.at(0).format == GL_SRGB8_ALPHA8);
@@ -192,6 +173,55 @@ int main()
     assert(pc_texture_downsample_rgba8(pixels, 3, 1)[0] == 85); // Odd edge included.
     assert(pc_texture_mip_count(8192, 8192) == 14);
     assert(pc_texture_mip_count(0, 8) == 0);
+
+    // Encoders round-trip through bcdec. Colour stays within what each format
+    // can hold, and BC1 cut-outs keep exactly the texels that were transparent.
+    const auto roundTrip = [](GLenum format, unsigned w, unsigned h, const std::vector<uint8_t>& rgba,
+                              std::vector<uint8_t>& back) {
+        std::vector<uint8_t> blocks;
+        assert(encode_bc_level(format, w, h, rgba, blocks));
+        assert(decode_bc_level(format, w, h, blocks, back));
+        int worst = 0;
+        for (size_t i = 0; i < rgba.size(); ++i)
+            if (rgba[i - i % 4 + 3] >= 128 || format != GL_COMPRESSED_RGBA_S3TC_DXT1_EXT)
+                worst = std::max(worst, std::abs(int(rgba[i]) - int(back[i])));
+        return worst;
+    };
+    // Every channel is affine in one ramp value, so each block is a line in
+    // RGBA: what BC1 and BC7 mode 6 fit, with negatively correlated channels.
+    const auto ramp = [](unsigned w, unsigned h, bool alpha) {
+        std::vector<uint8_t> rgba;
+        const unsigned n = w * h;
+        for (unsigned i = 0; i < n; ++i) {
+            const int v = 64 + (n > 1 ? int(i * 128 / (n - 1)) : 64);
+            rgba.insert(rgba.end(), {uint8_t(v), uint8_t(255 - v), uint8_t(v / 2), uint8_t(alpha ? 255 - v / 3 : 255)});
+        }
+        return rgba;
+    };
+    std::vector<uint8_t> back;
+    const std::pair<unsigned, unsigned> sizes[] = {{8, 8}, {5, 3}, {2, 2}, {1, 1}};
+    for (const auto& [w, h] : sizes) {
+        const int bc1 = roundTrip(GL_COMPRESSED_RGBA_S3TC_DXT1_EXT, w, h, ramp(w, h, false), back);
+        const int bc2 = roundTrip(GL_COMPRESSED_RGBA_S3TC_DXT3_EXT, w, h, ramp(w, h, true), back);
+        const int bc3 = roundTrip(GL_COMPRESSED_RGBA_S3TC_DXT5_EXT, w, h, ramp(w, h, true), back);
+        const int bc7 = roundTrip(GL_COMPRESSED_RGBA_BPTC_UNORM, w, h, ramp(w, h, true), back);
+        const int srgb7 = roundTrip(GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM, w, h, ramp(w, h, true), back);
+        // Descending: the first texel sits at the far endpoint, which BC7 can
+        // only store by swapping the endpoints.
+        std::vector<uint8_t> descending = ramp(w, h, true);
+        for (size_t i = 0, j = w * h - 1; i < j; ++i, --j)
+            std::swap_ranges(descending.begin() + i * 4, descending.begin() + i * 4 + 4, descending.begin() + j * 4);
+        const int bc7down = roundTrip(GL_COMPRESSED_RGBA_BPTC_UNORM, w, h, descending, back);
+        std::vector<uint8_t> cutout = ramp(w, h, false);
+        for (size_t i = 0; i < w * h; i += 3) cutout[i * 4 + 3] = 0;
+        const int bc1a = roundTrip(GL_COMPRESSED_RGBA_S3TC_DXT1_EXT, w, h, cutout, back);
+        for (size_t i = 0; i < w * h; ++i) assert(back[i * 4 + 3] == (i % 3 == 0 ? 0 : 255));
+        // Half a palette step across the widest block (the 5x3 image puts
+        // ~120 of the ramp in one block), plus endpoint rounding: 4 levels for
+        // BC1/2/3 colour, 3 for BC1 cut-out blocks, 16 for BC7.
+        assert(bc1 <= 24 && bc2 <= 24 && bc3 <= 24 && bc1a <= 34);
+        assert(bc7 <= 5 && srgb7 <= 5 && bc7down <= 5);
+    }
     fs::remove_all(dir);
     puts("pc_texpack_test: all checks passed");
 }
