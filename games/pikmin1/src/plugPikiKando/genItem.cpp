@@ -241,6 +241,11 @@ Creature* GenObjectItem::birth(BirthInfo& info)
 
 		int health = mParameterC() + mParameterB() * (int)gameflow.mWorldClock.mHoursInDay;
 		item->init(info.mPosition);
+#if defined(PIKI_PC_PORT)
+		if (item->mObjType == OBJTYPE_Bomb) {
+			static_cast<BombItem*>(item)->mPcSpawnPos = info.mPosition;
+		}
+#endif
 		item->mSRT.r         = info.mRotation;
 		item->mFaceDirection = item->mSRT.r.y;
 		item->mGenerator     = info.mGenerator;
