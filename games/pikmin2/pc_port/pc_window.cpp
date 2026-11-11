@@ -1013,6 +1013,11 @@ bool pc_window_init(const char* title, int width, int height) {
         pc_controller_open_slot(i);
     }
 
+    // SDL turns text input on when video starts, and on macOS that lets a held
+    // key open the accent picker during gameplay (sdl2-compat does not hide
+    // it). Text fields turn it on while they are open.
+    SDL_StopTextInput();
+
     printf("[PC Port] SDL2 window and GL context initialized successfully (%dx%d)\n", sWindowWidth, sWindowHeight);
     return true;
 }
