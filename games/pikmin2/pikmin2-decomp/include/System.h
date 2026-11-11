@@ -34,9 +34,14 @@ void pc_orig_tick_begin(void);
 #define PC_LERP(k) (gPcOrigDtScale == 1.0f ? (f32)(k) : (f32)(1.0f - powf(1.0f - (f32)(k), gPcOrigDtScale)))
 #define PC_ORIG_DT_SCALE() (gPcOrigDtScale)
 #define PC_ORIG_PERIOD() (pc_orig_period())
+// Duracion de una unidad de los contadores que bajan solo en PC_ORIG_TICK():
+// "segundos / PC_ORIG_COUNTER_DT()" da cuantos ticks originales dura algo.
+// Con sys->mDeltaTime (adaptativo) duraban x2 a 60 FPS y x4 a 120.
+#define PC_ORIG_COUNTER_DT() (pc_orig_period())
 #else
 #define PC_ORIG_DT_SCALE() (1.0f)
 #define PC_ORIG_TICK() (true)
+#define PC_ORIG_COUNTER_DT() (sys->mDeltaTime)
 #define PC_DAMP(k)     (k)
 #define PC_LERP(k)     (k)
 #endif

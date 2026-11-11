@@ -61,7 +61,7 @@ void TSaveMenu::doOpenScreen(ArgOpen*)
 {
 	mAlpha               = 200;
 	mDrawState           = 0;
-	u32 count            = E2DFader::kFadeTime / sys->mDeltaTime;
+	u32 count            = E2DFader::kFadeTime / PC_ORIG_COUNTER_DT();
 	mOpenCloseCounter    = count;
 	mOpenCloseCounterMax = count;
 	mDrawState           = 2;
@@ -77,7 +77,7 @@ void TSaveMenu::doOpenScreen(ArgOpen*)
 void TSaveMenu::doCloseScreen(ArgClose*)
 {
 	mFadeTimer           = 0.0f;
-	u32 count            = E2DFader::kFadeTime / sys->mDeltaTime;
+	u32 count            = E2DFader::kFadeTime / PC_ORIG_COUNTER_DT();
 	mOpenCloseCounter    = count;
 	mOpenCloseCounterMax = count;
 	mDrawState           = 1;
@@ -327,7 +327,7 @@ void TSaveMenu::startMsgState_(enumMsgState state)
 			mAnimScreen[2]->open(0.0f);
 			PSSystem::spSysIF->playSystemSe(PSSE_SY_MEMORYCARD_OK, 0);
 		}
-		u32 count       = 0.8f / sys->mDeltaTime;
+		u32 count       = 0.8f / PC_ORIG_COUNTER_DT();
 		mTextCounter    = count;
 		mTextCounterMax = count;
 		break;
@@ -347,7 +347,7 @@ void TSaveMenu::startMsgState_(enumMsgState state)
 		default:
 			JUT_PANICLINE(395, "ありえない！ありえない！たはあっ！\n"); // "Impossible! Impossible! Tahaha"
 		}
-		u32 count2      = 0.5f / sys->mDeltaTime;
+		u32 count2      = 0.5f / PC_ORIG_COUNTER_DT();
 		mTextCounter    = count2;
 		mTextCounterMax = count2;
 		break;

@@ -140,7 +140,7 @@ void FSMState_CardRequest::do_init(TMgr* mgr, Game::StateArg*)
 	mgr->mScreen.mCanExit = false;
 	mState                = 0;
 
-	u32 rate         = 3.0f / sys->mDeltaTime;
+	u32 rate         = 3.0f / PC_ORIG_COUNTER_DT();
 	mgr->mCounter    = rate;
 	mgr->mCounterMax = rate;
 

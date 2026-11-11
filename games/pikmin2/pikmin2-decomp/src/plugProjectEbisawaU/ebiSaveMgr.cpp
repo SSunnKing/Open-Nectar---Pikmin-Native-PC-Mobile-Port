@@ -425,7 +425,7 @@ void FSMState_NowSave::do_init(TMgr* mgr, Game::StateArg* arg)
 
 	mgr->mSaveMenu.openMsg(Screen::TSaveMenu::MESSAGE_Saving);
 
-	u32 count           = 1.0f / sys->mDeltaTime;
+	u32 count           = 1.0f / PC_ORIG_COUNTER_DT();
 	mgr->mCounter       = count;
 	mgr->mCounterBackup = count;
 
@@ -501,7 +501,7 @@ void FSMState_NowSave::do_exec(TMgr* mgr)
 		}
 		break;
 	case 4:
-		if (mgr->mCounter * sys->mDeltaTime < 0.5f && mgr->mController->getButtonDown() & Controller::PRESS_A) {
+		if (mgr->mCounter * PC_ORIG_COUNTER_DT() < 0.5f && mgr->mController->getButtonDown() & Controller::PRESS_A) {
 			mgr->mSaveMenu.closeMsg();
 		}
 
@@ -544,7 +544,7 @@ void FSMState_AfterSave::do_init(TMgr* mgr, Game::StateArg*)
 {
 	mgr->mSaveMenu.openMsg(Screen::TSaveMenu::MESSAGE_SaveSuccess);
 
-	u32 count           = 1.0f / sys->mDeltaTime;
+	u32 count           = 1.0f / PC_ORIG_COUNTER_DT();
 	mgr->mCounter       = count;
 	mgr->mCounterBackup = count;
 }
@@ -555,7 +555,7 @@ void FSMState_AfterSave::do_init(TMgr* mgr, Game::StateArg*)
  */
 void FSMState_AfterSave::do_exec(TMgr* mgr)
 {
-	if (mgr->mCounter * sys->mDeltaTime < 0.5f && mgr->mController->getButtonDown() & Controller::PRESS_A) {
+	if (mgr->mCounter * PC_ORIG_COUNTER_DT() < 0.5f && mgr->mController->getButtonDown() & Controller::PRESS_A) {
 		mgr->mSaveMenu.closeMsg();
 	}
 
