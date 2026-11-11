@@ -100,7 +100,14 @@ void GXLoadTexMtxImm(const Mtx mtx, u32 id, GXTexMtxType type) {
 void __GXSetMatrixIndex(GXAttr index) { (void)index; }
 
 void __GXSetViewport()              { }
+// Último viewport de GX, en coordenadas del EFB del juego (640x480): el agua
+// del co-op lo usa para llevar su proyección a su mitad de la pantalla.
+static f32 sGxViewport[4] = { 0.0f, 0.0f, 640.0f, 480.0f };
+extern "C" void pc_gx_get_viewport(f32* out) {
+    for (int i = 0; i < 4; i++) out[i] = sGxViewport[i];
+}
 void GXSetViewport(f32 xOrig, f32 yOrig, f32 wd, f32 ht, f32 nearZ, f32 farZ) {
+    sGxViewport[0] = xOrig; sGxViewport[1] = yOrig; sGxViewport[2] = wd; sGxViewport[3] = ht;
     pc_gfx_set_viewport(xOrig, yOrig, wd, ht, nearZ, farZ);
 }
 void GXSetViewportJitter(f32 xOrig, f32 yOrig, f32 wd, f32 ht, f32 nearZ, f32 farZ, u32 field) {

@@ -7,6 +7,10 @@
 #include "JSystem/J3D/J3DTexMtx.h"
 #include "System.h"
 #include "nans.h"
+#ifdef PIKI_PC_PORT
+#include "pc_p2_coop.h"
+extern "C" void pc_gx_get_viewport(f32* out);
+#endif
 
 static const u32 padding[3] = { 0, 0, 0 };
 
@@ -191,7 +195,14 @@ void AABBWaterBox::doEntry()
 		return;
 	}
 
+#ifdef PIKI_PC_PORT
+	// Historia con dos vistas: en la consola no se usaba nunca y el agua llevaba
+	// mizu.bti, un azul casi negro liso (34,34,51). El co-op refracta la
+	// pantalla como con un jugador (issue #309).
+	if (gameSystem->isStoryMode() && !pc_p2_coop_active()) {
+#else
 	if (gameSystem->isStoryMode()) {
+#endif
 		BaseGameSection* section = gameSystem->getSection();
 		if (section->mPrevNaviIdx == NAVIID_Multiplayer) {
 			if (gameSystem) {
@@ -235,6 +246,26 @@ void AABBWaterBox::doEntry()
 	copyMatrix[3][1] = 0.0f;
 	copyMatrix[3][2] = 0.0f;
 	copyMatrix[3][3] = 1.0f;
+#ifdef PIKI_PC_PORT
+	// Co-op a pantalla partida: la captura es la pantalla entera y la
+	// proyección es la de esta vista. Se pasa de NDC de la vista a NDC de la
+	// pantalla (antes de la escala y el desplazamiento de textura del
+	// material): S' = w*S + (2x+w-1)*Q y T' = h*T + (1-2y-h)*Q.
+	if (pc_p2_coop_active()) {
+		f32 vp[4];
+		pc_gx_get_viewport(vp);
+		const f32 sw = (f32)sys->getRenderModeObj()->fbWidth;
+		const f32 sh = (f32)sys->getRenderModeObj()->efbHeight;
+		if (sw > 0.0f && sh > 0.0f && vp[2] > 0.0f && vp[3] > 0.0f) {
+			const f32 x = vp[0] / sw, w = vp[2] / sw;
+			const f32 y = vp[1] / sh, h = vp[3] / sh;
+			for (int c = 0; c < 4; c++) {
+				copyMatrix[0][c] = w * copyMatrix[0][c] + (2.0f * x + w - 1.0f) * copyMatrix[2][c];
+				copyMatrix[1][c] = h * copyMatrix[1][c] + (1.0f - 2.0f * y - h) * copyMatrix[2][c];
+			}
+		}
+	}
+#endif
 
 	if (!mModel) {
 		return;
