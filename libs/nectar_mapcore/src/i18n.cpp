@@ -138,6 +138,7 @@ const Pair kTable[] = {
 	{ "V oculta y B bloquea mientras editas (no cambia el mapa).", "V hides and B locks while you edit (the map itself does not change)." },
 	{ "Mis mapas", "My maps" },
 	{ "Aquí saldrán tus mapas: los que crees, guardes o abras.", "Your maps will show up here: the ones you create, save or open." },
+	{ "Suelta sobre el mapa para ponerlo", "Drop it on the map to place it" },
 	{ "Panel de herramientas", "Tools panel" },
 	{ "Panel de propiedades", "Properties panel" },
 	{ "Capas del visor", "Viewport layers" },

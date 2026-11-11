@@ -1634,6 +1634,26 @@ void App::remapSessionItemsAfterRemoval(const std::vector<ItemRef>& removed)
 	lockedItems_.clear();
 }
 
+// Fuente de arrastre: lo elegido viaja con el ratón hasta el visor, que lo
+// pone donde se suelte (como arrastrar del Toolbox de Roblox Studio).
+void App::beginPlaceDrag(const PlaceChoice& c, unsigned thumbTex, const std::string& name, int flags)
+{
+	if (!ImGui::BeginDragDropSource(flags | ImGuiDragDropFlags_SourceNoHoldToOpenOthers)) return;
+	PlacePayload pl {};
+	pl.type = int(c.type);
+	std::snprintf(pl.asset, sizeof(pl.asset), "%s", c.asset.c_str());
+	std::snprintf(pl.label, sizeof(pl.label), "%s", c.label.c_str());
+	ImGui::SetDragDropPayload("NM_PLACE", &pl, sizeof(pl));
+	if (thumbTex) ImGui::Image(ImTextureID(std::intptr_t(thumbTex)), ImVec2(56, 56));
+	ImGui::SameLine();
+	ImGui::TextUnformatted(name.c_str());
+	ImGui::TextColored(kDim, "%s", tr("Suelta sobre el mapa para ponerlo"));
+	ImGui::EndDragDropSource();
+	// Mientras tanto, la herramienta de poner enseña la vista previa.
+	place_ = c;
+	tool_  = Tool::Place;
+}
+
 std::string App::placeAsset(const PlaceChoice& c) const
 {
 	switch (c.type) {
@@ -2699,6 +2719,7 @@ void App::drawPlaceOptions()
 			const bool pressed = t ? ImGui::ImageButton("##g", ImTextureID(std::intptr_t(t)), ImVec2(72, 72)) : ImGui::Button("##g", ImVec2(80, 80));
 			if (on) ImGui::PopStyleColor();
 			const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+			beginPlaceDrag(c, t, name);
 			if (!t) ImGui::GetWindowDrawList()->AddText(ImVec2(a.x + 6, a.y + 6), ImGui::GetColorU32(ImGuiCol_Text), name.c_str(), nullptr);
 			ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + (b.x - a.x));
 			ImGui::TextColored(on ? ImVec4(0.90f, 0.95f, 0.70f, 1) : kDim, "%s", name.c_str());
@@ -5717,9 +5738,18 @@ void App::drawRecentsBar(const ImVec2& origin, const ImVec2& size, bool& hovered
 		}
 		if (hot) {
 			ImGui::SetTooltip("%s", placeLabel(c.type, c.asset, c.label).c_str());
-			if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) place_ = c;
+			if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+				place_            = c;
+				drawerDragArmed_  = true;
+				drawerDragChoice_ = c;
+			}
 		}
 		x += tile + gap;
+	}
+	if (drawerDragArmed_ && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) drawerDragArmed_ = false;
+	if (drawerDragArmed_ && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 6.0f)) {
+		const PlaceChoice& c = drawerDragChoice_;
+		beginPlaceDrag(c, assetThumb(placeAsset(c)), placeLabel(c.type, c.asset, c.label), ImGuiDragDropFlags_SourceExtern);
 	}
 	if (list.empty()) {
 		dl->AddText(ImVec2(x, a.y + 7 + tile * 0.5f - ImGui::GetFontSize() * 0.5f), IM_COL32(150, 158, 140, 255), tr("Lo que pongas saldrá aquí"));
@@ -5840,7 +5870,9 @@ void App::drawViewport(const Rect& r)
 
 	renderScene(vw, vh);
 	ImGui::Image(ImTextureID(std::intptr_t(target_.color)), avail, ImVec2(0, 1), ImVec2(1, 0));
-	const bool imageHovered = ImGui::IsItemHovered();
+	// Mientras se arrastra algo del catálogo, el visor sigue «bajo el ratón»
+	// para enseñar la vista previa de lo que se va a soltar.
+	const bool imageHovered = ImGui::IsItemHovered() || (ImGui::GetDragDropPayload() != nullptr && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem));
 	hoverValid_             = imageHovered && terrainRay(mouseRay, hoverPos_);
 	// Debe ir inmediatamente después de Image: Dear ImGui usa el último item
 	// como destino. Los controles flotantes se dibujan después para no romperlo.
@@ -5854,6 +5886,15 @@ void App::drawViewport(const Rect& r)
 				if (cfg_.recents.size() > 16) cfg_.recents.resize(16);
 				cfg_.save();
 				placeAt(hit);
+			}
+		}
+		if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("NM_PLACE")) {
+			const PlacePayload* pl = static_cast<const PlacePayload*>(p->Data);
+			place_ = { ItemType(pl->type), pl->asset, pl->label };
+			tool_  = Tool::Place;
+			if (terrainRay(mouseRay, hit)) {
+				placeAt(hit);
+				rememberPlace(place_);
 			}
 		}
 		ImGui::EndDragDropTarget();

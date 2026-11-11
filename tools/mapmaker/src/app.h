@@ -318,6 +318,15 @@ private:
 	int paintMaterial_ = 0;
 	V3 brushPos_;
 	PlaceChoice place_;
+	/// Arrastrar desde el catálogo al mapa (carga «NM_PLACE»): lo que lleva el ratón.
+	struct PlacePayload {
+		int type;
+		char asset[200];
+		char label[48];
+	};
+	void beginPlaceDrag(const PlaceChoice& c, unsigned thumb, const std::string& name, int flags = 0); ///< flags: ImGuiDragDropFlags
+	bool drawerDragArmed_ = false; ///< se pulsó una casilla de la barra de recientes
+	PlaceChoice drawerDragChoice_;
 	bool placeValid_ = false;
 	V3 placePos_;
 	float wallHeight_ = 150.0f, wallThickness_ = 40.0f;
