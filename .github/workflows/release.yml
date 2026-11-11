@@ -258,21 +258,20 @@ jobs:
       - name: Gather the files
         run: |
           mkdir -p upload
+          # Only what players download and what the launcher updates from:
+          # the full package per system, the AppImage and the APK. The
+          # per-part archives and manifest.json stay in the build artifacts.
           for dir in parts/release-*; do
             for f in "${dir}"/*; do
               name="$(basename "${f}")"
-              if [ "${name}" = "manifest.json" ]; then
-                # Every system writes the same manifest. A difference is a bug.
-                if [ -f upload/manifest.json ] && ! cmp -s "${f}" upload/manifest.json; then
-                  echo "::error::manifest.json differs between systems (${dir})"
-                  exit 1
-                fi
-              fi
-              cp "${f}" "upload/${name}"
+              case "${name}" in
+                nectar-linux.tar.gz|nectar-windows.zip|nectar-macos.tar.gz|Open_Nectar-x86_64.AppImage|open_nectar_*.apk)
+                  cp "${f}" "upload/${name}" ;;
+              esac
             done
           done
           ls -l upload
-          for need in nectar-linux.tar.gz nectar-windows.zip nectar-macos.tar.gz Open_Nectar-x86_64.AppImage manifest.json; do
+          for need in nectar-linux.tar.gz nectar-windows.zip nectar-macos.tar.gz Open_Nectar-x86_64.AppImage; do
             test -f "upload/${need}" || { echo "::error::${need} is missing"; exit 1; }
           done
           ls upload/open_nectar_*.apk >/dev/null 2>&1 || echo "::warning::No APK in this release (no signing key). Add it by hand before publishing."
