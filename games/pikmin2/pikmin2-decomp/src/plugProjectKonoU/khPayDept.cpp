@@ -7,6 +7,7 @@
 #include "LoadResource.h"
 #include "kh/khUtil.h"
 #include "JSystem/J2D/J2DAnmLoader.h"
+#include "System.h" // PC_ORIG_DT_SCALE
 
 static void _Print(char* format, ...)
 {
@@ -175,8 +176,14 @@ bool ObjPayDept::updateAnimation()
 	mAnim1->setFrame(mAnimTime1);
 	mAnim2->setFrame(mAnimTime2);
 	mScreen->animation();
+#ifdef PIKI_PC_PORT
+	// FPS Mode: el paso estaba pensado para 30 Hz; a 60/120 FPS iba x2/x4.
+	mAnimTime1 += msVal.mAnimSpeed * PC_ORIG_DT_SCALE();
+	mAnimTime2 += msVal.mAnimSpeed * PC_ORIG_DT_SCALE();
+#else
 	mAnimTime1 += msVal.mAnimSpeed;
 	mAnimTime2 += msVal.mAnimSpeed;
+#endif
 	if (mAnimTime1 >= mAnim1->getFrameMax() || mAnimTime2 >= mAnim2->getFrameMax()) {
 		ret = true;
 	}
