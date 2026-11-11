@@ -813,13 +813,6 @@ void App::drawStartHome()
 	ImGui::Spacing();
 	if (ImGui::Button(tr("Importar un modelo (OBJ o DAE)..."), ImVec2(320, 34))) newMapFromModel();
 	hint(tr("Un escenario hecho en Blender o sacado de otro juego: su malla es el suelo y encima pones cebollas, piezas y enemigos."));
-	ImGui::Spacing();
-	if (ImGui::Button(tr("Abrir uno de mis mapas"), ImVec2(320, 34))) {
-		refreshOpenList();
-		openOpen_ = true;
-		newMap(nectar::TerrainShape::Rectangle);
-		screen_ = Screen::Editor;
-	}
 	ImGui::EndChild();
 	ImGui::SameLine(0, 24);
 	ImGui::BeginChild("##home_right", ImVec2(rightW, 0));
@@ -874,21 +867,29 @@ bool App::modeCard(int mode, float w, float h)
 
 void App::recentList(float w)
 {
-	ImGui::SeparatorText(tr("Recientes"));
+	ImGui::SeparatorText(tr("Mis mapas"));
 	struct Recent {
 		std::string name, path, modes, when;
+		fs::file_time_type at {};
 	};
 	static std::vector<Recent> sList;
 	static double sAt = -10.0;
 	if (now() - sAt > 3.0) {
 		sAt = now();
 		sList.clear();
+		// Como en Roblox Studio: todos los mapas de mi carpeta más los abiertos
+		// de otros sitios, el más reciente primero.
 		std::vector<std::string> paths = cfg_.recentMaps;
 		if (!cfg_.lastMap.empty() && std::find(paths.begin(), paths.end(), cfg_.lastMap) == paths.end()) paths.insert(paths.begin(), cfg_.lastMap);
 		std::error_code ec;
+		for (fs::directory_iterator it(cfg_.userMapsDir(), ec), end; !ec && it != end; it.increment(ec)) {
+			const std::string f = (it->path() / "map.json").string();
+			if (fs::exists(f, ec) && std::find(paths.begin(), paths.end(), f) == paths.end()) paths.push_back(f);
+		}
 		for (const std::string& path : paths) {
-			if (!fs::exists(path, ec) || sList.size() >= 10) continue;
+			if (!fs::exists(path, ec) || sList.size() >= 60) continue;
 			Recent r;
+			r.at   = fs::last_write_time(path, ec);
 			r.path = path;
 			r.name = fs::path(path).parent_path().filename().string();
 			std::string text, err;
@@ -915,13 +916,27 @@ void App::recentList(float w)
 			}
 			sList.push_back(r);
 		}
+		std::stable_sort(sList.begin(), sList.end(), [](const Recent& a, const Recent& b) { return a.at > b.at; });
 	}
 	if (sList.empty()) {
-		hint(tr("Aquí saldrán los mapas que abras o guardes."));
+		hint(tr("Aquí saldrán tus mapas: los que crees, guardes o abras."));
 		return;
 	}
+	ImGui::SetNextItemWidth(w - 8);
+	static char sFilter[64] = "";
+	ImGui::InputTextWithHint("##maps_filter", tr("Buscar..."), sFilter, sizeof(sFilter));
+	ImGui::BeginChild("##maps_list");
 	const float rowH = 76.0f;
+	auto icontains = [](const std::string& hay, const char* needle) {
+		if (!*needle) return true;
+		auto lower = [](std::string v) {
+			for (char& c : v) c = char(std::tolower(static_cast<unsigned char>(c)));
+			return v;
+		};
+		return lower(hay).find(lower(needle)) != std::string::npos;
+	};
 	for (std::size_t i = 0; i < sList.size(); i++) {
+		if (!icontains(sList[i].name, sFilter)) continue;
 		const Recent& r = sList[i];
 		ImGui::PushID(int(i));
 		const ImVec2 p     = ImGui::GetCursorScreenPos();
@@ -949,6 +964,7 @@ void App::recentList(float w)
 			break;
 		}
 	}
+	ImGui::EndChild();
 }
 
 // Paso 2: como en Unreal, ya con el modo elegido; siempre hay uno en blanco.

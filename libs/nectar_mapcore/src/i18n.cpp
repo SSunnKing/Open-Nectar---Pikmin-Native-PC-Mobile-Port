@@ -136,6 +136,8 @@ const Pair kTable[] = {
 	{ "Lámpara UV", "UV Lamp" },
 	{ "Clic para elegir; doble clic para ir hasta ello. Ctrl+clic elige varios.", "Click to select; double-click to jump to it. Ctrl+click selects several." },
 	{ "V oculta y B bloquea mientras editas (no cambia el mapa).", "V hides and B locks while you edit (the map itself does not change)." },
+	{ "Mis mapas", "My maps" },
+	{ "Aquí saldrán tus mapas: los que crees, guardes o abras.", "Your maps will show up here: the ones you create, save or open." },
 	{ "Panel de herramientas", "Tools panel" },
 	{ "Panel de propiedades", "Properties panel" },
 	{ "Capas del visor", "Viewport layers" },
