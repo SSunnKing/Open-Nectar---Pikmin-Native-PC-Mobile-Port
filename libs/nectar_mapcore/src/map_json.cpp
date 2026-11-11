@@ -1673,21 +1673,21 @@ const std::vector<ObjectInfo>& objectKinds()
 const std::vector<ShipPartInfo>& shipParts()
 {
 	static const std::vector<ShipPartInfo> list = {
-		{ "ust1", "objects/ufoparts/soto1.mod", 30, 50 },  { "ust2", "objects/ufoparts/soto2.mod", 50, 70 },
-		{ "ust3", "objects/ufoparts/soto3.mod", 40, 60 },  { "ust4", "objects/ufoparts/soto4.mod", 40, 60 },
-		{ "ust5", "objects/ufoparts/soto5.mod", 20, 40 },  { "uf01", "objects/ufoparts/fuzoku1.mod", 20, 40 },
-		{ "uf02", "objects/ufoparts/fuzoku2.mod", 20, 40 }, { "uf03", "objects/ufoparts/fuzoku3.mod", 20, 40 },
-		{ "uf04", "objects/ufoparts/fuzoku4.mod", 20, 40 }, { "uf05", "objects/ufoparts/fuzoku5.mod", 30, 50 },
-		{ "uf06", "objects/ufoparts/fuzoku6.mod", 15, 25 }, { "uf07", "objects/ufoparts/fuzoku7.mod", 20, 30 },
-		{ "uf08", "objects/ufoparts/fuzoku8.mod", 15, 25 }, { "uf09", "objects/ufoparts/fuzoku9.mod", 30, 50 },
-		{ "uf10", "objects/ufoparts/fuzoku10.mod", 15, 25 }, { "uf11", "objects/ufoparts/fuzoku11.mod", 15, 25 },
-		{ "un01", "objects/ufoparts/naka1.mod", 30, 50 },   { "un02", "objects/ufoparts/naka2.mod", 25, 45 },
-		{ "un03", "objects/ufoparts/naka3.mod", 25, 45 },   { "un04", "objects/ufoparts/naka4.mod", 30, 50 },
-		{ "un05", "objects/ufoparts/naka5.mod", 15, 25 },   { "un06", "objects/ufoparts/naka6.mod", 30, 50 },
-		{ "un07", "objects/ufoparts/naka7.mod", 30, 50 },   { "un08", "objects/ufoparts/naka8.mod", 20, 40 },
-		{ "un09", "objects/ufoparts/naka9.mod", 25, 45 },   { "un10", "objects/ufoparts/naka10.mod", 30, 50 },
-		{ "un11", "objects/ufoparts/naka11.mod", 40, 95 },  { "un12", "objects/ufoparts/naka12.mod", 20, 40 },
-		{ "un13", "objects/ufoparts/naka13.mod", 20, 40 },  { "un14", "objects/ufoparts/naka14.mod", 10, 25 },
+		{ "ust1", "objects/ufoparts/soto1.mod", "Bauprés", 30, 50 },  { "ust2", "objects/ufoparts/soto2.mod", "Motor de gluones", 50, 70 },
+		{ "ust3", "objects/ufoparts/soto3.mod", "Filtro antidioxinas", 40, 60 },  { "ust4", "objects/ufoparts/soto4.mod", "Dinamo de combustible eterno", 40, 60 },
+		{ "ust5", "objects/ufoparts/soto5.mod", "Motor principal", 20, 40 },  { "uf01", "objects/ufoparts/fuzoku1.mod", "Radar caprichoso", 20, 40 },
+		{ "uf02", "objects/ufoparts/fuzoku2.mod", "Radio interestelar", 20, 40 }, { "uf03", "objects/ufoparts/fuzoku3.mod", "Satélite guardián", 20, 40 },
+		{ "uf04", "objects/ufoparts/fuzoku4.mod", "Reactor Cronos", 20, 40 }, { "uf05", "objects/ufoparts/fuzoku5.mod", "Cúpula de radiación", 30, 50 },
+		{ "uf06", "objects/ufoparts/fuzoku6.mod", "Contador Geiger", 15, 25 }, { "uf07", "objects/ufoparts/fuzoku7.mod", "Sagitario", 20, 30 },
+		{ "uf08", "objects/ufoparts/fuzoku8.mod", "Libra", 15, 25 }, { "uf09", "objects/ufoparts/fuzoku9.mod", "Estabilizador omega", 30, 50 },
+		{ "uf10", "objects/ufoparts/fuzoku10.mod", "Propulsor de ionio (1)", 15, 25 }, { "uf11", "objects/ufoparts/fuzoku11.mod", "Propulsor de ionio (2)", 15, 25 },
+		{ "un01", "objects/ufoparts/naka1.mod", "Amortiguador", 30, 50 },   { "un02", "objects/ufoparts/naka2.mod", "Saltador de gravedad", 25, 45 },
+		{ "un03", "objects/ufoparts/naka3.mod", "Asiento del piloto", 25, 45 },   { "un04", "objects/ufoparts/naka4.mod", "Cañón nova", 30, 50 },
+		{ "un05", "objects/ufoparts/naka5.mod", "Marcha automática", 15, 25 },   { "un06", "objects/ufoparts/naka6.mod", "Rotor de circonio", 30, 50 },
+		{ "un07", "objects/ufoparts/naka7.mod", "Perno extraordinario", 30, 50 },   { "un08", "objects/ufoparts/naka8.mod", "Perno de reparación", 20, 40 },
+		{ "un09", "objects/ufoparts/naka9.mod", "Flotador espacial", 25, 45 },   { "un10", "objects/ufoparts/naka10.mod", "Máquina de masajes", 30, 50 },
+		{ "un11", "objects/ufoparts/naka11.mod", "Caja fuerte secreta", 40, 95 },  { "un12", "objects/ufoparts/naka12.mod", "Generador de positrones", 20, 40 },
+		{ "un13", "objects/ufoparts/naka13.mod", "Ordenador analógico", 20, 40 },  { "un14", "objects/ufoparts/naka14.mod", "Lámpara UV", 10, 25 },
 	};
 	return list;
 }

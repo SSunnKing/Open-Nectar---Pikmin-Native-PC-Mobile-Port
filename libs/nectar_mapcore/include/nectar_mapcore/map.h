@@ -535,6 +535,7 @@ const std::vector<ObjectInfo>& objectKinds();
 struct ShipPartInfo {
 	const char* id;
 	const char* model;
+	const char* label; ///< nombre que ve el usuario (en español; tr() lo traduce)
 	int carryMin, carryMax; ///< Pikmin para levantarla / para llevarla a toda velocidad
 };
 const std::vector<ShipPartInfo>& shipParts();

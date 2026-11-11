@@ -2675,9 +2675,19 @@ void App::drawPlaceOptions()
 			ImGui::PushID(c.label.c_str());
 			const unsigned t = assetThumb(placeAsset(c));
 			const bool on    = place_.type == c.type && place_.label == c.label;
+			// Nombre (la primera línea de la descripción) debajo de la miniatura,
+			// para no tener que pasar el ratón por cada una.
+			const std::string name = it.second.substr(0, it.second.find('\n'));
+			ImGui::BeginGroup();
 			if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.52f, 0.66f, 0.25f, 1));
-			const bool pressed = t ? ImGui::ImageButton("##g", ImTextureID(std::intptr_t(t)), ImVec2(72, 72)) : ImGui::Button(it.second.c_str(), ImVec2(80, 80));
+			const bool pressed = t ? ImGui::ImageButton("##g", ImTextureID(std::intptr_t(t)), ImVec2(72, 72)) : ImGui::Button("##g", ImVec2(80, 80));
 			if (on) ImGui::PopStyleColor();
+			const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+			if (!t) ImGui::GetWindowDrawList()->AddText(ImVec2(a.x + 6, a.y + 6), ImGui::GetColorU32(ImGuiCol_Text), name.c_str(), nullptr);
+			ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + (b.x - a.x));
+			ImGui::TextColored(on ? ImVec4(0.90f, 0.95f, 0.70f, 1) : kDim, "%s", name.c_str());
+			ImGui::PopTextWrapPos();
+			ImGui::EndGroup();
 			if (pressed) choose(c);
 			ImGui::SetItemTooltip(tipFmt, it.second.c_str());
 			ImGui::PopID();
@@ -2695,8 +2705,9 @@ void App::drawPlaceOptions()
 			bool used = false;
 			for (const nectar::DocShipPart& sp : ed_.doc.story.parts) used = used || sp.id == p.id;
 			if (used) continue;
-			char text[96];
-			std::snprintf(text, sizeof(text), tr("La levantan %d Pikmin (más rápido con %d)"), p.carryMin, p.carryMax);
+			char carry[96], text[160];
+			std::snprintf(carry, sizeof(carry), tr("La levantan %d Pikmin (más rápido con %d)"), p.carryMin, p.carryMax);
+			std::snprintf(text, sizeof(text), "%s\n%s", tr(p.label), carry);
 			parts.push_back({ { ItemType::ShipPart, "", p.id }, text });
 		}
 		grid("storyparts", parts, "%s");
@@ -2718,8 +2729,9 @@ void App::drawPlaceOptions()
 		hint(tr("Lo que hay que llevar al cohete. Las grandes necesitan muchos Pikmin y dan más puntos."));
 		std::vector<std::pair<PlaceChoice, std::string>> parts;
 		for (const nectar::ShipPartInfo& p : nectar::shipParts()) {
-			char text[96];
-			std::snprintf(text, sizeof(text), tr("La levantan %d Pikmin (más rápido con %d)"), p.carryMin, p.carryMax);
+			char carry[96], text[160];
+			std::snprintf(carry, sizeof(carry), tr("La levantan %d Pikmin (más rápido con %d)"), p.carryMin, p.carryMax);
+			std::snprintf(text, sizeof(text), "%s\n%s", tr(p.label), carry);
 			parts.push_back({ { ItemType::Piece, "", p.id }, text });
 		}
 		grid("parts", parts, "%s");
@@ -4694,7 +4706,8 @@ void App::drawHierarchy()
 		default: return true;
 		}
 	};
-	hint(tr("Clic selecciona; Ctrl combina; doble clic enfoca. V oculta y B bloquea durante esta sesión."));
+	hint(tr("Clic para elegir; doble clic para ir hasta ello. Ctrl+clic elige varios."));
+	hint(tr("V oculta y B bloquea mientras editas (no cambia el mapa)."));
 	int totalMatches = 0;
 	for (const Group& group : groups) {
 		int count = 0;

@@ -447,7 +447,15 @@ std::string itemName(const MapDoc& d, const ItemRef& r)
 		snprintf(buf, sizeof(buf), tr("Cebolla %s"), tr(onionNames[c >= 0 && c < 3 ? c : 1]));
 		break;
 	}
-	case ItemType::ShipPart: snprintf(buf, sizeof(buf), tr("Pieza de la nave (%s)"), d.story.parts[std::size_t(r.index)].id.c_str()); break;
+	case ItemType::ShipPart: {
+		const std::string& id = d.story.parts[std::size_t(r.index)].id;
+		const char* name      = id.c_str();
+		for (const nectar::ShipPartInfo& p : nectar::shipParts()) {
+			if (id == p.id) name = tr(p.label);
+		}
+		snprintf(buf, sizeof(buf), tr("Pieza de la nave (%s)"), name);
+		break;
+	}
 	}
 	return buf;
 }
