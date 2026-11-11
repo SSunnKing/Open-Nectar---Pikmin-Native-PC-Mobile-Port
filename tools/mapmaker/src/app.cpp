@@ -220,19 +220,22 @@ void drawSprout(ImDrawList* dl, ImVec2 c, float scale)
 /// Cabecera compacta para los paneles fijos del editor.
 void panelHeading(const char* title, const char* subtitle)
 {
-	const ImVec2 p = ImGui::GetCursorScreenPos();
-	ImDrawList* dl = ImGui::GetWindowDrawList();
-	const float titleW = ImGui::CalcTextSize(title).x;
-	dl->AddCircleFilled(ImVec2(p.x + 5, p.y + 9), 3.5f, IM_COL32(166, 190, 70, 255));
-	dl->AddLine(ImVec2(p.x + 26 + titleW, p.y + 9), ImVec2(p.x + ImGui::GetContentRegionAvail().x, p.y + 9), IM_COL32(67, 76, 67, 220), 1.0f);
-	ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 18);
-	ImGui::TextColored(ImVec4(0.88f, 0.90f, 0.84f, 1), "%s", title);
+	// Título algo mayor y subtítulo tenue, sin adornos: el punto y la raya de
+	// antes competían con el contenido.
+	const ImVec2 p  = ImGui::GetCursorScreenPos();
+	ImDrawList* dl  = ImGui::GetWindowDrawList();
+	const float fs  = ImGui::GetFontSize() * 1.15f;
+	const float sub = ImGui::GetFontSize() * 0.9f;
+	dl->AddText(nullptr, fs, ImVec2(p.x + 2, p.y), IM_COL32(236, 240, 220, 255), title);
+	float h = fs + 2.0f;
 	if (subtitle && *subtitle) {
-		ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 18);
-		ImGui::PushStyleColor(ImGuiCol_Text, kDim);
-		ImGui::TextUnformatted(subtitle);
-		ImGui::PopStyleColor();
+		dl->AddText(nullptr, sub, ImVec2(p.x + 2, p.y + h), IM_COL32(150, 158, 140, 255), subtitle);
+		h += sub + 2.0f;
 	}
+	ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, h + 4.0f));
+	// Separación suave con el contenido.
+	const ImVec2 q = ImGui::GetCursorScreenPos();
+	dl->AddLine(ImVec2(q.x, q.y - 2), ImVec2(q.x + ImGui::GetContentRegionAvail().x, q.y - 2), IM_COL32(60, 70, 58, 200), 1.0f);
 	ImGui::Spacing();
 }
 

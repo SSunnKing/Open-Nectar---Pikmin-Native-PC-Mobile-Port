@@ -80,7 +80,9 @@ int main(int argc, char** argv)
 	style.ChildBorderSize      = 1;
 	style.PopupBorderSize      = 1;
 	style.FrameBorderSize      = 0;
-	style.SeparatorTextPadding = ImVec2(8, 5);
+	style.SeparatorTextPadding    = ImVec2(10, 6);
+	style.SeparatorTextBorderSize = 1.0f; // línea fina: el título manda, la raya acompaña
+	style.SeparatorTextAlign      = ImVec2(0.0f, 0.5f);
 
 	ImVec4* c = style.Colors;
 	c[ImGuiCol_Text]                  = ImVec4(0.90f, 0.91f, 0.88f, 1.00f);
