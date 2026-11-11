@@ -44,6 +44,12 @@ static inline void pc_texpack_count_real_gl()
 #define BCDEC_IMPLEMENTATION
 #include "bcdec.h"
 
+// BC1/BC3 encoder (stb_dxt, MIT / public domain) for the mip levels a
+// compressed pack leaves out. It calls memcpy without including string.h.
+#include <string.h>
+#define STB_DXT_IMPLEMENTATION
+#include "stb_dxt.h"
+
 namespace fs = std::filesystem;
 
 // En GLES / drivers antiguos faltan las constantes BPTC y S3TC sRGB; los
@@ -523,6 +529,239 @@ static bool is_srgb(GLenum format)
         || format == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT;
 }
 
+// BC1. stb_dxt writes only the opaque four-colour mode, so a block with
+// transparent texels keeps stb's endpoint fit over its opaque texels and is
+// rewritten in three-colour mode, where index 3 is transparent black.
+static void encode_bc1_block(const uint8_t rgba[64], uint8_t out[8])
+{
+    uint32_t transparent = 0;
+    int fill = -1;
+    for (int i = 0; i < 16; ++i) {
+        if (rgba[i * 4 + 3] < 128) transparent |= 1u << i;
+        else if (fill < 0) fill = i;
+    }
+    // stb_dxt needs constant alpha. Transparent texels copy an opaque one so
+    // they do not pull the fit.
+    uint8_t opaque[64];
+    for (int i = 0; i < 16; ++i) {
+        const int from = (transparent >> i & 1) && fill >= 0 ? fill : i;
+        memcpy(opaque + i * 4, rgba + from * 4, 3);
+        opaque[i * 4 + 3] = 255;
+    }
+    stb_compress_dxt_block(out, opaque, 0, STB_DXT_HIGHQUAL);
+    if (!transparent) return;
+
+    uint16_t c0 = uint16_t(out[0] | out[1] << 8), c1 = uint16_t(out[2] | out[3] << 8);
+    if (c0 > c1) std::swap(c0, c1); // c0 <= c1 selects three-colour mode
+    int palette[3][3];
+    for (int k = 0; k < 2; ++k) {
+        const uint16_t c = k ? c1 : c0;
+        palette[k][0] = (c >> 11) * 255 / 31;
+        palette[k][1] = (c >> 5 & 63) * 255 / 63;
+        palette[k][2] = (c & 31) * 255 / 31;
+    }
+    for (int c = 0; c < 3; ++c) palette[2][c] = (palette[0][c] + palette[1][c]) / 2;
+    uint32_t mask = 0;
+    for (int i = 0; i < 16; ++i) {
+        int index = 3;
+        if (!(transparent >> i & 1)) {
+            int bestErr = 1 << 30;
+            for (int k = 0; k < 3; ++k) {
+                int err = 0;
+                for (int c = 0; c < 3; ++c) {
+                    const int d = palette[k][c] - opaque[i * 4 + c];
+                    err += d * d;
+                }
+                if (err < bestErr) { bestErr = err; index = k; }
+            }
+        }
+        mask |= uint32_t(index) << (i * 2);
+    }
+    out[0] = uint8_t(c0); out[1] = uint8_t(c0 >> 8);
+    out[2] = uint8_t(c1); out[3] = uint8_t(c1 >> 8);
+    for (int b = 0; b < 4; ++b) out[4 + b] = uint8_t(mask >> (b * 8));
+}
+
+// BC7 mode 6: one RGBA line per block, 7-bit endpoints that share a low bit,
+// 16 steps between them. A principal-axis fit is enough for the small levels
+// the loader builds. Levels the pack supplies are uploaded untouched.
+static void encode_bc7_block(const uint8_t rgba[64], uint8_t out[16])
+{
+    static const int kWeights[16] = {0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64};
+    float mean[4] = {};
+    for (int i = 0; i < 16; ++i)
+        for (int c = 0; c < 4; ++c) mean[c] += rgba[i * 4 + c] / 16.0f;
+    float cov[4][4] = {};
+    for (int i = 0; i < 16; ++i)
+        for (int a = 0; a < 4; ++a)
+            for (int b = 0; b < 4; ++b)
+                cov[a][b] += (rgba[i * 4 + a] - mean[a]) * (rgba[i * 4 + b] - mean[b]);
+    // Power iteration from the widest channel's column. That column is zero
+    // only for a constant block, whose texels all project onto the mean.
+    int widest = 0;
+    for (int c = 1; c < 4; ++c)
+        if (cov[c][c] > cov[widest][widest]) widest = c;
+    float axis[4] = {cov[0][widest], cov[1][widest], cov[2][widest], cov[3][widest]};
+    for (int iter = 0;; ++iter) {
+        const float len = std::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2] + axis[3] * axis[3]);
+        if (len < 1e-6f) {
+            axis[0] = axis[1] = axis[2] = axis[3] = 0;
+            break;
+        }
+        for (float& v : axis) v /= len;
+        if (iter == 8) break;
+        float next[4] = {};
+        for (int a = 0; a < 4; ++a)
+            for (int b = 0; b < 4; ++b) next[a] += cov[a][b] * axis[b];
+        memcpy(axis, next, sizeof axis);
+    }
+    float tmin = 0, tmax = 0;
+    for (int i = 0; i < 16; ++i) {
+        float t = 0;
+        for (int c = 0; c < 4; ++c) t += (rgba[i * 4 + c] - mean[c]) * axis[c];
+        tmin = std::min(tmin, t);
+        tmax = std::max(tmax, t);
+    }
+    // Quantise each endpoint with whichever shared low bit lands closer.
+    int q[2][4] = {}, p[2] = {};
+    for (int e = 0; e < 2; ++e) {
+        const float t = e ? tmax : tmin;
+        float best = 1e30f;
+        for (int bit = 0; bit < 2; ++bit) {
+            int candidate[4];
+            float err = 0;
+            for (int c = 0; c < 4; ++c) {
+                const float v = std::clamp(mean[c] + t * axis[c], 0.0f, 255.0f);
+                candidate[c] = std::clamp(int(std::lround((v - bit) / 2)), 0, 127);
+                const float d = float(candidate[c] * 2 + bit) - v;
+                err += d * d;
+            }
+            if (err < best) {
+                best = err;
+                p[e] = bit;
+                memcpy(q[e], candidate, sizeof candidate);
+            }
+        }
+    }
+    int palette[16][4];
+    for (int k = 0; k < 16; ++k)
+        for (int c = 0; c < 4; ++c)
+            palette[k][c] = ((64 - kWeights[k]) * (q[0][c] * 2 + p[0]) + kWeights[k] * (q[1][c] * 2 + p[1]) + 32) >> 6;
+    int index[16];
+    for (int i = 0; i < 16; ++i) {
+        int bestErr = 1 << 30;
+        for (int k = 0; k < 16; ++k) {
+            int err = 0;
+            for (int c = 0; c < 4; ++c) {
+                const int d = palette[k][c] - rgba[i * 4 + c];
+                err += d * d;
+            }
+            if (err < bestErr) { bestErr = err; index[i] = k; }
+        }
+    }
+    // The first texel's index is stored without its top bit. Swapping the
+    // endpoints mirrors the weights exactly, so it clears that bit losslessly.
+    if (index[0] & 8) {
+        std::swap(q[0], q[1]);
+        std::swap(p[0], p[1]);
+        for (int& i : index) i = 15 - i;
+    }
+    uint64_t bits[2] = {};
+    int pos = 0;
+    const auto put = [&](uint32_t value, int count) {
+        for (int k = 0; k < count; ++k, ++pos)
+            if (value >> k & 1) bits[pos >> 6] |= uint64_t(1) << (pos & 63);
+    };
+    put(1u << 6, 7); // mode 6
+    for (int c = 0; c < 4; ++c) { put(uint32_t(q[0][c]), 7); put(uint32_t(q[1][c]), 7); }
+    put(uint32_t(p[0]), 1);
+    put(uint32_t(p[1]), 1);
+    put(uint32_t(index[0]), 3);
+    for (int i = 1; i < 16; ++i) put(uint32_t(index[i]), 4);
+    for (int b = 0; b < 16; ++b) out[b] = uint8_t(bits[b >> 3] >> ((b & 7) * 8));
+}
+
+// Inverse of decode_bc_level for the levels the loader builds itself. Edge
+// blocks repeat the last row and column. False for a format it cannot write.
+static bool encode_bc_level(GLenum internalFormat, uint32_t w, uint32_t h,
+                            const std::vector<uint8_t>& in, std::vector<uint8_t>& out)
+{
+    enum class Bc { One, Two, Three, Seven } kind;
+    switch (internalFormat) {
+        case GL_COMPRESSED_RGBA_BPTC_UNORM:
+        case GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM:
+            kind = Bc::Seven; break;
+        case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT:
+            kind = Bc::One; break;
+        case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT:
+            kind = Bc::Two; break;
+        case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT:
+            kind = Bc::Three; break;
+        default:
+            return false;
+    }
+    if (w == 0 || h == 0 || in.size() < size_t(w) * h * 4) return false;
+    const size_t blockBytes = kind == Bc::One ? 8 : 16;
+    const uint32_t blocksW = (w + 3) / 4, blocksH = (h + 3) / 4;
+    out.assign(size_t(blocksW) * blocksH * blockBytes, 0);
+    uint8_t* dst = out.data();
+    uint8_t block[64];
+    for (uint32_t by = 0; by < blocksH; ++by) {
+        for (uint32_t bx = 0; bx < blocksW; ++bx, dst += blockBytes) {
+            for (uint32_t y = 0; y < 4; ++y)
+                for (uint32_t x = 0; x < 4; ++x) {
+                    const uint32_t sx = std::min(bx * 4 + x, w - 1), sy = std::min(by * 4 + y, h - 1);
+                    memcpy(block + (y * 4 + x) * 4, in.data() + (size_t(sy) * w + sx) * 4, 4);
+                }
+            switch (kind) {
+                case Bc::One:
+                    encode_bc1_block(block, dst);
+                    break;
+                case Bc::Two:
+                    // Explicit 4-bit alpha, then a colour block that is always
+                    // read in four-colour mode.
+                    for (int i = 0; i < 16; ++i) {
+                        const int alpha = (block[i * 4 + 3] * 15 + 127) / 255;
+                        dst[i / 2] |= uint8_t(alpha << ((i % 2) * 4));
+                        block[i * 4 + 3] = 255;
+                    }
+                    stb_compress_dxt_block(dst + 8, block, 0, STB_DXT_HIGHQUAL);
+                    break;
+                case Bc::Three:
+                    stb_compress_dxt_block(dst, block, 1, STB_DXT_HIGHQUAL);
+                    break;
+                case Bc::Seven:
+                    encode_bc7_block(block, dst);
+                    break;
+            }
+        }
+    }
+    return true;
+}
+
+// Builds the levels after the last supplied one in the pack's own BC format:
+// decode that level, box-filter it, encode each child. The driver is never
+// asked for compressed levels. glGenerateMipmap on BC data is illegal in GLES
+// and left to each driver on desktop, where it is unevenly supported.
+static bool encode_bc_tail(const PackImage& image, int fullLevels, std::vector<std::vector<uint8_t>>& tail)
+{
+    const PackLevel& last = image.levels.back();
+    uint32_t w = last.width, h = last.height;
+    std::vector<uint8_t> rgba;
+    if (!decode_bc_level(image.internalFormat, w, h, last.data, rgba)) return false;
+    for (int level = int(image.levels.size()); level < fullLevels; ++level) {
+        rgba = pc_texture_downsample_rgba8(rgba, w, h, is_srgb(image.internalFormat));
+        w = pc_texture_next_mip_size(w);
+        h = pc_texture_next_mip_size(h);
+        tail.emplace_back();
+        if (!encode_bc_level(image.internalFormat, w, h, rgba, tail.back())) return false;
+    }
+    return true;
+}
+
 #ifdef _WIN32
 #include <SDL2/SDL.h>
 // opengl32.dll solo exporta GL 1.1; glCompressedTexImage2D es de 1.3 y hay
@@ -617,52 +856,19 @@ bool pc_texpack_try_upload(const char* name, GLuint texId, int* glLevels, size_t
         }
     }
 
-#if !PIKI_USE_GLES
-    // Desktop GL can generate compressed levels. Start at the last valid
-    // supplied level so authored mips are not overwritten. Keep the source
-    // buffers until it succeeds: a driver that cannot encode this BC format
-    // falls back to the streaming CPU/RGBA path below.
-    if (base.compressed && capabilities_ok(base) && compressed_tex_image_2d()
-        && int(base.levels.size()) < fullLevels) {
-        const auto generate = reinterpret_cast<PFNGLGENERATEMIPMAPPROC>(SDL_GL_GetProcAddress("glGenerateMipmap"));
-        if (generate) {
-            while (glGetError() != GL_NO_ERROR) {}
-            size_t compressedBytes = 0;
-            for (size_t i = 0; i < base.levels.size(); ++i) {
-                const PackLevel& level = base.levels[i];
-                upload_level(base, int(i), level.width, level.height, level.data);
-                compressedBytes += level.data.size();
-            }
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, int(base.levels.size()) - 1);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, fullLevels - 1);
-            pc_texpack_count_real_gl();
-            generate(GL_TEXTURE_2D);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-            if (glGetError() == GL_NO_ERROR) {
-                const size_t blockBytes = base.internalFormat == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT
-                    || base.internalFormat == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT ? 8 : 16;
-                uint32_t w = base.levels.back().width, h = base.levels.back().height;
-                for (int i = int(base.levels.size()); i < fullLevels; ++i) {
-                    w = pc_texture_next_mip_size(w);
-                    h = pc_texture_next_mip_size(h);
-                    compressedBytes += size_t((w + 3) / 4) * ((h + 3) / 4) * blockBytes;
-                }
-                ++sStatReplaced;
-                if (glLevels) *glLevels = fullLevels;
-                if (gpuBytes) *gpuBytes = compressedBytes;
-                return true;
-            }
-        }
+    // A compressed chain the driver can sample stays compressed, and its
+    // missing levels are encoded on the CPU (encode_bc_tail). Otherwise BC
+    // levels are decoded one at a time and the tail is box-filtered as RGBA;
+    // only the last supplied level and its child are held, never a full
+    // uncompressed pyramid.
+    std::vector<std::vector<uint8_t>> tail;
+    bool decode = base.compressed && (!capabilities_ok(base) || !compressed_tex_image_2d());
+    if (base.compressed && !decode && int(base.levels.size()) < fullLevels
+        && !encode_bc_tail(base, fullLevels, tail)) {
+        log_once(name, "compressed mip encode failed; uploading RGBA");
+        tail.clear();
+        decode = true;
     }
-#endif
-
-    // GLES forbids compressed mip generation; desktop drivers may fail it.
-    // Decode incomplete BC1/2/3/7 chains and build their tail as RGBA instead.
-    // Complete supported compressed chains stay compressed. Decode/upload one
-    // level at a time; only the last prefix level and its child are kept for
-    // generation, not an additional full uncompressed CPU mip pyramid.
-    const bool decode = base.compressed && (!capabilities_ok(base)
-        || int(base.levels.size()) < fullLevels || !compressed_tex_image_2d());
     PackImage uploadFormat;
     uploadFormat.compressed = base.compressed && !decode;
     uploadFormat.internalFormat = decode ? (is_srgb(base.internalFormat) ? GL_SRGB8_ALPHA8 : GL_RGBA8)
@@ -695,6 +901,11 @@ bool pc_texpack_try_upload(const char* name, GLuint texId, int* glLevels, size_t
             w = pc_texture_next_mip_size(w);
             h = pc_texture_next_mip_size(h);
         }
+    }
+    for (const std::vector<uint8_t>& data : tail) {
+        w = pc_texture_next_mip_size(w);
+        h = pc_texture_next_mip_size(h);
+        push(w, h, data);
     }
     while (levels < fullLevels) {
         std::vector<uint8_t> next = pc_texture_downsample_rgba8(previous, w, h,
