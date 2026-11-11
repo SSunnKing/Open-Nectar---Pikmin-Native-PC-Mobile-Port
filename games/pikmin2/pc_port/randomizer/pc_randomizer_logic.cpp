@@ -10,7 +10,8 @@
 //   - la deuda: tiene que poder pagarse sin entrar en Wistful Wild;
 //   - con globos barajados: cada globo, antes de la zona que abre.
 // Un tesoro que pesa más de 100 (yoyo_yellow, los globos) necesita morados,
-// que salen de Candypops fijos (Emergence Cave), así que nunca bloquea.
+// que salen de Candypops fijos (Emergence Cave), así que nunca bloquea... salvo
+// en el Submerged Castle, todo agua: allí solo entran azules (issue #255).
 
 #include "pc_randomizer.h"
 #include "pc_randomizer_catalog.h"
@@ -57,6 +58,16 @@ int vanillaTreasure(int loc) { return pc_randomizer_treasure_by_code(pc_randomiz
 /// Cueva sin requisitos en el original: Emergence Cave (t_01).
 bool isFreeCave(int caveIdx) { return caveIdx >= 0 && std::strcmp(pc_randomizer_cave(caveIdx).id, "t_01") == 0; }
 
+/// Más de 100 Pikmin: yoyo_yellow (el juego cambia su 128 por 1000, 100 morados)
+/// y los globos.
+const int kMaxCarryWithoutPurples = 100;
+
+/// Submerged Castle (y_04): todo agua, solo llegan azules.
+bool heavyAllowed(const PcP2Location& l)
+{
+	return l.cave < 0 || std::strcmp(pc_randomizer_cave(l.cave).id, "y_04") != 0;
+}
+
 /// Puede tener el Spherical Atlas: superficie de VoR o Emergence Cave.
 bool atlasAllowed(const PcP2Location& l)
 {
@@ -89,6 +100,7 @@ bool validate(const int16_t* at, int count, uint32_t flags)
 		if (std::strcmp(name, "map02") == 0 && !projectionAllowed(l)) return false;
 		if (std::strcmp(name, "loozy") == 0 && l.kind != PC_P2LOC_BossHardcoded) return false;
 		if (isFirstTreasureSpot(l) && pc_randomizer_treasure(at[i]).min > kFirstTreasureMaxCarry) return false;
+		if (pc_randomizer_treasure(at[i]).min > kMaxCarryWithoutPurples && !heavyAllowed(l)) return false;
 	}
 	return true;
 }
@@ -171,6 +183,32 @@ void placeFirstTreasure(int16_t* at, int count, uint32_t flags, PcRandomizerRng&
 	const int16_t tmp = at[other];
 	at[other]         = at[spot];
 	at[spot]          = tmp;
+}
+
+/// Saca del Submerged Castle los tesoros que necesitan morados, cambiándolos por
+/// uno elegido con el flujo. Solo consume el flujo si hace falta, así que las
+/// semillas que no lo tenían allí quedan igual.
+void placeHeavyTreasures(int16_t* at, int count, uint32_t flags, PcRandomizerRng& rng)
+{
+	for (int spot = 0; spot < count; spot++) {
+		if (pc_randomizer_treasure(at[spot]).min <= kMaxCarryWithoutPurples) continue;
+		if (heavyAllowed(pc_randomizer_location(spot))) continue;
+		int options[256];
+		int n = 0;
+		for (int i = 0; i < count; i++) {
+			const PcP2Treasure& t = pc_randomizer_treasure(at[i]);
+			const PcP2Location& l = pc_randomizer_location(i);
+			if (i == spot || !heavyAllowed(l) || isFirstTreasureSpot(l) || isFixed(t.name, flags)) continue;
+			if (std::strcmp(t.name, "map01") == 0 || std::strcmp(t.name, "map02") == 0) continue;
+			if (t.min > kMaxCarryWithoutPurples || l.kind == PC_P2LOC_BossHardcoded) continue;
+			options[n++] = i;
+		}
+		if (n == 0) return;
+		const int other   = options[rng.below(uint32_t(n))];
+		const int16_t tmp = at[other];
+		at[other]         = at[spot];
+		at[spot]          = tmp;
+	}
 }
 
 /// Ubicación de un texto de PIKI_RND_FORCE: "t_01:2" (primera del subnivel 2 de
@@ -274,6 +312,7 @@ void build(Manifest& m, uint64_t seed, uint32_t flags, bool active)
 				placeGlobe(m.treasureAt, count, flags, "map02", projectionAllowed, rng, atlasAt);
 			}
 			placeFirstTreasure(m.treasureAt, count, flags, rng);
+			placeHeavyTreasures(m.treasureAt, count, flags, rng);
 			if (attempt == kMaxAttempts - 1) repairDebt(m.treasureAt, count, flags);
 			m.ok = validate(m.treasureAt, count, flags);
 		}
