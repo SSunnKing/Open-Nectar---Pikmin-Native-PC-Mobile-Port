@@ -2443,16 +2443,27 @@ void App::drawToolbox(const Rect& r)
 		                { Tool::Place, tr("Poner cosas"), tr("Piezas, pastillas, enemigos y decoración"), false, Icon::Place, 2 },
 		                { Tool::Scatter, tr("Decorar"), tr("Esparce hierbas, flores y piedras pintando"), false, Icon::Decor, 0 },
 		                { Tool::Walls, tr("Muros"), tr("Dibuja muros arrastrando"), false, Icon::Walls, 8 } };
+	// Nombre corto bajo el icono (como en Roblox Studio) y el grupo encima.
+	const char* shortLabels[] = { tr("Mover"), tr("Suelo"), tr("Relieve"), tr("Zona"), tr("Rampa"), tr("Agua"), tr("Pintar"), tr("Trazos"), tr("Poner"), tr("Decorar"), tr("Muros") };
 	// Por grupos: elegir, dar forma al terreno y poner cosas.
-	const int groupStart[] = { 0, 1, 8 };
+	const int groupStart[]     = { 0, 1, 8 };
+	const char* groupLabels[]  = { tr("ELEGIR"), tr("TERRENO"), tr("PONER") };
 	ImDrawList* dl = ImGui::GetWindowDrawList();
-	const float bw = r.w - 16.0f, bh = 42.0f;
-	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 4));
+	const float bw = r.w - 16.0f, bh = 52.0f;
+	const float smallFs = ImGui::GetFontSize() * 0.68f;
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 3));
 	for (int k = 0; k < 11; k++) {
-		if (k == groupStart[1] || k == groupStart[2]) {
+		for (int g = 0; g < 3; g++) {
+			if (k != groupStart[g]) continue;
 			const ImVec2 p = ImGui::GetCursorScreenPos();
-			dl->AddLine(ImVec2(p.x + 6, p.y + 5), ImVec2(p.x + bw - 6, p.y + 5), IM_COL32(80, 96, 70, 255), 1.5f);
-			ImGui::Dummy(ImVec2(bw, 8));
+			if (g) {
+				dl->AddLine(ImVec2(p.x + 6, p.y + 6), ImVec2(p.x + bw - 6, p.y + 6), IM_COL32(80, 96, 70, 255), 1.0f);
+				ImGui::Dummy(ImVec2(bw, 9));
+			}
+			const ImVec2 q = ImGui::GetCursorScreenPos();
+			const ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(smallFs, FLT_MAX, 0.0f, groupLabels[g]);
+			dl->AddText(nullptr, smallFs, ImVec2(q.x + (bw - ts.x) * 0.5f, q.y), IM_COL32(140, 160, 110, 255), groupLabels[g]);
+			ImGui::Dummy(ImVec2(bw, smallFs + 3));
 		}
 		const T& t = tools[k];
 		ImGui::PushID(k);
@@ -2465,11 +2476,18 @@ void App::drawToolbox(const Rect& r)
 		if (locked) ImGui::PopStyleVar();
 		const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
 		if (on) dl->AddRectFilled(a, ImVec2(a.x + 3.0f, b.y), IM_COL32(183, 207, 75, 255), 2.0f);
-		drawIcon(dl, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), 11.0f, t.icon, on ? IM_COL32(255, 255, 240, 255) : ImGui::GetColorU32(ImGuiCol_Text));
+		const ImU32 fg = on ? IM_COL32(255, 255, 240, 255) : ImGui::GetColorU32(ImGuiCol_Text);
+		drawIcon(dl, ImVec2((a.x + b.x) * 0.5f, a.y + 19.0f), 12.0f, t.icon, fg);
+		{
+			const ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(smallFs, FLT_MAX, 0.0f, shortLabels[k]);
+			dl->PushClipRect(ImVec2(a.x + 2, a.y), ImVec2(b.x - 2, b.y), true);
+			dl->AddText(nullptr, smallFs, ImVec2((a.x + b.x - ts.x) * 0.5f, b.y - smallFs - 5.0f), on ? fg : IM_COL32(190, 198, 180, 255), shortLabels[k]);
+			dl->PopClipRect();
+		}
 		if (t.key >= 0) {
 			char key[4];
 			std::snprintf(key, sizeof(key), "%d", t.key);
-			dl->AddText(nullptr, ImGui::GetFontSize() * 0.72f, ImVec2(b.x - 10.0f, b.y - ImGui::GetFontSize() * 0.78f), IM_COL32(150, 158, 140, 255), key);
+			dl->AddText(nullptr, ImGui::GetFontSize() * 0.62f, ImVec2(b.x - 9.0f, a.y + 2.0f), IM_COL32(130, 138, 120, 255), key);
 		}
 		if (t.key >= 0) ImGui::SetItemTooltip("%s  (%d)\n%s", t.label, t.key, t.tip);
 		else ImGui::SetItemTooltip("%s\n%s", t.label, t.tip);
