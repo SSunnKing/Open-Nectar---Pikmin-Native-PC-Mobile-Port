@@ -40,7 +40,7 @@ void ActBou::init(Creature* creature)
 	} else {
 		PRINT("TARGET IS %x : %d\n", creature, creature ? creature->mObjType : OBJTYPE_INVALID);
 #if defined(PIKI_PC_PORT)
-		if (pc_netplay_diag_bad_action_target != nullptr) pc_netplay_diag_bad_action_target("ActBou::init", mPiki, creature);
+		pc_netplay_diag_bad_action_target("ActBou::init", mPiki, creature);
 #endif
 		ERROR("karl caught a cold !\n");
 	}

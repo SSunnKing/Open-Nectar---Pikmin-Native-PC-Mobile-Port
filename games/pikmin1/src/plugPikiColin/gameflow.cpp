@@ -704,7 +704,7 @@ void GameFlow::softReset()
 {
 #if defined(PIKI_PC_PORT)
 	// The synchronous stage load below blocks the netplay network pump.
-	if (pc_netplay_on_stage_load != nullptr) pc_netplay_on_stage_load();
+	pc_netplay_on_stage_load();
 #endif
 	// make sure we don't debug-print all this while soft-resetting.
 	BOOL togglePrint   = gsys->mTogglePrint;

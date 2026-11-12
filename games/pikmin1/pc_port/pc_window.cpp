@@ -2013,7 +2013,7 @@ void pc_window_swap_buffers(void) {
         // simulation uses the fixed-step scheduler independently. Netplay's
         // unthrottled replay bypasses it too, and a netplay session owns the
         // single 30 Hz schedule (two stacked pacers would lose slots).
-        const bool netplayOwnsPacing = pc_netplay_session_active != nullptr && pc_netplay_session_active();
+        const bool netplayOwnsPacing = pc_netplay_session_active();
         // Monitor mode's vsync lock: the swap itself paces one tick per refresh;
         // a software deadline on top would only make it miss refreshes.
         const bool vsyncLocked = sLogicalRetraceInterval == 0 && pc_frame_vsync_lock();

@@ -746,7 +746,7 @@ void CardUtilIdleWhileBusy()
 {
 	while (CardUtilIsCardBusy()) {
 #if defined(PIKI_PC_PORT)
-		if (pc_netplay_load_keepalive != nullptr) pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteSave);
+		pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteSave);
 #endif
 		OSYieldThread();
 	}

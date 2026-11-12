@@ -22,7 +22,7 @@
 void pc_netplay_load_keepalive(int site);
 static inline void dvd_netplay_keepalive()
 {
-    if (pc_netplay_load_keepalive != nullptr) pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteDvd);
+    pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteDvd);
 }
 
 static std::unordered_map<DVDFileInfo*, FILE*> sOpenFiles;

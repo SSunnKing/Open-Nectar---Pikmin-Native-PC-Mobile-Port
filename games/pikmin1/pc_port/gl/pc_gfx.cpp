@@ -7041,7 +7041,7 @@ static void use_program_for_current_state() {
            program ? "" : " (FAILED)");
     // A burst of these blocks one netplay tick; between two programs the
     // netplay keep-alive polls the network.
-    if (pc_netplay_load_keepalive != nullptr) pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteShader);
+    pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteShader);
     if (!program) {
         // One failure is treated as a permanent fallback: a configuration this
         // generator cannot express must not be retried for every draw.

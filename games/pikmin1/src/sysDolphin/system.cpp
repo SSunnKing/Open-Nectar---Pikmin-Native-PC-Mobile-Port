@@ -377,7 +377,7 @@ void System::run(BaseApp* app)
 #if PIKI_PC_PORT
 		// A netplay session owns the whole loop turn (handshake, ticks,
 		// network wait or shutdown).
-		if (pc_netplay_session_drive != nullptr && pc_netplay_session_drive(this, app)) {
+		if (pc_netplay_session_drive(this, app)) {
 			continue;
 		}
 #endif
