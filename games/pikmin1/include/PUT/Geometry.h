@@ -31,6 +31,8 @@ public:
 
 	PUTRect(const PUTRect& other) { copy(other); }
 
+	PUTRect& operator=(const PUTRect&) = default;
+
 	void set(int x0, int y0, int x1, int y1);
 	void copy(const PUTRect& other);
 	void add(int x, int y);
