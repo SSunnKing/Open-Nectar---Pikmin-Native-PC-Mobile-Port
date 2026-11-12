@@ -2162,7 +2162,7 @@ void BaseShape::makeInstance(ShapeDynMaterials& animatedMats, int jointIdx)
 
 	for (int matIdx = 0; matIdx < animatedMats.mMatCount; matIdx++) {
 		Material* mat = &animatedMats.mMaterials[matIdx];
-		memcpy(static_cast<void*>(mat), &mMaterialList[matUsed[matIdx]], sizeof(Material)); // same dynamic type, so the vptr is unchanged
+		memcpy(static_cast<void*>(mat), static_cast<const void*>(&mMaterialList[matUsed[matIdx]]), sizeof(Material)); // same dynamic type, so the vptr is unchanged
 		if (mat->mFlags & MATFLAG_PVW) {
 			mat->mTevInfo = new PVWTevInfo();
 			memcpy(mat->mTevInfo, mMaterialList[matUsed[matIdx]].mTevInfo, sizeof(PVWTevInfo));
