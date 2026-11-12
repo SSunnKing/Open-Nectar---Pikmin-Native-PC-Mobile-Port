@@ -1,6 +1,8 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX // libstdc++ on MinGW already defines it
 #define NOMINMAX
+#endif
 #include <windows.h>
 #undef ERROR
 #undef near

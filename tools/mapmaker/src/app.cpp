@@ -42,7 +42,7 @@ namespace {
 
 constexpr double kAutosaveSeconds = 120.0;
 constexpr float kTopBarH = 64.0f, kStatusBarH = 30.0f, kRailW = 60.0f, kToolRowH = 46.0f, kDefaultToolboxW = 300.0f, kDefaultSideW = 360.0f;
-constexpr float kMinToolboxW = 240.0f, kMinSideW = 280.0f, kMinViewportW = 420.0f;
+constexpr float kMinSideW = 280.0f, kMinViewportW = 420.0f;
 
 const ImVec4 kGood(0.57f, 0.84f, 0.37f, 1), kWarn(0.96f, 0.76f, 0.28f, 1), kBad(0.96f, 0.40f, 0.30f, 1), kDim(0.59f, 0.62f, 0.56f, 1);
 
@@ -2488,7 +2488,7 @@ void App::drawToolbox(const Rect& r)
 			dl->PopClipRect();
 		}
 		if (t.key >= 0) {
-			char key[4];
+			char key[12]; // room for any int
 			std::snprintf(key, sizeof(key), "%d", t.key);
 			dl->AddText(nullptr, ImGui::GetFontSize() * 0.62f, ImVec2(b.x - 9.0f, a.y + 2.0f), IM_COL32(130, 138, 120, 255), key);
 		}

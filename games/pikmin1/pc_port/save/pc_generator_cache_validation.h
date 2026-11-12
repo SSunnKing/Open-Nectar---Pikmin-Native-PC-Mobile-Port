@@ -50,10 +50,19 @@ bool validateGeneratorCacheLayout(int usedSize, int freeSize, int heapSize,
 		aliveIndices[aliveCount++] = i;
 	}
 
+	// GCC's -Warray-bounds misreads std::sort's 16-element insertion-sort
+	// threshold as an overrun of this small array (a known false positive).
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
 	std::sort(aliveIndices.begin(), aliveIndices.begin() + aliveCount,
 	          [&entries](std::size_t lhs, std::size_t rhs) {
 		          return entries[lhs].mCacheHeapOffset < entries[rhs].mCacheHeapOffset;
 	          });
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 	std::uint32_t expectedOffset = 0;
 	for (std::size_t i = 0; i < aliveCount; ++i) {
 		const Entry& cache = entries[aliveIndices[i]];

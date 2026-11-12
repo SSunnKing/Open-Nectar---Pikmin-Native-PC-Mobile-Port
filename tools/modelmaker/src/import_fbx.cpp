@@ -188,7 +188,7 @@ bool importFbx(const std::string& path, ImpModel& out, std::string& error)
 					const uint32_t vertex = mesh->vertex_indices.data[index];
 					SkinVertex& o         = tv[k];
 					const ufbx_vec3 p     = ufbx_get_vertex_vec3(&mesh->vertex_position, index);
-					const ufbx_vec3 nn    = mesh->vertex_normal.exists ? ufbx_get_vertex_vec3(&mesh->vertex_normal, index) : ufbx_vec3 { 0, 1, 0 };
+					const ufbx_vec3 nn    = mesh->vertex_normal.exists ? ufbx_get_vertex_vec3(&mesh->vertex_normal, index) : ufbx_vec3 { { { 0, 1, 0 } } };
 					if (mesh->vertex_uv.exists) {
 						const ufbx_vec2 uv = ufbx_get_vertex_vec2(&mesh->vertex_uv, index);
 						o.uv               = { float(uv.x), 1.0f - float(uv.y) }; // FBX: origen abajo
