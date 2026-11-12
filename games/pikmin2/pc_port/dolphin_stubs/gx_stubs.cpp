@@ -71,7 +71,7 @@ void GXSetProjectionv(const f32* ptr) { (void)ptr; }
 void GXLoadPosMtxImm(const Mtx mtx, u32 id)  { pc_gfx_load_pos_mtx(mtx, id); }
 void GXLoadNrmMtxImm(const Mtx mtx, u32 id)  { pc_gfx_load_nrm_mtx(mtx, id); }
 void GXSetCurrentMtx(u32 id)        { pc_gfx_set_current_mtx(id); }
-void GXLoadTexMtxImm(const Mtx mtx, u32 id, GXTexMtxType type) { pc_gfx_load_tex_mtx(mtx, id); }
+void GXLoadTexMtxImm(const Mtx mtx, u32 id, [[maybe_unused]] GXTexMtxType type) { pc_gfx_load_tex_mtx(mtx, id); }
 void __GXSetMatrixIndex(GXAttr index) { (void)index; }
 
 void __GXSetViewport()              { }

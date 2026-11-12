@@ -53,7 +53,7 @@ OSThreadQueue __DVDThreadQueue = { nullptr, nullptr };
  * ────────────────────────────────────────────── */
 static auto sStartTime = std::chrono::high_resolution_clock::now();
 
-static u64 pcGetTicksRaw() {
+[[maybe_unused]] static u64 pcGetTicksRaw() {
     auto now = std::chrono::high_resolution_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(now - sStartTime);
     // Convert to GameCube timer ticks (OS_TIMER_CLOCK = bus/4 = 40.5 MHz)
@@ -118,7 +118,7 @@ OSTime OSCalendarTimeToTicks(OSCalendarTime* timeDate) {
     return OSGetTime();
 }
 
-void OSTicksToCalendarTime(OSTime ticks, OSCalendarTime* timeDate) {
+void OSTicksToCalendarTime([[maybe_unused]] OSTime ticks, OSCalendarTime* timeDate) {
     memset(timeDate, 0, sizeof(OSCalendarTime));
     // TODO: Stage 2 - Implement proper calendar time conversion
 }

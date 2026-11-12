@@ -28,8 +28,8 @@ public:
 	{
 	}
 
-	virtual void msgCommand(DataMsg& msg) { }                 // _10 (weak)
-	virtual void render2d(Graphics& gfx, int& textHeight) { } // _14 (weak)
+	virtual void msgCommand([[maybe_unused]] DataMsg& msg) { } // _10 (weak)
+	virtual void render2d([[maybe_unused]] Graphics& gfx, [[maybe_unused]] int& textHeight) { } // _14 (weak)
 
 	// _00     = VTBL
 	// _00-_14 = CoreNode

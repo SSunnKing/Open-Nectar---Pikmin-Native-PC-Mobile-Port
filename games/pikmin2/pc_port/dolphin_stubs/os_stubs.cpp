@@ -118,7 +118,7 @@ OSTime OSCalendarTimeToTicks(OSCalendarTime* timeDate) {
     return OSGetTime();
 }
 
-void OSTicksToCalendarTime(OSTime ticks, OSCalendarTime* timeDate) {
+void OSTicksToCalendarTime([[maybe_unused]] OSTime ticks, OSCalendarTime* timeDate) {
     memset(timeDate, 0, sizeof(OSCalendarTime));
     // TODO: Stage 2 - Implement proper calendar time conversion
 }

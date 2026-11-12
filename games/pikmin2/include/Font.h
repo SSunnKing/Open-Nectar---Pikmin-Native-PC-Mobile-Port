@@ -44,7 +44,7 @@ public:
 	int charToIndex(u16);
 
 	// DLL inlines:
-	int stringHeight(immut char* str) { return mCharHeight; }
+	int stringHeight([[maybe_unused]] immut char* str) { return mCharHeight; }
 
 	Texture* mTexture; // _00
 	int mCharWidth;    // _04
