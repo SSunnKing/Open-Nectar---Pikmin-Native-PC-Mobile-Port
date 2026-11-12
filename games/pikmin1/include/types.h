@@ -229,7 +229,9 @@ typedef int BOOL;
 #endif
 
 // Random and useful macros
+#ifndef PATH_MAX
 #define PATH_MAX  (256)                     // Max path length
+#endif
 #define MAX(a, b) (((a) > (b)) ? (a) : (b)) // Returns the maximum of a and b
 #define MIN(a, b) (((a) < (b)) ? (a) : (b)) // Returns the minimum of a and b
 
@@ -243,9 +245,13 @@ typedef int BOOL;
 #if defined(_MSC_VER)
 // MSVC 6.0 has no trailing alignment attribute; its __declspec(align(#)) must precede the declarator.
 // Also, nothing that uses this macro is byte-aligned in the DLL, so it must have been inert on MSVC.
+#ifndef ATTRIBUTE_ALIGN
 #define ATTRIBUTE_ALIGN(num)
+#endif
 #else
+#ifndef ATTRIBUTE_ALIGN
 #define ATTRIBUTE_ALIGN(num) __attribute__((aligned(num)))
+#endif
 #endif
 
 // Makes the compiler averse to using that register for the entire function.
