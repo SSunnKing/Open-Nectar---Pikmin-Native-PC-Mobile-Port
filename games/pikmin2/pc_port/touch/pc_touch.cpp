@@ -172,7 +172,14 @@ enum EditTool { TOOL_GRID, TOOL_MINUS, TOOL_PLUS, TOOL_RESET, TOOL_COUNT };
 struct ToolState { float cx = 0, cy = 0, r = 0; };
 ToolState sTools[TOOL_COUNT];
 
-bool button_editable(int i) { return i != BTN_BACK && i != BTN_MENU_CONFIRM; }
+bool button_editable(int i)
+{
+#if PIKI_P2_HOST
+	// En P2 el charge es lo mismo que un toque de swarm: sobra.
+	if (i == BTN_CHARGE) return false;
+#endif
+	return i != BTN_BACK && i != BTN_MENU_CONFIRM;
+}
 
 // Botones de mods: no se dibujan ni responden si su mod está apagado, para no
 // ocupar sitio con algo que no hace nada. El editor de disposición sí los
@@ -208,6 +215,7 @@ bool button_modded_off(int i)
 	}
 #if PIKI_P2_HOST
 	if (i == BTN_BOMB) return true; // Pikmin 2 no tiene el mod de bombas
+	if (i == BTN_CHARGE) return true; // duplica el botón de swarm
 	if (i == BTN_MAP) return !(sContext & PC_TOUCH_CTX_SWAP); // Y = cambiar de capitán
 #else
 	if (i == BTN_BOMB) return pc_settings_get_bomb_control() == 0;
@@ -242,6 +250,11 @@ GroupDrag sGroupDrag;
 // Botón de swarm: lo mismo que el arrastre de disolver (stick C), y un toque
 // sin arrastre deja al grupo yendo hacia el cursor hasta otro toque o silbar.
 GroupDrag sSwarmDrag;
+#if PIKI_P2_HOST
+// P2 se tumba manteniendo X ~35 ticks (naviState.cpp, con la Napsack): un
+// toque del botón mantiene X ese rato.
+Uint32 sLieDownUntil = 0;
+#endif
 bool sSwarmToggle = false;
 constexpr float kGroupDragStart = 0.025f; // fracción de H: a partir de aquí es arrastre
 constexpr float kGroupDragFull = 0.12f;   // fracción de H: deflexión máxima del C-stick
@@ -820,6 +833,9 @@ void pc_touch_on_finger(long long fingerId, PcTouchPhase phase, float x, float y
 				sButtons[btn].lastX = x;
 				sButtons[btn].lastY = y;
 				if (btn == BTN_SETTINGS) sSettingsRequested = true;
+#if PIKI_P2_HOST
+				if (btn == BTN_LIEDOWN && sGameMenuClaimFrames <= 0) sLieDownUntil = SDL_GetTicks() + 1500;
+#endif
 				if (btn == BTN_LAYOUT && sGameMenuClaimFrames <= 0) sLayoutRequested = true;
 				// Modo foto: el mismo conmutador que F3 en escritorio.
 				if (btn == BTN_PHOTO && sGameMenuClaimFrames <= 0) pc_photo_mode_request_toggle();
@@ -1041,6 +1057,16 @@ bool pc_touch_merge_pad(u16* button, s8* stickX, s8* stickY, s8* substickX, s8* 
 			touchButtons |= kButtons[i].pad;
 		}
 	}
+#if PIKI_P2_HOST
+	if (sLieDownUntil) {
+		if (sGameMenuClaimFrames > 0 || SDL_TICKS_PASSED(SDL_GetTicks(), sLieDownUntil)) {
+			sLieDownUntil = 0;
+		} else {
+			*button |= PAD_BUTTON_X;
+			touchButtons |= PAD_BUTTON_X;
+		}
+	}
+#endif
 	// Silbar o un menú del juego cortan el swarm continuo.
 	if (sButtons[BTN_WHISTLE].finger >= 0 || sGameMenuClaimFrames > 0) sSwarmToggle = false;
 	if (sButtons[BTN_SWARM].finger >= 0 && sSwarmDrag.dragging && sLayoutH > 0 && *substickX == 0 && *substickY == 0) {
