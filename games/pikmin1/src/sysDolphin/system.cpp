@@ -377,7 +377,7 @@ void System::run(BaseApp* app)
 #if PIKI_PC_PORT
 		// A netplay session owns the whole loop turn (handshake, ticks,
 		// network wait or shutdown).
-		if (pc_netplay_session_drive != nullptr && pc_netplay_session_drive(this, app)) {
+		if (pc_netplay_session_drive(this, app)) {
 			continue;
 		}
 #endif
@@ -1637,7 +1637,7 @@ void System::copyCacheToRam(u32 mainMemAddr, u32 aramCacheAddr, u32 size)
  */
 void freeBuffer(u32 cache)
 {
-	CacheTexture* texCache = (CacheTexture*)(((SystemCache*)cache)->owner);
+	CacheTexture* texCache = (CacheTexture*)(uintptr_t)(((SystemCache*)(uintptr_t)cache)->owner);
 
 	// sync data cache of texture to main mem
 	texCache->mPixelData = texCache->mTexImage->mTextureData;

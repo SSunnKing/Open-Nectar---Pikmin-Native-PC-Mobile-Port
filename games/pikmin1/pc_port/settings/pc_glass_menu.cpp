@@ -132,7 +132,7 @@ Rect listRow(int visibleIndex)
 }
 Rect scrollTrack() { return { kLeftX + kLeftW - 22, kColY + 8, 8, kVisible * kItemH }; }
 Rect optRow(int visibleIndex) { return { kRightX + 12, kColY + 8 + visibleIndex * kOptH, kRightW - 24, kOptH }; }
-Rect tabRect(int tab) { return { kTabX + tab * kTabW, kTabBarY + 4, kTabW, kTabBarH - 8 }; }
+[[maybe_unused]] Rect tabRect(int tab) { return { kTabX + tab * kTabW, kTabBarY + 4, kTabW, kTabBarH - 8 }; }
 Rect closeRect() { return { kTabBarX + kTabBarW - 12 - kCloseW, kTabBarY + 4, kCloseW, kTabBarH - 8 }; }
 
 // Toque en coordenadas 0..1 de la ventana -> espacio 640x480 centrado 4:3.
@@ -168,7 +168,7 @@ void closePicker()
 	sParentGroup = -1;
 }
 
-void openTab(int tab)
+[[maybe_unused]] void openTab(int tab)
 {
 	if (inPicker()) sParentGroup = -1;
 	sOptFocus = false;

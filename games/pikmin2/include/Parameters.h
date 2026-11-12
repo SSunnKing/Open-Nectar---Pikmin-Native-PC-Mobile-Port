@@ -77,13 +77,13 @@ struct BaseParm {
 	 * @brief Writes parameter to file stream - trivial in base class.
 	 * @param output File stream to write to - unused in base class.
 	 */
-	virtual void write(RandomAccessStream& output) { } // _0C
+	virtual void write([[maybe_unused]] RandomAccessStream& output) { } // _0C
 
 	/**
 	 * @brief Reads parameter from file stream - trivial in base class.
 	 * @param input File stream to read from - unused in base class.
 	 */
-	virtual void read(RandomAccessStream& input) { } // _10
+	virtual void read([[maybe_unused]] RandomAccessStream& input) { } // _10
 };
 
 /**
@@ -98,7 +98,7 @@ public:
 	 * @brief Constructs an empty parameters list.
 	 * @param name Name for this collection of parameters.
 	 */
-	Parameters(immut char* name)
+	Parameters([[maybe_unused]] immut char* name)
 	{
 		mFirstParm = nullptr;
 #if defined(WIN32)
@@ -131,7 +131,7 @@ public:
  */
 template <typename T>
 struct Parm : public BaseParm {
-	Parm(Parameters* owner, T value, T min, T max, ayuID id, immut char* name)
+	Parm(Parameters* owner, T value, [[maybe_unused]] T min, [[maybe_unused]] T max, ayuID id, [[maybe_unused]] immut char* name)
 	    : BaseParm(owner, id)
 	{
 #ifdef WIN32

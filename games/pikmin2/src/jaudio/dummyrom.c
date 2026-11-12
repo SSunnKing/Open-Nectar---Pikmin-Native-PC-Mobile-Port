@@ -1,4 +1,5 @@
 #include "jaudio/dummyrom.h"
+#include <stdint.h>
 #include "Dolphin/ar.h"
 #include "Dolphin/os.h"
 #include "jaudio/audiocommon.h"
@@ -107,10 +108,10 @@ void Jac_InitARAM(u32 loadAudiorom)
 
 	CARD_SECURITY_BUFFER = 0x40;
 	audiorom_size += AUDIO_ARAM_TOP;
-	JAC_ARAM_DMA_BUFFER_TOP = (u8*)audiorom_size;
+	JAC_ARAM_DMA_BUFFER_TOP = (u8*)(uintptr_t)audiorom_size;
 	audiorom_size += AUDIO_ARAM_HEAP_SIZE;
 	if (audiorom_size < aram_size) {
-		Nas_HeapInit(&aram_hp, (u8*)audiorom_size, aram_size - audiorom_size);
+		Nas_HeapInit(&aram_hp, (u8*)(uintptr_t)audiorom_size, aram_size - audiorom_size);
 	} else {
 		Nas_HeapInit(&aram_hp, NULL, 0);
 	}

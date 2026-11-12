@@ -10042,8 +10042,8 @@ bool pc_netplay_online_spectating(void);
 void pc_netplay_online_request_leave(void);
 void pc_netplay_online_request_rejoin(void);
 namespace {
-bool online_guest() { return pc_netplay_online_is_guest != nullptr && pc_netplay_online_is_guest(); }
-bool online_spectating() { return pc_netplay_online_spectating != nullptr && pc_netplay_online_spectating(); }
+bool online_guest() { return pc_netplay_online_is_guest(); }
+bool online_spectating() { return pc_netplay_online_spectating(); }
 
 const char* disabledReason(const GroupRow& r) {
     if (hardLocked(r)) return "Locked by Hard mode for this save file.";

@@ -283,7 +283,7 @@ public:
 
 	// the vtable has to be at 0x1A0, so it's in the middle, yes.
 	virtual void initSoftReset();                                                                                       // _08
-	virtual RandomAccessStream* openFile(immut char* path, bool isRelativePath = true, bool = true) { return nullptr; } // _0C
+	virtual RandomAccessStream* openFile([[maybe_unused]] immut char* path, [[maybe_unused]] bool isRelativePath = true, bool = true) { return nullptr; } // _0C
 	virtual u32 copyRamToCache(u32, u32, u32) { return 0; }                                                             // _10
 	virtual void copyCacheToRam(u32, u32, u32) { }                                                                      // _14
 	virtual void copyWaitUntilDone() { }                                                                                // _18
@@ -292,7 +292,7 @@ public:
 	virtual void forceHardReset() { }                                                                                   // _20
 #endif                                                                                                                  //
 	virtual void Activate(bool) { }                                                                                     // _20
-	virtual void parseArchiveDirectory(immut char* arcPath, immut char* dirPath) { }                                    // _24
+	virtual void parseArchiveDirectory([[maybe_unused]] immut char* arcPath, [[maybe_unused]] immut char* dirPath) { }  // _24
 	virtual void sndPlaySe(u32) = 0;                                                                                    // _28
 	virtual void startLoading(LoadIdler*, bool, u32) { }                                                                // _2C
 	virtual void endLoading() { }                                                                                       // _30
@@ -577,7 +577,7 @@ struct LogStream : public Stream {
  */
 struct AramStream : public RandomAccessStream {
 	virtual int getPending() { return mPending; } // _44 (weak)
-	virtual void read(void* data, int size)       // _3C (weak)
+	virtual void read([[maybe_unused]] void* data, int size) // _3C (weak)
 	{
 		int readSize = OSRoundUp32B(size);
 		#if defined(PIKI_PC_PORT)

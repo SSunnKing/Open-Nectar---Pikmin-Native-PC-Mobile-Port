@@ -40,7 +40,7 @@ public:
 	virtual void open();                                                                                          // _10
 	virtual void close();                                                                                         // _14
 	virtual void update() { /* Matching by size */ }                                                              // _18 unused/inlined
-	virtual void doRender(Graphics& gfx) { /* Matching by size */ }                                               // _1C unused/inlined
+	virtual void doRender([[maybe_unused]] Graphics& gfx) { /* Matching by size */ }                             // _1C unused/inlined
 	virtual void render(Graphics& gfx);                                                                           // _20
 	virtual void printStart(Graphics& gfx);                                                                       // _24
 	virtual void print(Graphics& gfx, int posX, int posY, immut char* message);                                   // _28

@@ -344,7 +344,7 @@ struct WhistleTemplate : public KEffect {
 		mEffIDB       = id2;
 	}
 
-	virtual bool invoke(zen::particleGenerator* ptclGen, zen::particleMdl* ptcl) // _24
+	virtual bool invoke([[maybe_unused]] zen::particleGenerator* ptclGen, zen::particleMdl* ptcl) // _24
 	{
 		Vector3f diff         = _0C - _18;
 		f32 ratio             = f32(ptcl->mAge) / f32(ptcl->mLifeTime);

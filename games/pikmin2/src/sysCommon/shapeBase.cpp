@@ -3403,7 +3403,11 @@ void BaseShape::updateAnim(Graphics& gfx, immut Matrix4f& mtx, f32* p3, const vo
 /**
  * @brief Likely fabricated static inline function useful for DOL-exclusive code in `BaseShape::calcWeightedMatrices`.
  */
+#ifdef __MWERKS__
 static inline void addMatrixWeights(register f32* animMtx, register f32* weightedMtx, register f32 weights[2])
+#else
+static inline void addMatrixWeights(f32* animMtx, f32* weightedMtx, f32 weights[2])
+#endif
 {
 #ifdef __MWERKS__
 	asm {

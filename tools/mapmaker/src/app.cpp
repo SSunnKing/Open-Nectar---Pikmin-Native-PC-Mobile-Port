@@ -2864,7 +2864,8 @@ void App::drawPlaceOptions()
 		grid("objects", list, "%s");
 	}
 	{
-		const std::vector<GameGenChoice>& gens = gameGenCatalog(cfg_.dataDir());
+		const std::string dataDir = cfg_.dataDir();
+		const std::vector<GameGenChoice>& gens = gameGenCatalog(dataDir);
 		if (!gens.empty() && iconHeader(tr("Objetos del juego (como en la historia)"), Icon::More)) {
 			hint(tr("Los mismos generadores que los niveles originales: el juego los crea y los recuerda de un día a otro. Al elegir uno, puedes cambiar su radio, cuántos salen o su giro."));
 			std::string category;

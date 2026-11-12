@@ -44,7 +44,7 @@ void ActEnter::init(Creature* target)
 	} else {
 		PRINT("TARGET IS %x : %d\n", target, target ? target->mObjType : -1);
 #if defined(PIKI_PC_PORT)
-		if (pc_netplay_diag_bad_action_target != nullptr) pc_netplay_diag_bad_action_target("ActEnter::init", mPiki, target);
+		pc_netplay_diag_bad_action_target("ActEnter::init", mPiki, target);
 #endif
 		ERROR("karl caught a cold !\n");
 	}

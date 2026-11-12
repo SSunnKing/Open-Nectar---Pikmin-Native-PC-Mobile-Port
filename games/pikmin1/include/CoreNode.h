@@ -40,7 +40,7 @@ public:
 	 * @brief Reads the data from a random access stream into the CoreNode.
 	 * @param stream The random access stream to read from.
 	 */
-	virtual void read(RandomAccessStream& stream) { } // _0C (weak)
+	virtual void read([[maybe_unused]] RandomAccessStream& stream) { } // _0C (weak)
 
 	/**
 	 * @brief Initializes the core data of the CoreNode.

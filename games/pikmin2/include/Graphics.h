@@ -148,7 +148,7 @@ public:
 	virtual void setViewport(immut RectArea&)       = 0;                                                                  // _48
 	virtual void setViewportOffset(immut RectArea&) = 0;                                                                  // _4C
 	virtual void setScissor(immut RectArea&)        = 0;                                                                  // _50
-	virtual void setBlendMode(u8 blendFactor, u8 zMode, u8 blendMode) { }                                                 // _54
+	virtual void setBlendMode([[maybe_unused]] u8 blendFactor, [[maybe_unused]] u8 zMode, [[maybe_unused]] u8 blendMode) { } // _54
 	virtual int setCullFront(int)                                                                                    = 0; // _58
 	virtual bool setDepth(bool)                                                                                      = 0; // _5C
 	virtual int setCBlending(int)                                                                                    = 0; // _60

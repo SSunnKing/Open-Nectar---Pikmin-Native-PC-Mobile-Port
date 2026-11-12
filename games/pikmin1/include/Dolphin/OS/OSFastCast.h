@@ -49,7 +49,13 @@ static inline void OSInitFastCast(void)
 #endif
 }
 
-static inline void OSf32tou8(register f32* in, register u8* out)
+#ifdef __MWERKS__
+#define OS_FASTCAST_REG register
+#else
+#define OS_FASTCAST_REG
+#endif
+
+static inline void OSf32tou8(OS_FASTCAST_REG f32* in, OS_FASTCAST_REG u8* out)
 {
 #ifdef __MWERKS__
 	asm {
@@ -61,7 +67,7 @@ static inline void OSf32tou8(register f32* in, register u8* out)
 #endif
 }
 
-static inline void OSf32tou16(register f32* in, register u16* out)
+static inline void OSf32tou16(OS_FASTCAST_REG f32* in, OS_FASTCAST_REG u16* out)
 {
 #ifdef __MWERKS__
 	asm {
@@ -73,7 +79,7 @@ static inline void OSf32tou16(register f32* in, register u16* out)
 #endif
 }
 
-static inline void OSf32tos8(register f32* in, register s8* out)
+static inline void OSf32tos8(OS_FASTCAST_REG f32* in, OS_FASTCAST_REG s8* out)
 {
 #ifdef __MWERKS__
 	asm {
@@ -85,7 +91,7 @@ static inline void OSf32tos8(register f32* in, register s8* out)
 #endif
 }
 
-static inline void OSf32tos16(register f32* in, register s16* out)
+static inline void OSf32tos16(OS_FASTCAST_REG f32* in, OS_FASTCAST_REG s16* out)
 {
 #ifdef __MWERKS__
 	asm {
@@ -97,7 +103,7 @@ static inline void OSf32tos16(register f32* in, register s16* out)
 #endif
 }
 
-static inline void OSu8tof32(register u8* in, register f32* out)
+static inline void OSu8tof32(OS_FASTCAST_REG u8* in, OS_FASTCAST_REG f32* out)
 {
 #ifdef __MWERKS__
 	asm {
@@ -109,7 +115,7 @@ static inline void OSu8tof32(register u8* in, register f32* out)
 #endif
 }
 
-static inline void OSu16tof32(register u16* in, register f32* out)
+static inline void OSu16tof32(OS_FASTCAST_REG u16* in, OS_FASTCAST_REG f32* out)
 {
 #ifdef __MWERKS__
 	asm {
@@ -121,7 +127,7 @@ static inline void OSu16tof32(register u16* in, register f32* out)
 #endif
 }
 
-static inline void OSs8tof32(register s8* in, register f32* out)
+static inline void OSs8tof32(OS_FASTCAST_REG s8* in, OS_FASTCAST_REG f32* out)
 {
 #ifdef __MWERKS__
 	asm {
@@ -133,7 +139,7 @@ static inline void OSs8tof32(register s8* in, register f32* out)
 #endif
 }
 
-static inline void OSs16tof32(register s16* in, register f32* out)
+static inline void OSs16tof32(OS_FASTCAST_REG s16* in, OS_FASTCAST_REG f32* out)
 {
 #ifdef __MWERKS__
 	asm {
@@ -149,4 +155,8 @@ static inline void OSs16tof32(register s16* in, register f32* out)
 
 END_SCOPE_EXTERN_C
 
+#endif
+
+#ifdef OS_FASTCAST_REG
+#undef OS_FASTCAST_REG
 #endif

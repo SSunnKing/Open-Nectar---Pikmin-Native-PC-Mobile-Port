@@ -109,7 +109,7 @@ int main(int argc, char* argv[])
     // --netplay-host-ice / --netplay-join-ice: the run folder, the private
     // save folder and the joiner's session bundle, before anything reads them.
 #if PC_ONLINE_ENABLED // online features are off project-wide (pc_online_switch.h)
-    if (pc_netplay_launch_preinit != nullptr) pc_netplay_launch_preinit(argc, argv);
+    pc_netplay_launch_preinit(argc, argv);
 #endif
 
     // Netplay determinism switches (--netplay-deterministic and the
@@ -173,7 +173,7 @@ int main(int argc, char* argv[])
     // --netplay-host / --netplay-join. A session also takes the co-op direct
     // boot. No-op unless a netplay switch is set.
 #if PC_ONLINE_ENABLED
-    if (pc_netplay_session_notify_argv != nullptr) pc_netplay_session_notify_argv(argc, argv);
+    pc_netplay_session_notify_argv(argc, argv);
 #endif
     (void)argc;
     (void)argv;
@@ -202,7 +202,7 @@ int main(int argc, char* argv[])
     fflush(stdout);
     pc_settings_init();
     // A netplay launch locks the sim settings here; the joiner adopts the host's.
-    if (pc_netplay_launch_post_settings != nullptr) pc_netplay_launch_post_settings();
+    pc_netplay_launch_post_settings();
     // Quick Save (experimental): with the setting on, deterministic mode from
     // here and a recording of every day; --quick-load <file> loads a save.
     // Inert with the setting off.

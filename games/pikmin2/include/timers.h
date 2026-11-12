@@ -55,14 +55,14 @@ public:
 	void showTimes();
 	void draw(Graphics&, Font*);
 
-	void start(immut char* name, bool p2)
+	void start([[maybe_unused]] immut char* name, [[maybe_unused]] bool p2)
 	{
 #if defined(DEVELOP) || defined(VERSION_PIKIDEMO)
 		_start(name, p2);
 #endif
 	}
 
-	void stop(immut char* name)
+	void stop([[maybe_unused]] immut char* name)
 	{
 #if defined(DEVELOP) || defined(VERSION_PIKIDEMO)
 		_stop(name);

@@ -51,7 +51,7 @@ private:
 
 inline bool pc_audio_in_netplay_session()
 {
-	return pc_netplay_session_active != nullptr && pc_netplay_session_active();
+	return pc_netplay_session_active();
 }
 
 inline bool pc_audio_legacy_ownership()

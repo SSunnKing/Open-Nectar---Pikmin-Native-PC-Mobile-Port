@@ -549,7 +549,7 @@ void MemoryCard::waitPolling()
 	// sin ceder deja el núcleo saturado durante todo el guardado. Cedemos la
 	// CPU igual que `CardUtilIdleWhileBusy()`.
 	while (!hasCardFinished()) {
-		if (pc_netplay_load_keepalive != nullptr) pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteSave);
+		pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteSave);
 		OSYieldThread();
 	}
 #else

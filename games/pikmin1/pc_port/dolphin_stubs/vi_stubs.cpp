@@ -55,13 +55,13 @@ void VIWaitForRetrace(void)    {
         pc_settings_draw_mission_hud();
     }
     pc_speedrun_draw();
-    if (pc_netplay_hud_draw != nullptr) pc_netplay_hud_draw();
+    pc_netplay_hud_draw();
     pc_settings_draw_achievement_toast();
     pc_settings_draw_quick_load(); // Quick Save: the load screen, or the last result
     pc_settings_draw_repair_note();
     pc_settings_draw();
     pc_glass_menu_draw();
-    if (pc_online_menu_draw != nullptr) pc_online_menu_draw();
+    pc_online_menu_draw();
 #endif
     pc_gfx_present();
     pc_keycaps_draw(); // teclas en lugar de los botones de GameCube (teclado y ratón)

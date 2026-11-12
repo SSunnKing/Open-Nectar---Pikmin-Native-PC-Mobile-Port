@@ -455,7 +455,7 @@ static void use_scratch_uniform_cache() { sUC = &sScratchUniformSet; }
 // Un programa nuevo (o un id reutilizado) empieza sin valores conocidos.
 static void drop_uniform_cache(GLuint program) {
     if (program == 0 || program >= kUniformSetPrograms || !sProgramUniformSets[program]) return;
-    memset(sProgramUniformSets[program], 0, sizeof(UniformCacheSet));
+    *sProgramUniformSets[program] = UniformCacheSet{};
 }
 
 
@@ -3537,8 +3537,8 @@ void pc_gfx_begin_frame(void) {
         sPerfDisplayListBytes = sPerfTextureUploads = 0;
         sPerfGpuSceneNs = sPerfGpuBlitNs = sPerfGpuSamples = 0;
         memset(sPerfTevStageDraws, 0, sizeof(sPerfTevStageDraws));
-        memset(sPerfTevPatterns, 0, sizeof(sPerfTevPatterns));
-        memset(sPerfTevMultiPatterns, 0, sizeof(sPerfTevMultiPatterns));
+        for (auto& pattern : sPerfTevPatterns) pattern = {};
+        for (auto& pattern : sPerfTevMultiPatterns) pattern = {};
         memset(sPerfFastPathDraws, 0, sizeof(sPerfFastPathDraws));
         memset(sPerfFastPathVertices, 0, sizeof(sPerfFastPathVertices));
         memset(sPerfPrimitiveDraws, 0, sizeof(sPerfPrimitiveDraws));
@@ -7041,7 +7041,7 @@ static void use_program_for_current_state() {
            program ? "" : " (FAILED)");
     // A burst of these blocks one netplay tick; between two programs the
     // netplay keep-alive polls the network.
-    if (pc_netplay_load_keepalive != nullptr) pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteShader);
+    pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteShader);
     if (!program) {
         // One failure is treated as a permanent fallback: a configuration this
         // generator cannot express must not be retried for every draw.
@@ -7348,7 +7348,7 @@ static uint64_t compute_batch_state_key_full() {
     h = hash_bytes(h, sTevRegisters, sizeof(sTevRegisters));
     h = hash_bytes(h, sKonstColors, sizeof(sKonstColors));
     h = hash_bytes(h, &sNumTevStages, sizeof(sNumTevStages));
-    const int stages = sNumTevStages < GX_MAXTEVSTAGE ? sNumTevStages : GX_MAXTEVSTAGE;
+    const int stages = sNumTevStages < static_cast<int>(GX_MAXTEVSTAGE) ? sNumTevStages : static_cast<int>(GX_MAXTEVSTAGE);
     for (int i = 0; i < stages; ++i) {
         h = hash_bytes(h, &sTevStages[i], sizeof(sTevStages[i]));
         h = hash_bytes(h, &sTevRasSwapSel[i], sizeof(sTevRasSwapSel[i]));

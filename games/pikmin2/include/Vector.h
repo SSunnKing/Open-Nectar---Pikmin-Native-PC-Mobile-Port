@@ -34,9 +34,10 @@ public:
 		z = other.z;
 	}
 
-	//!
-	//! NB: do NOT make an operator= definition, needs to use the default.
-	//!
+	// Use the default assignment operator. Naming it = default keeps the
+	// user-provided copy constructor from deprecating the implicit one.
+	Vector3f& operator=(const Vector3f&) = default;
+
 
 	void read(Stream& stream)
 	{
