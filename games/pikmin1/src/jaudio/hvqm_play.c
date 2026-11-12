@@ -468,6 +468,7 @@ static void* hvqm_proc(void* data)
 	// appears next in the linker map.  Other context clues tell us that this is an `OSThreadStartFunction`
 	// type of function.  Beyond that, it's anyone's guess what this function actually did.
 	OSInitFastCast();
+	return NULL;
 }
 
 /**

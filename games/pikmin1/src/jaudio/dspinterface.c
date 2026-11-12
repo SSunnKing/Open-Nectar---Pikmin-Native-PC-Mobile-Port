@@ -35,6 +35,7 @@ DSPchannel_* GetDspHandle(u8 idx)
 DSPchannel_* GetDspHandleNc(u8)
 {
 	TRAP_UNIMPLEMENTED;
+	return NULL;
 }
 
 /**
@@ -52,6 +53,7 @@ FXBuffer* GetFxHandle(u8 idx)
 FXBuffer* GetFxHandleNc(u8 idx)
 {
 	TRAP_UNIMPLEMENTED;
+	return NULL;
 }
 
 /**

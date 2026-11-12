@@ -358,6 +358,7 @@ SplineSegment::SplineSegment()
 f32 SplineSegment::calcDistance(NVector3f&, f32*)
 {
 	TRAP_UNIMPLEMENTED;
+	return 0.0f;
 }
 
 /**
@@ -395,6 +396,7 @@ template <>
 int NArray<SplineKeyFrame>::indexOf(SplineKeyFrame*, int)
 {
 	TRAP_UNIMPLEMENTED;
+	return 0;
 }
 
 /**
@@ -435,6 +437,7 @@ template <>
 SplineKeyFrame* NArray<SplineKeyFrame>::firstElement()
 {
 	TRAP_UNIMPLEMENTED;
+	return nullptr;
 }
 
 /**
@@ -445,6 +448,7 @@ template <>
 SplineKeyFrame* NArray<SplineKeyFrame>::lastElement()
 {
 	TRAP_UNIMPLEMENTED;
+	return nullptr;
 }
 
 /**
@@ -455,6 +459,7 @@ template <>
 int NArray<SplineSegment>::indexOf(SplineSegment*, int)
 {
 	TRAP_UNIMPLEMENTED;
+	return 0;
 }
 
 /**
@@ -495,6 +500,7 @@ template <>
 SplineSegment* NArray<SplineSegment>::firstElement()
 {
 	TRAP_UNIMPLEMENTED;
+	return nullptr;
 }
 
 /**
@@ -505,6 +511,7 @@ template <>
 SplineSegment* NArray<SplineSegment>::lastElement()
 {
 	TRAP_UNIMPLEMENTED;
+	return nullptr;
 }
 
 /**
@@ -535,6 +542,7 @@ template <>
 int NArray<SplineSegment>::indexOf(SplineSegment*)
 {
 	TRAP_UNIMPLEMENTED;
+	return 0;
 }
 
 /**
@@ -545,6 +553,7 @@ template <>
 bool NArray<SplineSegment>::contains(SplineSegment*)
 {
 	TRAP_UNIMPLEMENTED;
+	return false;
 }
 
 /**
@@ -575,6 +584,7 @@ template <>
 int NArray<SplineKeyFrame>::indexOf(SplineKeyFrame*)
 {
 	TRAP_UNIMPLEMENTED;
+	return 0;
 }
 
 /**
@@ -585,4 +595,5 @@ template <>
 bool NArray<SplineKeyFrame>::contains(SplineKeyFrame*)
 {
 	TRAP_UNIMPLEMENTED;
+	return false;
 }

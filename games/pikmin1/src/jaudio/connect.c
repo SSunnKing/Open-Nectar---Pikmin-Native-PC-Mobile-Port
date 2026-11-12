@@ -247,6 +247,7 @@ u16 Jac_BnkVirtualToPhysical(u16 vID)
 u16 Jac_BnkPhysicalToVirtual(u16 bnk)
 {
 	TRAP_UNIMPLEMENTED;
+	return 0;
 }
 
 /**
@@ -256,6 +257,7 @@ u16 Jac_BnkPhysicalToVirtual(u16 bnk)
 u16 Jac_WsPhysicalToVirtual(u16 ws)
 {
 	TRAP_UNIMPLEMENTED;
+	return 0;
 }
 
 /**

@@ -1223,6 +1223,7 @@ void RouteTracer::Context::setTarget(RouteTracer*)
 int RouteTracer::Context::recognise(RouteTracer*)
 {
 	TRAP_UNIMPLEMENTED;
+	return 0;
 }
 
 /**
@@ -1232,6 +1233,7 @@ int RouteTracer::Context::recognise(RouteTracer*)
 bool RouteTracer::noLink()
 {
 	TRAP_UNIMPLEMENTED;
+	return false;
 }
 
 /**
@@ -1259,6 +1261,7 @@ void RouteTracer::updateState()
 Vector3f RouteTracer::getTarget()
 {
 	TRAP_UNIMPLEMENTED;
+	return {};
 }
 
 /**
