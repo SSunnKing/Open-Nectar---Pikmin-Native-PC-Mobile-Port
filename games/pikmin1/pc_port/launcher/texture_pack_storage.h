@@ -18,7 +18,7 @@ inline constexpr double kTexturePackSoftFactor = 3.0;
 enum class TexturePackStorage { Unknown, Enough, Confirm, Block };
 inline std::uint64_t texturePackStorageBytes(std::uint64_t bytes, double factor) {
     const long double result = std::ceil(static_cast<long double>(bytes) * std::round(factor * 10.0) / 10.0L);
-    return result >= std::numeric_limits<std::uint64_t>::max()
+    return result >= static_cast<long double>(std::numeric_limits<std::uint64_t>::max())
         ? std::numeric_limits<std::uint64_t>::max() : std::uint64_t(result);
 }
 inline TexturePackStorage texturePackStorageCheck(std::optional<std::uint64_t> packBytes,

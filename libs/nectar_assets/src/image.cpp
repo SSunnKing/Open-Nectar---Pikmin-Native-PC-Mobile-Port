@@ -6,6 +6,8 @@
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+// Third-party: stb_image_write calls sprintf, which the macOS SDK marks deprecated.
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"

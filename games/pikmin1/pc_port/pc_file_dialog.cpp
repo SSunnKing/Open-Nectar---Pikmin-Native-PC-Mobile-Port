@@ -168,7 +168,7 @@ bool commandExists(const char* name)
 }
 
 // Empty when there is no dialog program; `reason` then says why.
-std::string dialogCommand(const char* title, const char* filterName, const char* patterns, std::string& reason)
+std::string dialogCommand(const char* title, const char* filterName, const char* patterns, [[maybe_unused]] std::string& reason)
 {
     const std::string fullTitle = std::string(kTitlePrefix) + title;
     if (commandExists("zenity")) {

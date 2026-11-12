@@ -17,9 +17,14 @@ typedef void (*GXDrawDoneCallback)(void);
 ////////////////////////////////////////////
 
 ///////////// BASIC FUNCTIONS //////////////
+// These are file-local helpers of the original GX library, which the PC port
+// doesn't build. Declaring them `static` in a header warns in every file that
+// includes it, because none of them defines them.
+#if !defined(PIKI_PC_PORT)
 static GXTexRegion* __GXDefaultTexRegionCallback(GXTexObj* obj, GXTexMapID id);
 static GXTlutRegion* __GXDefaultTlutRegionCallback(u32 tlut);
 static BOOL __GXShutdown(BOOL final); // need to check types
+#endif
 
 ////////////////////////////////////////////
 

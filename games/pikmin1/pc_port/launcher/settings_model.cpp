@@ -77,7 +77,11 @@ bool parseSettingsDump(const std::string& output, SettingsSnapshot& snapshot, st
     }
     if (const Json* models = root.get("hdModels"); models && models->type == Json::Type::Array) {
         for (const Json& m : models->items) {
-            HdModel model { m.integer("row", 0), m.str("name"), m.flag("installed", false), m.flag("enabled", true) };
+            HdModel model;
+            model.row = m.integer("row", 0);
+            model.name = m.str("name");
+            model.installed = m.flag("installed", false);
+            model.enabled = m.flag("enabled", true);
             model.path = m.str("path");
             model.size = m.str("size");
             model.bytes = (unsigned long long)std::max(0, m.integer("bytes", 0));

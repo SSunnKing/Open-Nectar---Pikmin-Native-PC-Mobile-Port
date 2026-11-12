@@ -37,7 +37,7 @@ static char sPcCrashPath[1024];
 // Definido en os_stubs.cpp (OSPanic lo rellena antes de abortar).
 extern "C" char pc_crash_note[512];
 
-static void pc_crash_header(FILE* out)
+[[maybe_unused]] static void pc_crash_header(FILE* out)
 {
 	if (pc_crash_note[0]) fprintf(out, "reason: %.511s\n", pc_crash_note);
 	char stamp[32] = "?";

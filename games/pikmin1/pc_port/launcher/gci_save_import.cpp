@@ -366,7 +366,7 @@ bool backupCardSave(const fs::path& card0Dir, const std::string& saveFileName, s
     }
     fs::path dir = root / stamp;
     if (next > 0) {
-        char suffix[8];
+        char suffix[16]; // room for "-" plus any int
         std::snprintf(suffix, sizeof(suffix), "-%02d", next);
         dir = root / (stamp + suffix);
     }
