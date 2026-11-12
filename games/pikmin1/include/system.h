@@ -515,7 +515,10 @@ public:
 	AramAllocator* mActiveAramAllocator;             // _328
 	vu32 mDmaComplete;                               // _32C
 	vu32 mTexComplete;                               // _330
-#if defined(WIN32)                                   // The WIN32 `System` class was very different.
+// The original game's WIN32 build had a very different `System`. The PC port
+// never uses it, and MinGW's <windows.h> defines WIN32 again in any file that
+// includes it, so gating on WIN32 alone gave `System` two layouts (-Wodr).
+#if defined(WIN32) && !defined(PIKI_PC_PORT)
 	u8 _334[0x3B8 - 0x334];                          // _334
 	char _3B8[];                                     // _3B8, major TODO here.
 #endif
