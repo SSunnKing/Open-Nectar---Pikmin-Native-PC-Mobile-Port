@@ -6,6 +6,7 @@
 #include "Dolphin/OS/OSMessage.h"
 #include "Dolphin/ar.h"
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 #define DMABUFFER_SIZE (0x10000)
@@ -22,8 +23,8 @@ static void ARAMFinish(u32 msg)
 	u32* REF_msg;
 
 	REF_msg             = &msg;
-	ARQRequest* request = (ARQRequest*)msg;
-	OSSendMessage((OSMessageQueue*)request->owner, (OSMessage)1, OS_MESSAGE_BLOCK);
+	ARQRequest* request = (ARQRequest*)(uintptr_t)msg;
+	OSSendMessage((OSMessageQueue*)request->owner, (OSMessage)(uintptr_t)1, OS_MESSAGE_BLOCK);
 }
 
 /**
@@ -534,7 +535,7 @@ void Jac_ShowHeap(jaheap_* heap, u32 flag)
 
 	STACK_PAD_VAR(3);
 	char unused[] = "        ";
-	(void*)unused[0];
+	(void)unused[0];
 
 	c     = heap->firstChild;
 	REF_c = &c;

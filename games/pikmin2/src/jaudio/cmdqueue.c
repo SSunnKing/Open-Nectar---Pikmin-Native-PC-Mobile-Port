@@ -67,7 +67,7 @@ void Jal_RemoveCmdQueue(void)
  */
 void Jal_SendCmdQueue(CmdQueue* queue, u16 msg)
 {
-	Jac_SendMessageBlock(&queue->msgQueue, (OSMessage)msg);
+	Jac_SendMessageBlock(&queue->msgQueue, (OSMessage)(uintptr_t)msg);
 }
 
 /**
@@ -80,7 +80,7 @@ void Jal_SendCmdQueue_Noblock(CmdQueue* queue, u16 msg)
 
 	REF_queue = &queue;
 	REF_msg   = &msg;
-	Jac_SendMessage(&queue->msgQueue, (OSMessage)msg);
+	Jac_SendMessage(&queue->msgQueue, (OSMessage)(uintptr_t)msg);
 
 #if defined(VERSION_GPIJ01_01)
 	int padding;
@@ -93,9 +93,9 @@ void Jal_SendCmdQueue_Noblock(CmdQueue* queue, u16 msg)
 void Jal_SendCmdQueue_Force(CmdQueue* queue, u16 msg)
 {
 	OSMessage outMsg;
-	if (!Jac_SendMessage(&queue->msgQueue, (OSMessage)msg)) {
+	if (!Jac_SendMessage(&queue->msgQueue, (OSMessage)(uintptr_t)msg)) {
 		Jac_ReceiveMessage(&queue->msgQueue, &outMsg);
-		Jac_SendMessage(&queue->msgQueue, (OSMessage)msg);
+		Jac_SendMessage(&queue->msgQueue, (OSMessage)(uintptr_t)msg);
 	}
 }
 

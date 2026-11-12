@@ -12,6 +12,7 @@
 #endif
 
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 /**
@@ -215,8 +216,8 @@ void Jaf_LoadStartFinish(u32 asyncContext)
 static void Jaf_LoadFinish(u32 asyncContext)
 {
 	// Why is a (known) u32 parameter suddenly a pointer?
-	seq_loadbuffer[*(int*)(asyncContext + 4)] = *(u8**)(asyncContext + 12);
-	*(u8*)asyncContext                        = 0;
+	seq_loadbuffer[*(int*)(uintptr_t)(asyncContext + 4)] = *(u8**)(uintptr_t)(asyncContext + 12);
+	*(u8*)(uintptr_t)asyncContext                       = 0;
 }
 
 /**
