@@ -1514,6 +1514,7 @@ int Graphics::calcLighting(f32 intensity)
 int Graphics::calcSphereLighting(immut Vector3f&, f32)
 {
 	TRAP_UNIMPLEMENTED;
+	return 0;
 }
 
 /**
@@ -1523,6 +1524,7 @@ int Graphics::calcSphereLighting(immut Vector3f&, f32)
 int Graphics::calcBoxLighting(immut BoundBox&)
 {
 	TRAP_UNIMPLEMENTED;
+	return 0;
 }
 
 /**

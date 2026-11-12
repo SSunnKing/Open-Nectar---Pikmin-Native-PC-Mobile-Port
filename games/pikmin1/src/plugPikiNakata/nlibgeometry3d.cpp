@@ -282,6 +282,7 @@ void NPlane::construct(NPlane&)
 bool NPlane::intersects(NLine&, f32*)
 {
 	TRAP_UNIMPLEMENTED;
+	return false;
 }
 
 /**
@@ -291,6 +292,7 @@ bool NPlane::intersects(NLine&, f32*)
 bool NPlane::outputIntersection(NLine&, NVector3f&)
 {
 	TRAP_UNIMPLEMENTED;
+	return false;
 }
 
 /**
@@ -300,6 +302,7 @@ bool NPlane::outputIntersection(NLine&, NVector3f&)
 bool NPlane::intersectsRay(NLine&, f32*)
 {
 	TRAP_UNIMPLEMENTED;
+	return false;
 }
 
 /**
@@ -309,6 +312,7 @@ bool NPlane::intersectsRay(NLine&, f32*)
 bool NPlane::outputRayIntersection(NLine&, NVector3f&)
 {
 	TRAP_UNIMPLEMENTED;
+	return false;
 }
 
 /**
@@ -318,6 +322,7 @@ bool NPlane::outputRayIntersection(NLine&, NVector3f&)
 bool NPlane::intersectsSegment(NSegment&, f32*)
 {
 	TRAP_UNIMPLEMENTED;
+	return false;
 }
 
 /**
@@ -327,6 +332,7 @@ bool NPlane::intersectsSegment(NSegment&, f32*)
 bool NPlane::outputSegmentIntersection(NSegment&, NVector3f&)
 {
 	TRAP_UNIMPLEMENTED;
+	return false;
 }
 
 /**
@@ -365,6 +371,7 @@ void NPlane::negate()
 bool NPlane::adjustTo(NVector3f&, f32)
 {
 	TRAP_UNIMPLEMENTED;
+	return false;
 }
 
 /**
@@ -374,6 +381,7 @@ bool NPlane::adjustTo(NVector3f&, f32)
 bool NPlane::adjust(NVector3f&)
 {
 	TRAP_UNIMPLEMENTED;
+	return false;
 }
 
 /**
@@ -383,6 +391,7 @@ bool NPlane::adjust(NVector3f&)
 bool NPlane::outputIntersectionLineY(NPlane&, NLine&)
 {
 	TRAP_UNIMPLEMENTED;
+	return false;
 }
 
 /**
@@ -392,6 +401,7 @@ bool NPlane::outputIntersectionLineY(NPlane&, NLine&)
 f32 NPlane::calcAngle(NPlane&)
 {
 	TRAP_UNIMPLEMENTED;
+	return 0.0f;
 }
 
 /**
@@ -401,6 +411,7 @@ f32 NPlane::calcAngle(NPlane&)
 f32 NPlane::calcY(f32, f32)
 {
 	TRAP_UNIMPLEMENTED;
+	return 0.0f;
 }
 
 /**
@@ -477,6 +488,7 @@ void NSegment::construct(NSegment&)
 f32 NSegment::calcDistanceAsSegment(NVector3f&, f32*, f32*)
 {
 	TRAP_UNIMPLEMENTED;
+	return 0.0f;
 }
 
 /**
@@ -486,6 +498,7 @@ f32 NSegment::calcDistanceAsSegment(NVector3f&, f32*, f32*)
 f32 NSegment::calcDistanceAsSegment(NLine&, f32*, f32*)
 {
 	TRAP_UNIMPLEMENTED;
+	return 0.0f;
 }
 
 /**
@@ -495,6 +508,7 @@ f32 NSegment::calcDistanceAsSegment(NLine&, f32*, f32*)
 f32 NSegment::calcSegmentDistanceAsSegment(NSegment&, f32*, f32*)
 {
 	TRAP_UNIMPLEMENTED;
+	return 0.0f;
 }
 
 /**

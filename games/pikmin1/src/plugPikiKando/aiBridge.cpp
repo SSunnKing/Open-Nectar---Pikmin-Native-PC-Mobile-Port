@@ -296,6 +296,7 @@ void ActBridge::initGo()
 int ActBridge::exeGo()
 {
 	TRAP_UNIMPLEMENTED;
+	return 0;
 }
 
 /**
@@ -314,6 +315,7 @@ void ActBridge::initWork()
 int ActBridge::exeWork()
 {
 	TRAP_UNIMPLEMENTED;
+	return 0;
 }
 
 /**
