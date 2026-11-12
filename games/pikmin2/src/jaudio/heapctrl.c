@@ -24,7 +24,7 @@ static void ARAMFinish(u32 msg)
 
 	REF_msg             = &msg;
 	ARQRequest* request = (ARQRequest*)(uintptr_t)msg;
-	OSSendMessage((OSMessageQueue*)request->owner, (OSMessage)(uintptr_t)1, OS_MESSAGE_BLOCK);
+	OSSendMessage((OSMessageQueue*)(uintptr_t)request->owner, (OSMessage)(uintptr_t)1, OS_MESSAGE_BLOCK);
 }
 
 /**

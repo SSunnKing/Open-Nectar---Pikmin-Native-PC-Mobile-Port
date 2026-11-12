@@ -1485,7 +1485,7 @@ void System::copyCacheToRam(u32 mainMemAddr, u32 aramCacheAddr, u32 size)
  */
 void freeBuffer(u32 cache)
 {
-	CacheTexture* texCache = (CacheTexture*)(((SystemCache*)(uintptr_t)cache)->owner);
+	CacheTexture* texCache = (CacheTexture*)(uintptr_t)(((SystemCache*)(uintptr_t)cache)->owner);
 
 	// sync data cache of texture to main mem
 	texCache->mPixelData = texCache->mTexImage->mTextureData;
