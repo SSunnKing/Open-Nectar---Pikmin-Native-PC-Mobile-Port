@@ -75,6 +75,11 @@ set(LEGACY_COMPILE_OPTIONS
     -Wno-format
     -Wno-attributes
     -Wno-comment
+    # Decomp-only noise from Clang (macOS): `(a, b)` comma expressions kept from
+    # the original code, and the SDK marking sprintf/vsprintf deprecated. Native
+    # code keeps both warnings.
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-unused-value>
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-deprecated-declarations>
 )
 
 # Endurecimiento del código decompilado. El compilador de GameCube no
@@ -654,6 +659,23 @@ add_library(${NECTAR_LEGACY} STATIC
     ${JAUDIO_TARGET_SOURCES}
 )
 target_compile_options(${NECTAR_LEGACY} PRIVATE ${LEGACY_COMPILE_OPTIONS})
+
+# A few decomp lines warn because they match the original game exactly (each
+# is marked "matches retail"). Changing them could change behavior, so only
+# that one warning is silenced, and only in that file.
+set_source_files_properties(src/plugPikiColin/gameflow.cpp src/plugPikiKando/generator.cpp
+    PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-unused-comparison>")
+set_source_files_properties(src/plugPikiKando/navi.cpp src/sysCommon/shapeBase.cpp
+    PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-pointer-bool-conversion>")
+set_source_files_properties(src/plugPikiYamashita/effectMgr.cpp
+    PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-tautological-compare>")
+set_source_files_properties(src/plugPikiKando/gmWin.cpp
+    PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-implicit-conversion-floating-point-to-bool>")
+set_source_files_properties(src/plugPikiYamashita/drawWorldMap.cpp
+    PROPERTIES COMPILE_OPTIONS "-Wno-enum-compare")
+# pc_permadeath_test builds this decomp file with the native flags.
+set_source_files_properties(src/sysCommon/stream.cpp
+    PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-deprecated-declarations>")
 
 # Native executable with strict flags. En Android es una biblioteca
 # compartida que carga la actividad Java de SDL (libnectar.so, con SDL_main

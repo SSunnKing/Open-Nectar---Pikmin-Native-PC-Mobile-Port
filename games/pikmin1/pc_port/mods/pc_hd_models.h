@@ -5,7 +5,7 @@
 
 class BaseShape;
 class Graphics;
-struct Matrix4f;
+class Matrix4f;
 
 // Optional high-definition replacement meshes (NHM1 packs under
 // Load/Models/). The original .mod files keep driving animation, collision

@@ -14,6 +14,11 @@ class MapMgr;
 #include "mods/pc_hd_models.h"
 #endif
 
+#if defined(__GNUC__) // GCC and Clang
+#pragma GCC diagnostic push
+// The original class hierarchy hides base-class overloads on purpose.
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
+#endif
 class ViewPiki : public Piki {
 public:
 	ViewPiki(CreatureProp*);
@@ -44,5 +49,8 @@ public:
 	Vector3f mLastEffectPosition; // _58C
 	Shape* mHappaModel;           // _598
 };
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 #endif

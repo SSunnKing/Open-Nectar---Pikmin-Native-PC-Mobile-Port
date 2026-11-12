@@ -77,11 +77,11 @@ void DynCollShape::createDupCollData()
 {
 	// dupe vertices
 	mVertexList = new Vector3f[mCollisionModel->mVertexCount];
-	memcpy(mVertexList, mCollisionModel->mVertexList, mCollisionModel->mVertexCount * sizeof(Vector3f));
+	memcpy(static_cast<void*>(mVertexList), mCollisionModel->mVertexList, mCollisionModel->mVertexCount * sizeof(Vector3f));
 
 	// dupe collision triangles
 	mCollTriList = new CollTriInfo[mCollisionModel->mTriCount];
-	memcpy(mCollTriList, mCollisionModel->mTriList, mCollisionModel->mTriCount * sizeof(CollTriInfo));
+	memcpy(static_cast<void*>(mCollTriList), mCollisionModel->mTriList, mCollisionModel->mTriCount * sizeof(CollTriInfo));
 
 	mCollGroupList = nullptr;
 

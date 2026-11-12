@@ -704,7 +704,7 @@ EffectMgr::EffectMgr()
 
 	mEffectShapeList.initCore("");
 
-	if (EFF_COUNT != EFF_COUNT) { // Bruh moment.
+	if (EFF_COUNT != EFF_COUNT) { // Bruh moment. Matches retail.
 		PRINT("ptcl data is wrong. %d %d\n", EFF_COUNT, EFF_COUNT);
 		ERROR("ptcl data is wrong.\n");
 	}

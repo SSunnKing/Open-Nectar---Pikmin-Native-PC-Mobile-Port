@@ -450,7 +450,7 @@ void ContainerWin::update()
 	case GMWIN_Active:
 	{
 		if (mStickWasPushed) {
-			if (absF(mController->getMainStickY() > 0.5f)) {
+			if (absF(mController->getMainStickY() > 0.5f)) { // matches retail: absF of the comparison, not of the stick value
 				return;
 			}
 			mStickWasPushed = false;

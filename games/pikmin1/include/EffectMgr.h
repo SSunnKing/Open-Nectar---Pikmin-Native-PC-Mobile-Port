@@ -14,6 +14,11 @@ struct EffectSimpleParticleRegistration;
 /**
  * @brief TODO
  */
+#if defined(__GNUC__) // GCC and Clang
+#pragma GCC diagnostic push
+// The original class hierarchy hides base-class overloads on purpose.
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
+#endif
 struct SmokeEmitter : public Node {
 
 	/**
@@ -68,6 +73,9 @@ struct SmokeEmitter : public Node {
 	Texture* mTexture;         // _34
 	Shape* mModel;             // _38
 };
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 /**
  * @brief TODO

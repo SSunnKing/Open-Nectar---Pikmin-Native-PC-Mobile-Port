@@ -104,6 +104,11 @@ struct DynCollAttachment {
  *
  * @note Size: 0x2B5.
  */
+#if defined(__GNUC__) // GCC and Clang
+#pragma GCC diagnostic push
+// The original class hierarchy hides base-class overloads on purpose.
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
+#endif
 class Creature : public RefCountable, public EventTalker {
 public:
 	Creature(CreatureProp*);
@@ -457,6 +462,9 @@ public:
 	u32 mIsFrozen;                       // _2B0, unknown
 	bool mIsBeingDamaged;                // _2B4
 };
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 // Global helper functions:
 f32 centreDist(Creature*, Creature*);

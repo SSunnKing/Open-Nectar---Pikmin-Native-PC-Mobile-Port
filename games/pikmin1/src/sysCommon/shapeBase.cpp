@@ -2162,7 +2162,7 @@ void BaseShape::makeInstance(ShapeDynMaterials& animatedMats, int jointIdx)
 
 	for (int matIdx = 0; matIdx < animatedMats.mMatCount; matIdx++) {
 		Material* mat = &animatedMats.mMaterials[matIdx];
-		memcpy(mat, &mMaterialList[matUsed[matIdx]], sizeof(Material));
+		memcpy(static_cast<void*>(mat), static_cast<const void*>(&mMaterialList[matUsed[matIdx]]), sizeof(Material)); // same dynamic type, so the vptr is unchanged
 		if (mat->mFlags & MATFLAG_PVW) {
 			mat->mTevInfo = new PVWTevInfo();
 			memcpy(mat->mTevInfo, mMaterialList[matUsed[matIdx]].mTevInfo, sizeof(PVWTevInfo));
@@ -2961,8 +2961,8 @@ void BaseShape::initialise()
 				    = &mTexAttrList[mMaterialList[matIdx].mTextureInfo.mTextureData[texDataIdx].mSourceAttrIndex];
 				mMaterialList[matIdx].mTextureInfo.mTextureData[texDataIdx].mTexture
 				    = mTexAttrList[mMaterialList[matIdx].mTextureInfo.mTextureData[texDataIdx].mSourceAttrIndex].mTexture;
-				!!(&mMaterialList[matIdx].mTextureInfo);
-				!!(&mMaterialList[matIdx].mTextureInfo);
+				!!(&mMaterialList[matIdx].mTextureInfo); // matches retail
+				!!(&mMaterialList[matIdx].mTextureInfo); // matches retail
 				mMaterialList[matIdx].mTextureInfo.mTextureData[texDataIdx].mTexture;
 #if 0 // This is what the DLL actually does instead of all this noise.
 				Texture* unused = mMaterialList[matIdx].mTextureInfo.mTextureData[texDataIdx].mTexture;

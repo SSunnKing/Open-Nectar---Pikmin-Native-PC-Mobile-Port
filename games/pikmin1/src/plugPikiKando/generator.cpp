@@ -815,7 +815,7 @@ void Generator::read(RandomAccessStream& input)
 	mCarryOverFlags = input.readInt();
 
 	// this isn't even printed or tested in the DLL lol, it just. sits here.
-	mGeneratorVersion != 'v0.0';
+	mGeneratorVersion != 'v0.0'; // matches retail
 
 	if (!ramMode) {
 		for (int i = 0; i < 32; i++) {
