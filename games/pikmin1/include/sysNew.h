@@ -48,6 +48,21 @@ void operator delete[](void* ptr);
 #define stack_new(...) &__VA_ARGS__
 #elif defined(_MSC_VER) && _MSC_VER < 1400
 #define stack_new(type) &type
+#elif defined(PIKI_PC_PORT) && defined(__cplusplus)
+// `stack_new(T)(args)` takes the address of a temporary, which standard C++
+// rejects and GCC only accepts under -fpermissive (with a warning at every
+// use). Binding the temporary to a reference parameter yields the same
+// address, and the temporary still lives to the end of the full expression,
+// exactly as before.
+namespace pc_stack_new {
+struct Tag { };
+template <typename T>
+inline T* operator|(Tag, T&& temporary)
+{
+	return &temporary;
+}
+} // namespace pc_stack_new
+#define stack_new(...) pc_stack_new::Tag {} | __VA_ARGS__
 #else
 #define stack_new(...) &__VA_ARGS__
 #endif

@@ -92,6 +92,11 @@ enum {
 /**
  * @brief TODO
  */
+#if defined(__GNUC__) // GCC and Clang
+#pragma GCC diagnostic push
+// The original class hierarchy hides base-class overloads on purpose.
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
+#endif
 class Piki : public Creature, public PaniAnimKeyListener {
 public:
 	Piki(CreatureProp*);
@@ -345,6 +350,9 @@ public:
 	SearchData mPikiSearchData[6];        // _53C
 	bool mEraseOnKill;                    // _584
 };
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 /**
  * @brief TODO

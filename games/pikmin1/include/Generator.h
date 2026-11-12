@@ -300,6 +300,11 @@ public:
 /**
  * @brief TODO
  */
+#if defined(__GNUC__) // GCC and Clang
+#pragma GCC diagnostic push
+// The original class hierarchy hides base-class overloads on purpose.
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
+#endif
 struct GenBase : public Parameters {
 	GenBase(u32 id, immut char* type, immut char* name);
 
@@ -329,10 +334,18 @@ struct GenBase : public Parameters {
 	immut char* mType; // _10
 	immut char* mName; // _14
 };
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 /**
  * @brief TODO
  */
+#if defined(__GNUC__) // GCC and Clang
+#pragma GCC diagnostic push
+// The original class hierarchy hides base-class overloads on purpose.
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
+#endif
 class GenObject : public GenBase {
 public:
 	GenObject(u32 id, immut char* name)
@@ -350,6 +363,9 @@ public:
 	// _04     = VTBL
 	// _00-_18 = GenBase
 };
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 /**
  * @brief TODO
@@ -736,6 +752,11 @@ public:
 /**
  * @brief TODO
  */
+#if defined(__GNUC__) // GCC and Clang
+#pragma GCC diagnostic push
+// The original class hierarchy hides base-class overloads on purpose.
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
+#endif
 class GenType : public GenBase {
 public:
 	GenType(u32 id, immut char* name)
@@ -759,6 +780,9 @@ public:
 	Parm<int> mDaysToResurrection; // _18, b00
 	Parm<int> mCarryOver;          // _28, b01, This is *really* poorly named (see `Generator::doAdjustFaceDir`)
 };
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 /**
  * @brief TODO
@@ -852,6 +876,11 @@ public:
 /**
  * @brief TODO
  */
+#if defined(__GNUC__) // GCC and Clang
+#pragma GCC diagnostic push
+// The original class hierarchy hides base-class overloads on purpose.
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
+#endif
 class GenArea : public GenBase {
 public:
 	GenArea(u32 id, immut char* name)
@@ -872,6 +901,9 @@ public:
 	// _00-_18 = GenBase
 	Vector3f _18; // _18
 };
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 /**
  * @brief TODO
@@ -1009,6 +1041,11 @@ public:
  *
  * @note Size: 0x60.
  */
+#if defined(__GNUC__) // GCC and Clang
+#pragma GCC diagnostic push
+// The original class hierarchy hides base-class overloads on purpose.
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
+#endif
 class GeneratorMgr : public Node {
 public:
 	GeneratorMgr();
@@ -1055,6 +1092,9 @@ protected:
 	f32 mNaviDirection;       // _58
 	bool mIsLimitGenerator;   // _5C
 };
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 extern GeneratorCache* generatorCache;
 extern GeneratorList* generatorList;

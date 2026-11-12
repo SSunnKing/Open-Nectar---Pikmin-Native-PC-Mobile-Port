@@ -51,6 +51,11 @@ public:
  *
  * @note Size: 0x3C.
  */
+#if defined(__GNUC__) // GCC and Clang
+#pragma GCC diagnostic push
+// The original class hierarchy hides base-class overloads on purpose.
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
+#endif
 struct MonoObjectMgr : public ObjectMgr {
 	friend struct SearchSystem;
 
@@ -90,6 +95,9 @@ protected:
 	int* mEntryStatus;      // _34
 	u32 _38;                // _38, unknown
 };
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 /**
  * @brief TODO

@@ -4,7 +4,7 @@
 #include "types.h"
 
 class RandomAccessStream;
-struct Vector3f;
+class Vector3f;
 
 enum {
 	PC_VS_REACT_NONE,

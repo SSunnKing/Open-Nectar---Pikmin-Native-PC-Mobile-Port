@@ -2907,7 +2907,7 @@ bool zen::DrawWorldMap::modeAppear(Controller* controller)
 	bool res = false;
 	mCoursePointMgr->update(controller, false);
 	if (mCoursePointMgr->getEventFlag() & 0x40) {
-		if (mCoursePointMgr->getSelectCourseNumber() != mStartMode) {
+		if (mCoursePointMgr->getSelectCourseNumber() != mStartMode) { // matches retail
 			closeMapInfo();
 		}
 

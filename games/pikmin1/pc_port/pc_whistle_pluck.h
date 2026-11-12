@@ -1,6 +1,6 @@
 #pragma once
 
-struct Navi;
+class Navi;
 
 // "Whistle Pluck" mod: convert the one sprout nearest the whistle cursor, if
 // any. No target is retained between calls. Returns true if one was plucked.

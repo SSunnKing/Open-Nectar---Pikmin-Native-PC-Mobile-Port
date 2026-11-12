@@ -359,7 +359,7 @@ bool pc_navi_step_throw_color(Navi* navi);
 bool pcIsLastNaviStanding(Navi* navi);
 /// Issue #67: color y tipo (hoja/capullo/flor/bomba) elegidos para lanzar.
 bool pc_throw_preference_active(Navi* navi);
-bool pc_throw_piki_matches(Navi* navi, struct Piki* piki);
+bool pc_throw_piki_matches(Navi* navi, Piki* piki);
 /// Tras lanzar: sin "Pikmin 2 Selection" se olvida lo elegido con la cruceta.
 void pc_navi_after_throw(Navi* navi);
 #endif

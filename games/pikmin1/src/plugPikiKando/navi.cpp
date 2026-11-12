@@ -4369,7 +4369,7 @@ void Navi::draw(Graphics& gfx)
 
 	bool hasAnimError = false;
 	for (int i = 0; i < mNaviShapeObject->mShape->mJointCount; i++) {
-		if (mNaviShapeObject->mShape->mAnimOverrides[i]->mData && &mNaviShapeObject->mShape->mAnimOverrides[i]->mCurrentFrame) {
+		if (mNaviShapeObject->mShape->mAnimOverrides[i]->mData && &mNaviShapeObject->mShape->mAnimOverrides[i]->mCurrentFrame) { // matches retail
 			int frame1 = mNaviShapeObject->mShape->mAnimOverrides[i]->mCurrentFrame;
 			int frame2 = mNaviShapeObject->mShape->mAnimOverrides[i]->mCurrentFrame;
 			if (frame1 < 0 || frame2 >= mNaviShapeObject->mShape->mAnimOverrides[i]->mData->mTotalFrameCount) {

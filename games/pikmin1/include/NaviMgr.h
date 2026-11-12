@@ -166,6 +166,11 @@ struct NaviProp : public CreatureProp {
 /**
  * @brief TODO
  */
+#if defined(__GNUC__) // GCC and Clang
+#pragma GCC diagnostic push
+// The original class hierarchy hides base-class overloads on purpose.
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
+#endif
 class NaviMgr : public MonoObjectMgr {
 public:
 	NaviMgr();
@@ -208,6 +213,9 @@ public:
 	int mNaviID;                          // _54
 	NaviProp* mNaviParms;                 // _58
 };
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 extern NaviMgr* naviMgr;
 

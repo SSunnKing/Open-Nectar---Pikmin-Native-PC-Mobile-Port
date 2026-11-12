@@ -518,7 +518,7 @@ void preloadLanguage()
 	gsys->setHeap(SYSHEAP_Lang);
 	gsys->resetHeap(SYSHEAP_Lang, AYU_STACK_GROW_UP);
 	oldHeap = gsys->getHeap(gsys->getHeapNum());
-	oldHeap->getFree() != 0;
+	oldHeap->getFree() != 0; // matches retail
 
 	lang = &gameflow.mLanguageIndex;
 	gsys->mBaseAramAllocator.reset();
