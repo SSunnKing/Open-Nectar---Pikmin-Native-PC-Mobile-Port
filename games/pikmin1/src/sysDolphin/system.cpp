@@ -1587,7 +1587,13 @@ u32 System::copyRamToCache(u32 mainMemAddr, u32 size, u32 aramCacheAddr)
 	gsys->mDmaComplete = FALSE;
 
 	// sync data cache and RAM
+#if !defined(PIKI_PC_PORT)
 	DCStoreRange((void*)mainMemAddr, size);
+#else
+	// On PC, mainMemAddr is a 64-bit pointer cut down to u32, so this range
+	// would point somewhere else. ARQPostRequest doesn't copy anything on PC,
+	// so there is nothing to sync.
+#endif
 
 	// send request to the aram queue (high priority)
 	ARQPostRequest(cache, (u32)(uintptr_t)cache, ARQ_TYPE_MRAM_TO_ARAM, ARQ_PRIORITY_HIGH, mainMemAddr, adjustedCacheAddr, size, doneDMA);
@@ -1624,7 +1630,12 @@ void System::copyCacheToRam(u32 mainMemAddr, u32 aramCacheAddr, u32 size)
 	gsys->mDmaComplete = FALSE;
 
 	// make sure data cache is clear for where we're putting this
+#if !defined(PIKI_PC_PORT)
 	DCInvalidateRange((void*)mainMemAddr, size);
+#else
+	// Same as copyRamToCache: the address is truncated on PC and no copy
+	// happens. DCInvalidateRange is a no-op on PC anyway.
+#endif
 
 	// send request to the aram queue (high priority)
 	ARQPostRequest(cache, (u32)(uintptr_t)cache, ARQ_TYPE_ARAM_TO_MRAM, ARQ_PRIORITY_HIGH, aramCacheAddr, mainMemAddr, size, doneDMA);
