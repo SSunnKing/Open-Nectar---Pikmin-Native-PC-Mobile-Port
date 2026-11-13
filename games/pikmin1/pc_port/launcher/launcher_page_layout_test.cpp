@@ -199,6 +199,17 @@ int main()
     // Version badge after the logo (#327).
     check(versionBadgeLabel("1.3") == "v1.3" && versionBadgeLabel("v1.3") == "v1.3", "badge reads v1.3");
     check(versionBadgeLabel("").empty(), "no version, no badge");
+    // The logo texture keeps its 476 px source from density 1.5 up (HiDPI),
+    // and is halved to 238 px at 1x as before.
+    {
+        const auto texH = [](float density) {
+            int h = 476;
+            while (h > logoTextureMaxHeight(density) * 2) h /= 2;
+            return h;
+        };
+        check(texH(1.0f) == 238 && texH(1.5f) == 476 && texH(2.0f) == 476 && texH(3.5f) == 476,
+              "logo texture follows the display density");
+    }
     check(near(versionBadgeTextSize(40.0f), 16.0f) && near(versionBadgeTextSize(400.0f), 21.0f), "badge text size clamps");
     {
         const float logoAspect = 2172.0f / 476.0f; // assets/logo.png

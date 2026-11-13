@@ -290,6 +290,15 @@ inline float hubContentTop(float windowW, float windowH, float logoAspect, bool 
 // línea base. En logo.png las letras acaban al 72,5 % del alto.
 inline constexpr float kLogoTextBaseline = 0.725f;
 
+// Alto máximo de la textura del logo (uploadTexture la reduce a la mitad
+// mientras pase del doble): 160 a 1x, como siempre; con más densidad
+// (HiDPI o ventana grande) crece para que el logo salga tan nítido como el
+// texto de la versión.
+inline int logoTextureMaxHeight(float density)
+{
+    return int(std::lround(160.0f * std::max(1.0f, density)));
+}
+
 // Texto de la píldora: "v" + versión ("1.3" → "v1.3"). Una etiqueta que ya
 // trae la "v" no la duplica; sin versión no hay píldora.
 inline std::string versionBadgeLabel(const std::string& version)

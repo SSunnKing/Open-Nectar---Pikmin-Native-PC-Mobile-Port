@@ -3282,6 +3282,14 @@ struct Hub {
 #endif
     }
 
+    // Logo con resolución para la densidad de la pantalla: a 1x se reduce
+    // en la CPU (sin mipmaps), en HiDPI se queda entero para no verse borroso.
+    void loadLogo(float density)
+    {
+        freeTexture(logo);
+        logo = loadImageTexture(kLogoOpenNectar, kLogoOpenNectarSize, logoTextureMaxHeight(density));
+    }
+
     void release()
     {
         freeDewdrop();
@@ -3564,6 +3572,8 @@ struct HubWindow::Impl {
             gFontDensity = density;
             ImGui::GetIO().Fonts->Clear();
             loadFonts(hub->fonts);
+            // El logo, a la misma densidad que el texto (la versión va a su lado).
+            hub->loadLogo(density);
             ImGui_ImplOpenGL3_DestroyFontsTexture();
             ImGui_ImplOpenGL3_CreateFontsTexture();
         }
@@ -3817,7 +3827,11 @@ bool HubWindow::open(const HubState& state, std::string& error)
     };
 #endif
     loadFonts(hub.fonts);
-    hub.logo = loadImageTexture(kLogoOpenNectar, kLogoOpenNectarSize, 160);
+#ifdef __ANDROID__
+    hub.loadLogo(gUiScale);
+#else
+    hub.loadLogo(gFontDensity);
+#endif
     hub.art.load(m.state.gameDataDirectory);
     if (hub.art.worldMap.valid()) {
         // El paisaje del mapa del mundo entra en el pase de fondo.
