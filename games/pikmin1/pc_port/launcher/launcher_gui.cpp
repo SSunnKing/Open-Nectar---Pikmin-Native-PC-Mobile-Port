@@ -3913,6 +3913,13 @@ void HubWindow::setInstallGame(HubGame game, const std::string& suggestedDirecto
 
 void HubWindow::setHomeLoop(std::function<HubResult()> loop) { mImpl->homeLoop = std::move(loop); }
 
+void HubWindow::showNotice(const std::string& text)
+{
+    if (!mImpl->hub) return;
+    mImpl->hub->notify(text);
+    mImpl->hub->toastTime = 8.0f; // long enough to read before it fades
+}
+
 void HubWindow::markInstalled(HubGame game, const std::string& directory, const std::string& executable,
                               const std::string& discId)
 {

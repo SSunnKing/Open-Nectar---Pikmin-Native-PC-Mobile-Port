@@ -101,6 +101,8 @@ public:
     // principal: quien llama resuelve ahí jugar, actualizar e instalar
     // Pikmin 2, y devuelve solo Quit o Install de Pikmin 1.
     void setHomeLoop(std::function<HubResult()> loop);
+    // Short notice at the bottom of the home screen (why --launch opened it).
+    void showNotice(const std::string& text);
     void markInstalled(HubGame game, const std::string& directory, const std::string& executable,
                        const std::string& discId);
     // true si la comprobación en segundo plano encontró un release más nuevo

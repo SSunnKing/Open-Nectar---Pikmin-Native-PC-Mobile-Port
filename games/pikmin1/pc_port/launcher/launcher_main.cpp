@@ -12,6 +12,7 @@
 #include "installer_ui.h"
 #include "install_directory.h"
 #include "install_disc_id.h"
+#include "launch_request.h"
 #include "launcher_gui.h"
 #include "crash_report.h"
 #include "launcher_platform.h"
@@ -1128,6 +1129,8 @@ void usage(const char* argv0)
               << "The disc image must come from your own copy of Pikmin: USA Rev 1 or Europe.\n"
               << "--skip-verify skips the image integrity check.\n"
               << "--dolphin-tool PATH enables RVZ/WIA/GCZ conversion (also found beside the launcher or on PATH).\n"
+              << "--launch=pikmin1 or --launch=pikmin2 starts that game without the home screen; if it\n"
+              << "is not ready to play, the home screen opens instead and says why.\n"
               << "In game, F1 opens graphics, controls and gameplay settings.\n";
 }
 
@@ -1252,6 +1255,12 @@ int main(int argc, char** argv)
     fs::path movedFrom;
     bool crashReport = false; // lo lanza el juego al fallar: abrir y ofrecer el informe
     fs::path crashFile;       // ruta del informe que pasa el juego (opcional)
+    // --launch=pikmin1|pikmin2 (#336): a game straight away, for shortcuts.
+    // It does not count as a command-line install: the window still opens
+    // when the game cannot start.
+    pikmin::launcher::LaunchTarget launchTarget = pikmin::launcher::LaunchTarget::None;
+    std::string launchValue; // as typed, for the error message
+    int launchArguments = 0;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--crash-report") {
@@ -1267,6 +1276,17 @@ int main(int argc, char** argv)
         else if (arg == "--dolphin-tool" && i + 1 < argc) converter = fs::absolute(argv[++i]);
         else if (arg == "--extract-only") extractOnly = true;
         else if (arg == "--skip-verify") skipVerify = true;
+        else if (const int first = i;
+                 pikmin::launcher::consumeLaunchArgument(i, argc, argv, launchTarget, launchValue)) {
+            if (launchTarget == pikmin::launcher::LaunchTarget::Invalid) {
+                std::cerr << (launchValue.empty() ? std::string("--launch needs a game")
+                                                  : "Unknown game for --launch: " + launchValue)
+                          << ". Use --launch=pikmin1 or --launch=pikmin2.\n";
+                usage(argv[0]);
+                return 2;
+            }
+            launchArguments += i - first + 1;
+        }
         else if (arg == "--help" || arg == "-h") { usage(argv[0]); return 0; }
 #if defined(__APPLE__)
         else if (consumeAppleLaunchArgument(arg, i, argc, argv)) continue;
@@ -1342,7 +1362,7 @@ int main(int argc, char** argv)
             if (ec) std::this_thread::sleep_for(std::chrono::milliseconds(300));
         }
     }
-    const int userArgs = userArgumentCount(argc, argv);
+    const int userArgs = userArgumentCount(argc, argv) - launchArguments;
     const bool openWindow = userArgs == 0 || (crashReport && userArgs == (crashFile.empty() ? 1 : 2))
                          || (userArgs == 2 && !movedFrom.empty());
     // El juego lo hereda: si falla, vuelve a abrir este launcher con
@@ -1370,7 +1390,12 @@ int main(int argc, char** argv)
                 && !installPackage(sourceDirectory, installed, failure)) {
                 std::cerr << "Could not update " << installed << ": " << failure << '\n';
             }
-            platform::relaunch(installed / kLauncherExecutable, {});
+            // Solo --launch pasa al instalado: el acceso directo puede
+            // apuntar al launcher descargado o al AppImage.
+            std::vector<std::string> forwarded;
+            if (const std::string launch = pikmin::launcher::launchArgument(launchTarget); !launch.empty())
+                forwarded.push_back(launch);
+            platform::relaunch(installed / kLauncherExecutable, forwarded);
         }
     }
 #ifdef _WIN32
@@ -1379,6 +1404,26 @@ int main(int argc, char** argv)
         fs::remove(sourceDirectory / (std::string(name) + ".old"), ignored);
     }
 #endif
+
+    // --launch: the same start as Play on the home screen. If the game cannot
+    // start (not installed, half-updated install, binary missing), the home
+    // screen opens with a short notice instead.
+    std::string launchNotice;
+    if (launchTarget == pikmin::launcher::LaunchTarget::Pikmin1
+        || launchTarget == pikmin::launcher::LaunchTarget::Pikmin2) {
+        const bool second = launchTarget == pikmin::launcher::LaunchTarget::Pikmin2;
+        const fs::path& directory = second ? pikmin2Directory : pikmin1Directory;
+        const fs::path& executable = second ? pikmin2Executable : pikmin1Executable;
+        pikmin::launcher::LaunchFacts facts;
+        facts.assetsInstalled = second ? fs::is_regular_file(pikmin2Directory / "assets/.pikmin2-assets")
+                                       : assetsReady(pikmin1Directory);
+        facts.executablePresent = fs::is_regular_file(executable);
+        facts.needsRepair = isInstallFolder && packageMissing(sourceDirectory);
+        const pikmin::launcher::LaunchDecision decision = pikmin::launcher::decideLaunch(facts);
+        if (decision == pikmin::launcher::LaunchDecision::Launch) launchGame(directory, executable);
+        launchNotice = pikmin::launcher::launchFallbackNotice(launchTarget, decision);
+        std::cerr << "--launch: " << launchNotice << '\n';
+    }
 
     bool forceInstall = false;
     // La ventana principal sigue abierta durante la instalación y hace de
@@ -1454,6 +1499,7 @@ int main(int argc, char** argv)
                 { "Pikmin 2", pikmin2Directory, "pikmin2_crash.log", "pikmin2.log" },
                 { "Pikmin", pikmin1Directory, "pikmin_crash.log", "pikmin.log" },
             });
+            if (!launchNotice.empty()) home->showNotice(launchNotice);
             // Pantalla principal hasta que se pide instalar Pikmin 1 (o salir):
             // jugar, actualizar e instalar Pikmin 2 se resuelven aquí. También
             // la usa el modal de rutas de Pikmin 1 al cancelar.
