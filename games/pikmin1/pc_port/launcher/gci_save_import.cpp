@@ -534,8 +534,9 @@ PrepareResult prepareSaveImport(const fs::path& picked, const std::string& insta
             return PrepareResult::Error;
         }
         out.saveFileName = gci.saveFileName;
-        out.data = std::move(gci.payload);
+        // metaFromGci uses payload.size() for length and offsetData.
         const GciCardMeta meta = metaFromGci(gci);
+        out.data = std::move(gci.payload);
         const auto* m = reinterpret_cast<const std::uint8_t*>(&meta);
         out.meta.assign(m, m + sizeof(meta));
     } else {
