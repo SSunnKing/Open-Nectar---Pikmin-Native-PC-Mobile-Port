@@ -2858,13 +2858,15 @@ struct Hub {
     }
 
     // Aviso de versión nueva, arriba a la derecha; pulsarlo es como Update.
-    void drawReleaseNotice(ImVec2 size, float t)
+    // Devuelve el borde izquierdo del aviso (size.x si no hay aviso), para que
+    // la versión junto al logo no se meta debajo.
+    float drawReleaseNotice(ImVec2 size, float t)
     {
-        if (!releaseCheck || !releaseCheck->done) return;
+        if (!releaseCheck || !releaseCheck->done) return size.x;
         std::string text;
         {
             std::lock_guard<std::mutex> lock(releaseCheck->mutex);
-            if (!releaseCheck->newer) return;
+            if (!releaseCheck->newer) return size.x;
             text = "Open Nectar " + releaseCheck->latest.version + " is available";
         }
         // Píldora a la medida del texto, con el mismo margen que los botones.
@@ -2890,7 +2892,7 @@ struct Hub {
             notes = releaseCheck->latest.notes;
             version = releaseCheck->latest.version;
         }
-        if (notes.empty()) return;
+        if (notes.empty()) return a.x - 4.0f;
         const float w = buttons::buttonWidth(role::kAction);
         ImGui::SetCursorScreenPos(ImVec2(a.x - w - buttons::kButtonGap, a.y));
         if (glassButton("What's new", role::kAction, b.y - a.y)) {
@@ -2899,6 +2901,27 @@ struct Hub {
             whatsNewNotes = notes;
             whatsNewNotesH = -1.0f;
         }
+        return a.x - w - buttons::kButtonGap;
+    }
+
+    // Versión de este launcher (#327): una píldora pequeña tras el rótulo del
+    // logo, con la placa verde y el borde naranja de los avisos.
+    void drawVersionBadge(ImVec2 size, ImVec2 logoAt, float logoW, float logoH, float noticeLeft)
+    {
+        const std::string label = versionBadgeLabel(currentVersion());
+        if (label.empty()) return;
+        const float textSize = versionBadgeTextSize(logoH);
+        const ImVec2 text = fonts.body->CalcTextSizeA(textSize, FLT_MAX, 0.0f, label.c_str());
+        const float padX = std::round(textSize * 0.55f), padY = std::round(textSize * 0.2f);
+        // El aviso de actualización ocupa de y = 18 a 58, más 4 px de halo.
+        const BadgeRect r = placeVersionBadge(size.x, logoAt.x, logoAt.y, logoW, logoH, text.x + padX * 2.0f,
+                                              text.y + padY * 2.0f, noticeLeft, 62.0f);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const ImVec2 a(std::round(r.x0), std::round(r.y0)), b(std::round(r.x1), std::round(r.y1));
+        const float rounding = (b.y - a.y) * 0.5f;
+        dl->AddRectFilled(a, b, IM_COL32(6, 26, 10, 200), rounding);
+        dl->AddRect(a, b, col(kOrange, 0.85f), rounding, 0, 1.5f);
+        dl->AddText(fonts.body, textSize, ImVec2(a.x + padX, a.y + padY), col(kOrange), label.c_str());
     }
 
     // Quita el marcado en línea de Markdown: **negrita**, `código` y
@@ -3237,7 +3260,8 @@ struct Hub {
             break;
         }
 
-        drawReleaseNotice(size, t);
+        const float noticeLeft = drawReleaseNotice(size, t);
+        drawVersionBadge(size, logoAt, logoW, logoH, noticeLeft);
         if (!state.dataFolder.empty()) {
             // Abajo a la derecha, a la altura del rótulo de la carpeta.
             const char* label = "Change folder";
