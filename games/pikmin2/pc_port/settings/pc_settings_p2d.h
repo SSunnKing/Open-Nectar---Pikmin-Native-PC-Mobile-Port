@@ -33,7 +33,7 @@ void pc_settings_p2d_set_content(int left, int right);
 // Imagen arbitraria (Texture GX) escalada al rectángulo; u1/v1 recortan la
 // textura (0..1) cuando está rellenada a múltiplo de 4. Va en la misma capa
 // que las placas, así que se dibuja encima de las encoladas antes.
-class Texture;
+struct Texture;
 /// u0/u1: columnas de textura (0..1) que se dibujan; v1: altura.
 void pc_settings_p2d_image(int x, int y, int w, int h, Texture* texture, float u1, float v1, Colour tint, float u0 = 0.0f);
 void pc_settings_p2d_clear();

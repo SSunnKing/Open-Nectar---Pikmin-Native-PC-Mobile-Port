@@ -275,11 +275,12 @@ s32 DVDT_LoadtoDRAMHost(u32 owner, immut char* name, void* dst, u32 src, u32 len
 /**
  * @TODO: Documentation
  */
-static void __DVDT_CheckBack(void* cb)
+static s32 __DVDT_CheckBack(void* cb)
 {
 	DVDCall* callback = (DVDCall*)cb;
 
 	__DoFinish(callback, callback->owner);
+	return 0;
 }
 
 /**
@@ -702,7 +703,7 @@ void DVDT_CheckPass(u32 owner, u32* status, Jac_DVDCallback callback)
 	call.callbackStatus = status;
 	call.callback       = callback;
 
-	DVDT_AddTask((TaskCallback)__DVDT_CheckBack, cb, 0x58);
+	DVDT_AddTask(__DVDT_CheckBack, cb, 0x58);
 }
 
 /**

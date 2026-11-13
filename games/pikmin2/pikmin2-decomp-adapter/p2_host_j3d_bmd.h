@@ -509,7 +509,14 @@ static inline void pc_promote_j3d_mat(J3DMaterialBlock* mat, u32 blockSize)
 	mat->mNumMaterials = numMaterials;
 
 	J3DOffset* offsets = &mat->mMatEntryDataOffset;
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+#endif
 	size_t offsetCount = (sizeof(J3DMaterialBlock) - offsetof(J3DMaterialBlock, mMatEntryDataOffset)) / sizeof(J3DOffset);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 	for (size_t i = 0; i < offsetCount; i++) {
 		if ((u32)offsets[i] != 0) {
 			u32 off = pc_bmd_bswap32(offsets[i]);
@@ -592,7 +599,14 @@ static inline void pc_promote_j3d_mat_v21(J3DMaterialBlock_v21* mat, u32 blockSi
 	mat->mNumMaterials = numMaterials;
 
 	J3DOffset* offsets = &mat->mMatEntryDataOffset;
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+#endif
 	size_t offsetCount = (sizeof(J3DMaterialBlock_v21) - offsetof(J3DMaterialBlock_v21, mMatEntryDataOffset)) / sizeof(J3DOffset);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 	for (size_t i = 0; i < offsetCount; i++) {
 		if ((u32)offsets[i] != 0) {
 			u32 off = pc_bmd_bswap32(offsets[i]);
@@ -647,7 +661,14 @@ static inline void pc_promote_j3d_mat_dl(J3DMaterialDLBlock* mdl, u32 blockSize)
 {
 	mdl->mEntries = pc_bmd_bswap16(mdl->mEntries);
 	J3DOffset* offsets = &mdl->mPacketOffset;
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+#endif
 	size_t offsetCount = (sizeof(J3DMaterialDLBlock) - offsetof(J3DMaterialDLBlock, mPacketOffset)) / sizeof(J3DOffset);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 	for (size_t i = 0; i < offsetCount; i++) {
 		if ((u32)offsets[i] != 0) {
 			u32 off = pc_bmd_bswap32(offsets[i]);

@@ -162,7 +162,6 @@ static PFNGLATTACHSHADERPROC glAttachShader_ptr = nullptr;
 static PFNGLLINKPROGRAMPROC glLinkProgram_ptr = nullptr;
 static PFNGLUSEPROGRAMPROC glUseProgram_ptr = nullptr;
 static PFNGLGETUNIFORMLOCATIONPROC glGetUniformLocation_ptr = nullptr;
-static PFNGLGETATTRIBLOCATIONPROC glGetAttribLocation_ptr = nullptr;
 static PFNGLBINDATTRIBLOCATIONPROC glBindAttribLocation_ptr = nullptr;
 static PFNGLDELETESHADERPROC glDeleteShader_ptr = nullptr;
 static PFNGLDELETEPROGRAMPROC glDeleteProgram_ptr = nullptr;
@@ -252,7 +251,6 @@ static void load_gl_functions() {
     glLinkProgram_ptr = (PFNGLLINKPROGRAMPROC)SDL_GL_GetProcAddress("glLinkProgram");
     glUseProgram_ptr = (PFNGLUSEPROGRAMPROC)SDL_GL_GetProcAddress("glUseProgram");
     glGetUniformLocation_ptr = (PFNGLGETUNIFORMLOCATIONPROC)SDL_GL_GetProcAddress("glGetUniformLocation");
-    glGetAttribLocation_ptr = (PFNGLGETATTRIBLOCATIONPROC)SDL_GL_GetProcAddress("glGetAttribLocation");
     glBindAttribLocation_ptr = (PFNGLBINDATTRIBLOCATIONPROC)SDL_GL_GetProcAddress("glBindAttribLocation");
     glDeleteShader_ptr = (PFNGLDELETESHADERPROC)SDL_GL_GetProcAddress("glDeleteShader");
     glDeleteProgram_ptr = (PFNGLDELETEPROGRAMPROC)SDL_GL_GetProcAddress("glDeleteProgram");
@@ -732,7 +730,6 @@ static bool sNativeFramebufferReady = false;
 static int sRenderWidth = 640;
 static int sRenderHeight = 480;
 static float sRenderScale = 2.0f / 3.0f;
-static bool sRenderScaleSet = false; // true once set by the settings module
 
 // Aspect ratio support.
 enum AspectRatioMode {
@@ -752,8 +749,6 @@ static uint64_t sPerfDraws = 0;
 // The most recent perspective's terms, held until the world is known to have
 // finished so the right ones can be committed. See pc_gfx_set_projection.
 static float sPendingInvP00 = 1.0f, sPendingInvP11 = 1.0f;
-static float sPendingNear = 1.0f, sPendingFar = 15000.0f;
-static bool sPendingValid = false;
 // Pikmin 2 pone despues del mundo otra perspectiva sin apenas draws (near=10
 // far=10000) y el mundo reutiliza la perspectiva de frames anteriores; se
 // confirmaba la equivocada y DOF desenfocaba todo y las sombras no casaban.
@@ -1028,7 +1023,6 @@ static void filesel_debug_print_post_ortho();
 static PcRenderPacketStore sPacketStore;
 static bool sCaptureEnabled = false;
 static bool sCaptureActive = false;
-static uint64_t sCurrentCaptureSerial = 0;
 static PcGfxHostVector<uint8_t> sCaptureBuffer;
 static float sReplayClearColor[4] = { 0.1f, 0.1f, 0.15f, 1.0f };
 static float sReplayClearDepth = 1.0f;
@@ -1038,7 +1032,6 @@ void pc_gfx_begin_capture(uint64_t serial) {
     // The packet store (make_unique/std::vector) outlives the section heap.
     PcGfxHostAllocScope hostAllocScope;
     sCaptureActive = true;
-    sCurrentCaptureSerial = serial;
     sCaptureBuffer.clear();
     sPacketStore.beginAuthoritativeTick(serial);
 }
@@ -2862,7 +2855,6 @@ static bool sRenderOriginal = false;
 void pc_gfx_set_render_scale(float scale) {
     sRenderOriginal = scale <= 0.0f;
     sRenderScale = sRenderOriginal ? 1.0f : std::clamp(scale, 0.25f, 4.0f);
-    sRenderScaleSet = true;
     printf("[PC Port] Internal render scale set to %.2f\n", sRenderScale);
 }
 
@@ -3468,8 +3460,7 @@ void pc_gfx_init(void) {
     // so an A/B on scale can be run without touching the player's config.
     if (const char* value = std::getenv("PIKMIN_RENDER_SCALE")) {
         sRenderScale = std::clamp(strtof(value, nullptr), 0.25f, 4.0f);
-        sRenderScaleSet = true;
-        printf("[PC Port] Internal render scale forced to %.2f by PIKMIN_RENDER_SCALE\n", sRenderScale);
+            printf("[PC Port] Internal render scale forced to %.2f by PIKMIN_RENDER_SCALE\n", sRenderScale);
     }
 
     // Default identity matrices
@@ -3785,7 +3776,6 @@ void pc_gfx_begin_frame(void) {
         sDrawsAtProjection = sPerfDraws;
     }
     ++sGfxFrameSerial;
-    sPendingValid = false;
     if (!kP2Host) sBestDraws = -1;
     sDrawsAtFrameStart = sPerfDraws;
     using Clock = std::chrono::steady_clock;
@@ -5082,7 +5072,6 @@ extern "C" void pc_gfx_world_done(void)
     sViewInvP11 = sBestInvP11;
     sViewNear   = sBestNear;
     sViewFar    = sBestFar;
-    sPendingValid = false;
     sBestDraws = -1;
     post_apply_before_interface();
 }
@@ -5429,8 +5418,7 @@ void pc_gfx_set_projection(const Mtx44 mtx, GXProjectionType type) {
         sViewInvP11 = sBestInvP11;
         sViewNear   = sBestNear;
         sViewFar    = sBestFar;
-        sPendingValid = false;
-        sBestDraws = -1;
+            sBestDraws = -1;
         post_apply_before_interface();
     }
     if (sProjDebug && type != GX_PERSPECTIVE) {
@@ -5476,9 +5464,6 @@ void pc_gfx_set_projection(const Mtx44 mtx, GXProjectionType type) {
             if (f > n && n > 0.0f) {
                 sPendingInvP00 = 1.0f / p00;
                 sPendingInvP11 = 1.0f / p11;
-                sPendingNear = n;
-                sPendingFar = f;
-                sPendingValid = true;
                 sCurPerspValid = true;
                 sCurInvP00 = sPendingInvP00; sCurInvP11 = sPendingInvP11;
                 sCurNear = n; sCurFar = f;
@@ -8787,7 +8772,6 @@ static PcGfxHostVector<Vertex> sBatchVerts;
 static bool     sBatchOpen = false;
 static uint64_t sBatchKey  = 0;
 static GLenum   sBatchMode = GL_TRIANGLES;
-static uint32_t sBatchPrims = 0;   // primitives merged into the open batch
 
 // Everything becomes GL_TRIANGLES (or GL_LINES) so that consecutive primitives
 // of different topologies can still share one draw. Order is preserved
@@ -8962,7 +8946,6 @@ void pc_gfx_flush_batch(void) {
 #endif
     if (!sBatchOpen || sBatchVerts.empty()) {
         sBatchOpen  = false;
-        sBatchPrims = 0;
         sBatchVerts.clear();
         return;
     }
@@ -9142,20 +9125,16 @@ void pc_gfx_flush_batch(void) {
             GLint boundFBO = 0;
             GLint vp[4] = {0, 0, 0, 0};
             GLint sc[4] = {0, 0, 0, 0};
-            if (glGetIntegerv) {
-                glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &boundFBO);
-                glGetIntegerv(GL_VIEWPORT, vp);
-                glGetIntegerv(GL_SCISSOR_BOX, sc);
-            }
+            glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &boundFBO);
+            glGetIntegerv(GL_VIEWPORT, vp);
+            glGetIntegerv(GL_SCISSOR_BOX, sc);
             unsigned char px[4] = {0, 0, 0, 0};
             unsigned char pxTL[4] = {0, 0, 0, 0};
             bool scissorWas = glIsEnabled(GL_SCISSOR_TEST);
-            if (glReadPixels) {
-                glDisable(GL_SCISSOR_TEST);
-                glReadPixels(vp[2] / 2, vp[3] / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
-                glReadPixels(vp[0] + 5, vp[1] + 5, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pxTL);
-                if (scissorWas) glEnable(GL_SCISSOR_TEST);
-            }
+            glDisable(GL_SCISSOR_TEST);
+            glReadPixels(vp[2] / 2, vp[3] / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+            glReadPixels(vp[0] + 5, vp[1] + 5, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pxTL);
+            if (scissorWas) glEnable(GL_SCISSOR_TEST);
             const Vertex* v0 = sBatchVerts.empty() ? nullptr : &sBatchVerts[0];
             const Vertex* vM = sBatchVerts.size() > 1 ? &sBatchVerts[sBatchVerts.size() / 2] : nullptr;
             GLint pm = 0;
@@ -9168,7 +9147,7 @@ void pc_gfx_flush_batch(void) {
             cull      = glIsEnabled(GL_CULL_FACE);
             GLint activeUnit = 0;
             GLint texBindings[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-            if (glGetIntegerv) glGetIntegerv(GL_ACTIVE_TEXTURE, &activeUnit);
+            glGetIntegerv(GL_ACTIVE_TEXTURE, &activeUnit);
             for (int u = 0; u < 8; ++u) {
                 if (glActiveTexture_ptr) glActiveTexture_ptr(GL_TEXTURE0 + u);
                 glGetIntegerv(GL_TEXTURE_BINDING_2D, &texBindings[u]);
@@ -9305,7 +9284,6 @@ printf("[PC Probe] frame=%u draw %d: mode=%s verts=%zu boundFBO=%u nativeFBO=%u 
 
     sBatchVerts.clear();
     sBatchOpen  = false;
-    sBatchPrims = 0;
 }
 
 static void note_batch_run(uint64_t materialKey, uint64_t epoch) {
@@ -10187,7 +10165,6 @@ static void pc_gfx_end_impl(void) {
 
     if (sBatchOpen && batching_enabled() && stateKey == sBatchKey && batchMode == sBatchMode) {
         append_primitive_to_batch();
-        ++sBatchPrims;
         sInPrimitive = false;
         sAttrStep = 0;
         if (profilingSubmit) sSubmitUniformMs += submit_clock_ms() - submitT0;
@@ -10222,7 +10199,6 @@ static void pc_gfx_end_impl(void) {
     sBatchKey   = stateKey;
     sBatchMode  = batchMode;
     sBatchOpen  = true;
-    sBatchPrims = 1;
     append_primitive_to_batch();
     if (!batching_enabled()) pc_gfx_flush_batch();
 
@@ -10554,7 +10530,6 @@ static void gx_regs_report_once(const char* what, u32 reg) {
 // ─── CP registers: vertex descriptor, formats, arrays, matrix indices ───
 
 static u32 sCpVat[3][8] = {};       // 0x70/0x80/0x90 + fmt
-static u32 sCpVcdLo = 0;
 static u32 sCpArrayBase[16] = {};   // 0xA0..0xAF as written (physical)
 static u32 sCpArrayStride[16] = {}; // 0xB0..0xBF
 static u32 sCpMatIdxA = 0x3CF3CF00; // 0x30: pos + tex0..3 matrix indices
@@ -10623,7 +10598,6 @@ static void handle_cp_reg(u8 addr, u32 value) {
         cp_apply_tex_mtx_indices();
         break;
     case 0x50: { // VCD_LO
-        sCpVcdLo = value;
         pc_gfx_set_vtx_desc(GX_VA_PNMTXIDX, (value & 1) ? GX_DIRECT : GX_NONE);
         for (int t = 0; t < 8; ++t)
             pc_gfx_set_vtx_desc(GXAttr(GX_VA_TEX0MTXIDX + t), ((value >> (1 + t)) & 1) ? GX_DIRECT : GX_NONE);

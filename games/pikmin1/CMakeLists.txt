@@ -75,11 +75,16 @@ set(LEGACY_COMPILE_OPTIONS
     -Wno-format
     -Wno-attributes
     -Wno-comment
-    # Decomp-only noise from Clang (macOS): `(a, b)` comma expressions kept from
-    # the original code, and the SDK marking sprintf/vsprintf deprecated. Native
-    # code keeps both warnings.
-    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-unused-value>
+    # Decomp-faithful noise left after #116. Port, launcher and tools use
+    # NATIVE_COMPILE_OPTIONS and keep these warnings. -Wno-unused-value covers
+    # the original-game comma expressions that #334 already silenced on Clang.
+    -Wno-unused-parameter
+    -Wno-missing-field-initializers
+    -Wno-unknown-pragmas
+    -Wno-overloaded-virtual
+    -Wno-unused-value
     $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-deprecated-declarations>
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-unused-private-field>
 )
 
 # Endurecimiento del código decompilado. El compilador de GameCube no

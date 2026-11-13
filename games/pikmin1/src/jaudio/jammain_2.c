@@ -443,7 +443,7 @@ void Jam_WriteRegParam(seqp_* track, u8 controlByte)
 
 	s16 r30_newRegValue; // r30
 	u8 r29_regIdx;       // r29
-	u16 r28;             // r28
+	u16 r28 = 0;         // r28
 	u32 unaff_r27;       // r27
 	u32 r26;             // r26
 	u32 r25;             // r25

@@ -104,6 +104,19 @@ set(LEGACY_COMPILE_OPTIONS
     -Wno-format
     -Wno-attributes
     -Wno-comment
+    # Decomp-faithful noise. Pointer-truncation casts, -Wint-to-void-pointer-cast,
+    # delete-incomplete, dynamic-class-memaccess and uninitialized stay visible
+    # (fork #211 item 5). Port code uses NATIVE_COMPILE_OPTIONS and keeps these.
+    -Wno-unused-parameter
+    -Wno-missing-braces
+    -Wno-unused-value
+    -Wno-unused-function
+    -Wno-unknown-pragmas
+    -Wno-unused-label
+    -Wno-deprecated-copy
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-unknown-escape-sequence>
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-invalid-source-encoding>
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-mismatched-tags>
     # A non-void function without return is UB: GCC omits the epilogue and
     # control falls into the next symbol (doDrawRuby crash). Never allow it.
     -Werror=return-type
