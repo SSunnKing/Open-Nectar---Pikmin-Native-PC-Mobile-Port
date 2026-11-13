@@ -213,7 +213,6 @@ static double sTargetRefreshRate = 60.0;
 static std::chrono::steady_clock::time_point sNextPresentDeadline;
 
 // Settings-menu video state (PC only).
-static int sDisplayMode = PC_WINDOW_FULLSCREEN_WINDOWED;
 static bool sVsyncEnabled = true;   // presentation pacing on/off
 static bool sMonitorVsyncMode = false;
 static bool sMonitorVsyncFallback = false;
@@ -259,7 +258,6 @@ static void warpMouseToCentre() {
     SDL_WarpMouseInWindow(sWindow, w / 2, h / 2);
 }
 static int sMouseCenterY = 0;
-static bool sMouseWarped = false;
 
 // Control mode
 static int sControlMode = PC_CONTROL_CLASSIC;
@@ -991,7 +989,6 @@ bool pc_window_init(const char* title, int width, int height) {
     sMouseCenterX = sWindowWidth / 2;
     sMouseCenterY = sWindowHeight / 2;
     SDL_WarpMouseInWindow(sWindow, sMouseCenterX, sMouseCenterY);
-    sMouseWarped = true;
     
     SDL_DisplayMode displayMode {};
     const int display = SDL_GetWindowDisplayIndex(sWindow);
@@ -1346,8 +1343,7 @@ void pc_window_poll_events(PADStatus* pad) {
                     if (!sMouseRelativeMode) {
                         // Re-center mouse when exiting relative mode
                         warpMouseToCentre();
-                        sMouseWarped = true;
-                    } else {
+                                        } else {
                         // Consume any pending relative mouse motion on mode entry
                         int dummyX, dummyY;
                         SDL_GetRelativeMouseState(&dummyX, &dummyY);
@@ -1362,8 +1358,7 @@ void pc_window_poll_events(PADStatus* pad) {
                     sMouseCursorDeltaX = 0.0f;
                     sMouseCursorDeltaY = 0.0f;
                     warpMouseToCentre();
-                    sMouseWarped = true;
-                    printf("[PC Port] Mouse relative mode: OFF (Escape)\n");
+                                    printf("[PC Port] Mouse relative mode: OFF (Escape)\n");
                 }
 #if PIKI_P2_HOST
                 // Pikmin 2: F11 alterna ventana <-> pantalla completa (atajo; lo persistente va en F1).
@@ -1888,7 +1883,6 @@ void pc_window_set_display_mode(int mode) {
     if (SDL_SetWindowFullscreen(sWindow, flags) != 0) {
         snprintf(sLastVideoError, sizeof(sLastVideoError), "fullscreen: %s", SDL_GetError());
     } else {
-        sDisplayMode = mode;
         sLastVideoError[0] = '\0';
     }
     // The drawable size may change; refresh the cached target refresh rate for

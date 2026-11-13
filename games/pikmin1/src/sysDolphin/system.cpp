@@ -650,8 +650,8 @@ void System::parseArchiveDirectory(immut char* arcPath, immut char* dirPath)
 		list->mNextFreeAddress = addr;
 	}
 
-	u32 unused;
-	f32 unused2;
+	u32 unused = 0;
+	f32 unused2 = 0;
 	STACK_PAD_VAR(1);
 
 	// this is necessary to get it to call the vtable ptr not just inline it.

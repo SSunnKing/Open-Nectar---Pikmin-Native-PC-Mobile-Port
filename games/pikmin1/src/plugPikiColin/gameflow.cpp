@@ -506,7 +506,7 @@ void GameFlow::read(RandomAccessStream& input)
  */
 void preloadLanguage()
 {
-	u32 unused;
+	u32 unused = 0;
 	AyuHeap* oldHeap;
 	int* lang;
 	int heapIdx;

@@ -3376,7 +3376,7 @@ void GameCoreSection::update()
 	}
 #endif
 	if (!gameflow.mMoviePlayer->mIsActive && !mDoneSundownWarn && gameflow.mWorldClock.mTimeOfDay >= gameflow.mParameters->mNightWarning()
-	    && (flowCont.mGameEndFlag != GAMEEND_PikminExtinction || flowCont.mGameEndFlag != GAMEEND_NaviDown)) {
+	    && (flowCont.mGameEndFlag != GAMEEND_PikminExtinction || flowCont.mGameEndFlag != GAMEEND_NaviDown)) { // matches retail
 		if (playerState->inDayEnd()) {
 			PRINT("======== IN DAY END *** \n");
 		} else {

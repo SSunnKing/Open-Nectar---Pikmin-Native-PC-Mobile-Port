@@ -10,9 +10,9 @@
 #ifdef PIKI_PC_PORT
 
 namespace Game {
-class Navi;
-class Piki;
-class Pellet;
+struct Navi;
+struct Piki;
+struct Pellet;
 }
 
 /** Tag the captain who should own the next co-op full-screen cutscene (no-op unless co-op is active). */

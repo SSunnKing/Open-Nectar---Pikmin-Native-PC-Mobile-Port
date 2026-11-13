@@ -165,25 +165,25 @@ static inline char** backtrace_symbols(void* const* buf, int size)
 
 /* ── Intrinsecos PowerPC usados por el codigo del juego/JSystem ── */
 #ifdef __cplusplus
-static inline p2float __pc_frsqrte(p2float v) { return 1.0f / sqrtf(v); }
-static inline p2float __pc_fres(p2float v)    { return 1.0f / v; }
-static inline p2float __pc_fabsf(p2float v)   { return fabsf(v); }
-static inline p2float __pc_fabs(p2float v)    { return fabsf(v); }
-static inline p2float __pc_fsel(p2float a, p2float b, p2float c){ return a >= 0.0f ? b : c; }
-static inline p2float __pc_fsqrts(p2float v)  { return sqrtf(v); }
-static inline int     __pc_cntlzw(p2uint v)    { return v ? __builtin_clz(v) : 32; }
-static inline p2uint  __pc_cntlzwu(p2uint v)   { return v ? __builtin_clz(v) : 32; }
-static inline p2float __pc_fnabs(p2float v)    { return -fabsf(v); }
+[[maybe_unused]] static inline p2float __pc_frsqrte(p2float v) { return 1.0f / sqrtf(v); }
+[[maybe_unused]] static inline p2float __pc_fres(p2float v)    { return 1.0f / v; }
+[[maybe_unused]] static inline p2float __pc_fabsf(p2float v)   { return fabsf(v); }
+[[maybe_unused]] static inline p2float __pc_fabs(p2float v)    { return fabsf(v); }
+[[maybe_unused]] static inline p2float __pc_fsel(p2float a, p2float b, p2float c){ return a >= 0.0f ? b : c; }
+[[maybe_unused]] static inline p2float __pc_fsqrts(p2float v)  { return sqrtf(v); }
+[[maybe_unused]] static inline int     __pc_cntlzw(p2uint v)    { return v ? __builtin_clz(v) : 32; }
+[[maybe_unused]] static inline p2uint  __pc_cntlzwu(p2uint v)   { return v ? __builtin_clz(v) : 32; }
+[[maybe_unused]] static inline p2float __pc_fnabs(p2float v)    { return -fabsf(v); }
 #else
-static p2float __pc_frsqrte(p2float v) { return 1.0f / sqrtf(v); }
-static p2float __pc_fres(p2float v)    { return 1.0f / v; }
-static p2float __pc_fabsf(p2float v)   { return fabsf(v); }
-static p2float __pc_fabs(p2float v)    { return fabsf(v); }
-static p2float __pc_fsel(p2float a, p2float b, p2float c){ return a >= 0.0f ? b : c; }
-static p2float __pc_fsqrts(p2float v)  { return sqrtf(v); }
-static int     __pc_cntlzw(p2uint v)   { return v ? __builtin_clz(v) : 32; }
-static p2uint  __pc_cntlzwu(p2uint v)  { return v ? __builtin_clz(v) : 32; }
-static p2float __pc_fnabs(p2float v)   { return -fabsf(v); }
+__attribute__((unused)) static p2float __pc_frsqrte(p2float v) { return 1.0f / sqrtf(v); }
+__attribute__((unused)) static p2float __pc_fres(p2float v)    { return 1.0f / v; }
+__attribute__((unused)) static p2float __pc_fabsf(p2float v)   { return fabsf(v); }
+__attribute__((unused)) static p2float __pc_fabs(p2float v)    { return fabsf(v); }
+__attribute__((unused)) static p2float __pc_fsel(p2float a, p2float b, p2float c){ return a >= 0.0f ? b : c; }
+__attribute__((unused)) static p2float __pc_fsqrts(p2float v)  { return sqrtf(v); }
+__attribute__((unused)) static int     __pc_cntlzw(p2uint v)   { return v ? __builtin_clz(v) : 32; }
+__attribute__((unused)) static p2uint  __pc_cntlzwu(p2uint v)  { return v ? __builtin_clz(v) : 32; }
+__attribute__((unused)) static p2float __pc_fnabs(p2float v)   { return -fabsf(v); }
 #endif
 
 #define __frsqrte(x)   __pc_frsqrte((float)(x))
@@ -210,13 +210,13 @@ static inline unsigned int __pc_rlwimi(unsigned int rs, unsigned int val, int sh
 #include "stl/math.h"
 
 #ifdef __cplusplus
-static inline p2float tanf_kludge(p2float x) { return (p2float)tan((double)x); }
-static inline p2float sinf_kludge(p2float x) { return (p2float)sin((double)x); }
-static inline p2float cosf_kludge(p2float x) { return (p2float)cos((double)x); }
+[[maybe_unused]] static inline p2float tanf_kludge(p2float x) { return (p2float)tan((double)x); }
+[[maybe_unused]] static inline p2float sinf_kludge(p2float x) { return (p2float)sin((double)x); }
+[[maybe_unused]] static inline p2float cosf_kludge(p2float x) { return (p2float)cos((double)x); }
 #else
-static p2float tanf_kludge(p2float x) { return (p2float)tan((double)x); }
-static p2float sinf_kludge(p2float x) { return (p2float)sin((double)x); }
-static p2float cosf_kludge(p2float x) { return (p2float)cos((double)x); }
+__attribute__((unused)) static p2float tanf_kludge(p2float x) { return (p2float)tan((double)x); }
+__attribute__((unused)) static p2float sinf_kludge(p2float x) { return (p2float)sin((double)x); }
+__attribute__((unused)) static p2float cosf_kludge(p2float x) { return (p2float)cos((double)x); }
 #endif
 
 #ifndef IS_SAME_STRING

@@ -140,7 +140,7 @@ int ActRandomBoid::exec()
 		} else {
 			mStateTimer += 120;
 			mState = STATE_Stop;
-			if (startState != STATE_Stop || startState != STATE_Boid) {
+			if (startState != STATE_Stop || startState != STATE_Boid) { // matches retail
 				mPiki->mPikiAnimMgr.finishMotion(mListener);
 				mIsAnimFinishing = true;
 				return ACTOUT_Continue;

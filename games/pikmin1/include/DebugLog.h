@@ -10,7 +10,7 @@
 #include <string.h>
 
 #define DEFINE_PRINT(_NAME)                        \
-	static void _Print(immut char* fmt, ...)       \
+	[[maybe_unused]] static void _Print(immut char* fmt, ...) \
 	{                                              \
 		va_list args;                              \
 		va_start(args, fmt);                       \
@@ -30,7 +30,7 @@
 
 // Size - 0x9C
 #define DEFINE_ERROR(line)                    \
-	static void _Error(immut char* fmt, ...)  \
+	[[maybe_unused]] static void _Error(immut char* fmt, ...) \
 	{                                         \
 		va_list args;                         \
 		va_start(args, fmt);                  \
