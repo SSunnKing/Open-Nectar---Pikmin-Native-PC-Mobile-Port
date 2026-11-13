@@ -237,6 +237,9 @@ int nativeTests(const std::vector<std::uint8_t>& gciBytes)
     CHECK(L::prepareSaveImport(root / "export.gci", "GPIE01", card0, save, msg) == L::PrepareResult::Ready
               && !save.native && save.data.size() == kCardBlockSize,
           "gci through prepareSaveImport");
+    const L::GciCardMeta gciMeta = metaOf(save.meta);
+    CHECK(gciMeta.length == kCardBlockSize && gciMeta.offsetData == kCardBlockSize,
+          "gci metadata keeps payload length after prepareSaveImport");
     CHECK(L::prepareSaveImport(root / "export.gci", "GPVE01", card0, save, msg) == L::PrepareResult::Error
               && msg.find("This save is for Pikmin (GPIE01)") != std::string::npos,
           "gci for the other game rejected");
