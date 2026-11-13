@@ -1234,11 +1234,14 @@ void NTransform3D::translate(immut Vector3f& offset)
 /**
  * @todo: Documentation
  */
-void NTransform3D::rotate(immut Vector3f& point)
+void NTransform3D::rotate(Vector3f& point)
 {
 	NTransform3D NRef rotation = NTransform3D();
 	outputRotation(rotation);
-	rotation.rotate(point);
+	// Infinite recursion in the original. NLine::transform and NPlane::transform
+	// call this to turn a direction or normal by the rotation part only, which
+	// is what transforming by `rotation` (no translation) does.
+	TERNARY_BUGFIX(rotation.transform, rotation.rotate)(point);
 }
 
 /**

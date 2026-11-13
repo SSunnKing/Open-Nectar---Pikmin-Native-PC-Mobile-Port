@@ -459,7 +459,7 @@ public:
 	NTransform3D();
 	NTransform3D(immut NMatrix4f&); // unused/inlined
 
-	void rotate(immut Vector3f&);
+	void rotate(Vector3f&);
 	void transform(Vector3f&) immut;
 	void inputAxisAngle(immut NAxisAngle4f&);
 	void outputRotation(Matrix4f&) immut;

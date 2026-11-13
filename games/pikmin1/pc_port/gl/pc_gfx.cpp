@@ -32,6 +32,7 @@
 #include "pc_gx_lighting_glsl.h"
 #include "pc_postprocess.h"
 #include "pc_texpack.h"
+#include "pc_gx_xf_load.h"
 #include "../timing/pc_render_phase.h"
 #include "../timing/pc_tick_profiler.h"
 #include "../netplay/pc_netplay_present.h"
@@ -9091,25 +9092,22 @@ static void pc_gfx_call_display_list_impl(const void* list, u32 nbytes) {
         if (command == GX_CMD_LOAD_XF_REG) {
             building = false;
             flushPendingStrip();
-            u32 header;
-            if (!read_be_u32(cursor, end, header)) break;
-            const u32 numWords = (header >> 16) & 0xFFFF;
-            const u32 addrBase = header & 0xFFFF;
+            // The count field is length - 1 and the words are big-endian file
+            // bytes; pc_gx_xf_load.h has the details.
+            PcGxXfLoad xf;
+            if (!pc_gx_decode_xf_load(cursor, end, xf)) break;
 #ifdef PC_GFX_TRACE
             {
-                static FILE* xf = nullptr;
-                if (!xf) xf = fopen("/tmp/opencode/xfdl.log", "w");
-                if (xf) {
-                    fprintf(xf, "XF num=%u addr=%04X w0=%08X w1=%08X\n", numWords, addrBase,
-                            cursor[0] << 24 | cursor[1] << 16 | cursor[2] << 8 | cursor[3],
-                            cursor[4] << 24 | cursor[5] << 16 | cursor[6] << 8 | cursor[7]);
-                    fflush(xf);
+                static FILE* xfLog = nullptr;
+                if (!xfLog) xfLog = fopen("/tmp/opencode/xfdl.log", "w");
+                if (xfLog) {
+                    fprintf(xfLog, "XF num=%u addr=%04X w0=%08X w1=%08X\n", xf.numWords, xf.addrBase,
+                            xf.words[0], xf.numWords > 1 ? xf.words[1] : 0u);
+                    fflush(xfLog);
                 }
             }
 #endif
-            if (end - cursor < ptrdiff_t(numWords * 4)) break;
-            handle_xf_regs(addrBase, numWords, reinterpret_cast<const u32*>(cursor));
-            cursor += numWords * 4;
+            handle_xf_regs(xf.addrBase, xf.numWords, xf.words);
             continue;
         }
         if (command == GX_CMD_CALL_DL) {

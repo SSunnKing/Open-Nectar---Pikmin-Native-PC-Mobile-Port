@@ -852,6 +852,13 @@ PCJamResult PCJamPlayer::runTrack(size_t index, std::vector<PCJamEvent>& events,
                     pair = static_cast<u16>(pair << 2);
                 }
             }
+            // The table covers 0xC0-0xFF only. A command byte below that,
+            // which a register can supply, has no known operand layout, so
+            // the stream cannot be kept aligned: stop like any other
+            // unsupported opcode instead of reading before the table (the
+            // original Cmd_Process has no check here either).
+            if (command < 0xC0)
+                return fail(PCJamResult::UnsupportedOpcode, command);
             const CommandArguments& layout = kCommandArguments[command - 0xC0];
             argumentTypes |= layout.types;
             u32 arguments[8] = {};
@@ -1364,6 +1371,12 @@ PCJamResult PCJamPlayer::runTrack(size_t index, std::vector<PCJamEvent>& events,
             // not implement is skipped rather than killing the sequence. Two
             // sound-effect handlers open with OscFull (0xF2), which used to
             // stop them dead.
+            // Every opcode below 0xC0 is handled by the note and 0x80-0xB0
+            // family branches above, so this always lands in the table.
+            static_assert(sizeof(kCommandArguments) / sizeof(kCommandArguments[0]) == 0x100 - 0xC0,
+                          "kCommandArguments covers 0xC0-0xFF");
+            if (opcode < 0xC0)
+                return fail(PCJamResult::UnsupportedOpcode, opcode);
             const CommandArguments& layout = kCommandArguments[opcode - 0xC0];
             u16 argumentTypes = layout.types;
             for (u8 i = 0; i < layout.count; ++i) {
