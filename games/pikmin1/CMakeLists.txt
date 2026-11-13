@@ -1326,6 +1326,11 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
     target_compile_options(launcher_page_layout_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME launcher_page_layout_test COMMAND launcher_page_layout_test)
 
+    # --launch=pikmin1|pikmin2 (#336): parsing and the launch-or-home decision.
+    add_executable(launch_request_test pc_port/launcher/launch_request_test.cpp)
+    target_compile_options(launch_request_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME launch_request_test COMMAND launch_request_test)
+
     # Versión junto al logo (#327): la fuente y el estilo, sin ventana.
     add_executable(version_label_test pc_port/launcher/version_label_test.cpp
         pc_port/launcher/version_label.cpp
