@@ -197,8 +197,14 @@ RandomAccessStream* System::openFile(immut char* path, bool isRelativePath, bool
 	}
 #endif
 	char strPath[PATH_MAX];
+#if defined(BUGFIX)
+	// The original passes strPath as both the destination and the first
+	// source of one sprintf, which is undefined behavior. Same result in one call.
+	snprintf(strPath, sizeof(strPath), "%s%s%s", isRelativePath ? mActiveDir : "", isRelativePath ? mDataRoot : "", path);
+#else
 	sprintf(strPath, "%s", isRelativePath ? mActiveDir : "");
 	sprintf(strPath, "%s%s%s", strPath, isRelativePath ? mDataRoot : "", path);
+#endif
 
 	// The original game serves many resources from a 32-bit ARAM address space.
 	// On the native 64-bit port the assets are already extracted under dataDir;
