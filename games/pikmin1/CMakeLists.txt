@@ -1456,6 +1456,11 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_envelope_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_envelope_test COMMAND pc_envelope_test)
 
+    # Display-list XF register load decoding (header only, no GL)
+    add_executable(pc_gx_xf_load_test pc_port/gl/pc_gx_xf_load_test.cpp)
+    target_compile_options(pc_gx_xf_load_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_gx_xf_load_test COMMAND pc_gx_xf_load_test)
+
     # Co-op formation (C-stick swarm) sound arbitration (header only, no audio engine)
     add_executable(pc_formation_arbiter_test pc_port/audio/pc_formation_arbiter_test.cpp)
     target_compile_options(pc_formation_arbiter_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
