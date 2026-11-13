@@ -1710,6 +1710,14 @@ if(PIKMIN_BUILD_TESTS)
     # The directory already defines PIKI_USE_GLES (0 on desktop). Undefine it
     # first so Clang doesn't warn that the GLES test redefines it.
     target_compile_options(pc_texpack_gles_test PRIVATE -UPIKI_USE_GLES -DPIKI_USE_GLES=1)
+    # These tests check results with assert(), which Release compiles out.
+    foreach(test pc_texpack_test pc_texpack_gles_test)
+        if(MSVC)
+            target_compile_options(${test} PRIVATE /UNDEBUG)
+        else()
+            target_compile_options(${test} PRIVATE -UNDEBUG)
+        endif()
+    endforeach()
 
     add_executable(pc_tev_shader_test
         pc_port/gl/pc_tev_shader_test.cpp
