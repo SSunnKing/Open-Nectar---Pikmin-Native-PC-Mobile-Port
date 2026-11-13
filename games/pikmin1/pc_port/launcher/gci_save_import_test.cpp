@@ -1,4 +1,5 @@
 #include "gci_save_import.h"
+#include "install_disc_id.h"
 
 #include "dolphin_stubs/pc_card_save_root.h"
 
@@ -369,6 +370,76 @@ int backupTests(const pikmin::launcher::ParsedGci& parsed)
 
 } // namespace
 
+// #323: a European Pikmin 2 install takes European saves. The launcher used
+// to pass GPVE01 for every Pikmin 2 install, so GPVP01 saves were rejected.
+std::vector<std::uint8_t> makePikmin2Gci(const char* gameName)
+{
+    const std::vector<std::uint8_t> payload = makePikmin2Save();
+    std::vector<std::uint8_t> file(kGciHeaderSize, 0);
+    std::memcpy(file.data(), gameName, 4);
+    std::memcpy(file.data() + 4, "01", 2);
+    const char name[] = "Pikmin2_SaveData";
+    std::memcpy(file.data() + 8, name, sizeof(name));
+    writeBe32(file, 0x28, 654321u);
+    writeBe16(file, 0x38, static_cast<std::uint16_t>(payload.size() / kCardBlockSize));
+    file.insert(file.end(), payload.begin(), payload.end());
+    return file;
+}
+
+int pikmin2RegionTests()
+{
+    namespace L = pikmin::launcher;
+    int failures = 0;
+    const fs::path root = fs::temp_directory_path() / "gci_pikmin2_region_test";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+
+    // The installer's marker decides the region.
+    const fs::path pal = root / "pal" / "pikmin2";
+    const fs::path usa = root / "usa" / "pikmin2";
+    fs::create_directories(pal / "assets");
+    fs::create_directories(usa / "assets");
+    {
+        std::ofstream(pal / "assets" / ".pikmin2-assets") << "GPVP01\nextracted_from=pikmin2-pal.iso\n";
+        std::ofstream(usa / "assets" / ".pikmin2-assets") << "GPVE01\r\nextracted_from=pikmin2.iso\n";
+    }
+    CHECK(L::installedPikmin2DiscId(pal) == "GPVP01", "PAL marker reads GPVP01");
+    CHECK(L::installedPikmin2DiscId(usa) == "GPVE01", "USA marker reads GPVE01");
+    CHECK(L::installedPikmin2DiscId(root / "missing") == "GPVP01", "no marker: the default European build");
+
+    // Empty launcher state: Pikmin 2 asks its install; no install means USA.
+    CHECK(L::discIdOrInstalled(1, "", pal.string()) == "GPVP01", "PAL install without a disc id");
+    CHECK(L::discIdOrInstalled(1, "", usa.string()) == "GPVE01", "USA install without a disc id");
+    CHECK(L::discIdOrInstalled(1, "", "") == "GPVE01", "no Pikmin 2 install falls back to USA");
+    CHECK(L::discIdOrInstalled(0, "", pal.string()) == "GPIE01", "Pikmin falls back to USA");
+    CHECK(L::discIdOrInstalled(1, "GPVP01", "") == "GPVP01", "a known disc id wins");
+
+    // A GPVP01 .gci goes into a PAL install and is turned away by a USA one.
+    const fs::path palGci = root / "8P-GPVP-Pikmin2_SaveData.gci";
+    const fs::path usaGci = root / "8P-GPVE-Pikmin2_SaveData.gci";
+    writeAll(palGci, makePikmin2Gci("GPVP"));
+    writeAll(usaGci, makePikmin2Gci("GPVE"));
+    L::PreparedSave save;
+    std::string msg;
+    CHECK(L::prepareSaveImport(palGci, L::installedPikmin2DiscId(pal), pal / "save" / "card0", save, msg)
+              == L::PrepareResult::Ready
+              && save.saveFileName == "Pikmin2_SaveData" && save.data.size() == L::kPikmin2SaveFileSize,
+          "GPVP01 save accepted by a PAL install");
+    CHECK(L::prepareSaveImport(palGci, L::installedPikmin2DiscId(usa), usa / "save" / "card0", save, msg)
+              == L::PrepareResult::Error
+              && msg.find("GPVP01") != std::string::npos,
+          "GPVP01 save rejected by a USA install");
+    CHECK(L::prepareSaveImport(usaGci, L::installedPikmin2DiscId(usa), usa / "save" / "card0", save, msg)
+              == L::PrepareResult::Ready,
+          "GPVE01 save accepted by a USA install");
+    CHECK(L::prepareSaveImport(usaGci, L::installedPikmin2DiscId(pal), pal / "save" / "card0", save, msg)
+              == L::PrepareResult::Error,
+          "GPVE01 save rejected by a PAL install");
+
+    fs::remove_all(root, ec);
+    return failures;
+}
+
 int main()
 {
     int failures = 0;
@@ -473,6 +544,7 @@ int main()
 
     failures += backupTests(parsed);
     failures += nativeTests(makeSyntheticGci());
+    failures += pikmin2RegionTests();
 
     fs::remove_all(root, ec);
     if (failures == 0) std::printf("gci_save_import_test: PASS\n");

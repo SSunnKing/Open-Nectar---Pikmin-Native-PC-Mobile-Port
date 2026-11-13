@@ -25,6 +25,7 @@
 #endif
 #include "gci_save_import.h"
 #include "install_directory.h"
+#include "install_disc_id.h"
 #include "install_note_layout.h"
 #include "dolphin_stubs/pc_card_save_root.h"
 #include "launcher_cursor.h"
@@ -942,8 +943,8 @@ struct Hub {
 
     void startCoverDownloads()
     {
-        const std::string ids[2] = { state.games[0].discId.empty() ? "GPIE01" : state.games[0].discId,
-                                     state.games[1].discId.empty() ? "GPVE01" : state.games[1].discId };
+        const std::string ids[2] = { discIdOrInstalled(0, state.games[0].discId, state.games[0].directory),
+                                     discIdOrInstalled(1, state.games[1].discId, state.games[1].directory) };
         for (int i = 0; i < 2; ++i) {
             const std::string region = ids[i][3] == 'P' ? "EN" : (ids[i][3] == 'J' ? "JA" : "US");
             const std::string base = "https://art.gametdb.com/wii/";
@@ -2153,7 +2154,7 @@ struct Hub {
     void importPickedSave(int gameIndex, const fs::path& picked)
     {
         const GameInstall& game = state.games[gameIndex];
-        const std::string discId = game.discId.empty() ? (gameIndex == 0 ? "GPIE01" : "GPVE01") : game.discId;
+        const std::string discId = discIdOrInstalled(gameIndex, game.discId, game.directory);
         const fs::path card0 = card0DirectoryForInstall(fs::path(game.directory));
         PreparedSave save;
         std::string error;

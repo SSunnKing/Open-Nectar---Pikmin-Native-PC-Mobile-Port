@@ -11,6 +11,7 @@
 #include "prepared_image.h"
 #include "installer_ui.h"
 #include "install_directory.h"
+#include "install_disc_id.h"
 #include "launcher_gui.h"
 #include "crash_report.h"
 #include "launcher_platform.h"
@@ -726,20 +727,10 @@ constexpr const char* kPikmin2UsaExecutable = "pikmin2_pc-usa.exe";
 constexpr const char* kPikmin2Executable = "pikmin2_pc";
 constexpr const char* kPikmin2UsaExecutable = "pikmin2_pc-usa";
 #endif
-// El paquete trae dos builds de Pikmin 2: Europa (GPVP01, pikmin2_pc) y USA
-// (GPVE01, pikmin2_pc-usa). Al instalar se copia la del disco como pikmin2_pc.
-constexpr const char* kPikmin2DiscId = "GPVP01";
-constexpr const char* kPikmin2UsaDiscId = "GPVE01";
-
-// Región de los datos instalados: primera línea de assets/.pikmin2-assets.
-std::string installedPikmin2DiscId(const fs::path& gameDirectory)
-{
-    std::ifstream in(gameDirectory / "assets" / ".pikmin2-assets");
-    std::string line;
-    if (!in || !std::getline(in, line)) return kPikmin2DiscId;
-    while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
-    return line == kPikmin2UsaDiscId ? kPikmin2UsaDiscId : kPikmin2DiscId;
-}
+// Región de los datos instalados: install_disc_id.h (#323).
+constexpr const char* kPikmin2DiscId = pikmin::launcher::kPikmin2PalDiscId;
+using pikmin::launcher::installedPikmin2DiscId;
+using pikmin::launcher::kPikmin2UsaDiscId;
 
 // Pikmin 2 vive en <instalación>/pikmin2: su ejecutable y su carpeta assets,
 // aparte de los de Pikmin 1, que ocupan la raíz.
@@ -1118,7 +1109,7 @@ UpdateOutcome runPikmin2Install(pikmin::launcher::HubWindow& hub, const fs::path
             return UpdateOutcome::BackHome;
         }
         hub.markInstalled(pikmin::launcher::HubGame::Pikmin2, gameDirectory.string(),
-                          (gameDirectory / kPikmin2Executable).string(), "GPVE01");
+                          (gameDirectory / kPikmin2Executable).string(), installedPikmin2DiscId(gameDirectory));
         rememberPikmin2Directory(gameDirectory);
         rememberInstallDirectory(installDirectory);
         const std::string text = "Pikmin 2 is installed in:\n" + gameDirectory.string()
@@ -1423,7 +1414,7 @@ int main(int argc, char** argv)
         if (pikmin2Available) {
             hubState.games[1].directory = pikmin2Directory.string();
             hubState.games[1].executable = pikmin2Executable.string();
-            hubState.games[1].discId = "GPVE01";
+            hubState.games[1].discId = installedPikmin2DiscId(pikmin2Directory);
         }
         // Datos del juego para decorar la ventana: la instalación de al lado,
         // la de la carpeta por defecto, o la que indique NECTAR_GAME_DIR.
