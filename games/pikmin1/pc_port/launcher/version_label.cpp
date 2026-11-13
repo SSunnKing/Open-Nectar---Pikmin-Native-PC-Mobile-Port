@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <limits>
 
 // stb_truetype, private to this file (ImGui keeps its copy static too).
 #if defined(__GNUC__)
@@ -34,15 +33,12 @@ struct Rgb {
     float r, g, b;
 };
 
-// Sampled from assets/logo.png: yellow highlight, orange body, deep orange
-// bottom, brown edge and the halo around the letters.
-constexpr Rgb kHighlight { 255.0f, 250.0f, 215.0f };
-constexpr Rgb kTop { 255.0f, 214.0f, 70.0f };
-constexpr Rgb kBody { 255.0f, 168.0f, 36.0f };
-constexpr Rgb kBottom { 246.0f, 116.0f, 8.0f };
-constexpr Rgb kEdge { 214.0f, 96.0f, 6.0f };
-constexpr Rgb kOutline { 170.0f, 70.0f, 4.0f };
-constexpr Rgb kHalo { 236.0f, 128.0f, 20.0f };
+// Sampled from assets/logo.png: the letters' orange, the lighter orange of
+// their upper half, the dark orange edge and the white shine marks.
+constexpr Rgb kFill { 255.0f, 160.0f, 28.0f };
+constexpr Rgb kFillTop { 255.0f, 200.0f, 70.0f };
+constexpr Rgb kOutline { 176.0f, 66.0f, 2.0f };
+constexpr Rgb kShine { 255.0f, 252.0f, 230.0f };
 
 Rgb mix(Rgb a, Rgb b, float t)
 {
@@ -50,44 +46,6 @@ Rgb mix(Rgb a, Rgb b, float t)
 }
 
 float clamp01(float v) { return std::min(1.0f, std::max(0.0f, v)); }
-
-float smooth(float e0, float e1, float x)
-{
-    const float t = clamp01((x - e0) / (e1 - e0));
-    return t * t * (3.0f - 2.0f * t);
-}
-
-// Distance (in pixels) from every pixel to the nearest pixel where `inside`
-// is true: two-pass chamfer with 1 / sqrt(2) steps.
-std::vector<float> distanceTo(const std::vector<std::uint8_t>& inside, int w, int h)
-{
-    const float inf = std::numeric_limits<float>::max() / 4.0f;
-    const float d1 = 1.0f, d2 = 1.41421356f;
-    std::vector<float> d(std::size_t(w) * std::size_t(h));
-    for (std::size_t i = 0; i < d.size(); ++i) d[i] = inside[i] ? 0.0f : inf;
-    const auto at = [&](int x, int y) -> float& { return d[std::size_t(y) * std::size_t(w) + std::size_t(x)]; };
-    for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-            float& v = at(x, y);
-            if (x > 0) v = std::min(v, at(x - 1, y) + d1);
-            if (y > 0) {
-                v = std::min(v, at(x, y - 1) + d1);
-                if (x > 0) v = std::min(v, at(x - 1, y - 1) + d2);
-                if (x + 1 < w) v = std::min(v, at(x + 1, y - 1) + d2);
-            }
-        }
-    for (int y = h - 1; y >= 0; --y)
-        for (int x = w - 1; x >= 0; --x) {
-            float& v = at(x, y);
-            if (x + 1 < w) v = std::min(v, at(x + 1, y) + d1);
-            if (y + 1 < h) {
-                v = std::min(v, at(x, y + 1) + d1);
-                if (x + 1 < w) v = std::min(v, at(x + 1, y + 1) + d2);
-                if (x > 0) v = std::min(v, at(x - 1, y + 1) + d2);
-            }
-        }
-    return d;
-}
 
 } // namespace
 
@@ -107,24 +65,28 @@ bool renderVersionLabel(const unsigned char* ttf, std::size_t ttfSize, const std
     int ascent = 0, descent = 0, lineGap = 0;
     stbtt_GetFontVMetrics(&font, &ascent, &descent, &lineGap);
 
-    // Glyph coverage, with room around it for the outline and the halo.
-    const float outlineR = std::max(1.0f, inkHeight * 0.06f);
-    const float haloR = std::max(1.5f, inkHeight * 0.16f);
-    const int pad = int(std::ceil(outlineR + haloR)) + 2;
+    // Outline a whole number of pixels thick, so its edge stays crisp.
+    const float outlineR = std::max(1.0f, std::round(inkHeight * 0.07f));
+    const int pad = int(std::ceil(outlineR)) + 3;
     const float baseline = float(pad) + std::ceil(float(ascent) * scale);
-    // A little extra room between letters: the halo would fuse them at small sizes.
+    // A little room between letters so the outlines don't fuse at small sizes.
     const float tracking = std::max(1.0f, inkHeight * 0.06f);
-    float penX = float(pad);
-    float textW = 0.0f;
-    for (std::size_t i = 0; i < text.size(); ++i) {
+    const auto advance = [&](std::size_t i, float& penX) {
         const int cp = static_cast<unsigned char>(text[i]);
         int adv = 0, lsb = 0;
         stbtt_GetCodepointHMetrics(&font, cp, &adv, &lsb);
-        int bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
-        stbtt_GetCodepointBitmapBoxSubpixel(&font, cp, scale, scale, penX - std::floor(penX), 0.0f, &bx0, &by0, &bx1, &by1);
-        textW = std::max(textW, std::floor(penX) + float(bx1));
         penX += float(adv) * scale + tracking;
-        if (i + 1 < text.size()) penX += float(stbtt_GetCodepointKernAdvance(&font, cp, static_cast<unsigned char>(text[i + 1]))) * scale;
+        if (i + 1 < text.size())
+            penX += float(stbtt_GetCodepointKernAdvance(&font, cp, static_cast<unsigned char>(text[i + 1]))) * scale;
+    };
+    float penX = float(pad);
+    float textW = 0.0f;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        int bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
+        stbtt_GetCodepointBitmapBoxSubpixel(&font, static_cast<unsigned char>(text[i]), scale, scale,
+                                            penX - std::floor(penX), 0.0f, &bx0, &by0, &bx1, &by1);
+        textW = std::max(textW, std::floor(penX) + float(bx1));
+        advance(i, penX);
     }
     const int w = int(std::ceil(std::max(textW, penX))) + pad;
     const int h = int(std::ceil(baseline - float(descent) * scale)) + pad;
@@ -133,12 +95,9 @@ bool renderVersionLabel(const unsigned char* ttf, std::size_t ttfSize, const std
     std::vector<float> cover(std::size_t(w) * std::size_t(h), 0.0f);
     penX = float(pad);
     for (std::size_t i = 0; i < text.size(); ++i) {
-        const int cp = static_cast<unsigned char>(text[i]);
-        int adv = 0, lsb = 0;
-        stbtt_GetCodepointHMetrics(&font, cp, &adv, &lsb);
-        const float shift = penX - std::floor(penX);
         int gw = 0, gh = 0, gx = 0, gy = 0;
-        unsigned char* bmp = stbtt_GetCodepointBitmapSubpixel(&font, scale, scale, shift, 0.0f, cp, &gw, &gh, &gx, &gy);
+        unsigned char* bmp = stbtt_GetCodepointBitmapSubpixel(&font, scale, scale, penX - std::floor(penX), 0.0f,
+                                                              static_cast<unsigned char>(text[i]), &gw, &gh, &gx, &gy);
         if (bmp) {
             const int ox = int(std::floor(penX)) + gx, oy = int(baseline) + gy;
             for (int y = 0; y < gh; ++y)
@@ -150,43 +109,36 @@ bool renderVersionLabel(const unsigned char* ttf, std::size_t ttfSize, const std
                 }
             stbtt_FreeBitmap(bmp, nullptr);
         }
-        penX += float(adv) * scale + tracking;
-        if (i + 1 < text.size()) penX += float(stbtt_GetCodepointKernAdvance(&font, cp, static_cast<unsigned char>(text[i + 1]))) * scale;
+        advance(i, penX);
     }
 
     // Ink box.
     int inkT = h, inkB = -1, inkL = w, inkR = -1;
-    std::vector<std::uint8_t> ink(cover.size()), outside(cover.size());
     for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-            const std::size_t i = std::size_t(y) * std::size_t(w) + std::size_t(x);
-            ink[i] = cover[i] >= 0.5f;
-            outside[i] = !ink[i];
-            if (cover[i] > 0.0f) {
+        for (int x = 0; x < w; ++x)
+            if (cover[std::size_t(y) * std::size_t(w) + std::size_t(x)] > 0.0f) {
                 inkT = std::min(inkT, y);
                 inkB = std::max(inkB, y);
                 inkL = std::min(inkL, x);
                 inkR = std::max(inkR, x);
             }
-        }
     if (inkB < 0) return false;
 
-    // Small holes inside the letters (Game Bubble draws its shine marks as
-    // cut-outs) are filled as highlights; real counters, like the one in a
-    // 0, stay open.
+    // Game Bubble draws its shine marks as small holes inside the letters:
+    // they are filled in white, like the logo's highlights. Real counters,
+    // like the one in a 0, are bigger and stay open.
     std::vector<std::uint8_t> shine(cover.size(), 0);
     {
-        std::vector<int> label(cover.size(), 0);
-        std::vector<std::size_t> stack;
-        int next = 0;
-        const float maxShine = 0.035f * float(inkB + 1 - inkT) * float(inkB + 1 - inkT);
+        std::vector<std::uint8_t> seen(cover.size(), 0);
+        std::vector<std::size_t> stack, members;
+        const float inkH = float(inkB + 1 - inkT);
+        const float maxShine = 0.035f * inkH * inkH;
         for (std::size_t start = 0; start < cover.size(); ++start) {
-            if (ink[start] || label[start]) continue;
-            ++next;
-            std::vector<std::size_t> members;
+            if (cover[start] >= 0.5f || seen[start]) continue;
+            members.clear();
             bool touchesBorder = false;
             stack.push_back(start);
-            label[start] = next;
+            seen[start] = 1;
             while (!stack.empty()) {
                 const std::size_t i = stack.back();
                 stack.pop_back();
@@ -198,27 +150,34 @@ bool renderVersionLabel(const unsigned char* ttf, std::size_t ttfSize, const std
                 for (int k = 0; k < 4; ++k) {
                     if (nx[k] < 0 || ny[k] < 0 || nx[k] >= w || ny[k] >= h) continue;
                     const std::size_t j = std::size_t(ny[k]) * std::size_t(w) + std::size_t(nx[k]);
-                    if (ink[j] || label[j]) continue;
-                    label[j] = next;
+                    if (cover[j] >= 0.5f || seen[j]) continue;
+                    seen[j] = 1;
                     stack.push_back(j);
                 }
             }
             if (!touchesBorder && float(members.size()) <= maxShine)
                 for (std::size_t i : members) shine[i] = 1;
         }
-        for (std::size_t i = 0; i < cover.size(); ++i)
-            if (shine[i]) {
-                ink[i] = 1;
-                outside[i] = 0;
-            }
     }
-    const std::vector<float> fromInk = distanceTo(ink, w, h);     // outside: how far from the letters
-    const std::vector<float> fromEdge = distanceTo(outside, w, h); // inside: how deep into a stroke
+    const auto solid = [&](std::size_t i) { return shine[i] ? 1.0f : cover[i]; };
 
-    // Stroke half-width, for the tube shading: the deepest point of the ink.
-    float deepest = 1.0f;
-    for (std::size_t i = 0; i < cover.size(); ++i)
-        if (ink[i]) deepest = std::max(deepest, fromEdge[i]);
+    // Outline: the letters' coverage spread by a disk: full strength out to
+    // outlineR pixels, fading over the next one.
+    const int reach = int(std::ceil(outlineR + 1.0f));
+    std::vector<float> outline(cover.size(), 0.0f);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            float best = 0.0f;
+            for (int dy = -reach; dy <= reach; ++dy)
+                for (int dx = -reach; dx <= reach; ++dx) {
+                    const int qx = x + dx, qy = y + dy;
+                    if (qx < 0 || qy < 0 || qx >= w || qy >= h) continue;
+                    const float c = solid(std::size_t(qy) * std::size_t(w) + std::size_t(qx));
+                    if (c <= best) continue;
+                    best = std::max(best, c * clamp01(outlineR + 1.0f - std::sqrt(float(dx * dx + dy * dy))));
+                }
+            outline[std::size_t(y) * std::size_t(w) + std::size_t(x)] = best;
+        }
 
     out.width = w;
     out.height = h;
@@ -227,45 +186,29 @@ bool renderVersionLabel(const unsigned char* ttf, std::size_t ttfSize, const std
     out.inkLeft = float(inkL);
     out.inkRight = float(inkR + 1);
     out.rgba.assign(std::size_t(w) * std::size_t(h) * 4, 0);
-    const float inkH = std::max(1.0f, float(inkB + 1 - inkT));
-    // Small labels get a fainter halo so they stay crisp.
-    const float haloStrength = 0.42f * (0.35f + 0.65f * smooth(10.0f, 22.0f, inkHeight));
-    for (int y = 0; y < h; ++y)
+    // Upper half lighter, with a one-pixel step at the middle of the digits.
+    const float middle = float(inkT) + float(inkB + 1 - inkT) * 0.5f;
+    for (int y = 0; y < h; ++y) {
+        const Rgb row = mix(kFillTop, kFill, clamp01(float(y) + 1.0f - middle));
         for (int x = 0; x < w; ++x) {
             const std::size_t i = std::size_t(y) * std::size_t(w) + std::size_t(x);
-            // Halo, then outline, then the glossy fill, each one "over".
-            const float dOut = ink[i] ? 0.0f : fromInk[i];
-            const float haloA = haloStrength * (1.0f - smooth(outlineR, outlineR + haloR, dOut));
-            const float outlineA = clamp01(outlineR + 0.5f - dOut);
-            const float fillA = shine[i] ? 1.0f : cover[i];
-
-            // Fill: vertical gradient, darker toward the stroke edges, and a
-            // highlight along the middle of the upper half of each stroke.
-            const float t = clamp01((float(y) + 0.5f - float(inkT)) / inkH);
-            Rgb fill = t < 0.45f ? mix(kTop, kBody, t / 0.45f) : mix(kBody, kBottom, (t - 0.45f) / 0.55f);
-            const float depth = ink[i] ? clamp01(fromEdge[i] / deepest) : 0.0f;
-            fill = mix(kEdge, fill, smooth(0.0f, 0.6f, depth));
-            const float gloss = smooth(0.4f, 0.85f, depth) * (1.0f - smooth(0.2f, 0.5f, t));
-            fill = mix(fill, kHighlight, gloss);
-            if (shine[i]) fill = mix(fill, kHighlight, 1.0f - cover[i]);
-
-            float a = haloA;
-            Rgb c = kHalo;
-            const auto over = [&](Rgb top, float topA) {
-                const float na = topA + a * (1.0f - topA);
-                if (na <= 0.0f) return;
-                c = { (top.r * topA + c.r * a * (1.0f - topA)) / na, (top.g * topA + c.g * a * (1.0f - topA)) / na,
-                      (top.b * topA + c.b * a * (1.0f - topA)) / na };
-                a = na;
-            };
-            over(kOutline, outlineA);
-            over(fill, fillA);
+            const Rgb fill = shine[i] && cover[i] < 0.5f ? kShine : row;
+            const float fillA = solid(i);
+            // Fill over the outline.
+            const float a = fillA + outline[i] * (1.0f - fillA);
+            Rgb c = kOutline;
+            if (a > 0.0f) {
+                const float wo = outline[i] * (1.0f - fillA);
+                c = { (fill.r * fillA + kOutline.r * wo) / a, (fill.g * fillA + kOutline.g * wo) / a,
+                      (fill.b * fillA + kOutline.b * wo) / a };
+            }
             unsigned char* p = &out.rgba[i * 4];
             p[0] = static_cast<unsigned char>(std::lround(std::min(255.0f, c.r)));
             p[1] = static_cast<unsigned char>(std::lround(std::min(255.0f, c.g)));
             p[2] = static_cast<unsigned char>(std::lround(std::min(255.0f, c.b)));
             p[3] = static_cast<unsigned char>(std::lround(clamp01(a) * 255.0f));
         }
+    }
     return true;
 }
 

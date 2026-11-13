@@ -199,8 +199,8 @@ int main()
     // Version label after the logo (#327).
     check(versionLabelText("1.3") == "v1.3" && versionLabelText("v1.3") == "v1.3", "label reads v1.3");
     check(versionLabelText("").empty(), "no version, no label");
-    check(near(versionLabelInkHeight(153.4f), 153.4f * kLogoLetterHeight * 0.45f), "label digits are 45% of the logo letters");
-    check(near(versionLabelInkHeight(40.0f), 12.0f), "label digits never below 12 px");
+    check(near(versionLabelInkHeight(153.4f), 153.4f * kLogoLetterHeight * 0.5f), "label digits are half the logo letters");
+    check(near(versionLabelInkHeight(40.0f), 10.0f), "label digits never below 10 px");
     {
         const float logoAspect = 2172.0f / 476.0f; // assets/logo.png
         for (float w = 800.0f; w <= 2560.0f; w += 40.0f)
@@ -208,9 +208,8 @@ int main()
                 const float logoH = hubLogoHeight(w, h, logoAspect), logoW = logoH * logoAspect;
                 const float logoX = (w - logoW) * 0.5f;
                 const float ink = versionLabelInkHeight(logoH);
-                // Generous size for "v1.3" with its outline and halo (and room
-                // for a "v10.12").
-                const float labelW = ink * 4.5f, labelH = ink * 1.9f;
+                // Ink box of "v1.3" (and room for a "v10.12").
+                const float labelW = ink * 4.5f, labelH = ink * 1.1f;
                 // No update notice; one that stays right of the label; and a
                 // wide one (with What's new) that reaches over the logo.
                 for (float noticeLeft : { w, w - 140.0f, w - 480.0f }) {
@@ -222,8 +221,7 @@ int main()
                     const bool hitsNotice = r.x1 > noticeLeft && r.x0 < w - 14.0f && r.y0 < 62.0f;
                     check(!hitsNotice, "label never under the update notice");
                     if (noticeLeft >= w)
-                        check(near((r.y0 + r.y1) * 0.5f, kLogoTop + logoH * kLogoTextCenter),
-                              "label centered on the logo lettering");
+                        check(near(r.y1, kLogoTop + logoH * kLogoTextBaseline), "label sits on the logo baseline");
                 }
             }
     }

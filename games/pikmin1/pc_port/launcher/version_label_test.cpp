@@ -1,5 +1,5 @@
-// The version label next to the logo (#327): Game Bubble, glossy orange,
-// rendered in the CPU at the requested pixel size.
+// The version label next to the logo (#327): Game Bubble, flat orange with a
+// lighter top and a crisp outline, rendered in the CPU at the requested size.
 #include "version_label.h"
 
 #include "font_game_bubble.h"
@@ -35,6 +35,26 @@ int main()
             if (img.rgba[i] > 200 && img.rgba[i + 1] > 60 && img.rgba[i + 2] < 120) ++orange;
         }
         check(opaque > 0 && orange * 2 > opaque, "mostly orange letters");
+        // Crisp dark-orange outline, lighter upper half, and no soft halo:
+        // nothing faint more than a couple of pixels outside the outline.
+        int outline = 0, faint = 0;
+        double topG = 0, bottomG = 0;
+        int topN = 0, bottomN = 0;
+        const float mid = (img.inkTop + img.inkBottom) * 0.5f;
+        for (int y = 0; y < img.height; ++y)
+            for (int x = 0; x < img.width; ++x) {
+                const unsigned char* p = &img.rgba[(std::size_t(y) * img.width + x) * 4];
+                if (p[3] == 255 && p[0] < 200) ++outline;
+                if (p[3] > 0 && p[3] < 255 && (x < img.inkLeft - ink * 0.07f - 3 || x >= img.inkRight + ink * 0.07f + 3))
+                    ++faint;
+                if (p[3] == 255 && p[0] == 255) {
+                    if (y + 1 < mid) { topG += p[1]; ++topN; }
+                    else if (y > mid) { bottomG += p[1]; ++bottomN; }
+                }
+            }
+        check(outline > 0, "dark outline");
+        check(faint == 0, "no halo");
+        check(topN > 0 && bottomN > 0 && topG / topN > bottomG / bottomN + 10.0, "upper half lighter");
         check(img.rgba[3] == 0 && img.rgba[img.rgba.size() - 1] == 0, "transparent around the label");
     }
     VersionLabelImage none;

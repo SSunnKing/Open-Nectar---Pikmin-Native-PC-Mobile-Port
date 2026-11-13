@@ -2911,9 +2911,10 @@ struct Hub {
         return a.x - w - buttons::kButtonGap;
     }
 
-    // Versión de este launcher (#327) a la derecha del logo, centrada con sus
-    // letras y con su mismo aspecto: Game Bubble naranja y brillante, pintada
-    // en la CPU (version_label.cpp) a los píxeles reales de la pantalla.
+    // Versión de este launcher (#327) a la derecha del logo, sobre la línea
+    // base de sus letras y con su aspecto: Game Bubble en naranja, la mitad de
+    // arriba más clara, brillos blancos y un contorno nítido. Se pinta en la
+    // CPU (version_label.cpp) a los píxeles reales de la pantalla.
     void drawVersionLabel(ImVec2 size, ImVec2 logoAt, float logoW, float logoH, float noticeLeft)
     {
         const std::string text = versionLabelText(currentVersion());
@@ -2930,21 +2931,23 @@ struct Hub {
         ImDrawList* dl = ImGui::GetWindowDrawList();
         // El aviso de actualización ocupa de y = 18 a 58, más 4 px de halo.
         if (!versionTex.valid()) {
-            // Sin la fuente: el texto del launcher, en el naranja del logo.
+            // Sin la fuente: el texto del launcher, en el naranja del logo,
+            // con su base en la del logo.
             const float textSize = std::max(16.0f, versionLabelInkHeight(logoH) * 1.4f);
+            const float ascent = fonts.body->Ascent * textSize / fonts.body->FontSize;
             const ImVec2 t = fonts.body->CalcTextSizeA(textSize, FLT_MAX, 0.0f, text.c_str());
-            const LabelRect r = placeVersionLabel(size.x, logoAt.x, logoAt.y, logoW, logoH, t.x, t.y, noticeLeft, 62.0f);
+            const LabelRect r
+                = placeVersionLabel(size.x, logoAt.x, logoAt.y, logoW, logoH, t.x, ascent, noticeLeft, 62.0f);
             dl->AddText(fonts.body, textSize, ImVec2(std::round(r.x0), std::round(r.y0)), col(kOrange), text.c_str());
             return;
         }
-        // Se centra la tinta de las cifras; el contorno y el halo sobresalen.
+        // La caja de tinta de las cifras se apoya en la base; el contorno sobresale.
         const VersionLabelImage& img = versionImage;
         const LabelRect r = placeVersionLabel(size.x, logoAt.x, logoAt.y, logoW, logoH,
                                               (img.inkRight - img.inkLeft) / scale, (img.inkBottom - img.inkTop) / scale,
                                               noticeLeft, 62.0f);
         // A píxel entero de la pantalla, para que la imagen salga 1:1.
-        const ImVec2 a(std::round((r.x0 - img.inkLeft / scale) * scale) / scale,
-                       std::round((r.y0 - img.inkTop / scale) * scale) / scale);
+        const ImVec2 a(std::round(r.x0 * scale - img.inkLeft) / scale, std::round(r.y1 * scale - img.inkBottom) / scale);
         const ImVec2 b(a.x + float(img.width) / scale, a.y + float(img.height) / scale);
         dl->AddImage(versionTex.imgui(), a, b);
     }
