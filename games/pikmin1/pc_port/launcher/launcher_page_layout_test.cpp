@@ -196,6 +196,33 @@ int main()
             }
     }
 
+    // Version label after the logo (#327).
+    check(versionLabelText("1.3") == "v1.3" && versionLabelText("v1.3") == "v1.3", "label reads v1.3");
+    check(versionLabelText("").empty(), "no version, no label");
+    check(near(versionLabelInkHeight(153.4f), 153.4f * kLogoLetterHeight * 0.5f), "label digits are half the logo letters");
+    check(near(versionLabelInkHeight(40.0f), 10.0f), "label digits never below 10 px");
+    {
+        const float logoAspect = 2172.0f / 476.0f; // assets/logo.png
+        for (float w = 800.0f; w <= 2560.0f; w += 40.0f)
+            for (float h = 600.0f; h <= 1440.0f; h += 40.0f) {
+                const float logoH = hubLogoHeight(w, h, logoAspect), logoW = logoH * logoAspect;
+                const float logoX = (w - logoW) * 0.5f;
+                const float ink = versionLabelInkHeight(logoH);
+                // Ink box of "v1.3" (and room for a "v10.12").
+                const float labelW = ink * 4.5f, labelH = ink * 1.1f;
+                const LabelRect r = placeVersionLabel(w, logoX, kLogoTop, logoW, logoH, labelW, labelH);
+                check(r.x0 >= logoX + logoW, "label sits right of the logo");
+                check(r.x1 <= w - 12.0f, "label stays inside the window");
+                check(r.y0 >= 0.0f && r.y1 <= kLogoTop + logoH + 10.0f, "label stays above the tabs");
+                check(near(r.y1, kLogoTop + logoH * kLogoTextBaseline), "label always on the logo baseline");
+                // The update notice and What's new pills span y = 18..58 plus a
+                // 4 px glow, and can reach over the logo on narrow windows: the
+                // label, with its outline, always stays below them.
+                const float outline = std::max(1.0f, std::round(ink * 0.07f));
+                check(r.y0 - outline >= 62.0f, "label never under the update notice");
+            }
+    }
+
     std::cout << "launcher_page_layout_test: ok\n";
     return 0;
 }

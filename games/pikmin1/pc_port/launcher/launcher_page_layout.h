@@ -284,4 +284,55 @@ inline float hubContentTop(float windowW, float windowH, float logoAspect, bool 
     return kLogoTop + hubLogoHeight(windowW, windowH, logoAspect) + 10.0f + (tabs ? kTabsH : 0.0f);
 }
 
+// ── Versión junto al logo (#327) ────────────────────────────────────────────
+
+// La versión va a la derecha del rótulo OPEN NECTAR, apoyada en la misma
+// línea base. En logo.png (476 px de alto) las letras van de la fila ~210 a
+// la 347: la base está en la fila 348 y miden un 28,8 % del alto del logo.
+inline constexpr float kLogoTextBaseline = 348.0f / 476.0f;
+inline constexpr float kLogoLetterHeight = 0.288f;
+
+// Alto máximo de la textura del logo (uploadTexture la reduce a la mitad
+// mientras pase del doble): 160 a 1x, como siempre; con más densidad
+// (HiDPI o ventana grande) crece para que el logo salga tan nítido como el
+// texto de la versión.
+inline int logoTextureMaxHeight(float density)
+{
+    return int(std::lround(160.0f * std::max(1.0f, density)));
+}
+
+// Alto de las cifras de la versión: la mitad del de las letras del logo;
+// nunca por debajo de 10 px.
+inline float versionLabelInkHeight(float logoH) { return std::max(10.0f, logoH * kLogoLetterHeight * 0.5f); }
+
+// Texto: "v" + versión ("1.3" → "v1.3"). Una etiqueta que ya trae la "v" no
+// la duplica; sin versión no hay rótulo.
+inline std::string versionLabelText(const std::string& version)
+{
+    if (version.empty()) return {};
+    if (version[0] == 'v' || version[0] == 'V') return "v" + version.substr(1);
+    return "v" + version;
+}
+
+struct LabelRect {
+    float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
+};
+
+// Coloca las letras del rótulo (`labelW` x `labelH`, su caja de tinta) tras
+// el logo, con su base siempre en la de las letras del logo. No se mueve por
+// el aviso de actualización: queda por debajo de él en todos los tamaños
+// (launcher_page_layout_test lo comprueba).
+inline LabelRect placeVersionLabel(float windowW, float logoX, float logoY, float logoW, float logoH, float labelW,
+                                   float labelH)
+{
+    constexpr float kMargin = 12.0f;
+    LabelRect r;
+    r.x0 = logoX + logoW + std::max(4.0f, logoH * 0.03f);
+    r.x0 = std::min(r.x0, windowW - kMargin - labelW);
+    r.y1 = logoY + logoH * kLogoTextBaseline;
+    r.y0 = r.y1 - labelH;
+    r.x1 = r.x0 + labelW;
+    return r;
+}
+
 } // namespace pikmin::launcher

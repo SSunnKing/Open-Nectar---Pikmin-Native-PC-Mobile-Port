@@ -40,6 +40,7 @@
 #include "texture_pack_storage.h"
 #include "hd_model_downloads.h"
 #include "release_update.h"
+#include "version_label.h"
 
 #include "imgui.h"
 #include "imgui_internal.h" // cola de eventos: escalar la posición del ratón
@@ -61,6 +62,7 @@
 
 #include "font_fredoka.h"
 #include "logo_open_nectar.h"
+#include "font_game_bubble.h"
 
 #include "../pc_icon.h"
 
@@ -683,6 +685,11 @@ struct Hub {
     HubResult& result;
     Fonts fonts;
     Texture logo;
+    // Versión junto al logo, ya pintada (se rehace si cambia de tamaño).
+    Texture versionTex;
+    VersionLabelImage versionImage;
+    std::string versionText;
+    float versionInk = 0.0f;
     GameArt art;
     Texture covers[2];
     float coverStart[2] = { 0.0f, 0.0f };
@@ -2902,6 +2909,47 @@ struct Hub {
         }
     }
 
+    // Versión de este launcher (#327) a la derecha del logo, sobre la línea
+    // base de sus letras y con su aspecto: Game Bubble en naranja, la mitad de
+    // arriba más clara, brillos blancos y un contorno nítido. Se pinta en la
+    // CPU (version_label.cpp) a los píxeles reales de la pantalla.
+    void drawVersionLabel(ImVec2 size, ImVec2 logoAt, float logoW, float logoH)
+    {
+        const std::string text = versionLabelText(currentVersion());
+        if (text.empty()) return;
+        const float scale = std::max(1.0f, ImGui::GetIO().DisplayFramebufferScale.x);
+        const float ink = std::round(versionLabelInkHeight(logoH) * scale);
+        if (text != versionText || ink != versionInk) {
+            freeTexture(versionTex);
+            versionText = text;
+            versionInk = ink;
+            if (renderVersionLabel(kFontGameBubble, kFontGameBubbleSize, text, ink, versionImage))
+                versionTex = uploadTexture(versionImage.rgba, versionImage.width, versionImage.height, 0);
+        }
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        // Siempre en la misma base; el aviso de actualización (y = 18 a 58, más
+        // 4 px de halo) queda por encima en todos los tamaños (ver los tests).
+        if (!versionTex.valid()) {
+            // Sin la fuente: el texto del launcher, en el naranja del logo,
+            // con su base en la del logo.
+            const float textSize = std::max(16.0f, versionLabelInkHeight(logoH) * 1.4f);
+            const float ascent = fonts.body->Ascent * textSize / fonts.body->FontSize;
+            const ImVec2 t = fonts.body->CalcTextSizeA(textSize, FLT_MAX, 0.0f, text.c_str());
+            const LabelRect r
+                = placeVersionLabel(size.x, logoAt.x, logoAt.y, logoW, logoH, t.x, ascent);
+            dl->AddText(fonts.body, textSize, ImVec2(std::round(r.x0), std::round(r.y0)), col(kOrange), text.c_str());
+            return;
+        }
+        // La caja de tinta de las cifras se apoya en la base; el contorno sobresale.
+        const VersionLabelImage& img = versionImage;
+        const LabelRect r = placeVersionLabel(size.x, logoAt.x, logoAt.y, logoW, logoH,
+                                              (img.inkRight - img.inkLeft) / scale, (img.inkBottom - img.inkTop) / scale);
+        // A píxel entero de la pantalla, para que la imagen salga 1:1.
+        const ImVec2 a(std::round(r.x0 * scale - img.inkLeft) / scale, std::round(r.y1 * scale - img.inkBottom) / scale);
+        const ImVec2 b(a.x + float(img.width) / scale, a.y + float(img.height) / scale);
+        dl->AddImage(versionTex.imgui(), a, b);
+    }
+
     // Quita el marcado en línea de Markdown: **negrita**, `código` y
     // [texto](enlace) se quedan en su texto.
     static std::string plainInline(const std::string& in)
@@ -3239,6 +3287,7 @@ struct Hub {
         }
 
         drawReleaseNotice(size, t);
+        drawVersionLabel(size, logoAt, logoW, logoH);
         if (!state.dataFolder.empty()) {
             // Abajo a la derecha, a la altura del rótulo de la carpeta.
             const char* label = "Change folder";
@@ -3259,11 +3308,20 @@ struct Hub {
 #endif
     }
 
+    // Logo con resolución para la densidad de la pantalla: a 1x se reduce
+    // en la CPU (sin mipmaps), en HiDPI se queda entero para no verse borroso.
+    void loadLogo(float density)
+    {
+        freeTexture(logo);
+        logo = loadImageTexture(kLogoOpenNectar, kLogoOpenNectarSize, logoTextureMaxHeight(density));
+    }
+
     void release()
     {
         freeDewdrop();
         for (Texture& cover : covers) freeTexture(cover);
         freeTexture(logo);
+        freeTexture(versionTex);
         slideshow.release();
         art.release();
     }
@@ -3541,6 +3599,8 @@ struct HubWindow::Impl {
             gFontDensity = density;
             ImGui::GetIO().Fonts->Clear();
             loadFonts(hub->fonts);
+            // El logo, a la misma densidad que el texto (la versión va a su lado).
+            hub->loadLogo(density);
             ImGui_ImplOpenGL3_DestroyFontsTexture();
             ImGui_ImplOpenGL3_CreateFontsTexture();
         }
@@ -3794,7 +3854,11 @@ bool HubWindow::open(const HubState& state, std::string& error)
     };
 #endif
     loadFonts(hub.fonts);
-    hub.logo = loadImageTexture(kLogoOpenNectar, kLogoOpenNectarSize, 160);
+#ifdef __ANDROID__
+    hub.loadLogo(gUiScale);
+#else
+    hub.loadLogo(gFontDensity);
+#endif
     hub.art.load(m.state.gameDataDirectory);
     if (hub.art.worldMap.valid()) {
         // El paisaje del mapa del mundo entra en el pase de fondo.
