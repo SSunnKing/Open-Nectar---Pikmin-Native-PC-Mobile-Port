@@ -23,6 +23,7 @@
 #include "UtilityKando.h"
 #include "WeedsItem.h"
 #include "WorkObject.h"
+#include "pc_throw_arc.h"
 #include "settings/pc_settings.h"
 #include "timing/pc_anim_timing.h"
 #include "pc_coop.h"
@@ -2515,6 +2516,7 @@ void Piki::init(Navi* navi)
 	mFiredState       = 0;
 #if defined(PIKI_PC_PORT)
 	mPcSieging = false; // VS: el objeto se recicla; no heredar el asedio de otro Pikmin
+	pc_throw_arc_release(this);
 #endif
 	mIsCallable       = true;
 	mLastAnimPosition.set(0.0f, 0.0f, 0.0f);

@@ -19,6 +19,7 @@
 #include "PikiHeadItem.h"
 #include "PikiMgr.h"
 #if defined(PIKI_PC_PORT)
+#include "pc_throw_arc.h"
 #include "settings/pc_settings.h"
 #endif
 #include "PlayerState.h"
@@ -1969,6 +1970,14 @@ void PikiFlyingState::exec(Piki* piki)
 
 	mSparkleEffect.updatePos(piki->mSRT.t);
 
+#if defined(PIKI_PC_PORT)
+	// Movement already took this tick's 30 Hz step, or held. A hold must not
+	// start the glide or draw another random fall offset.
+	if (pc_throw_arc_would_hold(piki)) {
+		return;
+	}
+#endif
+
 	f32 startGrav          = AICONST.mGravity() * 0.8f;
 	f32 glideGrav          = AICONST.mGravity() * C_PIKI_PARM(piki, mFlowerGravityScale);
 	f32 gravTransitionTime = 0.15f;
@@ -2018,8 +2027,13 @@ void PikiFlyingState::exec(Piki* piki)
 		return;
 	}
 
-	piki->mFaceDirection = roundAng(gsys->getFrameTime() * PI / 0.42f + piki->mFaceDirection);
-	mGlideTimer += gsys->getFrameTime();
+#if defined(PIKI_PC_PORT)
+	const f32 step = pc_throw_arc_integrate_dt(piki, gsys->getFrameTime());
+#else
+	const f32 step = gsys->getFrameTime();
+#endif
+	piki->mFaceDirection = roundAng(step * PI / 0.42f + piki->mFaceDirection);
+	mGlideTimer += step;
 
 	// for some natural variation in fall speed
 	f32 randomFactor = (gsys->getRand(1.0f) - 0.5f) * 0.01f;
@@ -2033,7 +2047,7 @@ void PikiFlyingState::exec(Piki* piki)
 		gravAdjust = glideGrav;
 	}
 
-	piki->mVelocity.y += ((AICONST.mGravity() - gravAdjust) * (randomFactor + 1.0f)) * gsys->getFrameTime();
+	piki->mVelocity.y += ((AICONST.mGravity() - gravAdjust) * (randomFactor + 1.0f)) * step;
 
 	STACK_PAD_VAR(4);
 }
@@ -2043,6 +2057,9 @@ void PikiFlyingState::exec(Piki* piki)
  */
 void PikiFlyingState::cleanup(Piki* piki)
 {
+#if defined(PIKI_PC_PORT)
+	pc_throw_arc_release(piki);
+#endif
 	mSparkleEffect.kill();
 	piki->restartAI();
 	piki->mWantToStick = false;
