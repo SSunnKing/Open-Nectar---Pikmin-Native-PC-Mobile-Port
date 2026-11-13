@@ -2865,15 +2865,13 @@ struct Hub {
     }
 
     // Aviso de versión nueva, arriba a la derecha; pulsarlo es como Update.
-    // Devuelve el borde izquierdo del aviso (size.x si no hay aviso), para que
-    // la versión junto al logo no se meta debajo.
-    float drawReleaseNotice(ImVec2 size, float t)
+    void drawReleaseNotice(ImVec2 size, float t)
     {
-        if (!releaseCheck || !releaseCheck->done) return size.x;
+        if (!releaseCheck || !releaseCheck->done) return;
         std::string text;
         {
             std::lock_guard<std::mutex> lock(releaseCheck->mutex);
-            if (!releaseCheck->newer) return size.x;
+            if (!releaseCheck->newer) return;
             text = "Open Nectar " + releaseCheck->latest.version + " is available";
         }
         // Píldora a la medida del texto, con el mismo margen que los botones.
@@ -2899,7 +2897,7 @@ struct Hub {
             notes = releaseCheck->latest.notes;
             version = releaseCheck->latest.version;
         }
-        if (notes.empty()) return a.x - 4.0f;
+        if (notes.empty()) return;
         const float w = buttons::buttonWidth(role::kAction);
         ImGui::SetCursorScreenPos(ImVec2(a.x - w - buttons::kButtonGap, a.y));
         if (glassButton("What's new", role::kAction, b.y - a.y)) {
@@ -2908,14 +2906,13 @@ struct Hub {
             whatsNewNotes = notes;
             whatsNewNotesH = -1.0f;
         }
-        return a.x - w - buttons::kButtonGap;
     }
 
     // Versión de este launcher (#327) a la derecha del logo, sobre la línea
     // base de sus letras y con su aspecto: Game Bubble en naranja, la mitad de
     // arriba más clara, brillos blancos y un contorno nítido. Se pinta en la
     // CPU (version_label.cpp) a los píxeles reales de la pantalla.
-    void drawVersionLabel(ImVec2 size, ImVec2 logoAt, float logoW, float logoH, float noticeLeft)
+    void drawVersionLabel(ImVec2 size, ImVec2 logoAt, float logoW, float logoH)
     {
         const std::string text = versionLabelText(currentVersion());
         if (text.empty()) return;
@@ -2929,7 +2926,8 @@ struct Hub {
                 versionTex = uploadTexture(versionImage.rgba, versionImage.width, versionImage.height, 0);
         }
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        // El aviso de actualización ocupa de y = 18 a 58, más 4 px de halo.
+        // Siempre en la misma base; el aviso de actualización (y = 18 a 58, más
+        // 4 px de halo) queda por encima en todos los tamaños (ver los tests).
         if (!versionTex.valid()) {
             // Sin la fuente: el texto del launcher, en el naranja del logo,
             // con su base en la del logo.
@@ -2937,15 +2935,14 @@ struct Hub {
             const float ascent = fonts.body->Ascent * textSize / fonts.body->FontSize;
             const ImVec2 t = fonts.body->CalcTextSizeA(textSize, FLT_MAX, 0.0f, text.c_str());
             const LabelRect r
-                = placeVersionLabel(size.x, logoAt.x, logoAt.y, logoW, logoH, t.x, ascent, noticeLeft, 62.0f);
+                = placeVersionLabel(size.x, logoAt.x, logoAt.y, logoW, logoH, t.x, ascent);
             dl->AddText(fonts.body, textSize, ImVec2(std::round(r.x0), std::round(r.y0)), col(kOrange), text.c_str());
             return;
         }
         // La caja de tinta de las cifras se apoya en la base; el contorno sobresale.
         const VersionLabelImage& img = versionImage;
         const LabelRect r = placeVersionLabel(size.x, logoAt.x, logoAt.y, logoW, logoH,
-                                              (img.inkRight - img.inkLeft) / scale, (img.inkBottom - img.inkTop) / scale,
-                                              noticeLeft, 62.0f);
+                                              (img.inkRight - img.inkLeft) / scale, (img.inkBottom - img.inkTop) / scale);
         // A píxel entero de la pantalla, para que la imagen salga 1:1.
         const ImVec2 a(std::round(r.x0 * scale - img.inkLeft) / scale, std::round(r.y1 * scale - img.inkBottom) / scale);
         const ImVec2 b(a.x + float(img.width) / scale, a.y + float(img.height) / scale);
@@ -3288,8 +3285,8 @@ struct Hub {
             break;
         }
 
-        const float noticeLeft = drawReleaseNotice(size, t);
-        drawVersionLabel(size, logoAt, logoW, logoH, noticeLeft);
+        drawReleaseNotice(size, t);
+        drawVersionLabel(size, logoAt, logoW, logoH);
         if (!state.dataFolder.empty()) {
             // Abajo a la derecha, a la altura del rótulo de la carpeta.
             const char* label = "Change folder";

@@ -210,19 +210,16 @@ int main()
                 const float ink = versionLabelInkHeight(logoH);
                 // Ink box of "v1.3" (and room for a "v10.12").
                 const float labelW = ink * 4.5f, labelH = ink * 1.1f;
-                // No update notice; one that stays right of the label; and a
-                // wide one (with What's new) that reaches over the logo.
-                for (float noticeLeft : { w, w - 140.0f, w - 480.0f }) {
-                    const LabelRect r
-                        = placeVersionLabel(w, logoX, kLogoTop, logoW, logoH, labelW, labelH, noticeLeft, 62.0f);
-                    check(r.x0 >= logoX + logoW, "label sits right of the logo");
-                    check(r.x1 <= w - 12.0f, "label stays inside the window");
-                    check(r.y0 >= 0.0f && r.y1 <= kLogoTop + logoH + 10.0f, "label stays above the tabs");
-                    const bool hitsNotice = r.x1 > noticeLeft && r.x0 < w - 14.0f && r.y0 < 62.0f;
-                    check(!hitsNotice, "label never under the update notice");
-                    if (noticeLeft >= w)
-                        check(near(r.y1, kLogoTop + logoH * kLogoTextBaseline), "label sits on the logo baseline");
-                }
+                const LabelRect r = placeVersionLabel(w, logoX, kLogoTop, logoW, logoH, labelW, labelH);
+                check(r.x0 >= logoX + logoW, "label sits right of the logo");
+                check(r.x1 <= w - 12.0f, "label stays inside the window");
+                check(r.y0 >= 0.0f && r.y1 <= kLogoTop + logoH + 10.0f, "label stays above the tabs");
+                check(near(r.y1, kLogoTop + logoH * kLogoTextBaseline), "label always on the logo baseline");
+                // The update notice and What's new pills span y = 18..58 plus a
+                // 4 px glow, and can reach over the logo on narrow windows: the
+                // label, with its outline, always stays below them.
+                const float outline = std::max(1.0f, std::round(ink * 0.07f));
+                check(r.y0 - outline >= 62.0f, "label never under the update notice");
             }
     }
 

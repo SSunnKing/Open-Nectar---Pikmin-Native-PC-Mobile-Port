@@ -319,24 +319,19 @@ struct LabelRect {
 };
 
 // Coloca las letras del rótulo (`labelW` x `labelH`, su caja de tinta) tras
-// el logo, con su base en la de las letras del logo.
-// `noticeLeft` es el borde izquierdo del aviso de actualización de arriba a la
-// derecha (>= windowW si no hay aviso) y `noticeBottom` su borde inferior: si
-// se tocan, el rótulo baja hasta quedar justo debajo del aviso, al lado del
-// logo.
+// el logo, con su base siempre en la de las letras del logo. No se mueve por
+// el aviso de actualización: queda por debajo de él en todos los tamaños
+// (launcher_page_layout_test lo comprueba).
 inline LabelRect placeVersionLabel(float windowW, float logoX, float logoY, float logoW, float logoH, float labelW,
-                                   float labelH, float noticeLeft, float noticeBottom)
+                                   float labelH)
 {
     constexpr float kMargin = 12.0f;
-    constexpr float kNoticeGap = 6.0f;
     LabelRect r;
     r.x0 = logoX + logoW + std::max(4.0f, logoH * 0.03f);
     r.x0 = std::min(r.x0, windowW - kMargin - labelW);
-    r.y0 = logoY + logoH * kLogoTextBaseline - labelH;
-    if (noticeLeft < windowW && r.x0 + labelW > noticeLeft - kNoticeGap)
-        r.y0 = std::max(r.y0, noticeBottom + kNoticeGap);
+    r.y1 = logoY + logoH * kLogoTextBaseline;
+    r.y0 = r.y1 - labelH;
     r.x1 = r.x0 + labelW;
-    r.y1 = r.y0 + labelH;
     return r;
 }
 
