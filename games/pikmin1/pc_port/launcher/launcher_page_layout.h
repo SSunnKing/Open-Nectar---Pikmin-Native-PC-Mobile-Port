@@ -286,9 +286,11 @@ inline float hubContentTop(float windowW, float windowH, float logoAspect, bool 
 
 // ── Versión junto al logo (#327) ────────────────────────────────────────────
 
-// La píldora "v1.3" va a la derecha del rótulo OPEN NECTAR, apoyada en su
-// línea base. En logo.png las letras acaban al 72,5 % del alto.
-inline constexpr float kLogoTextBaseline = 0.725f;
+// La versión va a la derecha del rótulo OPEN NECTAR, centrada en vertical con
+// sus letras. En logo.png las letras ocupan del 43 % al 74 % del alto: su
+// centro está al 58,4 % y miden el 30,7 % del alto del logo.
+inline constexpr float kLogoTextCenter = 0.584f;
+inline constexpr float kLogoLetterHeight = 0.307f;
 
 // Alto máximo de la textura del logo (uploadTexture la reduce a la mitad
 // mientras pase del doble): 160 a 1x, como siempre; con más densidad
@@ -299,40 +301,41 @@ inline int logoTextureMaxHeight(float density)
     return int(std::lround(160.0f * std::max(1.0f, density)));
 }
 
-// Texto de la píldora: "v" + versión ("1.3" → "v1.3"). Una etiqueta que ya
-// trae la "v" no la duplica; sin versión no hay píldora.
-inline std::string versionBadgeLabel(const std::string& version)
+// Alto de las cifras de la versión: un 45 % del de las letras del logo, para
+// que se lea como un rótulo secundario; nunca por debajo de 12 px.
+inline float versionLabelInkHeight(float logoH) { return std::max(12.0f, logoH * kLogoLetterHeight * 0.45f); }
+
+// Texto: "v" + versión ("1.3" → "v1.3"). Una etiqueta que ya trae la "v" no
+// la duplica; sin versión no hay rótulo.
+inline std::string versionLabelText(const std::string& version)
 {
     if (version.empty()) return {};
     if (version[0] == 'v' || version[0] == 'V') return "v" + version.substr(1);
     return "v" + version;
 }
 
-// Tamaño de letra de la píldora: crece con el logo, entre el de los pies de
-// página (16) y el del texto normal (21).
-inline float versionBadgeTextSize(float logoH) { return std::clamp(logoH * 0.16f, 16.0f, 21.0f); }
-
-struct BadgeRect {
+struct LabelRect {
     float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
 };
 
-// Coloca la píldora (`badgeW` x `badgeH`) tras el logo. `noticeLeft` es el
-// borde izquierdo del aviso de actualización de arriba a la derecha (>=
-// windowW si no hay aviso) y `noticeBottom` su borde inferior: si se tocan, la
-// píldora baja hasta quedar justo debajo del aviso, al lado del logo.
-inline BadgeRect placeVersionBadge(float windowW, float logoX, float logoY, float logoW, float logoH, float badgeW,
-                                   float badgeH, float noticeLeft, float noticeBottom)
+// Coloca el rótulo (`labelW` x `labelH`, centrado en sus letras) tras el logo.
+// `noticeLeft` es el borde izquierdo del aviso de actualización de arriba a la
+// derecha (>= windowW si no hay aviso) y `noticeBottom` su borde inferior: si
+// se tocan, el rótulo baja hasta quedar justo debajo del aviso, al lado del
+// logo.
+inline LabelRect placeVersionLabel(float windowW, float logoX, float logoY, float logoW, float logoH, float labelW,
+                                   float labelH, float noticeLeft, float noticeBottom)
 {
     constexpr float kMargin = 12.0f;
     constexpr float kNoticeGap = 6.0f;
-    BadgeRect r;
-    r.x0 = logoX + logoW + std::max(6.0f, logoH * 0.06f);
-    r.x0 = std::min(r.x0, windowW - kMargin - badgeW);
-    r.y0 = logoY + logoH * kLogoTextBaseline - badgeH;
-    if (noticeLeft < windowW && r.x0 + badgeW > noticeLeft - kNoticeGap)
+    LabelRect r;
+    r.x0 = logoX + logoW + std::max(4.0f, logoH * 0.03f);
+    r.x0 = std::min(r.x0, windowW - kMargin - labelW);
+    r.y0 = logoY + logoH * kLogoTextCenter - labelH * 0.5f;
+    if (noticeLeft < windowW && r.x0 + labelW > noticeLeft - kNoticeGap)
         r.y0 = std::max(r.y0, noticeBottom + kNoticeGap);
-    r.x1 = r.x0 + badgeW;
-    r.y1 = r.y0 + badgeH;
+    r.x1 = r.x0 + labelW;
+    r.y1 = r.y0 + labelH;
     return r;
 }
 

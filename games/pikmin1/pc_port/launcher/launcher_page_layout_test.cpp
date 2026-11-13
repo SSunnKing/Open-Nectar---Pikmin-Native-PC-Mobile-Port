@@ -196,42 +196,34 @@ int main()
             }
     }
 
-    // Version badge after the logo (#327).
-    check(versionBadgeLabel("1.3") == "v1.3" && versionBadgeLabel("v1.3") == "v1.3", "badge reads v1.3");
-    check(versionBadgeLabel("").empty(), "no version, no badge");
-    // The logo texture keeps its 476 px source from density 1.5 up (HiDPI),
-    // and is halved to 238 px at 1x as before.
-    {
-        const auto texH = [](float density) {
-            int h = 476;
-            while (h > logoTextureMaxHeight(density) * 2) h /= 2;
-            return h;
-        };
-        check(texH(1.0f) == 238 && texH(1.5f) == 476 && texH(2.0f) == 476 && texH(3.5f) == 476,
-              "logo texture follows the display density");
-    }
-    check(near(versionBadgeTextSize(40.0f), 16.0f) && near(versionBadgeTextSize(400.0f), 21.0f), "badge text size clamps");
+    // Version label after the logo (#327).
+    check(versionLabelText("1.3") == "v1.3" && versionLabelText("v1.3") == "v1.3", "label reads v1.3");
+    check(versionLabelText("").empty(), "no version, no label");
+    check(near(versionLabelInkHeight(153.4f), 153.4f * kLogoLetterHeight * 0.45f), "label digits are 45% of the logo letters");
+    check(near(versionLabelInkHeight(40.0f), 12.0f), "label digits never below 12 px");
     {
         const float logoAspect = 2172.0f / 476.0f; // assets/logo.png
         for (float w = 800.0f; w <= 2560.0f; w += 40.0f)
             for (float h = 600.0f; h <= 1440.0f; h += 40.0f) {
                 const float logoH = hubLogoHeight(w, h, logoAspect), logoW = logoH * logoAspect;
                 const float logoX = (w - logoW) * 0.5f;
-                const float textSize = versionBadgeTextSize(logoH);
-                // Generous width for "v1.3" (and room for a "v10.12").
-                const float badgeW = textSize * 4.0f, badgeH = textSize * 1.4f;
-                // No update notice; one that stays right of the badge; and a
+                const float ink = versionLabelInkHeight(logoH);
+                // Generous size for "v1.3" with its outline and halo (and room
+                // for a "v10.12").
+                const float labelW = ink * 4.5f, labelH = ink * 1.9f;
+                // No update notice; one that stays right of the label; and a
                 // wide one (with What's new) that reaches over the logo.
                 for (float noticeLeft : { w, w - 140.0f, w - 480.0f }) {
-                    const BadgeRect r
-                        = placeVersionBadge(w, logoX, kLogoTop, logoW, logoH, badgeW, badgeH, noticeLeft, 62.0f);
-                    check(r.x0 >= logoX + logoW, "badge sits right of the logo");
-                    check(r.x1 <= w - 12.0f, "badge stays inside the window");
-                    check(r.y0 >= 0.0f && r.y1 <= kLogoTop + logoH + 10.0f, "badge stays above the tabs");
+                    const LabelRect r
+                        = placeVersionLabel(w, logoX, kLogoTop, logoW, logoH, labelW, labelH, noticeLeft, 62.0f);
+                    check(r.x0 >= logoX + logoW, "label sits right of the logo");
+                    check(r.x1 <= w - 12.0f, "label stays inside the window");
+                    check(r.y0 >= 0.0f && r.y1 <= kLogoTop + logoH + 10.0f, "label stays above the tabs");
                     const bool hitsNotice = r.x1 > noticeLeft && r.x0 < w - 14.0f && r.y0 < 62.0f;
-                    check(!hitsNotice, "badge never under the update notice");
+                    check(!hitsNotice, "label never under the update notice");
                     if (noticeLeft >= w)
-                        check(near(r.y1, kLogoTop + logoH * kLogoTextBaseline), "badge sits on the logo baseline");
+                        check(near((r.y0 + r.y1) * 0.5f, kLogoTop + logoH * kLogoTextCenter),
+                              "label centered on the logo lettering");
                 }
             }
     }

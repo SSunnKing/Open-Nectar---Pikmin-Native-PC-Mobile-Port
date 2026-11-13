@@ -1082,10 +1082,13 @@ if(ANDROID AND NOT TARGET nectar_launcher)
     file(MAKE_DIRECTORY "${LAUNCHER_EMBED_DIR}")
     embed_file("${CMAKE_CURRENT_SOURCE_DIR}/pc_port/launcher/assets/logo.png" "${LAUNCHER_EMBED_DIR}/logo_open_nectar.h" kLogoOpenNectar)
     embed_file("${CMAKE_CURRENT_SOURCE_DIR}/pc_port/launcher/assets/Fredoka.ttf" "${LAUNCHER_EMBED_DIR}/font_fredoka.h" kFontFredoka)
+    # Solo para la versión junto al logo (#327). Licencia: assets/GameBubble-LICENSE.txt.
+    embed_file("${CMAKE_CURRENT_SOURCE_DIR}/pc_port/launcher/assets/GameBubble.ttf" "${LAUNCHER_EMBED_DIR}/font_game_bubble.h" kFontGameBubble)
 
     add_library(nectar_launcher SHARED
         pc_port/launcher/launcher_android_main.cpp
         pc_port/launcher/launcher_gui.cpp
+        pc_port/launcher/version_label.cpp
         pc_port/launcher/install_directory.cpp
         pc_port/launcher/install_note_layout.cpp
         pc_port/dolphin_stubs/pc_card_save_root.cpp
@@ -1101,7 +1104,8 @@ if(ANDROID AND NOT TARGET nectar_launcher)
         pc_port/launcher/launcher_platform_android.cpp
         pc_port/pc_icon.cpp
         "${LAUNCHER_EMBED_DIR}/logo_open_nectar.h"
-        "${LAUNCHER_EMBED_DIR}/font_fredoka.h")
+        "${LAUNCHER_EMBED_DIR}/font_fredoka.h"
+        "${LAUNCHER_EMBED_DIR}/font_game_bubble.h")
     set_property(TARGET nectar_launcher PROPERTY INCLUDE_DIRECTORIES "")
     target_include_directories(nectar_launcher PRIVATE
         ${PC_PORT_DIR}
@@ -1157,10 +1161,13 @@ if(PIKMIN_BUILD_LAUNCHER)
     file(MAKE_DIRECTORY "${LAUNCHER_EMBED_DIR}")
     embed_file("${CMAKE_CURRENT_SOURCE_DIR}/pc_port/launcher/assets/logo.png" "${LAUNCHER_EMBED_DIR}/logo_open_nectar.h" kLogoOpenNectar)
     embed_file("${CMAKE_CURRENT_SOURCE_DIR}/pc_port/launcher/assets/Fredoka.ttf" "${LAUNCHER_EMBED_DIR}/font_fredoka.h" kFontFredoka)
+    # Solo para la versión junto al logo (#327). Licencia: assets/GameBubble-LICENSE.txt.
+    embed_file("${CMAKE_CURRENT_SOURCE_DIR}/pc_port/launcher/assets/GameBubble.ttf" "${LAUNCHER_EMBED_DIR}/font_game_bubble.h" kFontGameBubble)
 
     add_executable(pikmin_launcher
         pc_port/launcher/launcher_main.cpp
         pc_port/launcher/launcher_gui.cpp
+        pc_port/launcher/version_label.cpp
         pc_port/launcher/hd_model_downloads.cpp
         pc_port/launcher/install_directory.cpp
         pc_port/launcher/install_note_layout.cpp
@@ -1179,7 +1186,8 @@ if(PIKMIN_BUILD_LAUNCHER)
         pc_port/pc_icon.cpp
         ${LAUNCHER_PLATFORM_SOURCE}
         "${LAUNCHER_EMBED_DIR}/logo_open_nectar.h"
-        "${LAUNCHER_EMBED_DIR}/font_fredoka.h")
+        "${LAUNCHER_EMBED_DIR}/font_fredoka.h"
+        "${LAUNCHER_EMBED_DIR}/font_game_bubble.h")
     # El launcher no usa cabeceras del juego (ver launcher_imgui).
     set_property(TARGET pikmin_launcher PROPERTY INCLUDE_DIRECTORIES "")
     target_include_directories(pikmin_launcher PRIVATE
@@ -1312,6 +1320,16 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
     add_executable(launcher_page_layout_test pc_port/launcher/launcher_page_layout_test.cpp)
     target_compile_options(launcher_page_layout_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME launcher_page_layout_test COMMAND launcher_page_layout_test)
+
+    # Versión junto al logo (#327): la fuente y el estilo, sin ventana.
+    add_executable(version_label_test pc_port/launcher/version_label_test.cpp
+        pc_port/launcher/version_label.cpp
+        "${LAUNCHER_EMBED_DIR}/font_game_bubble.h")
+    set_property(TARGET version_label_test PROPERTY INCLUDE_DIRECTORIES "")
+    target_include_directories(version_label_test PRIVATE ${PC_PORT_DIR}/launcher "${LAUNCHER_EMBED_DIR}"
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
+    target_compile_options(version_label_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME version_label_test COMMAND version_label_test)
 
     add_executable(asset_finalize_test pc_port/launcher/asset_finalize_test.cpp)
     target_link_libraries(asset_finalize_test PRIVATE Threads::Threads)

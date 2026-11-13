@@ -39,6 +39,7 @@
 #include "texture_pack_storage.h"
 #include "hd_model_downloads.h"
 #include "release_update.h"
+#include "version_label.h"
 
 #include "imgui.h"
 #include "imgui_internal.h" // cola de eventos: escalar la posición del ratón
@@ -60,6 +61,7 @@
 
 #include "font_fredoka.h"
 #include "logo_open_nectar.h"
+#include "font_game_bubble.h"
 
 #include "../pc_icon.h"
 
@@ -682,6 +684,11 @@ struct Hub {
     HubResult& result;
     Fonts fonts;
     Texture logo;
+    // Versión junto al logo, ya pintada (se rehace si cambia de tamaño).
+    Texture versionTex;
+    VersionLabelImage versionImage;
+    std::string versionText;
+    float versionInk = 0.0f;
     GameArt art;
     Texture covers[2];
     float coverStart[2] = { 0.0f, 0.0f };
@@ -2904,24 +2911,42 @@ struct Hub {
         return a.x - w - buttons::kButtonGap;
     }
 
-    // Versión de este launcher (#327): una píldora pequeña tras el rótulo del
-    // logo, con la placa verde y el borde naranja de los avisos.
-    void drawVersionBadge(ImVec2 size, ImVec2 logoAt, float logoW, float logoH, float noticeLeft)
+    // Versión de este launcher (#327) a la derecha del logo, centrada con sus
+    // letras y con su mismo aspecto: Game Bubble naranja y brillante, pintada
+    // en la CPU (version_label.cpp) a los píxeles reales de la pantalla.
+    void drawVersionLabel(ImVec2 size, ImVec2 logoAt, float logoW, float logoH, float noticeLeft)
     {
-        const std::string label = versionBadgeLabel(currentVersion());
-        if (label.empty()) return;
-        const float textSize = versionBadgeTextSize(logoH);
-        const ImVec2 text = fonts.body->CalcTextSizeA(textSize, FLT_MAX, 0.0f, label.c_str());
-        const float padX = std::round(textSize * 0.55f), padY = std::round(textSize * 0.2f);
-        // El aviso de actualización ocupa de y = 18 a 58, más 4 px de halo.
-        const BadgeRect r = placeVersionBadge(size.x, logoAt.x, logoAt.y, logoW, logoH, text.x + padX * 2.0f,
-                                              text.y + padY * 2.0f, noticeLeft, 62.0f);
+        const std::string text = versionLabelText(currentVersion());
+        if (text.empty()) return;
+        const float scale = std::max(1.0f, ImGui::GetIO().DisplayFramebufferScale.x);
+        const float ink = std::round(versionLabelInkHeight(logoH) * scale);
+        if (text != versionText || ink != versionInk) {
+            freeTexture(versionTex);
+            versionText = text;
+            versionInk = ink;
+            if (renderVersionLabel(kFontGameBubble, kFontGameBubbleSize, text, ink, versionImage))
+                versionTex = uploadTexture(versionImage.rgba, versionImage.width, versionImage.height, 0);
+        }
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        const ImVec2 a(std::round(r.x0), std::round(r.y0)), b(std::round(r.x1), std::round(r.y1));
-        const float rounding = (b.y - a.y) * 0.5f;
-        dl->AddRectFilled(a, b, IM_COL32(6, 26, 10, 200), rounding);
-        dl->AddRect(a, b, col(kOrange, 0.85f), rounding, 0, 1.5f);
-        dl->AddText(fonts.body, textSize, ImVec2(a.x + padX, a.y + padY), col(kOrange), label.c_str());
+        // El aviso de actualización ocupa de y = 18 a 58, más 4 px de halo.
+        if (!versionTex.valid()) {
+            // Sin la fuente: el texto del launcher, en el naranja del logo.
+            const float textSize = std::max(16.0f, versionLabelInkHeight(logoH) * 1.4f);
+            const ImVec2 t = fonts.body->CalcTextSizeA(textSize, FLT_MAX, 0.0f, text.c_str());
+            const LabelRect r = placeVersionLabel(size.x, logoAt.x, logoAt.y, logoW, logoH, t.x, t.y, noticeLeft, 62.0f);
+            dl->AddText(fonts.body, textSize, ImVec2(std::round(r.x0), std::round(r.y0)), col(kOrange), text.c_str());
+            return;
+        }
+        // Se centra la tinta de las cifras; el contorno y el halo sobresalen.
+        const VersionLabelImage& img = versionImage;
+        const LabelRect r = placeVersionLabel(size.x, logoAt.x, logoAt.y, logoW, logoH,
+                                              (img.inkRight - img.inkLeft) / scale, (img.inkBottom - img.inkTop) / scale,
+                                              noticeLeft, 62.0f);
+        // A píxel entero de la pantalla, para que la imagen salga 1:1.
+        const ImVec2 a(std::round((r.x0 - img.inkLeft / scale) * scale) / scale,
+                       std::round((r.y0 - img.inkTop / scale) * scale) / scale);
+        const ImVec2 b(a.x + float(img.width) / scale, a.y + float(img.height) / scale);
+        dl->AddImage(versionTex.imgui(), a, b);
     }
 
     // Quita el marcado en línea de Markdown: **negrita**, `código` y
@@ -3261,7 +3286,7 @@ struct Hub {
         }
 
         const float noticeLeft = drawReleaseNotice(size, t);
-        drawVersionBadge(size, logoAt, logoW, logoH, noticeLeft);
+        drawVersionLabel(size, logoAt, logoW, logoH, noticeLeft);
         if (!state.dataFolder.empty()) {
             // Abajo a la derecha, a la altura del rótulo de la carpeta.
             const char* label = "Change folder";
@@ -3295,6 +3320,7 @@ struct Hub {
         freeDewdrop();
         for (Texture& cover : covers) freeTexture(cover);
         freeTexture(logo);
+        freeTexture(versionTex);
         slideshow.release();
         art.release();
     }
