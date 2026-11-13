@@ -613,12 +613,21 @@ void App::startCatalog()
 	catalogThread_          = std::thread([this, data, cache] {
         nectar::Catalog cat;
         std::string err;
-        const bool ok = nectar::buildCatalog(data, cache, cat, err, [this](std::size_t done, std::size_t total, const std::string&) {
-            catalogDone_  = int(done);
-            catalogTotal_ = int(total);
-        });
+        bool ok = false;
+        // Una excepción que salga de este hilo cierra el editor (#326): se
+        // muestra en la pantalla de preparación.
+        try {
+            ok = nectar::buildCatalog(data, cache, cat, err, [this](std::size_t done, std::size_t total, const std::string&) {
+                catalogDone_  = int(done);
+                catalogTotal_ = int(total);
+            });
+        } catch (const std::exception& e) {
+            err = e.what();
+        } catch (...) {
+            err = "error desconocido";
+        }
         if (ok) catalog_ = std::move(cat);
-        else catalogError_ = err;
+        else catalogError_ = err.empty() ? std::string("error desconocido") : err;
         catalogFinished_ = true;
     });
 }

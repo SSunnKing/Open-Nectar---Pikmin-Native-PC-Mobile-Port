@@ -44,4 +44,9 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
     add_executable(nectar_assets_test tests/nectar_assets_test.cpp)
     target_link_libraries(nectar_assets_test PRIVATE nectar_assets)
+elseif(PIKMIN_BUILD_TESTS AND NOT ANDROID)
+    # Con el juego: solo la parte que no necesita los assets del disco (#326).
+    add_executable(nectar_assets_test tests/nectar_assets_test.cpp)
+    target_link_libraries(nectar_assets_test PRIVATE nectar_assets)
+    add_test(NAME nectar_assets_catalog_utf8_test COMMAND nectar_assets_test --catalog-utf8)
 endif()
