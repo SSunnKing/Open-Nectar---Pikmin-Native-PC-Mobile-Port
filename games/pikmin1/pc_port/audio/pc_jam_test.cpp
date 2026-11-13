@@ -68,6 +68,19 @@ int main(int argc, char** argv) {
         if (!sawNoteOff || player.result() != PCJamResult::Finished) ++failures;
     }
     {
+        // A register-wrapped command (0xB0) whose command byte is below 0xC0
+        // has no entry in the operand table. It must stop the sequence as an
+        // unsupported opcode, not index before the table.
+        const std::vector<u8> data = { 0xB0, 0x10, 0x00, 0xFF };
+        PCJamPlayer player;
+        std::vector<PCJamEvent> events;
+        if (!player.start(data) || player.tick(events) != PCJamResult::UnsupportedOpcode
+            || player.unsupportedOpcode() != 0x10 || player.active()) {
+            std::printf("FAIL: out-of-range 0xB0 command not rejected\n");
+            ++failures;
+        }
+    }
+    {
         // Closing a child track must release its sustained mixer voices.  The
         // original Jaq_CloseTrack always calls __AllNoteOff; omitting that is
         // what made looped FileSelect instruments survive as long beeps.
