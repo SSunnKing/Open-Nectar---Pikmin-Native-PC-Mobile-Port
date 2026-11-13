@@ -249,7 +249,10 @@ bool loadCatalog(const std::string& cacheDir, Catalog& out, std::string& error)
 	return true;
 }
 
-bool buildCatalog(const std::string& dataDir, const std::string& cacheDir, Catalog& out, std::string& error, const CatalogProgress& progress)
+namespace {
+
+bool buildCatalogUnchecked(const std::string& dataDir, const std::string& cacheDir, Catalog& out, std::string& error,
+                           const CatalogProgress& progress)
 {
 	std::error_code ec;
 	const fs::path root(dataDir);
@@ -316,7 +319,9 @@ bool buildCatalog(const std::string& dataDir, const std::string& cacheDir, Catal
 			error = "no se puede escribir " + tmp.string();
 			return false;
 		}
-		f << index.dump(1);
+		// Rutas y mensajes pueden traer bytes que no son UTF-8 (nombres de
+		// archivo en Linux, #326): se guardan con U+FFFD en vez de abortar.
+		f << index.dump(1, ' ', false, json::error_handler_t::replace);
 	}
 	fs::rename(tmp, fs::path(cacheDir) / "index.json", ec);
 	if (ec) {
@@ -324,6 +329,22 @@ bool buildCatalog(const std::string& dataDir, const std::string& cacheDir, Catal
 		return false;
 	}
 	return true;
+}
+
+} // namespace
+
+bool buildCatalog(const std::string& dataDir, const std::string& cacheDir, Catalog& out, std::string& error, const CatalogProgress& progress)
+{
+	// Nada de lo que encuentre en el disco debe tumbar al editor (#326): un
+	// fallo inesperado se devuelve como error, igual que los demás.
+	try {
+		return buildCatalogUnchecked(dataDir, cacheDir, out, error, progress);
+	} catch (const std::exception& e) {
+		error = std::string("no se pudo preparar el catálogo: ") + e.what();
+	} catch (...) {
+		error = "no se pudo preparar el catálogo";
+	}
+	return false;
 }
 
 } // namespace nectar

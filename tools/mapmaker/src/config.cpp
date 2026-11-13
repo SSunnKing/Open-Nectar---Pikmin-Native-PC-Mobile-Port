@@ -87,9 +87,17 @@ bool Config::save() const
 		             { "toolboxWidth", toolboxWidth }, { "sidePanelWidth", sidePanelWidth }, { "sideSplit", sideSplit }, { "placeRecents", placeRecents },
 		             { "showToolbox", showToolbox }, { "showSidePanel", showSidePanel },
 		             { "ignoreDecorSelection", ignoreDecorSelection }, { "localGizmo", localGizmo }, { "pieces", pieces } };
+	// Las rutas pueden traer bytes que no son UTF-8 (#326): se sustituyen en
+	// vez de lanzar una excepción al guardar.
+	std::string text;
+	try {
+		text = j.dump(2, ' ', false, json::error_handler_t::replace);
+	} catch (const std::exception&) {
+		return false;
+	}
 	std::ofstream f(fs::path(directory()) / "config.json");
 	if (!f) return false;
-	f << j.dump(2);
+	f << text;
 	return true;
 }
 

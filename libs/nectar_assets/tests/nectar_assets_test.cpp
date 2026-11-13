@@ -1,4 +1,5 @@
 // nectar_assets_test <dataDir> [carpeta para miniaturas de muestra]
+// nectar_assets_test --catalog-utf8   (sin dataDir; lo corre ctest)
 //
 // Lee todos los assets del dataDir con nectar_assets:
 //  - cada .mod sin errores, y el nº de vértices igual al que lee el juego
@@ -8,6 +9,7 @@
 //  - el árbol de caminos de los mapas.
 // Sale con 1 si algo de lo obligatorio falla.
 
+#include "nectar_assets/catalog.h"
 #include "nectar_assets/gen.h"
 #include "nectar_assets/image.h"
 #include "nectar_assets/ini.h"
@@ -15,6 +17,8 @@
 #include "nectar_assets/raster.h"
 
 #include <cstdio>
+#include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -48,10 +52,76 @@ long gameVertexCount(const std::vector<std::uint8_t>& d)
 	return 0;
 }
 
+// #326: un nombre de archivo con un byte que no es UTF-8 (0x83, como los de
+// Shift-JIS) hacía que index.dump() lanzara type_error.316 y el editor de
+// mapas abortaba. El catálogo debe guardarse igual, con U+FFFD en su lugar.
+int catalogUtf8Check()
+{
+	const fs::path root = fs::temp_directory_path() / "nectar_catalog_utf8_test";
+	std::error_code ec;
+	fs::remove_all(root, ec);
+	const fs::path data = root / "dataDir", cache = root / "cache";
+	fs::create_directories(data, ec);
+	std::ofstream(data / "good.gen", std::ios::binary) << "not a generator file";
+	// En macOS (APFS) el sistema rechaza nombres que no son UTF-8, y en
+	// Windows la conversión de la ruta puede fallar: ahí solo queda comprobar
+	// que el catálogo normal sigue funcionando.
+	const std::string badName = std::string("bad") + char(0x83) + "name.gen";
+	bool haveBad = false;
+	try {
+		const fs::path badPath = data / fs::path(badName);
+		{
+			std::ofstream bad(badPath, std::ios::binary);
+			if (bad) bad << "not a generator file either";
+		}
+		haveBad = fs::exists(badPath, ec);
+	} catch (const std::exception&) {
+		haveBad = false;
+	}
+
+	int failures = 0;
+	nectar::Catalog cat;
+	std::string err;
+	bool ok = false;
+	try {
+		ok = nectar::buildCatalog(data.string(), cache.string(), cat, err);
+	} catch (const std::exception& e) {
+		printf("FAIL: buildCatalog lanzó una excepción: %s\n", e.what());
+		failures++;
+	}
+	if (!failures && !ok) {
+		printf("FAIL: buildCatalog: %s\n", err.c_str());
+		failures++;
+	}
+	if (ok && cat.entries.size() != (haveBad ? 2u : 1u)) {
+		printf("FAIL: %zu entradas, se esperaban %d\n", cat.entries.size(), haveBad ? 2 : 1);
+		failures++;
+	}
+	nectar::Catalog loaded;
+	if (ok && !nectar::loadCatalog(cache.string(), loaded, err)) {
+		printf("FAIL: el índice guardado no se lee: %s\n", err.c_str());
+		failures++;
+	}
+	if (ok && haveBad) {
+		bool replaced = false;
+		for (const nectar::CatalogEntry& e : loaded.entries)
+			replaced = replaced || e.path.find("\xEF\xBF\xBD") != std::string::npos;
+		if (!replaced) {
+			printf("FAIL: el byte 0x83 no se guardó como U+FFFD\n");
+			failures++;
+		}
+	}
+	fs::remove_all(root, ec);
+	printf("catalog-utf8: %s%s\n", failures ? "FAIL" : "ok",
+	       haveBad ? "" : " (este sistema no admite nombres que no son UTF-8; solo se probó el catálogo normal)");
+	return failures ? 1 : 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
+	if (argc == 2 && std::strcmp(argv[1], "--catalog-utf8") == 0) return catalogUtf8Check();
 	if (argc < 2) {
 		fprintf(stderr, "uso: %s <dataDir> [carpeta para miniaturas]\n", argv[0]);
 		return 2;
