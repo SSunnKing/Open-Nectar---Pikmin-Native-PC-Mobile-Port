@@ -2251,14 +2251,17 @@ void PikiFlyingState::procBounceMsg(Piki* piki, MsgBounce*)
 		piki->changeMode(PikiMode::PutbombMode, piki->mNavi);
 	} else {
 #if defined(PIKI_PC_PORT)
-		// Mod "Better Pathfinding": lanzado a un sitio sin nada que hacer, en
-		// el original se queda plantado hasta que se le silba. Aquí vuelve al
-		// grupo por su cuenta, igual que cuando rebota antes de aterrizar.
+		// Mod "Thrown Pikmin Return" (off by default; it used to be
+		// part of Better Pathfinding): lanzado a un sitio sin nada que hacer,
+		// en el original se queda plantado hasta que se le silba. Aquí vuelve
+		// al grupo por su cuenta, igual que cuando rebota antes de aterrizar.
 		// Solo si cae a la altura del capitán: lanzado a una repisa o a un
 		// desnivel se queda esperando, como en el original (issue #254).
+		// Off by default because some areas need a Pikmin left across water
+		// at the captain's height while he walks round to it.
 		const f32 kSameLevelHeight = 30.0f;
 		Creature* target           = nullptr;
-		if (pc_settings_get_better_pathfinding() && piki->mNavi && !playerState->inDayEnd()
+		if (pc_settings_get_thrown_return_to_squad() && piki->mNavi && !playerState->inDayEnd()
 		    && absF(piki->mSRT.t.y - piki->mNavi->mSRT.t.y) <= kSameLevelHeight
 		    && piki->graspSituation(&target) == PIKISITCH_Unk0) {
 			piki->mActiveAction->mCurrActionIdx = PikiAction::Crowd;

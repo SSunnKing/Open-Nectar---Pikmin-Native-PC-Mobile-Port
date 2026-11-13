@@ -66,6 +66,7 @@ int pc_settings_get_shadows(void);
 // stock port stays faithful.
 int pc_settings_get_chain_actions(void);
 int pc_settings_get_better_pathfinding(void);
+int pc_settings_get_thrown_return_to_squad(void);
 int pc_settings_get_blues_only_water(void);
 int pc_settings_get_idle_counter(void);
 /// Vida como porcentaje de la original (100 = sin cambio). Se aplica como
