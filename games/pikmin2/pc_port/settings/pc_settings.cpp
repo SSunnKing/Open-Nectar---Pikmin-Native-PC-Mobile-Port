@@ -172,6 +172,10 @@ struct PcConfig {
     int holdToPluck = 0;
     // Mod: unstick Pikmin that stop making progress along a route (0=off, 1=on).
     int betterPathfinding = 0;
+    // Mod: a thrown Pikmin that lands with nothing to do runs back to the
+    // squad (0=off, 1=on). Off by default: it stops a Pikmin from being left
+    // on a ledge or across water.
+    int thrownReturnToSquad = 0;
     // Mod: a non-blue Pikmin that wanders into water on its own is pushed back
     // to dry land instead of drowning. Being thrown in still drowns it.
     int bluesOnlyWater = 0;
@@ -313,6 +317,7 @@ struct PcConfig {
         chainActions = 0;
         holdToPluck = 0;
         betterPathfinding = 0;
+        thrownReturnToSquad = 0;
         bluesOnlyWater = 0;
         idleCounter = 0;
         eternalNight = 0;
@@ -1202,6 +1207,7 @@ void saveConfig() {
     out << "chainActions = " << sConfig.chainActions << "\n";
     out << "holdToPluck = " << sConfig.holdToPluck << "\n";
     out << "betterPathfinding = " << sConfig.betterPathfinding << "\n";
+    out << "thrownReturnToSquad = " << sConfig.thrownReturnToSquad << "\n";
     out << "bluesOnlyWater = " << sConfig.bluesOnlyWater << "\n";
     out << "idleCounter = " << sConfig.idleCounter << "\n";
     out << "eternalNight = " << sConfig.eternalNight << "\n";
@@ -1408,6 +1414,9 @@ void loadConfig() {
         }
         else if (key == "betterPathfinding") {
             sConfig.betterPathfinding = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "thrownReturnToSquad") {
+            sConfig.thrownReturnToSquad = atoi(val.c_str()) ? 1 : 0;
         }
         else if (key == "bluesOnlyWater") {
             sConfig.bluesOnlyWater = atoi(val.c_str()) ? 1 : 0;
@@ -2872,6 +2881,10 @@ void modsRowChange(int row, bool left, bool right) {
     // Desatascar Pikmin que dejan de avanzar por su ruta.
     else if (row == 8) {
         if (left || right) sPending.betterPathfinding = sPending.betterPathfinding ? 0 : 1;
+    }
+    // Lanzados sin nada que hacer vuelven al grupo.
+    else if (row == 44) {
+        if (left || right) sPending.thrownReturnToSquad = sPending.thrownReturnToSquad ? 0 : 1;
     }
     // Solo los azules entran al agua por su cuenta.
     else if (row == 9) {
@@ -7952,6 +7965,11 @@ int pc_settings_get_better_pathfinding(void) {
     return sConfig.betterPathfinding;
 }
 
+int pc_settings_get_thrown_return_to_squad(void) {
+    if (pc_speedrun_active()) return 0;
+    return sConfig.thrownReturnToSquad;
+}
+
 int pc_settings_get_blues_only_water(void) {
     if (pc_speedrun_active()) return 0;
     return sConfig.bluesOnlyWater;
@@ -8338,6 +8356,7 @@ void modsRowValue(int i, char* value, size_t n) {
     case 6: snprintf(value, n, "%s", sPending.coopSplit ? "Horizontal (top/bottom)" : "Vertical (left/right)"); break;
     case 7: snprintf(value, n, "%s", sPending.coopMergeCamera ? "On (dynamic)" : "Off (static split)"); break;
     case 8: snprintf(value, n, "%s", sPending.betterPathfinding ? "On" : "Off (original)"); break;
+    case 44: snprintf(value, n, "%s", sPending.thrownReturnToSquad ? "On" : "Off (original)"); break;
     case 9: snprintf(value, n, "%s", sPending.bluesOnlyWater ? "On" : "Off (original)"); break;
     case 10: snprintf(value, n, "%s", sPending.idleCounter ? "On" : "Off (original)"); break;
     case 40: snprintf(value, n, "%s", sPending.eternalNight ? "On" : "Off (original)"); break;
@@ -8573,7 +8592,8 @@ const GroupRow kGameplayRows[] = {
 #else
     { SRC_MODS, 25, "Instant Whistle Response", "Whistled Pikmin join the squad at once, without stopping to turn and look first." },
     { SRC_MODS, 1, "Chain Pikmin Actions", "Pikmin that finish a task go on to the next one nearby." },
-    { SRC_MODS, 8, "Better Pathfinding", "Smarter Pikmin: a carrying team that gets stuck finds a new route even when it is not against a wall, and thrown Pikmin with nothing to do run back to the squad." },
+    { SRC_MODS, 8, "Better Pathfinding", "Smarter Pikmin: a carrying team that gets stuck finds a new route even when it is not against a wall." },
+    { SRC_MODS, 44, "Thrown Pikmin Return", "A thrown Pikmin that lands with nothing to do runs back to the squad. Leave this off to finish the game: some areas need a Pikmin left on a ledge or across water while you move the captain." },
     { SRC_MODS, 9, "Blues Only In Water", "Only blue Pikmin walk into water on their own." },
     { SRC_MODS, 23, "No Tripping", "Pikmin running in the squad never trip and fall behind." },
     { SRC_MODS, 40, "Eternal Night", "Always night, whatever the day length: night lighting, and the moon crosses the day bar instead of the sun." },

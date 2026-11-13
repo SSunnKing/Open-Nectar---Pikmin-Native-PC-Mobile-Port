@@ -1,7 +1,7 @@
 #include "Game/PikiState.h"
 #ifdef PIKI_PC_PORT
 extern "C" int pc_settings_get_instant_whistle(void);
-extern "C" int pc_settings_get_better_pathfinding(void);
+extern "C" int pc_settings_get_thrown_return_to_squad(void);
 #endif
 #include "Game/Piki.h"
 #include "Game/PikiParms.h"
@@ -2313,10 +2313,12 @@ void PikiFlyingState::bounceCallback(Piki* piki, Sys::Triangle* triangle)
 	transit(piki, PIKISTATE_Walk, nullptr);
 	if (!piki->invokeAI()) {
 #ifdef PIKI_PC_PORT
-		// Mod "Better Pathfinding": lanzado a un sitio sin nada que hacer, en
-		// el original se queda plantado hasta que se le silba. Aquí vuelve al
-		// grupo por su cuenta.
-		if (pc_settings_get_better_pathfinding() && piki->mNavi && piki->mNavi->isAlive()) {
+		// Mod "Thrown Pikmin Return" (off by default; it used to be
+		// part of Better Pathfinding): lanzado a un sitio sin nada que hacer,
+		// en el original se queda plantado hasta que se le silba. Aquí vuelve
+		// al grupo por su cuenta. Off by default because it stops a Pikmin
+		// from being left on a ledge or across water.
+		if (pc_settings_get_thrown_return_to_squad() && piki->mNavi && piki->mNavi->isAlive()) {
 			PikiAI::ActFormationInitArg initArg(piki->mNavi);
 			piki->mBrain->start(PikiAI::ACT_Formation, &initArg);
 		} else

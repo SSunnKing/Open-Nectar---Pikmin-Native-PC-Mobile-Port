@@ -154,6 +154,10 @@ struct PcConfig {
     int holdToPluck = 0;
     // Mod: unstick Pikmin that stop making progress along a route (0=off, 1=on).
     int betterPathfinding = 0;
+    // Mod: a thrown Pikmin that lands with nothing to do runs back to the
+    // squad (0=off, 1=on). Off by default: some areas need a Pikmin left on a
+    // ledge or across water while the captain moves round to it.
+    int thrownReturnToSquad = 0;
     // Mod: a non-blue Pikmin that wanders into water on its own is pushed back
     // to dry land instead of drowning. Being thrown in still drowns it.
     int bluesOnlyWater = 0;
@@ -305,6 +309,7 @@ struct PcConfig {
         chainActions = 0;
         holdToPluck = 0;
         betterPathfinding = 0;
+        thrownReturnToSquad = 0;
         bluesOnlyWater = 0;
         idleCounter = 0;
         naviHealthPct = 100;
@@ -1139,8 +1144,8 @@ namespace {
 // graphics, audio, bindings, camera feel and other local-only rows are not
 // here: what they change reaches the sim, if at all, as recorded input.
 #define PC_NETPLAY_SESSION_FIELDS(X)                                                          \
-    X(fpsMode) X(chainActions) X(holdToPluck) X(betterPathfinding) X(bluesOnlyWater)         \
-    X(idleCounter) X(naviHealthPct) X(tekiHealthPct) X(infiniteDay) X(freeCamera)            \
+    X(fpsMode) X(chainActions) X(holdToPluck) X(betterPathfinding) X(thrownReturnToSquad)     \
+    X(bluesOnlyWater) X(idleCounter) X(naviHealthPct) X(tekiHealthPct) X(infiniteDay) X(freeCamera) \
     X(whistleRadiusPct) X(throwSpeedPct) X(throwCancelB) X(quickGrab) X(noTrip)              \
     X(whistlePluck) X(bombControl) X(bombRespawnSec) X(hideOlimarText) X(onionStep10) X(instantWhistle)        \
     X(pikiInvincible) X(allFlowers) X(carrySpeedPct) X(naviSpeedPct) X(unlockZones)          \
@@ -1282,6 +1287,7 @@ void saveConfig() {
     out << "chainActions = " << sConfig.chainActions << "\n";
     out << "holdToPluck = " << sConfig.holdToPluck << "\n";
     out << "betterPathfinding = " << sConfig.betterPathfinding << "\n";
+    out << "thrownReturnToSquad = " << sConfig.thrownReturnToSquad << "\n";
     out << "bluesOnlyWater = " << sConfig.bluesOnlyWater << "\n";
     out << "idleCounter = " << sConfig.idleCounter << "\n";
     out << "naviHealthPct = " << sConfig.naviHealthPct << "\n";
@@ -1485,6 +1491,9 @@ void loadConfig() {
         }
         else if (key == "betterPathfinding") {
             sConfig.betterPathfinding = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "thrownReturnToSquad") {
+            sConfig.thrownReturnToSquad = atoi(val.c_str()) ? 1 : 0;
         }
         else if (key == "bluesOnlyWater") {
             sConfig.bluesOnlyWater = atoi(val.c_str()) ? 1 : 0;
@@ -3033,6 +3042,10 @@ void modsRowChange(int row, bool left, bool right) {
     // Desatascar Pikmin que dejan de avanzar por su ruta.
     else if (row == 8) {
         if (left || right) sPending.betterPathfinding = sPending.betterPathfinding ? 0 : 1;
+    }
+    // Lanzados sin nada que hacer vuelven al grupo.
+    else if (row == 44) {
+        if (left || right) sPending.thrownReturnToSquad = sPending.thrownReturnToSquad ? 0 : 1;
     }
     // Solo los azules entran al agua por su cuenta.
     else if (row == 9) {
@@ -9148,6 +9161,11 @@ int pc_settings_get_better_pathfinding(void) { if (pc_speedrun_active()) return 
     return sConfig.betterPathfinding;
 }
 
+int pc_settings_get_thrown_return_to_squad(void) {
+    if (pc_speedrun_active()) return 0;
+    return sConfig.thrownReturnToSquad;
+}
+
 int pc_settings_get_blues_only_water(void) { if (pc_speedrun_active()) return 0;
     return sConfig.bluesOnlyWater;
 }
@@ -9600,6 +9618,7 @@ void modsRowValue(int i, char* value, size_t n) {
     case 6: snprintf(value, n, "%s", sPending.coopSplit ? "Horizontal (top/bottom)" : "Vertical (left/right)"); break;
     case 7: snprintf(value, n, "%s", sPending.coopMergeCamera ? "On (dynamic)" : "Off (static split)"); break;
     case 8: snprintf(value, n, "%s", sPending.betterPathfinding ? "On" : "Off (original)"); break;
+    case 44: snprintf(value, n, "%s", sPending.thrownReturnToSquad ? "On" : "Off (original)"); break;
     case 9: snprintf(value, n, "%s", sPending.bluesOnlyWater ? "On" : "Off (original)"); break;
     case 10: snprintf(value, n, "%s", sPending.idleCounter ? "On" : "Off (original)"); break;
     case 11: healthPctLabel(sPending.naviHealthPct, "Infinite", value, n); break;
@@ -9795,7 +9814,8 @@ const GroupRow kCameraRows[] = {
 const GroupRow kGameplayRows[] = {
     { SRC_MODS, 25, "Instant Whistle Response", "Whistled Pikmin join the squad at once, without stopping to turn and look first." },
     { SRC_MODS, 1, "Chain Pikmin Actions", "Pikmin that finish a task go on to the next one nearby." },
-    { SRC_MODS, 8, "Better Pathfinding", "Smarter Pikmin: they get unstuck on their way, run back to the squad when thrown with nothing to do, and no longer stop to pull nectar grass they walk past (swarm them at it instead)." },
+    { SRC_MODS, 8, "Better Pathfinding", "Smarter Pikmin: they get unstuck on their way, and no longer stop to pull nectar grass they walk past (swarm them at it instead)." },
+    { SRC_MODS, 44, "Thrown Pikmin Return", "A thrown Pikmin that lands with nothing to do runs back to the squad. Leave this off to finish the game: some areas need a Pikmin left on a ledge or across water while you move Olimar." },
     { SRC_MODS, 9, "Blues Only In Water", "Only blue Pikmin walk into water on their own." },
     { SRC_MODS, 23, "No Tripping", "Pikmin running in the squad never trip and fall behind." },
     { SRC_MODS, 40, "Eternal Night", "Always night, whatever the day length: night lighting, and the moon crosses the day bar instead of the sun." },
