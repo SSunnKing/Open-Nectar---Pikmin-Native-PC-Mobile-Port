@@ -1523,6 +1523,12 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_cine_skip_order_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_cine_skip_order_test COMMAND pc_cine_skip_order_test)
 
+    # End-of-day skip gates (header only, no disc)
+    add_executable(pc_day_end_skip_test pc_port/pc_day_end_skip_test.cpp)
+    target_include_directories(pc_day_end_skip_test PRIVATE pc_port)
+    target_compile_options(pc_day_end_skip_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_day_end_skip_test COMMAND pc_day_end_skip_test)
+
     # Text window presses through the menu translator (no game needed)
     add_executable(pc_text_window_press_test pc_port/pc_text_window_press_test.cpp pc_port/pc_menu_pad.cpp)
     target_include_directories(pc_text_window_press_test PRIVATE ${SDL2_INCLUDE_DIRS} pc_port)
