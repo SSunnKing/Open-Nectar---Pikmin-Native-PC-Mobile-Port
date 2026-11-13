@@ -69,6 +69,12 @@ void testBuilders()
     checkEqual(chooseFolderScript("Open Nectar - Choose the install folder"),
                "POSIX path of (choose folder with prompt \"Open Nectar - Choose the install folder\")",
                "choose folder script");
+    checkEqual(chooseFileNameScript("Create a shortcut to Pikmin 2", "Pikmin 2", "/Users/kim/Applications"),
+               "POSIX path of (choose file name with prompt \"Create a shortcut to Pikmin 2\" default name "
+               "\"Pikmin 2\" default location POSIX file \"/Users/kim/Applications\")",
+               "save dialog script");
+    checkEqual(chooseFileNameScript("p", "Pikmin"), "POSIX path of (choose file name with prompt \"p\" default name \"Pikmin\")",
+               "save dialog without a folder");
     checkEqual(chooseFolderScript("Open Nectar - Choose the install folder", "/tmp/open-nectar"),
                "POSIX path of (choose folder with prompt \"Open Nectar - Choose the install folder\" default location "
                "POSIX file \"/tmp/open-nectar\")",

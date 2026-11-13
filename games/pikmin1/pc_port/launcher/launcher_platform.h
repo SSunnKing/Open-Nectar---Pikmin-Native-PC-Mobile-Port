@@ -14,6 +14,8 @@
 // guarda wchar_t internamente, de modo que los nombres con acentos o
 // caracteres no ASCII sobreviven en ambos sistemas.
 
+#include "launch_request.h"
+
 #include <filesystem>
 #include <functional>
 #include <string>
@@ -119,6 +121,31 @@ void relaunch(const std::filesystem::path& program, const std::vector<std::strin
 // en Windows, un .desktop en Linux, un enlace en macOS). Lo sustituye si ya
 // existía. false si no hay escritorio o no se pudo escribir.
 bool createDesktopShortcut(const std::filesystem::path& launcher);
+
+// A shortcut that opens one game directly (#336): the launcher with
+// --launch=pikmin1 or --launch=pikmin2.
+//   macOS   a small .app at `location` (the Save dialog's answer)
+//   Windows a .lnk on the desktop and in Start > Open Nectar
+//   Linux   an applications-menu entry, and on the desktop if `desktop`;
+//           the "Open Nectar" menu entry, if there is one, gains a Pikmin
+//           and a Pikmin 2 action
+//   Android not here (home-screen shortcuts are separate): returns false
+struct GameShortcutRequest {
+    LaunchTarget target = LaunchTarget::Pikmin1;
+    std::filesystem::path launcher;      // the launcher the shortcut runs
+    std::vector<unsigned char> iconPng;  // 256x256 cover icon; empty if there is no cover yet
+    std::filesystem::path fallbackIcon;  // open_nectar.png beside the launcher, used without a cover
+    std::filesystem::path location;      // macOS: the .app to write
+    bool desktop = false;                // Linux: also on the desktop
+};
+// `places` says where the shortcut went ("the desktop", "the Start menu"),
+// for the notice; `error` why it failed.
+bool createGameShortcut(const GameShortcutRequest& request, std::vector<std::string>& places, std::string& error);
+
+// macOS: Save dialog for a shortcut, opened in `folder` (created if missing)
+// with `name` filled in. Empty if cancelled. Elsewhere: always empty.
+std::filesystem::path askForShortcutLocation(const std::string& prompt, const std::filesystem::path& folder,
+                                             const std::string& name);
 
 // Entra en dataRoot y sustituye el proceso actual por el juego. No retorna
 // si tiene éxito; si falla, escribe el motivo y termina el proceso.

@@ -46,6 +46,18 @@ inline std::string chooseFolderScript(const std::string& prompt, const std::stri
     return script + ")";
 }
 
+// Save dialog: prints the POSIX path the user typed or picked (the file
+// need not exist; the panel itself asks before replacing one).
+inline std::string chooseFileNameScript(const std::string& prompt, const std::string& defaultName,
+                                        const std::string& defaultPosixFolder = {})
+{
+    std::string script = "POSIX path of (choose file name with prompt " + appleScriptString(prompt)
+        + " default name " + appleScriptString(defaultName);
+    if (!defaultPosixFolder.empty())
+        script += " default location POSIX file " + appleScriptString(defaultPosixFolder);
+    return script + ")";
+}
+
 // A message with one OK button. No "activate": it adds about 2 s before the
 // dialog shows, and the dialog already opens above the app's window.
 inline std::string messageScript(const std::string& title, const std::string& message, bool error)
