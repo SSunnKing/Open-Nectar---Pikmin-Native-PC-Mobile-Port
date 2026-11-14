@@ -29,6 +29,7 @@
 #include "install_note_layout.h"
 #include "dolphin_stubs/pc_card_save_root.h"
 #include "launcher_cursor.h"
+#include "launcher_nav.h"
 #include "launcher_platform.h"
 #include "launcher_page_layout.h"
 #include "launcher_sidebar_layout.h"
@@ -680,6 +681,47 @@ struct Fonts {
 
 enum class Tab { Games, Settings, Install };
 
+// The joystick subsystem is up, so ImGui may open a controller. Mouse and
+// keyboard navigation stay as they were: only the gamepad flag is set.
+bool gGamepadSubsystem = false;
+
+void noteGamepadSubsystem(bool on) { gGamepadSubsystem = on; }
+
+// `on` opens the first controller for ImGui nav. `off` closes it and ignores
+// further pad input, so a game started beside the launcher can open the device.
+// Only the co-op child keeps the launcher process alive; a normal Play execs.
+#if PIKMIN_LAUNCHER_NETPLAY
+void setGamepadNavigation(bool on)
+{
+    if (!gGamepadSubsystem || ImGui::GetCurrentContext() == nullptr || ImGui::GetIO().BackendPlatformUserData == nullptr)
+        return;
+    ImGuiIO& io = ImGui::GetIO();
+    if (on) {
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+        ImGui_ImplSDL2_SetGamepadMode(ImGui_ImplSDL2_GamepadMode_AutoFirst, nullptr, 0);
+    } else {
+        io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
+        ImGui_ImplSDL2_SetGamepadMode(ImGui_ImplSDL2_GamepadMode_Manual, nullptr, 0);
+    }
+}
+#endif
+
+// B (SDL_CONTROLLER_BUTTON_A is FaceDown; B is FaceRight).
+bool gamepadBackPressed() { return ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight); }
+
+// True on the item just submitted while the gamepad focus ring is showing.
+// A mouse click hides that ring, so this stays false for mouse use.
+bool gamepadItemFocused()
+{
+    const ImGuiIO& io = ImGui::GetIO();
+    return io.NavVisible && ImGui::IsItemFocused();
+}
+
+void drawGamepadFocusRing(ImDrawList* dl, ImVec2 a, ImVec2 b, float rounding)
+{
+    dl->AddRect(ImVec2(a.x - 4.0f, a.y - 4.0f), ImVec2(b.x + 4.0f, b.y + 4.0f), col(kOrange), rounding, 0, 3.0f);
+}
+
 struct Hub {
     const HubState& state;
     HubResult& result;
@@ -896,6 +938,7 @@ struct Hub {
     // Online co-op panel (netplay builds of the game): the game runs as a
     // child while the panel shows and takes the connection codes.
     platform::GameProcess coopProcess;
+    bool gamepadHeldByGame = false; // the child has the controller; nav is off
     std::unique_ptr<CoopFlow> coop;
     std::vector<char> coopInput = std::vector<char>(32768, '\0');
     std::string coopError;
@@ -906,9 +949,22 @@ struct Hub {
             coop = std::make_unique<CoopFlow>(
                 [this](const std::vector<std::string>& args, std::string& error) {
                     const GameInstall& game = state.games[int(HubGame::Pikmin1)];
-                    return platform::spawnGame(game.directory, game.executable, args, coopProcess, error);
+                    // Close the pad before fork so the game does not inherit a
+                    // grabbed device. Navigation returns when the child exits.
+                    setGamepadNavigation(false);
+                    const bool started = platform::spawnGame(game.directory, game.executable, args, coopProcess, error);
+                    if (started) gamepadHeldByGame = true;
+                    else setGamepadNavigation(true);
+                    return started;
                 },
-                [this](int& code) { return platform::gameRunning(coopProcess, code); });
+                [this](int& code) {
+                    const bool running = platform::gameRunning(coopProcess, code);
+                    if (gamepadHeldByGame && !running) {
+                        gamepadHeldByGame = false;
+                        setGamepadNavigation(true);
+                    }
+                    return running;
+                });
         }
         return *coop;
     }
@@ -1189,11 +1245,16 @@ struct Hub {
         const bool clicked = ImGui::InvisibleButton(label, size);
         const ImGuiID id = ImGui::GetItemID();
         const bool hovered = ImGui::IsItemHovered() && !disabled;
+        // Gamepad focus uses the same glow as a mouse hover, plus a ring.
+        // Mouse clicks hide the ring, so the button looks as it did before.
+        const bool padFocus = gamepadItemFocused() && !disabled;
+        const bool hot = hovered || padFocus;
         const bool held = ImGui::IsItemActive() && !disabled;
         if (hovered) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
         ImDrawList* dl = ImGui::GetWindowDrawList();
         const ImVec2 b(at.x + size.x, at.y + size.y);
-        const dewdrop::Layers layers = dewdropFrame(dl, id, at, b, hovered, held, selected, disabled);
+        const dewdrop::Layers layers = dewdropFrame(dl, id, at, b, hot, held, selected, disabled);
+        if (padFocus) drawGamepadFocusRing(dl, at, b, 16.0f);
         dewdropLabel(dl, at, size, label, buttons::kLabelSize, layers);
         return clicked && !disabled;
     }
@@ -1273,11 +1334,13 @@ struct Hub {
         ImGui::PushID(index);
         const bool clicked = ImGui::InvisibleButton("cover", size);
         const bool hovered = ImGui::IsItemHovered();
+        const bool padFocus = gamepadItemFocused();
         ImGui::PopID();
+        const bool hot = (hovered || padFocus) && available;
         if (hovered && available) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
 
         CardState& card = cards[index];
-        card.hover = approach(card.hover, hovered ? 1.0f : 0.0f, dt, 12.0f);
+        card.hover = approach(card.hover, hot ? 1.0f : 0.0f, dt, 12.0f);
         const float scale = 1.0f + 0.08f * card.hover;
         const ImVec2 centre(origin.x + size.x * 0.5f, origin.y + size.y * 0.5f);
         const ImVec2 half(size.x * 0.5f * scale, size.y * 0.5f * scale);
@@ -1320,7 +1383,8 @@ struct Hub {
                                         IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 170), IM_COL32(0, 0, 0, 170));
             dl->AddRectFilled(ImVec2(a.x, b.y - rounding), b, IM_COL32(0, 0, 0, 170), rounding, ImDrawFlags_RoundCornersBottom);
         }
-        dl->AddRect(a, b, col(hovered && available ? kOrange : kOrangeDeep), rounding, 0, 3.0f + card.hover);
+        dl->AddRect(a, b, col(hot && available ? kOrange : kOrangeDeep), rounding, 0, 3.0f + card.hover);
+        if (padFocus && available) drawGamepadFocusRing(dl, a, b, rounding);
 
         // Destellos del sol del juego en dos esquinas al pasar por encima.
         if (art.sparkle.valid() && card.hover > 0.02f && available) {
@@ -1377,7 +1441,9 @@ struct Hub {
     float beginPageScroll(const char* id, float top, ImVec2 size)
     {
         ImGui::SetCursorScreenPos(ImVec2(0.0f, top));
-        ImGui::BeginChild(id, ImVec2(size.x, std::max(1.0f, pageBottom(size) - top)), ImGuiChildFlags_None,
+        // NavFlattened: the d-pad moves between the tabs and this page. The
+        // mouse wheel still uses wheelScroll().
+        ImGui::BeginChild(id, ImVec2(size.x, std::max(1.0f, pageBottom(size) - top)), ImGuiChildFlags_NavFlattened,
                           ImGuiWindowFlags_NoBackground);
         return ImGui::GetWindowPos().y - ImGui::GetScrollY();
     }
@@ -1638,7 +1704,7 @@ struct Hub {
                 ImGui::TextWrapped("Destination: %s", installingPack.path.c_str());
                 if (glassButton(blocked ? "OK" : "Cancel", ImVec2(110, 38), true)) ImGui::CloseCurrentPopup();
                 ImGui::SetItemDefaultFocus();
-                if (ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+                if (ImGui::IsKeyPressed(ImGuiKey_Escape) || gamepadBackPressed()) ImGui::CloseCurrentPopup();
                 if (!blocked) {
                     ImGui::SameLine();
                     if (glassButton("Install anyway", ImVec2(160, 38))) {
@@ -1666,7 +1732,7 @@ struct Hub {
                 ImGui::TextUnformatted(snap.activePack == deletingPack.id
                     ? "This pack is selected. Textures will switch to Off." : "Other installed packs will stay.");
                 ImGui::TextUnformatted("Close the game first. Saves and discs stay.");
-                if (glassButton("Cancel", ImVec2(110, 38))) ImGui::CloseCurrentPopup();
+                if (glassButton("Cancel", ImVec2(110, 38)) || gamepadBackPressed()) ImGui::CloseCurrentPopup();
                 ImGui::SameLine();
                 if (glassButton("Delete pack", ImVec2(130, 38), true)) {
                     queue({ "--texpack-delete", deletingPack.id }, "Deleting the pack...");
@@ -1823,7 +1889,7 @@ struct Hub {
         ImGui::PopTextWrapPos();
         if (glassButton("Cancel", ImVec2(110, 38))) ImGui::CloseCurrentPopup();
         ImGui::SetItemDefaultFocus();
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape) || gamepadBackPressed()) ImGui::CloseCurrentPopup();
         ImGui::SameLine();
         if (glassButton("Uninstall", ImVec2(150, 38), true)) {
             queue({ "--hdmodel-delete", std::to_string(deletingModel.row) }, "Uninstalling the model...");
@@ -1971,7 +2037,7 @@ struct Hub {
                      + style.ItemSpacing.y + 38.0f + style.ItemSpacing.y;
         if (!progressText.empty())
             footerH += ImGui::CalcTextSize(progressText.c_str(), nullptr, false, fullW).y + style.ItemSpacing.y;
-        ImGui::BeginChild("##hdrows", ImVec2(0, -footerH), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+        ImGui::BeginChild("##hdrows", ImVec2(0, -footerH), ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground);
         const float width = ImGui::GetContentRegionAvail().x;
         const float buttonW = buttons::buttonWidth(role::kSettingsRow);
         const bool stacked = width < buttonW + 12.0f + 220.0f;
@@ -2076,7 +2142,7 @@ struct Hub {
             ImGui::EndTooltip();
         }
         if (!footStacked) ImGui::SameLine(0.0f, 12.0f);
-        if (glassButton("Close", ImVec2(footW, 42.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        if (glassButton("Close", ImVec2(footW, 42.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape) || gamepadBackPressed()) {
             ImGui::CloseCurrentPopup();
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Stops watching Downloads.");
@@ -2455,8 +2521,8 @@ struct Hub {
         glassButton("Folders", ImVec2(listW, 40.0f), true);
 
         ImGui::SetCursorScreenPos(ImVec2(panelX, top + 24.0f));
-        ImGui::BeginChild("launcherRows", ImVec2(panelW, panelFit.rowsH), ImGuiChildFlags_Borders,
-                          ImGuiWindowFlags_NoScrollWithMouse);
+        ImGui::BeginChild("launcherRows", ImVec2(panelW, panelFit.rowsH),
+                          ImGuiChildFlags_Borders | ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoScrollWithMouse);
         const float innerW = ImGui::GetContentRegionAvail().x;
         // Como en las filas de un juego (settingRowLabel).
         auto rowLabel = [&](const char* text, const ImVec4& colour) { return settingRowLabel(text, colour, innerW); };
@@ -2595,7 +2661,7 @@ struct Hub {
         ImVec2 listOrigin(margin, listTop);
         if (sidebar.scroll) {
             ImGui::SetCursorScreenPos(listOrigin);
-            ImGui::BeginChild("##pages", ImVec2(listW, std::max(1.0f, listSpace)), ImGuiChildFlags_None,
+            ImGui::BeginChild("##pages", ImVec2(listW, std::max(1.0f, listSpace)), ImGuiChildFlags_NavFlattened,
                               ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar);
             // Al encoger la ventana (o cambiar de página o de juego) la página
             // elegida podría quedar fuera; solo entonces se mueve la lista, para
@@ -2642,8 +2708,8 @@ struct Hub {
 
         // Filas del grupo, con scroll.
         ImGui::SetCursorScreenPos(ImVec2(panelX, top + 24.0f));
-        ImGui::BeginChild("rows", ImVec2(panelW, panelFit.rowsH), ImGuiChildFlags_Borders,
-                          ImGuiWindowFlags_NoScrollWithMouse);
+        ImGui::BeginChild("rows", ImVec2(panelW, panelFit.rowsH),
+                          ImGuiChildFlags_Borders | ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoScrollWithMouse);
         int pick[2] = { -1, -1 }; // fila y opción elegidas este fotograma
         std::string help;
         const SettingsGroup* shownGroup = settingsGroup < packsPage ? &groups[size_t(settingsGroup)] : nullptr;
@@ -3048,6 +3114,7 @@ struct Hub {
     {
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(size);
+        ImGui::SetNextWindowFocus();
         ImGui::Begin("##whatsnew", nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings
                          | ImGuiWindowFlags_NoBackground);
@@ -3070,7 +3137,7 @@ struct Hub {
         // Notas con scroll (rueda o arrastrando la barra).
         const float buttonsH = 50.0f;
         ImGui::SetCursorScreenPos(ImVec2(a.x + 34.0f, a.y + 80.0f));
-        ImGui::BeginChild("##notes", ImVec2(panel.x - 68.0f, panel.y - 80.0f - buttonsH - 44.0f), ImGuiChildFlags_None,
+        ImGui::BeginChild("##notes", ImVec2(panel.x - 68.0f, panel.y - 80.0f - buttonsH - 44.0f), ImGuiChildFlags_NavFlattened,
                           ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollWithMouse);
         ImGui::PushTextWrapPos(0.0f);
         drawNotes(whatsNewNotes);
@@ -3089,7 +3156,7 @@ struct Hub {
             choose(HubAction::Update, HubGame::Pikmin1);
         }
         ImGui::SetCursorScreenPos(ImVec2(b.x - 34.0f - updateW - 14.0f - closeW, y));
-        if (glassButton("Close", rowSize, buttonsH) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        if (glassButton("Close", rowSize, buttonsH) || ImGui::IsKeyPressed(ImGuiKey_Escape) || gamepadBackPressed()) {
             whatsNewOpen = false;
         }
         ImGui::End();
@@ -3117,6 +3184,7 @@ struct Hub {
         flow.poll();
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(size);
+        ImGui::SetNextWindowFocus();
         ImGui::Begin("##coop", nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings
                          | ImGuiWindowFlags_NoBackground);
@@ -3134,7 +3202,7 @@ struct Hub {
 
         const float innerW = panel.x - 68.0f;
         ImGui::SetCursorScreenPos(ImVec2(a.x + 34.0f, a.y + 80.0f));
-        ImGui::BeginChild("##coopbody", ImVec2(innerW, panel.y - 80.0f - 90.0f), ImGuiChildFlags_None,
+        ImGui::BeginChild("##coopbody", ImVec2(innerW, panel.y - 80.0f - 90.0f), ImGuiChildFlags_NavFlattened,
                           ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollWithMouse);
         ImGui::PushTextWrapPos(0.0f);
         ImGui::PushStyleColor(ImGuiCol_Text, col(ImVec4(1.0f, 0.93f, 0.80f, 1.0f)));
@@ -3186,7 +3254,7 @@ struct Hub {
 
         const float buttonsH = 50.0f, closeW = buttons::buttonWidth(role::kSmallAction), y = b.y - buttonsH - 26.0f;
         ImGui::SetCursorScreenPos(ImVec2(b.x - 34.0f - closeW, y));
-        if (glassButton("Close", role::kSmallAction, buttonsH) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        if (glassButton("Close", role::kSmallAction, buttonsH) || ImGui::IsKeyPressed(ImGuiKey_Escape) || gamepadBackPressed()) {
             // The game keeps running; closing only hides the panel.
             coopOpen = false;
         }
@@ -3248,6 +3316,11 @@ struct Hub {
     // no responde al ratón.
     void frame(ImVec2 size, float t, float dt, bool interactive = true)
     {
+#if PIKMIN_LAUNCHER_NETPLAY
+        // Keep polling after the panel is closed: that is when the game still
+        // has the controller, and when nav should come back.
+        if (coop) coop->poll();
+#endif
         collectCovers();
         drawBackground(ImGui::GetBackgroundDrawList(), size, dt);
 
@@ -3366,6 +3439,7 @@ struct HubWindow::Impl {
     std::unique_ptr<Hub> hub;
     Uint64 start = 0, last = 0;
     bool quitRequested = false;
+    bool gameController = false; // SDL_INIT_GAMECONTROLLER succeeded
     bool startAtHome = false;  // la próxima elección de rutas empieza en la pantalla principal
     bool playRequested = false;
     HubGame installGame = HubGame::Pikmin1; // juego que instalan los modales de rutas y progreso
@@ -3401,6 +3475,10 @@ struct HubWindow::Impl {
         ImGui::DestroyContext();
         SDL_GL_DeleteContext(context);
         SDL_DestroyWindow(window);
+        // The game process is started after this window is destroyed. Close the
+        // controller here so that process can open it (exec keeps leftover
+        // grabs; on Windows the launcher waits in this process).
+        if (gameController) SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER);
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
     }
 
@@ -3410,6 +3488,7 @@ struct HubWindow::Impl {
     {
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(size);
+        ImGui::SetNextWindowFocus();
         ImGui::Begin("##modal", nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings
                          | ImGuiWindowFlags_NoBackground);
@@ -3494,7 +3573,7 @@ struct HubWindow::Impl {
         const float buttonsY = at.y + panel.y - 110.0f;
         const float actionW = buttons::buttonWidth(role::kAction);
         ImGui::SetCursorScreenPos(ImVec2(at.x + width - 2.0f * actionW - 14.0f, buttonsY));
-        if (hub->glassButton("Cancel", role::kAction, 50.0f)) pathsAction = 4;
+        if (hub->glassButton("Cancel", role::kAction, 50.0f) || gamepadBackPressed()) pathsAction = 4;
         ImGui::SetCursorScreenPos(ImVec2(at.x + width - actionW, buttonsY));
         if (hub->glassButton("Install", role::kAction, 50.0f, true, rom.empty() || installDirectory.empty())) pathsAction = 3;
         endModal();
@@ -3580,6 +3659,11 @@ struct HubWindow::Impl {
             ImGui::SetCursorScreenPos(ImVec2(at.x + b.x, buttonsY + float(b.row) * rowStep));
             if (hub->glassButton(cancelLabel.c_str(), ImVec2(b.w, 50.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape))
                 answer = 2;
+        }
+        // B dismisses. It does not press Play, Download, or the other actions.
+        if (answer < 0 && gamepadBackPressed()) {
+            const int back = launcherGamepadDialogBack(!cancelLabel.empty(), secondaryLabel);
+            if (back >= 0) answer = back;
         }
         endModal();
     }
@@ -3670,6 +3754,7 @@ struct HubWindow::Impl {
 #ifndef __ANDROID__
         scaleQueuedMouse();
 #endif
+        launcherApplyGamepadNav();
         if (gUiScale != 1.0f) {
             ImGuiIO& io = ImGui::GetIO();
             io.DisplayFramebufferScale = ImVec2(io.DisplayFramebufferScale.x * gUiScale, io.DisplayFramebufferScale.y * gUiScale);
@@ -3778,6 +3863,11 @@ bool HubWindow::open(const HubState& state, std::string& error)
         error = SDL_GetError();
         return false;
     }
+    // Controllers opened before or after launch. A failure here leaves the
+    // mouse and keyboard launcher unchanged.
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    m.gameController = SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) == 0;
+    noteGamepadSubsystem(m.gameController);
 #ifdef __ANDROID__
     // Android: OpenGL ES 3.0 a pantalla completa (la ventana es la actividad).
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
@@ -3803,6 +3893,8 @@ bool HubWindow::open(const HubState& state, std::string& error)
 #endif
     if (!window) {
         error = SDL_GetError();
+        if (m.gameController) SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER);
+        m.gameController = false;
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return false;
     }
@@ -3816,6 +3908,8 @@ bool HubWindow::open(const HubState& state, std::string& error)
     if (!context) {
         error = SDL_GetError();
         SDL_DestroyWindow(window);
+        if (m.gameController) SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER);
+        m.gameController = false;
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return false;
     }
@@ -3834,7 +3928,11 @@ bool HubWindow::open(const HubState& state, std::string& error)
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGui::GetIO().IniFilename = nullptr;
+    ImGuiIO& io = ImGui::GetIO();
+    io.IniFilename = nullptr;
+    // Keyboard navigation stays off, so arrows and shortcuts are unchanged.
+    // D-pad and left stick move focus, A activates, B goes back.
+    if (m.gameController) io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
     ImGui_ImplSDL2_InitForOpenGL(window, context);
 #ifdef __ANDROID__
     ImGui_ImplOpenGL3_Init("#version 300 es");
