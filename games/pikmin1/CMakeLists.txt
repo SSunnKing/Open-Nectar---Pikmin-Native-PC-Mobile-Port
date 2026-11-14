@@ -889,6 +889,7 @@ if(PIKMIN_NETPLAY_BUILD)
         # with NECTAR_ONLINE, the lockstep ICE (NPIX) room otherwise or with
         # PIKMIN_ONLINE_LEGACY_ICE=1; joining follows the pasted code.
         pc_port/netplay/pc_online_menu.cpp
+        pc_port/netplay/pc_online_menu_rows.cpp
         pc_port/netplay/pc_online_relaunch.cpp)
     target_link_libraries(${NECTAR_GAME} PRIVATE gekkonet)
     if(WIN32)
