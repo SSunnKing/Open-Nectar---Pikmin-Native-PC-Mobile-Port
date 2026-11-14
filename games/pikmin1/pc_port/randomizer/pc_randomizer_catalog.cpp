@@ -1,5 +1,7 @@
 #include "randomizer/pc_randomizer_catalog.h"
 
+#include "pc_randomizer.h"
+
 #include <cmath>
 #include <cstring>
 
@@ -177,4 +179,54 @@ bool pc_randomizer_boss_is_fight(int genBossId)
 bool pc_randomizer_boss_drops_part(int genBossId)
 {
 	return genBossId >= 0 && genBossId < kBossCount && kBossDrops[genBossId];
+}
+
+bool pc_randomizer_boss_always_births(int genBossId)
+{
+	// GENBOSS_Pom: BossMgr::create lo omite sin la cebolla de mItemColour.
+	if (genBossId == PC_RND_GENBOSS_POM) return false;
+	int all[16];
+	const int count = pc_randomizer_boss_pool(all, 16);
+	for (int i = 0; i < count; i++) {
+		if (all[i] == genBossId) return true;
+	}
+	return false;
+}
+
+int pc_randomizer_choose_boss(PcRandomizerRng& rng, int original, bool needsPart, bool fightOnly)
+{
+	int pool[16];
+	int n = 0;
+	int all[16];
+	const int count = pc_randomizer_boss_pool(all, 16);
+	for (int i = 0; i < count; i++) {
+		const int b = all[i];
+		if (fightOnly && !pc_randomizer_boss_is_fight(b)) continue;
+		if (needsPart && !pc_randomizer_boss_drops_part(b)) continue;
+		pool[n++] = b;
+	}
+	if (!n) return original;
+	const int picked = pool[rng.below(uint32_t(n))];
+	if (!needsPart || pc_randomizer_boss_always_births(picked)) return picked;
+
+	int valid[16];
+	int vn = 0;
+	for (int i = 0; i < n; i++) {
+		if (pc_randomizer_boss_always_births(pool[i])) valid[vn++] = pool[i];
+	}
+	if (!vn) return original;
+	return valid[rng.below(uint32_t(vn))];
+}
+
+int pc_randomizer_choose_teki(PcRandomizerRng& rng, int original, bool needsCarrier, bool sameClass)
+{
+	int pool[64];
+	int n = 0;
+	for (int t = 0; t < 64 && n < 64; t++) {
+		if (!pc_randomizer_teki_target(t)) continue;
+		if (sameClass && pc_randomizer_teki_class(t) != pc_randomizer_teki_class(original)) continue;
+		if (needsCarrier && (pc_randomizer_teki_info(t).tags & PC_ENEMY_CarrierCompatible) == 0) continue;
+		pool[n++] = t;
+	}
+	return n ? pool[rng.below(uint32_t(n))] : original;
 }
