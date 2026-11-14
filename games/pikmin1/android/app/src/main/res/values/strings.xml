@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Open Nectar</string>
+    <string name="shortcut_pikmin">Pikmin</string>
+    <string name="shortcut_pikmin_long">Play Pikmin</string>
+    <string name="shortcut_pikmin2">Pikmin 2</string>
+    <string name="shortcut_pikmin2_long">Play Pikmin 2</string>
 </resources>

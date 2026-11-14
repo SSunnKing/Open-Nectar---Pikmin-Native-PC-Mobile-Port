@@ -11,6 +11,8 @@ dependencies {
     // Desempaquetado de packs de texturas en .rar (PLAN_TEXTURAS_HD fase 2).
     // JunRAR lee RAR4 y RAR5 en Java puro. Trae transitive commons-compress.
     implementation 'com.github.junrar:junrar:7.5.5'
+    // Create shortcut: ShortcutManagerCompat.requestPinShortcut (#336).
+    implementation 'androidx.core:core:1.15.0'
 }
 
 // Firma de release (fase 8). La clave vive fuera del repositorio; se busca

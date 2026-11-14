@@ -10,10 +10,14 @@
 // la actividad que abra NectarActivity con la biblioteca del juego y su
 // carpeta; el juego corre en su propio proceso.
 
+#include "asset_check.h"
 #include "asset_finalize.h"
 #include "fd_stream.h"
 #include "gamecube_image.h"
+#include "game_shortcut.h"
+#include "launch_request.h"
 #include "launcher_gui.h"
+#include "launcher_platform.h"
 #include "crash_report.h"
 #include "texture_pack_download.h"
 
@@ -28,6 +32,8 @@
 
 namespace fs = std::filesystem;
 using namespace pikmin::launcher;
+namespace platform = pikmin::launcher::platform;
+namespace shortcut = pikmin::launcher::shortcut;
 
 namespace {
 
@@ -254,6 +260,127 @@ bool installFromFd(int fd, HubGame game, const fs::path& dir, HubWindow& hub, Ga
     return out.installed;
 }
 
+// Pikmin 2's marker can be written before the files the game opens. Same
+// check as a finished install in installFromFd.
+bool pikmin2ContentReady(const fs::path& dir)
+{
+    const fs::path assets = dir / "assets";
+    std::error_code ec;
+    return fs::is_directory(assets / "user", ec) && fs::is_regular_file(assets / "AudioRes/Conductor.arc", ec)
+        && fs::is_directory(assets / "AudioRes/Seqs", ec) && fs::is_regular_file(assets / "message/font_foreign.szs", ec);
+}
+
+std::string jniString(JNIEnv* env, jstring value)
+{
+    if (!value) return {};
+    const char* text = env->GetStringUTFChars(value, nullptr);
+    std::string out = text ? text : "";
+    if (text) env->ReleaseStringUTFChars(value, text);
+    return out;
+}
+
+// One JNI string from LauncherActivity, or empty if the method isn't there.
+std::string activityString(const char* name, const char* signature)
+{
+    JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
+    jobject activity = (jobject)SDL_AndroidGetActivity();
+    if (!env || !activity) return {};
+    jclass cls = env->GetObjectClass(activity);
+    jmethodID method = env->GetMethodID(cls, name, signature);
+    std::string out;
+    if (method) {
+        jstring value = (jstring)env->CallObjectMethod(activity, method);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        else out = jniString(env, value);
+        if (value) env->DeleteLocalRef(value);
+    } else if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
+    env->DeleteLocalRef(cls);
+    env->DeleteLocalRef(activity);
+    return out;
+}
+
+// True when a shortcut intent arrived (cold start, or onNewIntent). The two
+// strings are the extra and the data URI; both empty is a normal open.
+bool takeLaunchChoice(std::string& extra, std::string& data)
+{
+    JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
+    jobject activity = (jobject)SDL_AndroidGetActivity();
+    if (!env || !activity) return false;
+    jclass cls = env->GetObjectClass(activity);
+    jmethodID method = env->GetMethodID(cls, "takeLaunchChoice", "()[Ljava/lang/String;");
+    bool got = false;
+    if (method) {
+        jobjectArray values = (jobjectArray)env->CallObjectMethod(activity, method);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        } else if (values) {
+            if (env->GetArrayLength(values) >= 2) {
+                jstring jExtra = (jstring)env->GetObjectArrayElement(values, 0);
+                jstring jData = (jstring)env->GetObjectArrayElement(values, 1);
+                extra = jniString(env, jExtra);
+                data = jniString(env, jData);
+                if (jExtra) env->DeleteLocalRef(jExtra);
+                if (jData) env->DeleteLocalRef(jData);
+                got = true;
+            }
+            env->DeleteLocalRef(values);
+        }
+    } else if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
+    env->DeleteLocalRef(cls);
+    env->DeleteLocalRef(activity);
+    return got;
+}
+
+// The game .so Play would load. An empty directory means we couldn't ask
+// Java; a known library name is then treated as present (the APK ships it).
+bool androidLibraryPresent(const std::string& nativeLibDir, const std::string& name)
+{
+    if (name != "nectar" && name != "nectar-pal" && name != "nectar2" && name != "nectar2-pal") return false;
+    if (nativeLibDir.empty()) return true;
+    std::error_code ec;
+    return fs::is_regular_file(fs::path(nativeLibDir) / ("lib" + name + ".so"), ec);
+}
+
+enum class DirectResult { None, Play, Stay };
+
+// Same launch-or-home decision as --launch on desktop. `hub` is null before
+// the window exists; the notice is kept in `notice` for when it opens.
+DirectResult handleDirectLaunch(HubState& state, const fs::path& pikmin1Dir, const fs::path& pikmin2Dir,
+                                const std::string& nativeLibDir, LaunchTarget target, HubWindow* hub, HubGame& game,
+                                std::string& notice)
+{
+    notice.clear();
+    if (target == LaunchTarget::None) return DirectResult::None;
+    if (target == LaunchTarget::Invalid) {
+        notice = androidLaunchInvalidNotice();
+        logLine("--launch: " + notice);
+        if (hub) hub->showNotice(notice);
+        return DirectResult::Stay;
+    }
+    const bool second = target == LaunchTarget::Pikmin2;
+    state.games[0] = pikmin1Install(pikmin1Dir);
+    state.games[1] = pikmin2Install(pikmin2Dir);
+    const GameInstall& install = state.games[second ? 1 : 0];
+    const fs::path& dir = second ? pikmin2Dir : pikmin1Dir;
+    const bool incomplete = install.installed && (second ? !pikmin2ContentReady(dir) : !assetsReady(dir));
+    const LaunchFacts facts = androidLaunchFacts(install.installed, incomplete,
+                                                 androidLibraryPresent(nativeLibDir, install.executable));
+    const LaunchDecision decision = decideLaunch(facts);
+    if (decision == LaunchDecision::Launch) {
+        game = second ? HubGame::Pikmin2 : HubGame::Pikmin1;
+        logLine(std::string("--launch: ") + launchTargetTitle(target));
+        return DirectResult::Play;
+    }
+    notice = launchFallbackNotice(target, decision);
+    logLine("--launch: " + notice);
+    if (hub) hub->showNotice(notice);
+    return DirectResult::Stay;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -272,6 +399,26 @@ int main(int argc, char** argv)
     state.games[1] = pikmin2Install(pikmin2Dir);
     if (state.games[0].installed) state.gameDataDirectory = (pikmin1Dir / "assets/dataDir").string();
 
+    // A shortcut's Intent (extra or opennectar://launch/pikmin1|pikmin2) takes
+    // the same path as --launch. Success starts the game before the window,
+    // so the home screen never flashes. Anything else opens the home screen
+    // with the same notice desktop shows.
+    const std::string nativeLibDir = activityString("nativeLibraryDir", "()Ljava/lang/String;");
+    std::string launchNotice;
+    {
+        std::string extra, data;
+        if (takeLaunchChoice(extra, data)) {
+            HubGame game = HubGame::Pikmin1;
+            const DirectResult result = handleDirectLaunch(state, pikmin1Dir, pikmin2Dir, nativeLibDir,
+                                                           parseAndroidLaunchChoice(extra, data), nullptr, game, launchNotice);
+            if (result == DirectResult::Play) {
+                const GameInstall& install = state.games[int(game)];
+                startGame(install.executable, install.directory);
+                return 0;
+            }
+        }
+    }
+
     HubWindow hub;
     std::string error;
     if (!hub.open(state, error)) {
@@ -284,6 +431,17 @@ int main(int argc, char** argv)
         { "Pikmin 2", pikmin2Dir, "pikmin2_crash.log", "pikmin2.log" },
         { "Pikmin", pikmin1Dir, "pikmin_crash.log", "pikmin.log" },
     });
+    if (!launchNotice.empty()) hub.showNotice(launchNotice);
+
+    // The app was already open: onNewIntent sets the same choice. Checked
+    // every home frame, including after a shortcut arrives mid-session.
+    hub.setPendingLaunch([&](HubGame& game) {
+        std::string extra, data;
+        if (!takeLaunchChoice(extra, data)) return false;
+        std::string notice;
+        return handleDirectLaunch(state, pikmin1Dir, pikmin2Dir, nativeLibDir, parseAndroidLaunchChoice(extra, data),
+                                  &hub, game, notice) == DirectResult::Play;
+    });
 
     for (;;) {
         const HubResult choice = hub.runHome();
@@ -292,6 +450,18 @@ int main(int argc, char** argv)
         if (choice.action == HubAction::DataFolder) {
             changeDataFolder();
             return 0;
+        }
+        if (choice.action == HubAction::CreateShortcut) {
+            if (!state.games[index].installed) continue;
+            platform::GameShortcutRequest request;
+            request.target = choice.game == HubGame::Pikmin2 ? LaunchTarget::Pikmin2 : LaunchTarget::Pikmin1;
+            request.iconPng = hub.gameIconPng(choice.game);
+            std::vector<std::string> places;
+            std::string shortcutError;
+            if (platform::createGameShortcut(request, places, shortcutError))
+                hub.showNotice(shortcut::createdNotice(request.target, places));
+            else hub.showNotice(shortcut::failedNotice(request.target, shortcutError));
+            continue;
         }
         if (choice.action == HubAction::Play) {
             if (!state.games[index].installed) continue;

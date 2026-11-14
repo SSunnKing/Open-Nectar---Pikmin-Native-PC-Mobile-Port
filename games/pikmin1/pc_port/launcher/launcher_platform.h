@@ -129,7 +129,8 @@ bool createDesktopShortcut(const std::filesystem::path& launcher);
 //   Linux   an applications-menu entry, and on the desktop if `desktop`;
 //           the "Open Nectar" menu entry, if there is one, gains a Pikmin
 //           and a Pikmin 2 action
-//   Android not here (home-screen shortcuts are separate): returns false
+//   Android asks the home screen to pin a shortcut (the cover in `iconPng`,
+//           or the app icon when that is empty). `places` is "the home screen".
 struct GameShortcutRequest {
     LaunchTarget target = LaunchTarget::Pikmin1;
     std::filesystem::path launcher;      // the launcher the shortcut runs
