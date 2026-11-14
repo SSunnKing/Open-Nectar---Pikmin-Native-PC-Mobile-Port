@@ -40,6 +40,7 @@ const std::vector<Use>& launcherButtons()
         { "Games", role::kTab, 42 }, { "Settings", role::kTab, 42 }, { "Move Install", role::kTab, 42 },
         // Bajo las portadas (Pikmin y Pikmin 2).
         { "Install", role::kGameWide, 44 }, { "HD textures", role::kGameWide, 44 },
+        { "Create shortcut", role::kGameWide, 44 },
         { "Map editor", role::kGameTool, 44 }, { "Model maker", role::kGameTool, 44 },
         { "HD textures", role::kGameTool, 44 }, { "Characters", role::kGameTool, 44 },
         { "Host Co-op", role::kGameTool, 44 }, { "Join Co-op", role::kGameTool, 44 },
@@ -80,7 +81,8 @@ const std::vector<Use>& launcherButtons()
 // Botones de los diálogos: el tamaño sale de sizeFor (alto 50).
 const char* const kDialogLabels[] = { "OK", "Close", "Cancel", "Back", "Restart", "Retry", "Try again", "Not now",
                                       "Play now", "Finish now", "Update now", "Choose again", "Back to setup",
-                                      "Update from a folder", "Use a downloaded folder", "Update to 10.10.10" };
+                                      "Update from a folder", "Use a downloaded folder", "Update to 10.10.10",
+                                      "Menu and desktop", "Menu only" };
 
 struct Atlas {
     ImGuiContext* context = nullptr;

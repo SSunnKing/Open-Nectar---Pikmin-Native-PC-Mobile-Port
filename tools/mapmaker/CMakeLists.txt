@@ -68,6 +68,8 @@ if(WIN32)
 else()
     set(NM_PLATFORM "${NM_P1}/pc_port/launcher/launcher_platform_posix.cpp")
 endif()
+# The launcher's shortcut helpers (#336), which its platform layer uses.
+list(APPEND NM_PLATFORM "${NM_P1}/pc_port/launcher/game_shortcut.cpp")
 
 add_executable(nectar_mapmaker
     src/main.cpp

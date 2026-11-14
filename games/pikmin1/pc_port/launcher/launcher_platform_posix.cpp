@@ -3,6 +3,7 @@
 // si no hay ninguno, el launcher recurre a su instalador en modo texto.
 
 #include "launcher_platform.h"
+#include "game_shortcut.h"
 #include "../pc_dialog_command.h"
 #include "nectar_paths/paths.h"
 
@@ -20,6 +21,7 @@
 #include <condition_variable>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <mutex>
 #include <set>
 #include <string>
@@ -556,56 +558,143 @@ bool spawnGame(const fs::path& dataRoot, const fs::path& gameBinary, const std::
     return true;
 }
 
+#if !defined(__APPLE__)
+namespace {
+
+std::string readWholeFile(const fs::path& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+std::string environment(const char* name)
+{
+    const char* value = std::getenv(name);
+    return value ? value : "";
+}
+
+// La carpeta del escritorio va traducida ("Escritorio"): la dice
+// user-dirs.dirs, con la línea XDG_DESKTOP_DIR="$HOME/Escritorio".
+fs::path desktopFolder(const fs::path& home)
+{
+    const std::string xdg = environment("XDG_CONFIG_HOME");
+    return shortcut::desktopDirectory(home, readWholeFile((!xdg.empty() ? fs::path(xdg) : home / ".config") / "user-dirs.dirs"));
+}
+
+// GNOME no abre un .desktop del escritorio hasta marcarlo de confianza.
+void trustDesktopFile(const fs::path& file)
+{
+    std::string ignored, error;
+    runAndCapture("gio", { "set", file.string(), "metadata::trusted", "true" }, file.parent_path(), ignored, error);
+}
+
+fs::path launcherIcon(const fs::path& launcher)
+{
+    std::error_code ec;
+    const fs::path icon = launcher.parent_path() / "open_nectar.png";
+    return fs::is_regular_file(icon, ec) ? icon : fs::path();
+}
+
+} // namespace
+#endif
+
 bool createDesktopShortcut(const fs::path& launcher)
 {
     const char* home = std::getenv("HOME");
     if (!home || !*home) return false;
-    std::error_code ec;
 #if defined(__APPLE__)
+    std::error_code ec;
     const fs::path link = fs::path(home) / "Desktop" / "Open Nectar";
     fs::remove(link, ec);
     fs::create_symlink(launcher, link, ec);
     return !ec;
 #else
-    // La carpeta del escritorio va traducida ("Escritorio"): la dice
-    // user-dirs.dirs, con la línea XDG_DESKTOP_DIR="$HOME/Escritorio".
-    fs::path desktop = fs::path(home) / "Desktop";
-    const char* xdg = std::getenv("XDG_CONFIG_HOME");
-    std::ifstream dirs((xdg && *xdg ? fs::path(xdg) : fs::path(home) / ".config") / "user-dirs.dirs");
-    for (std::string line; std::getline(dirs, line);) {
-        const std::string key = "XDG_DESKTOP_DIR=\"";
-        if (line.compare(0, key.size(), key) != 0) continue;
-        std::string value = line.substr(key.size());
-        if (!value.empty() && value.back() == '"') value.pop_back();
-        if (value.compare(0, 5, "$HOME") == 0) value = std::string(home) + value.substr(5);
-        if (!value.empty()) desktop = value;
-    }
-    const fs::path icon = launcher.parent_path() / "open_nectar.png";
-    const std::string entry = "[Desktop Entry]\nType=Application\nName=Open Nectar\n"
-                              "Comment=Pikmin 1 and Pikmin 2\nExec=\"" + launcher.string() + "\"\n"
-                              "Path=" + launcher.parent_path().string() + "\n"
-                            + (fs::is_regular_file(icon, ec) ? "Icon=" + icon.string() + "\n" : std::string())
-                            + "Terminal=false\nCategories=Game;\n";
+    // With a Pikmin and a Pikmin 2 action (--launch) in menus that show them.
+    const std::string entry = shortcut::mainDesktopEntry(launcher, launcherIcon(launcher));
     bool written = false;
     // Escritorio y menú de aplicaciones.
+    const fs::path desktop = desktopFolder(home);
     for (const fs::path& file : { desktop / "open-nectar.desktop",
-                                  fs::path(home) / ".local/share/applications/open-nectar.desktop" }) {
-        fs::create_directories(file.parent_path(), ec);
-        std::ofstream out(file, std::ios::trunc);
-        if (!(out << entry)) continue;
-        out.close();
-        fs::permissions(file, fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
-                        fs::perm_options::add, ec);
-        if (!written) {
-            // GNOME no abre un .desktop del escritorio hasta marcarlo de confianza.
-            std::string ignored, error;
-            runAndCapture("gio", { "set", file.string(), "metadata::trusted", "true" }, desktop, ignored, error);
-        }
+                                  shortcut::applicationsDirectory(home, environment("XDG_DATA_HOME")) / "open-nectar.desktop" }) {
+        std::string error;
+        if (!shortcut::writeFile(file, entry, true, error)) continue;
+        if (!written) trustDesktopFile(file);
         written = true;
     }
     return written;
 #endif
 }
+
+#if defined(__APPLE__)
+fs::path askForShortcutLocation(const std::string& prompt, const fs::path& folder, const std::string& name)
+{
+    std::error_code ec;
+    if (!folder.empty()) fs::create_directories(folder, ec); // ~/Applications is not there on every Mac
+    const std::string selected = runDialogProcess("osascript", { "-e",
+        pc_dialog::chooseFileNameScript(prompt, name, !ec && fs::is_directory(folder, ec) ? folder.string() : std::string()) });
+    return selected.empty() ? fs::path() : fs::path(selected);
+}
+
+bool createGameShortcut(const GameShortcutRequest& request, std::vector<std::string>& places, std::string& error)
+{
+    const char* home = std::getenv("HOME");
+    if (request.location.empty()) {
+        error = "no place chosen";
+        return false;
+    }
+    const fs::path bundle = shortcut::macBundlePath(request.location);
+    std::vector<unsigned char> icns = shortcut::icnsFromPng(request.iconPng);
+    if (icns.empty() && !request.fallbackIcon.empty()) {
+        std::ifstream in(request.fallbackIcon, std::ios::binary);
+        const std::vector<unsigned char> png((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        icns = shortcut::icnsFromPng(png);
+    }
+    if (!shortcut::writeMacBundle(bundle, request.target, request.launcher, icns, error)) return false;
+    // Tell Launch Services now, so Launchpad and Spotlight list it straight away.
+    std::string ignored, lsError;
+    runAndCapture("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+                  { "-f", bundle.string() }, bundle.parent_path(), ignored, lsError);
+    places.push_back(shortcut::macPlaceName(bundle, home ? fs::path(home) : fs::path()));
+    return true;
+}
+#else
+fs::path askForShortcutLocation(const std::string&, const fs::path&, const std::string&) { return {}; }
+
+bool createGameShortcut(const GameShortcutRequest& request, std::vector<std::string>& places, std::string& error)
+{
+    const char* home = std::getenv("HOME");
+    if (!home || !*home) {
+        error = "HOME is not set";
+        return false;
+    }
+    const std::string dataHome = environment("XDG_DATA_HOME");
+    // The cover icon is kept with the user's data; without one, the Open Nectar icon.
+    fs::path icon = request.fallbackIcon;
+    if (!request.iconPng.empty()) {
+        const fs::path file = shortcut::linuxIconPath(home, dataHome, request.target);
+        std::string ignored;
+        if (shortcut::writeFile(file, std::string(request.iconPng.begin(), request.iconPng.end()), false, ignored)) icon = file;
+    }
+    const std::string entry = shortcut::desktopEntry(request.target, request.launcher, icon);
+    const fs::path applications = shortcut::applicationsDirectory(home, dataHome);
+    if (!shortcut::writeFile(applications / shortcut::desktopFileName(request.target), entry, true, error)) return false;
+    places.push_back("the applications menu");
+    // The "Open Nectar" entry made at install gains the two game actions.
+    std::error_code ec;
+    const fs::path main = applications / "open-nectar.desktop";
+    if (fs::is_regular_file(main, ec)) {
+        std::string ignored;
+        shortcut::writeFile(main, shortcut::mainDesktopEntry(request.launcher, launcherIcon(request.launcher)), true, ignored);
+    }
+    if (request.desktop) {
+        const fs::path file = desktopFolder(home) / shortcut::desktopFileName(request.target);
+        if (!shortcut::writeFile(file, entry, true, error)) return false;
+        trustDesktopFile(file);
+        places.push_back("the desktop");
+    }
+    return true;
+}
+#endif
 
 bool gameRunning(GameProcess& process, int& exitCode)
 {

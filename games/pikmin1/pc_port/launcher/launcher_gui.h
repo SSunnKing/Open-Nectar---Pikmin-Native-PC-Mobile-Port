@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace pikmin {
 namespace launcher {
@@ -21,6 +22,7 @@ enum class HubAction {
     InstallCharacter, // botón Characters: instala un personaje (.nectarchar)
     TexturePack, // botón HD textures: descarga e instala el pack de ese juego
     DataFolder, // botón Change folder (Android): elegir otra carpeta de datos
+    CreateShortcut, // Create shortcut: a shortcut that opens this game directly (#336)
 };
 
 // Juegos que muestra la pantalla principal; los dos se instalan desde su disco.
@@ -103,6 +105,9 @@ public:
     void setHomeLoop(std::function<HubResult()> loop);
     // Short notice at the bottom of the home screen (why --launch opened it).
     void showNotice(const std::string& text);
+    // The game's cover as a 256x256 PNG icon for its shortcut (#336), from
+    // the launcher's cover cache. Empty if the cover was never downloaded.
+    std::vector<unsigned char> gameIconPng(HubGame game) const;
     void markInstalled(HubGame game, const std::string& directory, const std::string& executable,
                        const std::string& discId);
     // true si la comprobación en segundo plano encontró un release más nuevo

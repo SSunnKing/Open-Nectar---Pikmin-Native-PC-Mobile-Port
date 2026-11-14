@@ -23,6 +23,7 @@
 #if PIKMIN_LAUNCHER_NETPLAY
 #include "launcher_coop.h"
 #endif
+#include "game_shortcut.h"
 #include "gci_save_import.h"
 #include "install_directory.h"
 #include "install_disc_id.h"
@@ -1361,16 +1362,29 @@ struct Hub {
     // Por encima del pie ("Installed in: ...").
     static float pageBottom(ImVec2 size) { return hubPageBottom(size.y); }
 
-    // Filas de botones de la columna más alta (la de Pikmin 1 si está instalado).
-    float gamesRows() const
-    {
-        if (!state.games[int(HubGame::Pikmin1)].installed) return 1.0f;
-        float rows = editorRows();
-#if PIKMIN_LAUNCHER_NETPLAY
-        if (state.netplay) rows += 2.0f;
+    // Create shortcut (#336), the last row under each installed game. Not on
+    // Android: home-screen shortcuts there are separate.
+    static constexpr bool kShortcutButton =
+#ifdef __ANDROID__
+        false;
+#else
+        true;
 #endif
+
+    // Filas de botones bajo la portada de un juego.
+    float columnRows(int game) const
+    {
+        if (!state.games[game].installed) return 1.0f;
+        float rows = game == int(HubGame::Pikmin1) ? editorRows() : 1.0f;
+#if PIKMIN_LAUNCHER_NETPLAY
+        if (game == int(HubGame::Pikmin1) && state.netplay) rows += 2.0f;
+#endif
+        if (kShortcutButton) rows += 1.0f;
         return rows;
     }
+
+    // Filas de botones de la columna más alta.
+    float gamesRows() const { return std::max(columnRows(0), columnRows(1)); }
 
     // Una página que no cabe se dibuja dentro de una región con scroll que
     // ocupa de `top` al borde inferior; devuelve dónde empieza su contenido.
@@ -1476,6 +1490,11 @@ struct Hub {
                 if (glassButton("Join VS", role::kGameTool, 44.0f)) openCoop(false, true);
             }
 #endif
+            // Create shortcut: wide, centred, under the game's other buttons.
+            if (installed && kShortcutButton) {
+                ImGui::SetCursorScreenPos(ImVec2(centre - wideW * 0.5f, below + buttonsGap + (columnRows(i) - 1.0f) * (44.0f + 10.0f)));
+                if (glassButton("Create shortcut", role::kGameWide, 44.0f)) choose(HubAction::CreateShortcut, HubGame(i));
+            }
             ImGui::PopID();
         }
 
@@ -3931,6 +3950,28 @@ void HubWindow::markInstalled(HubGame game, const std::string& directory, const 
 }
 
 bool HubWindow::playRequested() const { return mImpl->playRequested; }
+
+std::vector<unsigned char> HubWindow::gameIconPng(HubGame game) const
+{
+    const Hub* hub = mImpl->hub.get();
+    if (!hub) return {};
+    const auto& request = hub->coverRequests[int(game)];
+    if (!request) return {};
+    // The covers the home screen shows, from the cache (full box first).
+    const fs::path dir = platform::cacheDirectory() / "art";
+    for (const RemoteSource& source : request->sources) {
+        std::vector<unsigned char> bytes;
+        if (!readFile(dir / source.cacheName, bytes)) continue;
+        int w = 0, h = 0, channels = 0;
+        unsigned char* decoded = stbi_load_from_memory(bytes.data(), int(bytes.size()), &w, &h, &channels, 4);
+        if (!decoded) continue;
+        const std::vector<unsigned char> icon = shortcut::coverIcon(decoded, w, h, source.full ? kFrontCoverStart : 0.0f,
+                                                                    shortcut::kIconSize);
+        stbi_image_free(decoded);
+        return shortcut::encodePng(icon.data(), shortcut::kIconSize, shortcut::kIconSize);
+    }
+    return {};
+}
 
 bool HubWindow::newerRelease(ReleaseInfo& release) const
 {

@@ -122,6 +122,15 @@ void relaunch(const fs::path&, const std::vector<std::string>&) { }
 
 bool createDesktopShortcut(const fs::path&) { return false; } // el icono es el de la APK
 
+// Home-screen shortcuts on Android are a separate change (#336).
+bool createGameShortcut(const GameShortcutRequest&, std::vector<std::string>&, std::string& error)
+{
+    error = "not available on Android yet";
+    return false;
+}
+
+fs::path askForShortcutLocation(const std::string&, const fs::path&, const std::string&) { return {}; }
+
 [[noreturn]] void launchGame(const fs::path&, const fs::path&, const std::vector<std::string>&)
 {
     // launcher_android_main.cpp arranca el juego por JNI; esto no se usa.

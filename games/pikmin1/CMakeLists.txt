@@ -1108,6 +1108,7 @@ if(ANDROID AND NOT TARGET nectar_launcher)
         pc_port/launcher/texture_pack_download_dialog.cpp
         pc_port/launcher/installer_ui.cpp
         pc_port/launcher/launcher_platform_android.cpp
+        pc_port/launcher/game_shortcut.cpp
         pc_port/pc_icon.cpp
         "${LAUNCHER_EMBED_DIR}/logo_open_nectar.h"
         "${LAUNCHER_EMBED_DIR}/font_fredoka.h"
@@ -1130,9 +1131,9 @@ if(PIKMIN_BUILD_LAUNCHER)
     # La capa de plataforma aísla lo único del launcher que depende del sistema:
     # rutas del ejecutable, diálogos y arranque del juego.
     if (WIN32)
-        set(LAUNCHER_PLATFORM_SOURCE pc_port/launcher/launcher_platform_win32.cpp)
+        set(LAUNCHER_PLATFORM_SOURCE pc_port/launcher/launcher_platform_win32.cpp pc_port/launcher/game_shortcut.cpp)
     else()
-        set(LAUNCHER_PLATFORM_SOURCE pc_port/launcher/launcher_platform_posix.cpp)
+        set(LAUNCHER_PLATFORM_SOURCE pc_port/launcher/launcher_platform_posix.cpp pc_port/launcher/game_shortcut.cpp)
     endif()
 
     find_package(Threads REQUIRED)
@@ -1331,6 +1332,16 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
     add_executable(launch_request_test pc_port/launcher/launch_request_test.cpp)
     target_compile_options(launch_request_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME launch_request_test COMMAND launch_request_test)
+
+    # Per-game shortcuts (#336): .app, .desktop and .lnk names and contents,
+    # and the cover icon (PNG, .ico, .icns).
+    add_executable(game_shortcut_test pc_port/launcher/game_shortcut_test.cpp
+        pc_port/launcher/game_shortcut.cpp)
+    set_property(TARGET game_shortcut_test PROPERTY INCLUDE_DIRECTORIES "")
+    target_include_directories(game_shortcut_test PRIVATE ${PC_PORT_DIR}/launcher
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
+    target_compile_options(game_shortcut_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME game_shortcut_test COMMAND game_shortcut_test)
 
     # Versión junto al logo (#327): la fuente y el estilo, sin ventana.
     add_executable(version_label_test pc_port/launcher/version_label_test.cpp

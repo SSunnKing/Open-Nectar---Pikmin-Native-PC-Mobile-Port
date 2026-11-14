@@ -12,6 +12,7 @@
 #include "installer_ui.h"
 #include "install_directory.h"
 #include "install_disc_id.h"
+#include "game_shortcut.h"
 #include "launch_request.h"
 #include "launcher_gui.h"
 #include "crash_report.h"
@@ -1017,6 +1018,64 @@ void rememberInstallDirectory(const fs::path& directory)
     platform::createDesktopShortcut(install / kLauncherExecutable);
 }
 
+// The launcher a game shortcut runs (#336): this one inside an install, else
+// the remembered install's (it is the one that plays and updates), else this
+// one (on Linux the AppImage file, not its temporary mount).
+fs::path shortcutLauncher(const fs::path& sourceDirectory, bool isInstallFolder)
+{
+    std::error_code ec;
+    if (isInstallFolder) {
+        const fs::path self = platform::executablePath();
+        return self.empty() ? sourceDirectory / kLauncherExecutable : self;
+    }
+    const fs::path installed = rememberedInstallDirectory();
+    if (!installed.empty() && fs::is_regular_file(installed / kLauncherExecutable, ec)) return installed / kLauncherExecutable;
+#if !defined(_WIN32) && !defined(__APPLE__)
+    if (const char* image = std::getenv("APPIMAGE"); image && *image && fs::is_regular_file(image, ec)) return image;
+#endif
+    return platform::executablePath();
+}
+
+// Create shortcut under a cover: asks where when the system has a choice
+// (macOS: a Save dialog in ~/Applications; Linux: desktop too?), writes the
+// shortcut and says how it went at the bottom of the home screen.
+void createGameShortcut(pikmin::launcher::HubWindow& home, pikmin::launcher::HubGame game, const fs::path& launcher)
+{
+    namespace shortcut = pikmin::launcher::shortcut;
+    using pikmin::launcher::LaunchTarget;
+    const LaunchTarget target = game == pikmin::launcher::HubGame::Pikmin2 ? LaunchTarget::Pikmin2 : LaunchTarget::Pikmin1;
+    const std::string title = shortcut::gameTitle(target);
+    if (launcher.empty()) {
+        home.showNotice(shortcut::failedNotice(target, "the launcher could not find its own file"));
+        return;
+    }
+    platform::GameShortcutRequest request;
+    request.target = target;
+    request.launcher = launcher;
+    request.iconPng = home.gameIconPng(game);
+    std::error_code ec;
+    if (fs::is_regular_file(launcher.parent_path() / "open_nectar.png", ec))
+        request.fallbackIcon = launcher.parent_path() / "open_nectar.png";
+#if defined(__APPLE__)
+    const char* userHome = std::getenv("HOME");
+    const fs::path folder = userHome && *userHome ? shortcut::macDefaultFolder(userHome) : fs::path();
+    request.location = fs::u8path(home.runDialog([&] {
+        return platform::askForShortcutLocation("Open Nectar - Save a shortcut that opens " + title, folder, title).u8string();
+    }, "save dialog"));
+    if (request.location.empty()) return; // cancelled
+#elif !defined(_WIN32)
+    const int answer = home.ask("Create a " + title + " shortcut",
+                                "It goes in your applications menu. Put one on the desktop too?",
+                                "Menu and desktop", "Menu only", false, "Cancel");
+    if (answer < 0) return;
+    request.desktop = answer == 0;
+#endif
+    std::vector<std::string> places;
+    std::string error;
+    if (platform::createGameShortcut(request, places, error)) home.showNotice(shortcut::createdNotice(target, places));
+    else home.showNotice(shortcut::failedNotice(target, error));
+}
+
 // La ruta de dolphin-tool elegida también se recuerda (junto a pikmin2_dir):
 // instalar el otro juego más tarde no vuelve a pedirla (#171).
 fs::path converterFile() { return nectar::paths::configFile("dolphin_tool"); }
@@ -1551,6 +1610,10 @@ int main(int argc, char** argv)
                                 return std::string();
                             }, "message");
                         }
+                        continue;
+                    }
+                    if (choice.action == pikmin::launcher::HubAction::CreateShortcut) {
+                        createGameShortcut(*home, choice.game, shortcutLauncher(sourceDirectory, isInstallFolder));
                         continue;
                     }
                     if (choice.action == pikmin::launcher::HubAction::ModelMaker) {

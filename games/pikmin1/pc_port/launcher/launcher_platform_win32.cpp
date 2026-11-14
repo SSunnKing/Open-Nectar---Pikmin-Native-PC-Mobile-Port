@@ -10,6 +10,7 @@
 // extractor.
 
 #include "launcher_platform.h"
+#include "game_shortcut.h"
 #include "nectar_paths/paths.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -452,22 +453,35 @@ bool runAndCapture(const fs::path& program, const std::vector<std::string>& argu
     return true;
 }
 
-bool createDesktopShortcut(const fs::path& launcher)
+namespace {
+
+fs::path knownFolder(REFKNOWNFOLDERID id)
 {
     PWSTR folder = nullptr;
-    if (FAILED(SHGetKnownFolderPath(FOLDERID_Desktop, 0, nullptr, &folder))) return false;
-    const fs::path link = fs::path(folder) / L"Open Nectar.lnk";
+    if (FAILED(SHGetKnownFolderPath(id, KF_FLAG_CREATE, nullptr, &folder))) {
+        CoTaskMemFree(folder);
+        return {};
+    }
+    fs::path path(folder);
     CoTaskMemFree(folder);
+    return path;
+}
 
+// Writes a .lnk to `program` with `arguments`, its icon from `icon` (an .exe
+// or .ico, first icon). Replaces one that was there.
+bool saveShellLink(const fs::path& link, const fs::path& program, const std::wstring& arguments, const fs::path& icon,
+                   const std::wstring& description)
+{
     const HRESULT init = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     bool ok = false;
     IShellLinkW* shell = nullptr;
     if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_IShellLinkW,
                                    reinterpret_cast<void**>(&shell)))) {
-        shell->SetPath(launcher.wstring().c_str());
-        shell->SetWorkingDirectory(launcher.parent_path().wstring().c_str());
-        shell->SetIconLocation(launcher.wstring().c_str(), 0);
-        shell->SetDescription(L"Open Nectar - Pikmin 1 and Pikmin 2");
+        shell->SetPath(program.wstring().c_str());
+        if (!arguments.empty()) shell->SetArguments(arguments.c_str());
+        shell->SetWorkingDirectory(program.parent_path().wstring().c_str());
+        shell->SetIconLocation(icon.wstring().c_str(), 0);
+        shell->SetDescription(description.c_str());
         IPersistFile* file = nullptr;
         if (SUCCEEDED(shell->QueryInterface(IID_IPersistFile, reinterpret_cast<void**>(&file)))) {
             ok = SUCCEEDED(file->Save(link.wstring().c_str(), TRUE));
@@ -477,6 +491,49 @@ bool createDesktopShortcut(const fs::path& launcher)
     }
     if (SUCCEEDED(init)) CoUninitialize();
     return ok;
+}
+
+} // namespace
+
+bool createDesktopShortcut(const fs::path& launcher)
+{
+    const fs::path desktop = knownFolder(FOLDERID_Desktop);
+    if (desktop.empty()) return false;
+    return saveShellLink(desktop / L"Open Nectar.lnk", launcher, L"", launcher, L"Open Nectar - Pikmin 1 and Pikmin 2");
+}
+
+fs::path askForShortcutLocation(const std::string&, const fs::path&, const std::string&) { return {}; }
+
+bool createGameShortcut(const GameShortcutRequest& request, std::vector<std::string>& places, std::string& error)
+{
+    // The cover icon goes to %LOCALAPPDATA%\Open Nectar\icons; without a
+    // cover, the launcher's own icon.
+    fs::path icon = request.launcher;
+    if (!request.iconPng.empty()) {
+        const std::vector<unsigned char> ico = shortcut::icoFromPng(request.iconPng);
+        const fs::path local = knownFolder(FOLDERID_LocalAppData);
+        if (!ico.empty() && !local.empty()) {
+            const fs::path file = local / L"Open Nectar" / L"icons" / fs::u8path(shortcut::gameId(request.target) + ".ico");
+            std::string ignored;
+            if (shortcut::writeFile(file, std::string(ico.begin(), ico.end()), false, ignored)) icon = file;
+        }
+    }
+    const std::wstring arguments = fs::u8path(launchArgument(request.target)).wstring();
+    const std::wstring description = L"Open Nectar - " + fs::u8path(shortcut::gameTitle(request.target)).wstring();
+    const fs::path desktop = knownFolder(FOLDERID_Desktop);
+    if (!desktop.empty()
+        && saveShellLink(shortcut::windowsShortcutPath(desktop, request.target), request.launcher, arguments, icon, description))
+        places.push_back("the desktop");
+    const fs::path programs = knownFolder(FOLDERID_Programs);
+    if (!programs.empty()) {
+        const fs::path folder = shortcut::windowsStartMenuFolder(programs);
+        std::error_code ec;
+        fs::create_directories(folder, ec);
+        if (saveShellLink(shortcut::windowsShortcutPath(folder, request.target), request.launcher, arguments, icon, description))
+            places.push_back("the Start menu");
+    }
+    if (places.empty()) error = "Windows did not let the launcher write to the desktop or the Start menu";
+    return !places.empty();
 }
 
 void relaunch(const fs::path& program, const std::vector<std::string>& arguments)
