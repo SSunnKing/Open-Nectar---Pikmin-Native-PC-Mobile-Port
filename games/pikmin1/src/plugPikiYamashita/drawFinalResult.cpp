@@ -8,6 +8,7 @@
 #include "zen/ogSub.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
+#include "pc_menu_click.h"
 #endif
 
 /**
@@ -382,7 +383,13 @@ bool zen::DrawFinalResult::update(Controller* controller)
 	}
 	case MODE_Scores:
 	{
-		if (controller->keyClick(KBBTN_START | KBBTN_A)) {
+#if defined(PIKI_PC_PORT)
+		pc_menu_click_claim_pointer_menu();
+		const bool pointerGo = pc_menu_click_take(nullptr, nullptr) || pc_menu_click_take_back();
+#else
+		const bool pointerGo = false;
+#endif
+		if (controller->keyClick(KBBTN_START | KBBTN_A) || pointerGo) {
 			SeSystem::playSysSe(SYSSE_DECIDE1);
 			setMode(MODE_Parts);
 		} else {
