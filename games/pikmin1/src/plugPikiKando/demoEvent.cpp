@@ -219,7 +219,7 @@ void DemoEventMgr::act(int sender, int event)
 		{
 #if defined(PIKI_PC_PORT)
 			for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
-				naviMgr->getNavi(ni)->enterAllPikis();
+				if (Navi* navi = naviMgr->getNavi(ni)) navi->enterAllPikis();
 			}
 #else
 			naviMgr->getNavi()->enterAllPikis();
