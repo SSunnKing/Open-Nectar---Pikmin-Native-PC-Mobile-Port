@@ -1,4 +1,9 @@
 #include "zen/ogDiary.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_gfx.h"
+#include "pc_menu_click.h"
+#include "pc_screen_pointer.h"
+#endif
 #include "DebugLog.h"
 #include "Font.h"
 #include "P2D/Graph.h"
@@ -344,11 +349,22 @@ zen::ogDrawDiary::DiaryStatus zen::ogDrawDiary::update(Controller* input)
 	}
 
 	if (mStatus == ogDrawDiary::Active) {
-		if (input->keyClick(KBBTN_B)) {
+#if defined(PIKI_PC_PORT)
+		// Right click closes. A left click is left pending so the text window
+		// turns the page the same way A does; this also steps the diary entry.
+		pc_menu_click_claim_pointer_menu();
+		const bool pointerBack = pc_menu_click_take_back();
+		float pointerNx = 0.0f, pointerNy = 0.0f;
+		const bool pointerPage = pc_menu_click_pending(&pointerNx, &pointerNy);
+#else
+		const bool pointerBack = false;
+		const bool pointerPage = false;
+#endif
+		if (input->keyClick(KBBTN_B) || pointerBack) {
 			mStatus = Closing;
 			mEfxMgr->killAll(true);
 			seSystem->playSysSe(ogEnumFix(SYSSE_CANCEL, JACSYS_Cancel));
-		} else if (input->keyClick(KBBTN_A)) {
+		} else if (input->keyClick(KBBTN_A) || pointerPage) {
 			if (mDiaryMgr->nextPage()) {
 				seSystem->playSysSe(ogEnumFix(YMENU_SELECT2, JACSYS_MessageClose));
 			}
@@ -547,7 +563,48 @@ zen::ogDrawSelectDiary::SelectDiaryStatus zen::ogDrawSelectDiary::update(Control
 	}
 
 	if (mStatus == Active) {
-		if (input->keyClick(KBBTN_A | KBBTN_START)) {
+#if defined(PIKI_PC_PORT)
+		// The day under the pointer becomes the selection. A left click opens
+		// it; a right click leaves the grid. Days that have not happened stay locked.
+		pc_menu_click_claim_pointer_menu();
+		PcMenuClickRect dayRects[MAX_DAYS];
+		const int dayCount = mCurrentDay + 1;
+		for (int day = 0; day < dayCount && day < MAX_DAYS; day++) {
+			P2DPane* pane = mDayDisplayPanes[day];
+			const int x   = int(pane->getPosH());
+			const int y   = int(pane->getPosV());
+			dayRects[day] = PcMenuClickRect{ x, y, x + pane->getWidth(), y + pane->getHeight() };
+		}
+		float pointerNx = 0.0f, pointerNy = 0.0f;
+		float pointerGx = 0.0f, pointerGy = 0.0f;
+		const bool pointerOver = pc_menu_click_read_pointer_normalized(&pointerNx, &pointerNy)
+		                         && pc_gfx_menu_pointer_to_graph(pointerNx, pointerNy, &pointerGx, &pointerGy);
+		if (pointerOver) {
+			const int hover = pc_diary_day_hit(pointerGx, pointerGy, dayRects, dayCount, mCurrentDay);
+			if (hover >= 0 && hover != mSelectionIndex) {
+				mSelectedColumnIndex = s16(hover % 10);
+				mSelectedRowIndex    = s16(hover / 10);
+				if (!MoveCursor()) seSystem->playSysSe(ogEnumFix(SYSSE_MOVE1, JACSYS_Move1));
+			}
+		}
+		bool pointerOpen = false;
+		if (pc_menu_click_pending(&pointerNx, &pointerNy)
+		    && pc_gfx_menu_pointer_to_graph(pointerNx, pointerNy, &pointerGx, &pointerGy)) {
+			const int hit = pc_diary_day_hit(pointerGx, pointerGy, dayRects, dayCount, mCurrentDay);
+			if (hit >= 0) {
+				pc_menu_click_take(&pointerNx, &pointerNy);
+				mSelectedColumnIndex = s16(hit % 10);
+				mSelectedRowIndex    = s16(hit / 10);
+				MoveCursor();
+				pointerOpen = true;
+			}
+		}
+		const bool pointerClose = pc_menu_click_take_back();
+#else
+		const bool pointerOpen  = false;
+		const bool pointerClose = false;
+#endif
+		if (input->keyClick(KBBTN_A | KBBTN_START) || pointerOpen) {
 			P2DPane* pane = mDayDisplayPanes[mSelectionIndex];
 			int centerX   = pane->getPosH() + pane->getWidth() / 2;
 			int centerY   = pane->getPosV() + pane->getHeight() / 2;
@@ -557,7 +614,7 @@ zen::ogDrawSelectDiary::SelectDiaryStatus zen::ogDrawSelectDiary::update(Control
 			return mStatus;
 		}
 
-		if (input->keyClick(KBBTN_B | KBBTN_Y)) {
+		if (input->keyClick(KBBTN_B | KBBTN_Y) || pointerClose) {
 			mStatus          = FadingOut;
 			mTransitionTimer = 0.0f;
 			return mStatus;
@@ -638,6 +695,10 @@ void zen::ogDrawSelectDiary::draw(Graphics& gfx)
 
 	P2DPerspGraph graf(0, 0, 640, 480, 30.0f, 1.0f, 5000.0f);
 	graf.setPort();
+#if defined(PIKI_PC_PORT)
+	// The world map skips its tap space while the diary is up. The grid is 640x480.
+	pc_gfx_note_menu_tap_space(640, 480);
+#endif
 	mScreen->draw(0, 0, &graf);
 	mDiaryInstance->draw(gfx);
 	mBlackFadeScreen->draw(0, 0, &graf);

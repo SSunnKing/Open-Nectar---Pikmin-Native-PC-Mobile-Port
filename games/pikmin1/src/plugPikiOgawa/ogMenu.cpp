@@ -5,6 +5,11 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
 #include "pc_keycaps.h"
+#include "pc_button_prompt.h"
+#include "pc_menu_click.h"
+#include "pc_screen_pointer.h"
+#include "settings/pc_settings_p2d.h"
+#include "Colour.h"
 #include <cmath>
 #include <cstring>
 #endif
@@ -204,6 +209,17 @@ struct TouchSwipeHintCallBack : public P2DPaneCallBack {
 	virtual bool invoke(P2DPane*) { return true; }
 	virtual bool draw(P2DPane* pane)
 	{
+		// The arrow is drawn outside the glyph panes, so the prompt pass never
+		// sees it. The whole picture is the page turn: L on the left, R on the right.
+		const f32 w = f32(pane->getWidth());
+		const f32 h = f32(pane->getHeight());
+		float ax0 = 0, ay0 = 0, ax1 = 0, ay1 = 0;
+		if (pc_gfx_project_current(0.0f, 0.0f, 0.0f, &ax0, &ay0)
+		    && pc_gfx_project_current(w, h, 0.0f, &ax1, &ay1)) {
+			const std::uint16_t button = mTag == 'L' ? PC_BUTTON_PROMPT_PAD_L : PC_BUTTON_PROMPT_PAD_R;
+			pc_button_prompt_add(button, pc_projected_rect(ax0, ay0, ax1, ay1), "cont_y.blo",
+			                     mTag == 'L' ? "ya_l" : "ya_r", true, "");
+		}
 #if PIKI_PC_TOUCH
 		const bool touch = pc_touch_visible();
 #else
@@ -213,7 +229,6 @@ struct TouchSwipeHintCallBack : public P2DPaneCallBack {
 		if (!touch && !keys) return true;
 		// La letra ocupa (21,27)-(49,59) dentro de la flecha de 50x80; el
 		// gesto se centra ahí y se hace algo mayor que la letra.
-		const f32 w = f32(pane->getWidth());
 		float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
 		if (pc_gfx_project_current(w * 0.5f - 14.0f, 27.0f, 0.0f, &x0, &y0)
 		    && pc_gfx_project_current(w * 0.5f + 14.0f, 59.0f, 0.0f, &x1, &y1)) {
@@ -709,6 +724,11 @@ zen::ogScrMenuMgr::returnStatusFlag zen::ogScrMenuMgr::update(Controller* input)
 	if (mStatus == STATE_Inactive) {
 		return mStatus;
 	}
+#if defined(PIKI_PC_PORT)
+	// The level still owns the pointer (this menu sets the game overlay, not the
+	// window one). Claiming it releases the cursor and lets the arrow prompts count.
+	pc_menu_click_claim_pointer_menu();
+#endif
 #if PIKI_PC_TOUCH
 	// Mientras el menú de mapa/controles está en pantalla, la capa táctil
 	// pasa a modo menú: deslizar horizontalmente equivale a L/R (páginas).
@@ -768,7 +788,19 @@ zen::ogScrMenuMgr::returnStatusFlag zen::ogScrMenuMgr::update(Controller* input)
 
 #if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01)
 #else
-	if (input->keyClick(KBBTN_Y | KBBTN_B)) {
+	bool pcMapClose = false;
+#if defined(PIKI_PC_PORT)
+	pcMapClose = pc_menu_click_take_back();
+	float pcNx = 0, pcNy = 0;
+	float pcGx = 0, pcGy = 0;
+	if (!pcMapClose && pc_menu_click_pending(&pcNx, &pcNy)
+	    && pc_gfx_menu_pointer_to_graph(pcNx, pcNy, &pcGx, &pcGy)
+	    && pc_graph_rect_contains(pc_map_menu_close_rect(), pcGx, pcGy)) {
+		pc_menu_click_take(nullptr, nullptr);
+		pcMapClose = true;
+	}
+#endif
+	if (input->keyClick(KBBTN_Y | KBBTN_B) || pcMapClose) {
 		mTransitionTimer = 0.0f;
 		mStatus          = STATE_FadingOut;
 		seSystem->playSysSe(SYSSE_CMENU_OFF);
@@ -812,6 +844,9 @@ bool zen::ogScrMenuMgr::draw(Graphics& gfx)
 	}
 	P2DPerspGraph graf(0, 0, 640, 480, 30.0f, 1.0f, 5000.0f);
 	graf.setPort();
+#if defined(PIKI_PC_PORT)
+	pc_gfx_note_menu_tap_space(640, 480);
+#endif
 
 	GXColor color = { 0 };
 	GXSetFog(GX_FOG_NONE, 0.0f, 1.0f, 0.1f, 1.0f, color);
@@ -846,6 +881,30 @@ bool zen::ogScrMenuMgr::draw(Graphics& gfx)
 		mScreenMenus[2]->draw(gfx);
 		mLeftRightIndicator->draw();
 	}
+
+#if defined(PIKI_PC_PORT)
+	// Close sits under the pages. A left click on it is B, the same as Y or a
+	// right click. It is drawn only while the pointer is what the player is using.
+	if (mStatus == STATE_ActiveDisplay) {
+		graf.setPort();
+		const PcMenuClickRect chip = pc_map_menu_close_rect();
+		float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+		if (pc_gfx_project_current(f32(chip.minX), f32(chip.minY), 0.0f, &x0, &y0)
+		    && pc_gfx_project_current(f32(chip.maxX), f32(chip.maxY), 0.0f, &x1, &y1)) {
+			pc_button_prompt_add(PC_BUTTON_PROMPT_PAD_B, pc_projected_rect(x0, y0, x1, y1), "cont_y.blo", "close",
+			                     true, "");
+		}
+		float nx = 0, ny = 0;
+		if (pc_menu_click_read_pointer_normalized(&nx, &ny) && pc_settings_p2d_active()) {
+			PcSettingsP2DFrame frame(640, 480);
+			const int w = chip.maxX - chip.minX;
+			const int h = chip.maxY - chip.minY;
+			pc_settings_p2d_plate(chip.minX, chip.minY, w, h, 0);
+			pc_settings_p2d_text_styled(chip.minX + 28, chip.minY + 8, "Close", Colour(225, 255, 255, 255),
+			                            Colour(170, 210, 220, 255), 16, 20);
+		}
+	}
+#endif
 
 	STACK_PAD_TERNARY(mStatus, 1);
 

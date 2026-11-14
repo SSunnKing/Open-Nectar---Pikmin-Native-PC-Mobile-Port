@@ -7,6 +7,7 @@
 #include "sysNew.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
+#include "pc_menu_click.h"
 #endif
 
 /**
@@ -43,13 +44,23 @@ bool zen::DrawUfoParts::update(Controller* controller)
 		}
 		case MODE_Operation:
 		{
-			if (controller->keyClick(KBBTN_START | KBBTN_A)) {
+#if defined(PIKI_PC_PORT)
+			// End and Back are glyphs when the prompts are live. A click on empty
+			// space still ends the screen; a right click still goes back.
+			pc_menu_click_claim_pointer_menu();
+			const bool pointerEnd  = pc_menu_click_take(nullptr, nullptr);
+			const bool pointerBack = pc_menu_click_take_back();
+#else
+			const bool pointerEnd  = false;
+			const bool pointerBack = false;
+#endif
+			if (controller->keyClick(KBBTN_START | KBBTN_A) || pointerEnd) {
 				SeSystem::playSysSe(SYSSE_DECIDE1);
 				mReturnState = RETSTATE_Unk2;
 				res          = true;
 			}
 
-			if (controller->keyClick(KBBTN_B)) {
+			if (controller->keyClick(KBBTN_B) || pointerBack) {
 				SeSystem::playSysSe(SYSSE_CANCEL);
 				mReturnState = RETSTATE_Unk1;
 				mAlphaWipe.start(0.5f, 0.25f, AlphaWipe::TYPE_Reverse);
