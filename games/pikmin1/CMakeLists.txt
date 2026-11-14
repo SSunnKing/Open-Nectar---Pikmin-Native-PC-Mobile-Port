@@ -351,6 +351,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_menu_mode.cpp
     pc_port/pc_menu_repeat.cpp
     pc_port/pc_menu_click.cpp
+    pc_port/pc_screen_pointer.cpp
     pc_port/pc_button_prompt.cpp
     pc_port/pc_hand_cursor.cpp
     pc_port/pc_photo_mode.cpp
