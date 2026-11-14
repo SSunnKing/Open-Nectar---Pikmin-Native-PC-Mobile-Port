@@ -1,4 +1,7 @@
 #include "Creature.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_throw_arc.h"
+#endif
 #include "AIConstant.h"
 #include "AIPerf.h"
 #include "BombItem.h"
@@ -760,6 +763,22 @@ void Creature::update()
 	// Apply movement in two passes - volatile (temporary) and normal velocity
 	f32 deltaTime = gsys->getFrameTime();
 	MATCHING_START_TIMER("MOVENEW", true);
+#if defined(PIKI_PC_PORT)
+	// A thrown Pikmin integrates in 1/30 s steps. Smaller ticks make the same
+	// launch speed peak higher (upstream #320). 30 Hz does not take this branch.
+	{
+		bool holdThrow = false;
+		f32 throwStep  = deltaTime;
+		if (pc_throw_arc_movement(this, deltaTime, &holdThrow, &throwStep)) {
+			if (holdThrow) {
+				mVolatileVelocity.set(0.0f, 0.0f, 0.0f);
+				MATCHING_STOP_TIMER("MOVENEW");
+				return;
+			}
+			deltaTime = throwStep;
+		}
+	}
+#endif
 	Vector3f originalVel(mVelocity);
 	mVelocity = mVolatileVelocity;
 	moveNew(deltaTime);

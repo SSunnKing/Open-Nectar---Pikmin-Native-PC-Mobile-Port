@@ -400,6 +400,7 @@ set(PC_PORT_SOURCES
     ${NECTAR_LIBS_DIR}/nectar_assets/src/charpack.cpp
     ${PC_PORT_DIR}/launcher/bti_decode.cpp
     pc_port/pc_vs.cpp
+    pc_port/pc_throw_arc.cpp
     pc_port/pc_achievements.cpp
     pc_port/pc_file_dialog.cpp
     pc_port/gl/pc_gfx.cpp
@@ -1601,6 +1602,12 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_throw_release_test PRIVATE pc_port)
     target_compile_options(pc_throw_release_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_throw_release_test COMMAND pc_throw_release_test)
+
+    # Throw arc at 30/60/120 Hz (no captain, map, or window).
+    add_executable(pc_throw_arc_test pc_port/pc_throw_arc_test.cpp)
+    target_include_directories(pc_throw_arc_test PRIVATE pc_port)
+    target_compile_options(pc_throw_arc_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_throw_arc_test COMMAND pc_throw_arc_test)
 
     # Sprout landing policy (no map or window)
     add_executable(pc_seed_landing_test pc_port/pc_seed_landing_test.cpp)

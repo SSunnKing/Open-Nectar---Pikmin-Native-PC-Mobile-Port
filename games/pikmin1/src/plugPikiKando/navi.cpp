@@ -16,6 +16,7 @@
 #include "timing/pc_anim_timing.h"
 #include "netplay/pc_netplay_camlead.h"
 #include "netplay/pc_netplay_present.h"
+#include "pc_throw_arc.h"
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
 #endif
@@ -4871,6 +4872,11 @@ void Navi::throwPiki(Piki* piki, immut Vector3f& pos)
 #endif
 	piki->mTargetVelocity = piki->mVelocity;
 	piki->mVolatileVelocity.set(0.0f, 0.0f, 0.0f);
+#if defined(PIKI_PC_PORT)
+	// The launch speed stays the disc formula. Above 30 Hz the flight is
+	// integrated in 1/30 s steps so the arc does not grow with the tick rate.
+	pc_throw_arc_launch(piki);
+#endif
 }
 
 /**
