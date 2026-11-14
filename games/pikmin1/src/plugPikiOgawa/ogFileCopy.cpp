@@ -6,6 +6,11 @@
 #include "zen/EffectMgr2D.h"
 #include "zen/ogFileSelect.h"
 #include "zen/ogNitaku.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_file_pointer.h"
+#include "pc_gfx.h"
+#include "pc_menu_click.h"
+#endif
 
 /**
  * @todo: Documentation
@@ -166,10 +171,53 @@ void zen::ogScrFileSelectMgr::OperateCopy(Controller* input)
 	}
 
 	if (mIsCopyTargetSelectionActive) {
+#if defined(PIKI_PC_PORT)
+		// The destination is one of the other two cards. Hover moves the cursor
+		// onto it. A click opens the yes/no, as A does. The source card is not
+		// a destination. Right click cancels, as B does. Claimed, so the click
+		// is not also A through a mouse binding.
+		bool pointerConfirm = false;
+		bool pointerBack    = false;
+		pc_menu_click_claim_pointer_menu();
+		int drawableW = 0, drawableH = 0;
+		pc_gfx_get_drawable_size(&drawableW, &drawableH);
+		float px = 0.0f, py = 0.0f;
+		int tag = -1;
+		if (drawableW > 0 && drawableH > 0 && pc_menu_click_read_pointer_normalized(&px, &py)
+		    && pc_menu_click_targets_hit_row(PC_FILE_CARD_TARGET_KIND, px * drawableW, py * drawableH, mCopyTargetFileIndex,
+		                                    PC_FILE_CARD_HOLD_PX, &tag)) {
+			const PcFileCopyPointer hover = pc_file_copy_pointer(mCurrSlotIdx, mCopyTargetFileIndex, tag, false);
+			if (hover.action == PC_FILE_COPY_MOVE) {
+				seSystem->playSysSe(ogEnumFix(SYSSE_MOVE1, JACSYS_Move1));
+				mCopyTargetFileIndex = hover.slot;
+				MoveCpyCursor(mCopyTargetFileIndex, 0.25f);
+			}
+		}
+		tag = -1;
+		if (drawableW > 0 && drawableH > 0 && pc_menu_click_pending(&px, &py)
+		    && pc_menu_click_targets_hit_row(PC_FILE_CARD_TARGET_KIND, px * drawableW, py * drawableH, mCopyTargetFileIndex,
+		                                    PC_FILE_CARD_HOLD_PX, &tag)) {
+			// Take it either way, so a click on the source does not stay pending.
+			pc_menu_click_take(nullptr, nullptr);
+			const PcFileCopyPointer hit = pc_file_copy_pointer(mCurrSlotIdx, mCopyTargetFileIndex, tag, true);
+			if (hit.action == PC_FILE_COPY_CONFIRM) {
+				mCopyTargetFileIndex = hit.slot;
+				MoveCpyCursor(mCopyTargetFileIndex, 0.25f);
+				pointerConfirm = true;
+			}
+		}
+		pointerBack = pc_menu_click_take_back();
+		if (input->keyClick(KBBTN_B) || pointerBack) {
+#else
 		if (input->keyClick(KBBTN_B)) {
+#endif
 			seSystem->playSysSe(ogEnumFix(SYSSE_CANCEL, JACSYS_Cancel));
 			setOperateMode(Normal);
-		} else if (input->keyClick(KBBTN_A)) {
+		} else if (input->keyClick(KBBTN_A)
+#if defined(PIKI_PC_PORT)
+		           || pointerConfirm
+#endif
+		) {
 			seSystem->playSysSe(ogEnumFix(SYSSE_DECIDE1, JACSYS_Decide1));
 			mIsCopyTargetSelectionActive = false;
 			mYesNoDialogPane->show();

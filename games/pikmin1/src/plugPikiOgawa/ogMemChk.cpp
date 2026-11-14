@@ -1,5 +1,8 @@
 #include "zen/ogMemChk.h"
 #include "pc_gfx.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_menu_click.h"
+#endif
 #include "DebugLog.h"
 #include "Dolphin/card.h"
 #include "P2D/Graph.h"
@@ -23,6 +26,17 @@ DEFINE_ERROR(__LINE__) // Never used in the DLL
  * @note UNUSED Size: 0000F4
  */
 DEFINE_PRINT("OgMemChkSection")
+
+#if defined(PIKI_PC_PORT)
+// Format and repair results are "press A to continue". The drawn A glyph is
+// already a prompt; a click anywhere else on that screen is the same press.
+// Quick Save leaves the click untaken, so a replay stays on the keys.
+static bool pcMemChkContinueClick()
+{
+	pc_menu_click_claim_pointer_menu();
+	return pc_menu_click_take(nullptr, nullptr);
+}
+#endif
 
 /**
  * @todo: Documentation
@@ -753,7 +767,11 @@ zen::ogScrMemChkMgr::MemChkStatus zen::ogScrMemChkMgr::update(Controller* input)
 		DispYesNo(false);
 		DispAcup(true);
 		mAButtonAlphaMgr->update();
-		if (input->keyClick(KBBTN_A | KBBTN_START)) {
+		if (input->keyClick(KBBTN_A | KBBTN_START)
+#if defined(PIKI_PC_PORT)
+		    || pcMemChkContinueClick()
+#endif
+		) {
 			seSystem->playSysSe(ogEnumFix(SYSSE_DECIDE1, JACSYS_Decide1));
 			_UNUSEDC4 = 0.0f;
 			if (gameflow.mMemoryCard.mSaveFileIndex < 0) {
@@ -772,7 +790,11 @@ zen::ogScrMemChkMgr::MemChkStatus zen::ogScrMemChkMgr::update(Controller* input)
 	case FormatFail:
 	{
 		mAButtonAlphaMgr->update();
-		if (input->keyClick(KBBTN_A | KBBTN_START)) {
+		if (input->keyClick(KBBTN_A | KBBTN_START)
+#if defined(PIKI_PC_PORT)
+		    || pcMemChkContinueClick()
+#endif
+		) {
 			seSystem->playSysSe(ogEnumFix(SYSSE_DECIDE1, JACSYS_Decide1));
 			_UNUSEDC4 = 0.0f;
 			mStatus   = Inactive;
@@ -829,7 +851,11 @@ zen::ogScrMemChkMgr::MemChkStatus zen::ogScrMemChkMgr::update(Controller* input)
 		if (checkTypingAll()) {
 			mAButtonPane->show();
 			mAButtonAlphaMgr->update();
-			if (input->keyClick(KBBTN_A | KBBTN_START)) {
+			if (input->keyClick(KBBTN_A | KBBTN_START)
+#if defined(PIKI_PC_PORT)
+			    || pcMemChkContinueClick()
+#endif
+			) {
 				seSystem->playSysSe(ogEnumFix(SYSSE_DECIDE1, JACSYS_Decide1));
 				mStatus = Finished;
 			}
@@ -843,7 +869,11 @@ zen::ogScrMemChkMgr::MemChkStatus zen::ogScrMemChkMgr::update(Controller* input)
 		if (checkTypingAll()) {
 			mAButtonPane->show();
 			mAButtonAlphaMgr->update();
-			if (input->keyClick(KBBTN_A | KBBTN_START)) {
+			if (input->keyClick(KBBTN_A | KBBTN_START)
+#if defined(PIKI_PC_PORT)
+			    || pcMemChkContinueClick()
+#endif
+			) {
 				seSystem->playSysSe(ogEnumFix(SYSSE_DECIDE1, JACSYS_Decide1));
 #if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01)
 				start();

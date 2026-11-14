@@ -1,4 +1,7 @@
 #include "zen/ogMakeDefault.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_menu_click.h"
+#endif
 #include "DebugLog.h"
 #include "P2D/Graph.h"
 #include "P2D/Screen.h"
@@ -179,7 +182,15 @@ zen::ogScrMakeDefaultMgr::MakeDefaultStatus zen::ogScrMakeDefaultMgr::update(Con
 #else
 		if (checkTypingAll()) {
 			mAButtonPromptPicture->show();
-			if (input->keyClick(KBBTN_A)) {
+#if defined(PIKI_PC_PORT)
+			// The drawn A glyph is already a prompt. A click anywhere else continues too.
+			pc_menu_click_claim_pointer_menu();
+#endif
+			if (input->keyClick(KBBTN_A)
+#if defined(PIKI_PC_PORT)
+			    || pc_menu_click_take(nullptr, nullptr)
+#endif
+			) {
 				seSystem->playSysSe(SYSSE_DECIDE1);
 				mStatus     = Exiting;
 				mStateTimer = 0.0f;
