@@ -63,6 +63,7 @@
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_netplay_present.h"
 #include "quicksave/pc_quicksave.h"
+#include "pc_day_end_skip.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_permadeath.h"
 #include "randomizer/pc_randomizer.h"
@@ -1214,7 +1215,7 @@ ModeState* RunningModeState::update(u32& result)
 	if (flowCont.mGameEndFlag != GAMEEND_None) {
 		if (flowCont.mGameEndFlag == GAMEEND_NaviDown) {
 			// you killed your captain!
-#if defined(VERSION_GPIP01)
+#if defined(VERSION_GPIP01) || defined(PIKI_PC_PORT)
 			// can't skip the end of day cutscene in PAL if you kill your captain - shame! shame! shame!
 			flowCont.mIsDayEndSkippable = FALSE;
 #endif
@@ -1225,7 +1226,7 @@ ModeState* RunningModeState::update(u32& result)
 
 		if (flowCont.mGameEndFlag == GAMEEND_PikminExtinction) {
 			// you killed all your pikmin!
-#if defined(VERSION_GPIP01)
+#if defined(VERSION_GPIP01) || defined(PIKI_PC_PORT)
 			// can't skip the end of day cutscene in PAL if you kill all your pikmin - shame! shame! shame!
 			flowCont.mIsDayEndSkippable = FALSE;
 #endif
@@ -1633,7 +1634,42 @@ ModeState* DayOverModeState::update(u32& result)
 	// handle any text windows we might have open, such as during endings
 	handleTutorialWindow(result, mParentSection->mController);
 
-#if defined(VERSION_GPIP01)
+#if defined(PIKI_PC_PORT)
+	// El salto del atardecer de PAL, en todas las regiones: A, B o Start.
+	// Speedrun se queda en vanilla. Capitán caído, extinción, día 30 y las
+	// 30 piezas siguen sin poder saltarse. El clic se gasta aquí: Start no
+	// abre la pausa, y A, B o Start no confirman el informe en el mismo frame.
+	static_assert(PC_DAYEND_BTN_A == static_cast<unsigned>(KBBTN_A), "day-end skip A");
+	static_assert(PC_DAYEND_BTN_B == static_cast<unsigned>(KBBTN_B), "day-end skip B");
+	static_assert(PC_DAYEND_BTN_START == static_cast<unsigned>(KBBTN_START), "day-end skip Start");
+	static_assert(static_cast<int>(STATE_PhaseZero) == PC_DAYEND_PHASE_MARCH, "day-end march phase");
+	static_assert(static_cast<int>(STATE_PhaseOne) == PC_DAYEND_PHASE_TAKEOFF, "day-end takeoff phase");
+	const PcDayEndSkipDecision pcDayEnd = pc_day_end_skip({
+		flowCont.mIsDayEndSkippable != FALSE,
+		playerState->getCurrParts() == MAX_UFO_PARTS,
+		gameflow.mWorldClock.mCurrentDay >= MAX_DAYS,
+		pc_speedrun_active(),
+		mState,
+		flowCont.mIsDayEndSkipped != FALSE,
+		mParentSection->mController->mInputPressed,
+	});
+	if (pcDayEnd.skipScene) {
+		gameflow.mMoviePlayer->skipScene(SCENESKIP_Skip);
+		flowCont.mIsDayEndSkipped = TRUE;
+	}
+	// El despegue no pasa por skipScene (PAL no dispara sus eventos restantes),
+	// así que el audio se avisa aparte. La marcha ya lo avisa dentro de skipScene.
+	if (pcDayEnd.noteAudio) {
+		Jac_NoteDemoSkipped();
+	}
+	if (pcDayEnd.eatPress != 0) {
+		// Solo el clic. Quitar el botón pulsado haría que el frame siguiente
+		// lo viera como un clic nuevo y confirmara el informe.
+		mParentSection->mController->mInputPressed &= ~pcDayEnd.eatPress;
+	}
+	bool skipped = pcDayEnd.skip;
+	if (!gameflow.mMoviePlayer->mIsActive || skipped)
+#elif defined(VERSION_GPIP01)
 
 	// PAL-exclusive day end cutscene skipping code!
 	bool skipped = false;
@@ -3498,8 +3534,9 @@ NewPikiGameSection::NewPikiGameSection()
 	}
 
 	flowCont.mGameEndFlag = GAMEEND_None;
-#if defined(VERSION_GPIP01)
+#if defined(VERSION_GPIP01) || defined(PIKI_PC_PORT)
 	// in PAL, day end is skippable unless it's a special day end
+	// PC: igual en todas las regiones. Capitán caído y extinción lo apagan.
 	flowCont.mIsDayEndSkippable = TRUE;
 	flowCont.mIsDayEndSkipped   = FALSE;
 #endif
