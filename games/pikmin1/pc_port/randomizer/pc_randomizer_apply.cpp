@@ -15,7 +15,8 @@
 #include "teki.h"
 
 #include <cstdio>
-#include <cstring>
+
+static_assert(PC_RND_GENBOSS_POM == GENBOSS_Pom, "Candypop Bud id drifted from GenBossID");
 
 namespace {
 
@@ -95,31 +96,14 @@ BossBudget sBudget = { -1, -1, 0 };
 
 FILE* sEnemyLog = nullptr;
 
-// FNV-1a 32, de Glenn Fowler, Landon Curt Noll y Kiem-Phong Vo (dominio público).
-uint32_t fileTag(const char* file)
-{
-	uint32_t h = 2166136261u;
-	for (const char* p = file; *p; ++p) {
-		h ^= uint8_t(*p);
-		h *= 16777619u;
-	}
-	return h;
-}
-
-bool isPersistentFile(const char* file)
-{
-	return std::strcmp(file, "default.gen") == 0 || std::strcmp(file, "init.gen") == 0 || std::strcmp(file, "plants.gen") == 0;
-}
-
 /// Substream de una ubicación. Con "Daily layout", los generadores diarios y
 /// de rango añaden el día; los persistentes y las piezas nunca.
 PcRandomizerRng locationRng(uint32_t category, int stageId, const char* file, int index)
 {
-	uint32_t tag = fileTag(file);
-	if (pc_randomizer_flag(PC_RND_DailyLayout) && !isPersistentFile(file)) {
-		tag ^= uint32_t(pc_randomizer_mix64(uint64_t(gameflow.mWorldClock.mCurrentDay)));
-	}
-	return pc_randomizer_stream(category, stageId, tag, uint32_t(index));
+	const int day = (pc_randomizer_flag(PC_RND_DailyLayout) && !pc_randomizer_persistent_gen_file(file))
+	                    ? gameflow.mWorldClock.mCurrentDay
+	                    : -1;
+	return pc_randomizer_generator_stream(category, stageId, file, index, day);
 }
 
 void logLine(int stageId, const char* file, int index, const char* from, const char* to)
@@ -128,34 +112,6 @@ void logLine(int stageId, const char* file, int index, const char* from, const c
 	if (!sEnemyLog && pc_randomizer_flag(PC_RND_WriteSpoilerLog)) sEnemyLog = std::fopen("randomizer_spoiler.txt", "a");
 	if (sEnemyLog) std::fprintf(sEnemyLog, "[Enemies] day %d stage %d %s #%d: %s -> %s\n",
 	                            gameflow.mWorldClock.mCurrentDay, stageId, file, index, from, to);
-}
-
-int pickTeki(PcRandomizerRng& rng, int original, bool needsCarrier, bool sameClass)
-{
-	int pool[64];
-	int n = 0;
-	for (int t = 0; t < TEKI_TypeCount; t++) {
-		if (!pc_randomizer_teki_target(t)) continue;
-		if (sameClass && pc_randomizer_teki_class(t) != pc_randomizer_teki_class(original)) continue;
-		if (needsCarrier && !(pc_randomizer_teki_info(t).tags & PC_ENEMY_CarrierCompatible)) continue;
-		pool[n++] = t;
-	}
-	return n ? pool[rng.below(uint32_t(n))] : original;
-}
-
-int pickBoss(PcRandomizerRng& rng, int original, bool needsPart, bool fightOnly)
-{
-	int pool[16];
-	int n = 0;
-	int all[16];
-	const int count = pc_randomizer_boss_pool(all, 16);
-	for (int i = 0; i < count; i++) {
-		const int b = all[i];
-		if (fightOnly && !pc_randomizer_boss_is_fight(b)) continue;
-		if (needsPart && !pc_randomizer_boss_drops_part(b)) continue;
-		pool[n++] = b;
-	}
-	return n ? pool[rng.below(uint32_t(n))] : original;
 }
 
 /// Al cambiar de tipo, la personalidad conserva lo que es del sitio
@@ -187,7 +143,7 @@ void randomizeTeki(Generator& gen, int stageId, const char* file, int index)
 		GenObject* obj = GenObjectFactory::getProduct('boss');
 		if (obj) {
 			GenObjectBoss* boss    = static_cast<GenObjectBoss*>(obj);
-			boss->mBossID          = pickBoss(rng, 0, false, false);
+			boss->mBossID          = pc_randomizer_choose_boss(rng, 0, false, false);
 			boss->mPelletConfigIdx = -1;
 			gen.mGenObject         = boss;
 			gen.mGenObjectID       = 'boss';
@@ -199,7 +155,7 @@ void randomizeTeki(Generator& gen, int stageId, const char* file, int index)
 
 	const uint32_t mode = pc_randomizer_enemy_mode();
 	if (mode == PC_RNDMODE_Vanilla) return;
-	const int target = pickTeki(rng, type, carriesPart, mode == PC_RNDMODE_Shuffled);
+	const int target = pc_randomizer_choose_teki(rng, type, carriesPart, mode == PC_RNDMODE_Shuffled);
 	if (target == type) return;
 	teki->mTekiType = target;
 	sanitizePersonality(*teki->mPersonality, target);
@@ -227,7 +183,7 @@ void randomizeBoss(Generator& gen, int stageId, const char* file, int index)
 		GenObject* obj = GenObjectFactory::getProduct('teki');
 		if (obj) {
 			GenObjectTeki* teki = static_cast<GenObjectTeki*>(obj);
-			teki->mTekiType     = pickTeki(rng, TEKI_Chappy, false, false);
+			teki->mTekiType     = pc_randomizer_choose_teki(rng, TEKI_Chappy, false, false);
 			teki->mPersonality->reset();
 			gen.mGenObject   = teki;
 			gen.mGenObjectID = 'teki';
@@ -239,7 +195,7 @@ void randomizeBoss(Generator& gen, int stageId, const char* file, int index)
 	if (mode == PC_RNDMODE_Vanilla) return;
 	// Shuffled: solo los jefes de combate, entre ellos. Chaos: todos los del pool.
 	if (mode == PC_RNDMODE_Shuffled && !pc_randomizer_boss_is_fight(id)) return;
-	const int target = pickBoss(rng, id, hasPart, mode == PC_RNDMODE_Shuffled);
+	const int target = pc_randomizer_choose_boss(rng, id, hasPart, mode == PC_RNDMODE_Shuffled);
 	if (target == id) return;
 	boss->mBossID = target;
 	logLine(stageId, file, index, pc_randomizer_genboss_name(id), pc_randomizer_genboss_name(target));

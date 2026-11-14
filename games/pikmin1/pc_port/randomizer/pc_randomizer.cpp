@@ -86,6 +86,30 @@ uint32_t PcRandomizerRng::below(uint32_t bound)
 	return uint32_t(m >> 32);
 }
 
+uint32_t pc_randomizer_file_tag(const char* file)
+{
+	uint32_t h = 2166136261u;
+	if (!file) return h;
+	for (const char* p = file; *p; ++p) {
+		h ^= uint8_t(*p);
+		h *= 16777619u;
+	}
+	return h;
+}
+
+bool pc_randomizer_persistent_gen_file(const char* file)
+{
+	return file && (std::strcmp(file, "default.gen") == 0 || std::strcmp(file, "init.gen") == 0
+	                || std::strcmp(file, "plants.gen") == 0);
+}
+
+PcRandomizerRng pc_randomizer_generator_stream(uint32_t category, int stageId, const char* file, int index, int day)
+{
+	uint32_t tag = pc_randomizer_file_tag(file);
+	if (day >= 0) tag ^= uint32_t(pc_randomizer_mix64(uint64_t(day)));
+	return pc_randomizer_stream(category, stageId, tag, uint32_t(index));
+}
+
 PcRandomizerRng pc_randomizer_stream(uint32_t category, int stageId, uint32_t sourceTag, uint32_t locationKey)
 {
 	uint64_t k = pc_randomizer_mix64(sActive.seed);

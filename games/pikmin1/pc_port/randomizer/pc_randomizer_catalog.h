@@ -61,6 +61,25 @@ bool pc_randomizer_boss_is_fight(int genBossId);
 /// KingBody). El escarabajo iridiscente usa su propio createPellet, sin pieza.
 bool pc_randomizer_boss_drops_part(int genBossId);
 
+/// GenBossID del Pongashi (Candypop Bud). BossMgr::create devuelve null si
+/// hasContainer(mItemColour) es falso, y el cambio de jefe no toca ese color
+/// (0 azul, 1 rojo, 2 amarillo, 3 "aleatorio"). hasContainer solo reconoce
+/// cebollas 0–2; el 3 cae en el bit de la cebolla azul arrancada. init.gen nace
+/// una vez: si birth devuelve null, la pieza no entra en el radar ni en el mundo.
+constexpr int PC_RND_GENBOSS_POM = 5;
+
+struct PcRandomizerRng;
+
+/// BossMgr::create siempre crea este jefe. El Pongashi no: depende de la cebolla.
+bool pc_randomizer_boss_always_births(int genBossId);
+
+/// Sustituto de un generador de jefe. Con needsPart, un tiro que cae en un jefe
+/// que no siempre nace se vuelve a tirar entre los que sí. Un tiro que ya cae
+/// en uno que nace no consume otro número: esa semilla no cambia.
+int pc_randomizer_choose_boss(PcRandomizerRng& rng, int original, bool needsPart, bool fightOnly);
+/// Sustituto de un generador de enemigo. needsCarrier exige PC_ENEMY_CarrierCompatible.
+int pc_randomizer_choose_teki(PcRandomizerRng& rng, int original, bool needsCarrier, bool sameClass);
+
 /* ─── Ubicaciones de piezas (§6.2) ───
    Sacadas del inventario de randomizer_audit.txt: 30 ubicaciones, todas en
    init.gen, 2/8/9/10/1 por zona. La del Motor Principal la consume el salto de

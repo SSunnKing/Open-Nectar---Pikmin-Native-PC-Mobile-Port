@@ -140,4 +140,12 @@ struct PcRandomizerRng {
 
 PcRandomizerRng pc_randomizer_stream(uint32_t category, int stageId, uint32_t sourceTag, uint32_t locationKey);
 
+/// FNV-1a 32 of a generator file name (the source tag of a placement stream).
+uint32_t pc_randomizer_file_tag(const char* file);
+/// default.gen, init.gen and plants.gen. Daily layout does not remix these.
+bool pc_randomizer_persistent_gen_file(const char* file);
+/// Placement stream. `day` < 0 leaves the day out of the key; apply passes the
+/// current day only for Daily layout on a non-persistent file.
+PcRandomizerRng pc_randomizer_generator_stream(uint32_t category, int stageId, const char* file, int index, int day);
+
 #endif // PC_RANDOMIZER_H

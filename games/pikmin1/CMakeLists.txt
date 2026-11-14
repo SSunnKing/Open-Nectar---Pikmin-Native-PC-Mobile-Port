@@ -1447,6 +1447,16 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
 endif()
 
 if(PIKMIN_BUILD_TESTS)
+    # Ship-part carriers must be enemies the game can actually birth (issue #328).
+    add_executable(pc_randomizer_test
+        pc_port/randomizer/pc_randomizer_test.cpp
+        pc_port/randomizer/pc_randomizer.cpp
+        pc_port/randomizer/pc_randomizer_catalog.cpp
+        pc_port/randomizer/pc_randomizer_logic.cpp)
+    target_include_directories(pc_randomizer_test PRIVATE pc_port)
+    target_compile_options(pc_randomizer_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_randomizer_test COMMAND pc_randomizer_test)
+
     add_executable(pc_bundle_compat_test pc_port/pc_bundle_compat_test.cpp)
     target_include_directories(pc_bundle_compat_test PRIVATE pc_port)
     target_compile_options(pc_bundle_compat_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
