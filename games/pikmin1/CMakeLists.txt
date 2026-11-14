@@ -889,6 +889,7 @@ if(PIKMIN_NETPLAY_BUILD)
         # with NECTAR_ONLINE, the lockstep ICE (NPIX) room otherwise or with
         # PIKMIN_ONLINE_LEGACY_ICE=1; joining follows the pasted code.
         pc_port/netplay/pc_online_menu.cpp
+        pc_port/netplay/pc_online_menu_rows.cpp
         pc_port/netplay/pc_online_relaunch.cpp)
     target_link_libraries(${NECTAR_GAME} PRIVATE gekkonet)
     if(WIN32)
@@ -1665,6 +1666,12 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_file_select_pointer_test PRIVATE pc_port)
     target_compile_options(pc_file_select_pointer_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_file_select_pointer_test COMMAND pc_file_select_pointer_test)
+
+    add_executable(pc_online_menu_rows_test pc_port/netplay/pc_online_menu_rows_test.cpp
+                   pc_port/netplay/pc_online_menu_rows.cpp pc_port/pc_menu_click.cpp)
+    target_include_directories(pc_online_menu_rows_test PRIVATE pc_port)
+    target_compile_options(pc_online_menu_rows_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_online_menu_rows_test COMMAND pc_online_menu_rows_test)
 
     # Hand cursor over pointer menu targets: hover state to cursor shape, with a stub setter
     add_executable(pc_hand_cursor_test pc_port/pc_hand_cursor_test.cpp pc_port/pc_hand_cursor.cpp
