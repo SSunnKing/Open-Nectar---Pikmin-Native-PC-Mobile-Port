@@ -18,6 +18,7 @@
 #include "pc_photo_mode.h"
 #include "pc_record.h"
 #include "pc_coop.h"
+#include "pc_squad_enter.h"
 #include "mods/pc_mission.h"
 #include "randomizer/pc_randomizer_catalog.h"
 #include "mods/pc_vs_arena.h"
@@ -560,7 +561,13 @@ void GameCoreSection::enterFreePikmins()
 			int state = piki->getState();
 			if (state != PIKISTATE_Dead && state != PIKISTATE_Drown && state == PIKISTATE_Normal) {
 				for (int i = 0; i < 3; i++) {
+#if defined(PIKI_PC_PORT)
+					// EnterMode reads the Pikmin's own captain, not player 1.
+					// A missing onion is a skip, not ActEnter on a null goal.
+					Navi* navi = pc_enter_goal_captain(piki->mNavi, naviMgr->getNavi());
+#else
 					Navi* navi     = naviMgr->getNavi();
+#endif
 					GoalItem* goal = itemMgr->getContainer(i);
 					if (goal
 					    && qdist2(goal->mSRT.t.x, goal->mSRT.t.z, piki->mSRT.t.x, piki->mSRT.t.z)
@@ -569,7 +576,14 @@ void GameCoreSection::enterFreePikmins()
 							piki->mFSM->transit(piki, PIKISTATE_Normal);
 						}
 						piki->mFSM->transit(piki, PIKISTATE_Normal);
+#if defined(PIKI_PC_PORT)
+						GoalItem* dest = itemMgr->getContainer(piki->mColor);
+						if (!navi || !dest) break;
+						if (!piki->mNavi) piki->mNavi = navi;
+						navi->mGoalItem = dest;
+#else
 						navi->mGoalItem = itemMgr->getContainer(piki->mColor);
+#endif
 						piki->changeMode(PikiMode::EnterMode, nullptr);
 						goalSafe++;
 						break;
@@ -583,7 +597,14 @@ void GameCoreSection::enterFreePikmins()
 								piki->mFSM->transit(piki, PIKISTATE_Normal);
 							}
 							piki->mFSM->transit(piki, PIKISTATE_Normal);
+#if defined(PIKI_PC_PORT)
+							GoalItem* dest = itemMgr->getContainer(piki->mColor);
+							if (!navi || !dest) break;
+							if (!piki->mNavi) piki->mNavi = navi;
+							navi->mGoalItem = dest;
+#else
 							navi->mGoalItem = itemMgr->getContainer(piki->mColor);
+#endif
 							piki->changeMode(PikiMode::EnterMode, nullptr);
 							ufoSafe++;
 							break;
