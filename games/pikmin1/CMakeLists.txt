@@ -1425,6 +1425,13 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
         target_link_libraries(launcher_cursor_test PRIVATE launcher_imgui)
         add_test(NAME launcher_cursor_test COMMAND launcher_cursor_test)
 
+        # D-pad / left stick mapping and headless gamepad focus (no window).
+        add_executable(launcher_nav_test pc_port/launcher/launcher_nav_test.cpp)
+        set_property(TARGET launcher_nav_test PROPERTY INCLUDE_DIRECTORIES "")
+        target_compile_options(launcher_nav_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+        target_link_libraries(launcher_nav_test PRIVATE launcher_imgui)
+        add_test(NAME launcher_nav_test COMMAND launcher_nav_test)
+
         add_executable(texture_pack_row_test pc_port/launcher/texture_pack_row_test.cpp
             "${LAUNCHER_EMBED_DIR}/font_fredoka.h")
         set_property(TARGET texture_pack_row_test PROPERTY INCLUDE_DIRECTORIES "")
