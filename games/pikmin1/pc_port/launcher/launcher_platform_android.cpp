@@ -8,6 +8,8 @@
 
 #include "launcher_platform.h"
 
+#include "game_shortcut.h"
+
 #include <SDL2/SDL.h>
 #include <jni.h>
 
@@ -122,11 +124,54 @@ void relaunch(const fs::path&, const std::vector<std::string>&) { }
 
 bool createDesktopShortcut(const fs::path&) { return false; } // el icono es el de la APK
 
-// Home-screen shortcuts on Android are a separate change (#336).
-bool createGameShortcut(const GameShortcutRequest&, std::vector<std::string>&, std::string& error)
+// Pins a home-screen shortcut for one game. The cover PNG is the icon; Java
+// falls back to the app icon when it is empty. A launcher that cannot pin
+// returns a short reason for the home-screen notice.
+bool createGameShortcut(const GameShortcutRequest& request, std::vector<std::string>& places, std::string& error)
 {
-    error = "not available on Android yet";
-    return false;
+    JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
+    jobject activity = (jobject)SDL_AndroidGetActivity();
+    if (!env || !activity) {
+        error = "no activity";
+        return false;
+    }
+    jclass cls = env->GetObjectClass(activity);
+    jmethodID method = env->GetMethodID(cls, "pinGameShortcut", "(Ljava/lang/String;Ljava/lang/String;[B)Ljava/lang/String;");
+    bool ok = false;
+    if (method) {
+        const std::string id = shortcut::gameId(request.target);
+        const std::string title = shortcut::gameTitle(request.target);
+        jstring jId = env->NewStringUTF(id.c_str());
+        jstring jTitle = env->NewStringUTF(title.c_str());
+        jbyteArray png = env->NewByteArray(static_cast<jsize>(request.iconPng.size()));
+        if (png && !request.iconPng.empty()) {
+            env->SetByteArrayRegion(png, 0, static_cast<jsize>(request.iconPng.size()),
+                                    reinterpret_cast<const jbyte*>(request.iconPng.data()));
+        }
+        jstring jError = (jstring)env->CallObjectMethod(activity, method, jId, jTitle, png);
+        const bool threw = env->ExceptionCheck();
+        if (threw) env->ExceptionClear();
+        if (!threw && !jError) {
+            places.push_back("the home screen");
+            ok = true;
+        } else if (jError) {
+            const char* text = env->GetStringUTFChars(jError, nullptr);
+            error = text && *text ? text : "could not pin the shortcut";
+            if (text) env->ReleaseStringUTFChars(jError, text);
+            env->DeleteLocalRef(jError);
+        } else {
+            error = "could not pin the shortcut";
+        }
+        env->DeleteLocalRef(jId);
+        env->DeleteLocalRef(jTitle);
+        if (png) env->DeleteLocalRef(png);
+    } else {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        error = "pinning shortcuts is not available";
+    }
+    env->DeleteLocalRef(cls);
+    env->DeleteLocalRef(activity);
+    return ok;
 }
 
 fs::path askForShortcutLocation(const std::string&, const fs::path&, const std::string&) { return {}; }
