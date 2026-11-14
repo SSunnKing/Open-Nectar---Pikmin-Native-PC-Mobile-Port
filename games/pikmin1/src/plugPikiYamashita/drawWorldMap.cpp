@@ -2,6 +2,9 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
 #include "pc_menu_click.h"
+#include "pc_screen_pointer.h"
+#include "settings/pc_settings_p2d.h"
+#include "Colour.h"
 #include "netplay/pc_sim_rng.h"
 // Estrellas fugaces por todo el ancho (los efectos del mapa centran en 320).
 // Netplay: the world map is UI only, so it draws from the cosmetic stream.
@@ -2630,7 +2633,21 @@ bool zen::DrawWorldMap::update(Controller* controller)
 			}
 			case DrawWorldMapMode::Operation:
 			{
+#if defined(PIKI_PC_PORT)
+				// Start has no glyph on the idle map. The chip in the corner is that press.
+				// Taken before the course points, which would otherwise keep the click.
+				bool pointerStart = false;
+				float startNx = 0, startNy = 0, startGx = 0, startGy = 0;
+				if (pc_menu_click_pending(&startNx, &startNy)
+				    && pc_gfx_menu_pointer_to_graph(startNx, startNy, &startGx, &startGy)
+				    && pc_graph_rect_contains(pc_worldmap_start_rect(), startGx, startGy)) {
+					pc_menu_click_take(&startNx, &startNy);
+					pointerStart = true;
+				}
+				if (controller->keyClick(KBBTN_START) || pointerStart) {
+#else
 				if (controller->keyClick(KBBTN_START)) {
+#endif
 					mPause.start();
 					mCurrentMode = DrawWorldMapMode::Paused;
 #if defined(PIKI_PC_PORT)
@@ -2717,6 +2734,18 @@ void zen::DrawWorldMap::draw(Graphics& gfx)
 		mEffectMgr2D->draw(gfx);
 		mConfirmMgr->draw(gfx);
 		mWipeScreen->draw();
+#endif
+#if defined(PIKI_PC_PORT)
+		if (mCurrentMode == DrawWorldMapMode::Operation) {
+			float nx = 0, ny = 0;
+			if (pc_menu_click_read_pointer_normalized(&nx, &ny) && pc_settings_p2d_active()) {
+				const PcMenuClickRect chip = pc_worldmap_start_rect();
+				PcSettingsP2DFrame frame(640, 480);
+				pc_settings_p2d_plate(chip.minX, chip.minY, chip.maxX - chip.minX, chip.maxY - chip.minY, 2);
+				pc_settings_p2d_text_styled(chip.minX + 28, chip.minY + 6, "Start", Colour(255, 245, 210, 255),
+				                            Colour(255, 196, 64, 255), 16, 20);
+			}
+		}
 #endif
 	} else {
 		mSelectDiary.draw(gfx);

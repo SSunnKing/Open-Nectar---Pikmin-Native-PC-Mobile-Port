@@ -233,6 +233,10 @@ public:
 		return true;
 	}
 
+#if defined(PIKI_PC_PORT)
+	virtual bool draw(P2DPane* pane); // the centre arrow, as a mouse target
+#endif
+
 	arrowType setTexture(P2DPicture* pane)
 	{
 		judgeArrowType();

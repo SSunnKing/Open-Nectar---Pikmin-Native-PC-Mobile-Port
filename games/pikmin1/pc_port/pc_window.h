@@ -240,6 +240,8 @@ float pc_window_get_mouse_sensitivity(void);
 void pc_window_set_settings_menu_open(bool open);
 void pc_window_set_gameplay_active(bool active);  // pointer is captured only while a level runs
 void pc_window_set_menu_overlay(bool open);       // a pause or in-game menu releases the pointer
+// Classic gameplay, pointer not captured and no menu over it. HUD clicks use this.
+bool pc_window_gameplay_pointer_free(void);
 
 // Virtual cursor (mouse-controlled cursor input)
 extern "C" s8 pc_window_get_virtual_cursor_x(void);

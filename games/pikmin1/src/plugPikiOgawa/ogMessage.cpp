@@ -16,6 +16,7 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_window.h"
 #include "pc_text_window_press.h"
+#include "pc_menu_click.h"
 #endif
 
 #if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01) // these tables aren't here in demo
@@ -698,13 +699,26 @@ zen::ogScrMessageMgr::MessageStatus zen::ogScrMessageMgr::update(Controller* inp
 		mCursorPane->move(mCursorTargetX, mCursorTargetY);
 	}
 
+#if defined(PIKI_PC_PORT)
+	// A text window has no row to aim at. Left click is A, right click is B,
+	// including the press that shows a page that is still typing. Claimed so a
+	// Classic click is the page and not a throw behind it.
+	const bool pcMsgInput = !mIsUiInputDisabled;
+	if (pcMsgInput) pc_menu_click_claim_pointer_menu();
+	const bool clickA = input->keyClick(KBBTN_A) || (pcMsgInput && pc_menu_click_take(nullptr, nullptr));
+	const bool clickB = input->keyClick(KBBTN_B) || (pcMsgInput && pc_menu_click_take_back());
+#else
+	const bool clickA = input->keyClick(KBBTN_A);
+	const bool clickB = input->keyClick(KBBTN_B);
+#endif
+
 	if (mIsPageFullyRevealed) {
 		if (info->mMsgSegmentCount > 1 || mAlwaysShowNextPrompt) {
 			mButtonPromptPane->show();
 			mButtonPromptBlinker->update();
 		}
 
-		if (!mIsUiInputDisabled && input->keyClick(KBBTN_A | KBBTN_B)) {
+		if (!mIsUiInputDisabled && (clickA || clickB)) {
 			mCurrentMessageId++;
 			if (mCurrentMessageId >= info->mMsgSegmentCount) {
 				mCurrentMessageId = 0;
@@ -725,7 +739,7 @@ zen::ogScrMessageMgr::MessageStatus zen::ogScrMessageMgr::update(Controller* inp
 	// reaches at 30 Hz. This press is used up here: A on a shown page turns it
 	// above, on the next press.
 	if (!mIsUiInputDisabled
-	    && pc_text_window_press(mIsPageFullyRevealed, input->keyClick(KBBTN_A), input->keyClick(KBBTN_B))
+	    && pc_text_window_press(mIsPageFullyRevealed, clickA, clickB)
 	           == PC_TEXT_PRESS_SHOW_PAGE) {
 #else
 	if (!mIsUiInputDisabled && input->keyClick(KBBTN_B)) {
