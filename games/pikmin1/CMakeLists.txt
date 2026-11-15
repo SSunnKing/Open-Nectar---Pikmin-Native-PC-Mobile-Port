@@ -1541,6 +1541,12 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_menu_pad_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_menu_pad_test COMMAND pc_menu_pad_test)
 
+    # Android merged-gamepad names versus desktop motion nodes (issue #213)
+    add_executable(pc_pad_filter_test pc_port/pc_pad_filter_test.cpp)
+    target_include_directories(pc_pad_filter_test PRIVATE pc_port)
+    target_compile_options(pc_pad_filter_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_pad_filter_test COMMAND pc_pad_filter_test)
+
     # GameCube PADClamp (no window). Links the decomp translation unit.
     add_executable(pc_pad_clamp_test pc_port/pc_pad_clamp_test.cpp src/pad/Padclamp.c)
     target_include_directories(pc_pad_clamp_test PRIVATE include pc_port)
