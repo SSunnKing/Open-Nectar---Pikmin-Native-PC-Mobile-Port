@@ -1,9 +1,11 @@
 #include "netplay/pc_online_menu.h"
+#include "netplay/pc_online_menu_rows.h"
 #include "netplay/pc_online_switch.h"
 #include "netplay/pc_online_relaunch.h"
 
 #include "netplay/pc_netplay_session.h"
 #include "gl/pc_gfx.h"
+#include "pc_menu_click.h"
 #include "settings/pc_settings_p2d.h"
 
 #include "Colour.h"
@@ -37,6 +39,8 @@ Page sPage    = kClosed;
 bool sVs      = false;
 int sCursor   = 0;
 std::string sMessage; // error or hint under the options
+// Panel from the last draw, so a click lands on the row that was painted.
+int sHitX = 0, sHitY = 0, sHitW = 0, sHitRows = 0;
 
 constexpr int kScreenW = 640, kScreenH = 480;
 
@@ -71,6 +75,7 @@ void go(Page page)
 	sPage   = page;
 	sCursor = 0;
 	sMessage.clear();
+	sHitRows = 0;
 }
 
 // Starts this game again with `extra` and leaves (Android: Java ends this
@@ -251,6 +256,31 @@ int pc_online_menu_update(Controller* input)
 {
 	if (sPage == kClosed || input == nullptr) return PC_ONLINE_MENU_CANCEL;
 	const int count = (int)options().size();
+	// The title treats a left click as A. This menu wants the click for the
+	// row under the pointer instead, and a right click as Back.
+	pc_menu_click_claim_pointer_menu();
+	bool pointerChoose = false;
+	float nx = 0, ny = 0, gx = 0, gy = 0;
+	PcMenuClickRect rows[8];
+	const int hitCount = sHitRows < count ? sHitRows : count;
+	if (hitCount > 0) pc_online_menu_row_rects(sHitX, sHitY, sHitW, hitCount, rows);
+	if (hitCount > 0 && pc_menu_click_read_pointer_normalized(&nx, &ny)
+	    && pc_gfx_menu_pointer_to_graph(nx, ny, &gx, &gy)) {
+		const int hover = pc_online_menu_row_hit(gx, gy, rows, hitCount);
+		if (hover >= 0 && hover != sCursor) {
+			sCursor = hover;
+			sound(SYSSE_MOVE1);
+		}
+	}
+	if (hitCount > 0 && pc_menu_click_pending(&nx, &ny) && pc_gfx_menu_pointer_to_graph(nx, ny, &gx, &gy)) {
+		const int hit = pc_online_menu_row_hit(gx, gy, rows, hitCount);
+		if (hit >= 0) {
+			pc_menu_click_take(&nx, &ny);
+			sCursor       = hit;
+			pointerChoose = true;
+		}
+	}
+	const bool pointerBack = pc_menu_click_take_back();
 	if (input->keyClick(KBBTN_DPAD_UP | KBBTN_MSTICK_UP)) {
 		sCursor = (sCursor + count - 1) % count;
 		sound(SYSSE_MOVE1);
@@ -259,7 +289,8 @@ int pc_online_menu_update(Controller* input)
 		sCursor = (sCursor + 1) % count;
 		sound(SYSSE_MOVE1);
 	}
-	const bool back = input->keyClick(KBBTN_B) || (input->keyClick(KBBTN_A) && sCursor == count - 1 && sPage != kMode);
+	const bool choose = input->keyClick(KBBTN_A | KBBTN_START) || pointerChoose;
+	const bool back   = input->keyClick(KBBTN_B) || pointerBack || (choose && sCursor == count - 1 && sPage != kMode);
 	if (back) {
 		sound(SYSSE_CANCEL);
 		if (sPage == kMode || sPage == kNotice) {
@@ -269,7 +300,7 @@ int pc_online_menu_update(Controller* input)
 		go(sPage == kOnline ? kMode : kOnline);
 		return PC_ONLINE_MENU_OPEN;
 	}
-	if (!input->keyClick(KBBTN_A | KBBTN_START)) return PC_ONLINE_MENU_OPEN;
+	if (!choose) return PC_ONLINE_MENU_OPEN;
 	sound(SYSSE_DECIDE1);
 	switch (sPage) {
 	case kMode:
@@ -329,6 +360,11 @@ void pc_online_menu_draw(void)
 	Matrix4f ortho;
 	gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, kScreenW, kScreenH));
 	pc_settings_p2d_plate(x, y, w, h, 3);
+	sHitX = x;
+	sHitY = y;
+	sHitW = w;
+	sHitRows = (int)rows.size();
+	pc_gfx_note_menu_tap_space(kScreenW, kScreenH);
 
 	const char* title = sPage == kMode     ? (sVs ? "VS" : "Co-op")
 	                  : sPage == kOnline   ? (sVs ? "VS online" : "Co-op online")
