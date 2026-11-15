@@ -351,6 +351,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_menu_mode.cpp
     pc_port/pc_menu_repeat.cpp
     pc_port/pc_menu_click.cpp
+    pc_port/pc_file_pointer.cpp
     pc_port/pc_button_prompt.cpp
     pc_port/pc_hand_cursor.cpp
     pc_port/pc_photo_mode.cpp
@@ -1665,6 +1666,12 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_file_select_pointer_test PRIVATE pc_port)
     target_compile_options(pc_file_select_pointer_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_file_select_pointer_test COMMAND pc_file_select_pointer_test)
+
+    # File-select day chevrons and copy-destination clicks (no window, no disc)
+    add_executable(pc_file_pointer_test pc_port/pc_file_pointer_test.cpp pc_port/pc_file_pointer.cpp)
+    target_include_directories(pc_file_pointer_test PRIVATE pc_port)
+    target_compile_options(pc_file_pointer_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_file_pointer_test COMMAND pc_file_pointer_test)
 
     # Hand cursor over pointer menu targets: hover state to cursor shape, with a stub setter
     add_executable(pc_hand_cursor_test pc_port/pc_hand_cursor_test.cpp pc_port/pc_hand_cursor.cpp

@@ -25,6 +25,7 @@
 #include "settings/pc_settings.h"
 #include "pc_gfx.h"
 #include "pc_menu_click.h"
+#include "pc_file_pointer.h"
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
 #include "Dolphin/pad.h"
@@ -34,11 +35,8 @@
 static bool sPcPointerEnter = false;
 static bool sPcPointerBack  = false;
 #if defined(PIKI_PC_PORT)
-// Click target kind of the save cards, and how far a click may miss a card's drawn edge.
-constexpr int kPcCardTargets = 0;
-// The selected card keeps the pointer this far past its cell edge (drawable px), so a card
-// that grows when selected does not flicker at the boundary with its neighbour.
-constexpr float kPcCardHold = 16.0f;
+// -1 / +1 when the pointer clicked a day chevron this frame. 0 otherwise.
+static int sPcDayClick = 0;
 #endif
 
 static f32 filesel_fx_x(int slot, P2DPane* pane)
@@ -1211,7 +1209,7 @@ void zen::ogScrFileSelectMgr::OperateSelect(Controller* controller)
 {
 #if defined(PIKI_PC_PORT)
 	// Selector de días: L día anterior, R posterior.
-	const int dayDir = controller->keyClick(KBBTN_L) ? -1 : controller->keyClick(KBBTN_R) ? 1 : 0;
+	const int dayDir = controller->keyClick(KBBTN_L) ? -1 : controller->keyClick(KBBTN_R) ? 1 : sPcDayClick;
 	if (dayDir && !mSaveMode && sPcDayCount[mCurrSlotIdx] > 0) {
 		const int slot = mCurrSlotIdx;
 		const int day  = pcDayStep(slot, dayDir);
@@ -1596,21 +1594,39 @@ zen::ogScrFileSelectMgr::returnStatusFlag zen::ogScrFileSelectMgr::update(Contro
 			// between bubbles, so moving along the row switches cards with no dead gap.
 			sPcPointerEnter = false;
 			sPcPointerBack  = false;
+			sPcDayClick     = 0;
 			if (mOperation == Normal) {
 				pc_menu_click_claim_pointer_menu();
 				int drawableW = 0, drawableH = 0;
 				pc_gfx_get_drawable_size(&drawableW, &drawableH);
 				float px = 0.0f, py = 0.0f;
+				// Day chevrons sit beside the highlighted card and are not button glyphs.
+				// A click on a lit one is L or R. A grey one, and the card itself, are not.
+				if (!mSaveMode && sPcDayCount[mCurrSlotIdx] > 0 && mIconOnyonPanes[mCurrSlotIdx]) {
+					float nx = 0.0f, ny = 0.0f;
+					float gx = 0.0f, gy = 0.0f;
+					if (pc_menu_click_pending(&nx, &ny) && pc_gfx_menu_pointer_to_graph(nx, ny, &gx, &gy)) {
+						P2DPane* icon  = mIconOnyonPanes[mCurrSlotIdx];
+						const int cx   = int(filesel_fx_x(mCurrSlotIdx, icon));
+						const int cy   = icon->getPosV() + icon->getHeight() / 2;
+						const int dir  = pc_file_day_arrow_hit(gx, gy, cx, cy, pcDayStep(mCurrSlotIdx, -1) != 0,
+						                                      pcDayStep(mCurrSlotIdx, 1) != 0);
+						if (dir) {
+							pc_menu_click_take(nullptr, nullptr);
+							sPcDayClick = dir;
+						}
+					}
+				}
 				int tag = -1;
 				if (pc_menu_click_read_pointer_normalized(&px, &py)
-				    && pc_menu_click_targets_hit_row(kPcCardTargets, px * drawableW, py * drawableH, mCurrSlotIdx, kPcCardHold, &tag)
+				    && pc_menu_click_targets_hit_row(PC_FILE_CARD_TARGET_KIND, px * drawableW, py * drawableH, mCurrSlotIdx, PC_FILE_CARD_HOLD_PX, &tag)
 				    && tag != mCurrSlotIdx) {
 					SeSystem::playSysSe(ogEnumFix(SYSSE_MOVE1, JACSYS_Move1));
 					mCurrSlotIdx = tag;
 					setDataNumber(tag);
 				}
 				if (pc_menu_click_take(&px, &py)
-				    && pc_menu_click_targets_hit_row(kPcCardTargets, px * drawableW, py * drawableH, mCurrSlotIdx, kPcCardHold, &tag)) {
+				    && pc_menu_click_targets_hit_row(PC_FILE_CARD_TARGET_KIND, px * drawableW, py * drawableH, mCurrSlotIdx, PC_FILE_CARD_HOLD_PX, &tag)) {
 					mCurrSlotIdx   = tag;
 					setDataNumber(tag);
 					sPcPointerEnter = true;
@@ -1696,7 +1712,7 @@ void zen::ogScrFileSelectMgr::draw(Graphics& gfx)
 	// data_b is drawn by ogFileChkSel. Full width (issue #46): no 4:3 clip.
 	pc_gfx_apply_menu_clip_43();
 
-	pc_menu_click_targets_begin(kPcCardTargets);
+	pc_menu_click_targets_begin(PC_FILE_CARD_TARGET_KIND);
 	for (int i = 0; i < 3; i++) {
 		const int slotX = pc_gfx_menu_shift_center();
 		mSlotScreensData[i]->draw(slotX, 0, &perspGraph);
@@ -1750,6 +1766,8 @@ void zen::ogScrFileSelectMgr::draw(Graphics& gfx)
 	}
 	perspGraph.setPort(); // el fundido va con la perspectiva de la pantalla
 	mBlackOverlayScreen->draw(0, 0, &perspGraph);
+	// Day chevrons and the copy cards share this menu graph on the next click.
+	pc_gfx_note_menu_tap_space(virtW, 480);
 #else
 	mCopyCursorsScreen->draw(0, 0, &perspGraph);
 	mMainUIScreen->draw(0, 0, &perspGraph);
