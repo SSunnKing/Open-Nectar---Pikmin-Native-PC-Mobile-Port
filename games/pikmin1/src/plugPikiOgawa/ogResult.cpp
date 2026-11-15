@@ -10,6 +10,9 @@
 #include "zen/ogMessage.h"
 #include "zen/ogResult.h"
 #include "pc_gfx.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_menu_click.h"
+#endif
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
 #endif
@@ -641,6 +644,12 @@ zen::ogScrResultMgr::returnStatusFlag zen::ogScrResultMgr::update(Controller* in
 			mStatus        = RESULT_FadeOut;
 		} else if (mSaveStatus == -1) {
 			bool touchGo = false;
+#if defined(PIKI_PC_PORT)
+			// Classic has no A binding on the mouse. A click or a right click
+			// continues, the same as A, B or Start.
+			pc_menu_click_claim_pointer_menu();
+			if (pc_menu_click_take(nullptr, nullptr) || pc_menu_click_take_back()) touchGo = true;
+#endif
 #if PIKI_PC_TOUCH
 			// Pantalla de resultados: cualquier toque equivale a "seguir".
 			pc_touch_claim_game_menu();

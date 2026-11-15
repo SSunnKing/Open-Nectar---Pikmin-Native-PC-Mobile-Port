@@ -8,7 +8,11 @@
 #include "zen/TexAnim.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
+#include "pc_menu_click.h"
+#include "pc_screen_pointer.h"
 #include "settings/pc_settings.h"
+#include "settings/pc_settings_p2d.h"
+#include "Colour.h"
 #endif
 
 /**
@@ -246,6 +250,20 @@ bool zen::DrawContainer::startStatus()
 	return false;
 }
 
+#if defined(PIKI_PC_PORT)
+bool zen::ArrowCenterCallBack::draw(P2DPane* pane)
+{
+	// Both the arrow and its shadow call this. The shadow is a few pixels
+	// away; either rectangle is the up/down target.
+	float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+	if (pc_gfx_project_current(0.0f, 0.0f, 0.0f, &x0, &y0)
+	    && pc_gfx_project_current(f32(pane->getWidth()), f32(pane->getHeight()), 0.0f, &x1, &y1)) {
+		pc_onion_arrow_mark(x0, y0, x1, y1);
+	}
+	return true;
+}
+#endif
+
 /**
  * @todo: Documentation
  */
@@ -256,6 +274,32 @@ bool zen::DrawContainer::operationStatus()
 		mFrameTimer -= TAU;
 	}
 
+#if defined(PIKI_PC_PORT)
+	// Upper half of the arrow sends Pikmin in, lower half takes them out.
+	// One click is one step, the same as a stick click. Right click cancels.
+	// OK confirms. Keys and the stick repeat are unchanged.
+	pc_menu_click_claim_pointer_menu();
+	int pointerStep = 0;
+	bool pointerConfirm = false;
+	float onionNx = 0, onionNy = 0;
+	if (pc_menu_click_pending(&onionNx, &onionNy)) {
+		int dw = 0, dh = 0;
+		pc_gfx_get_drawable_size(&dw, &dh);
+		const float wx = dw > 0 ? onionNx * float(dw) : onionNx;
+		const float wy = dh > 0 ? onionNy * float(dh) : onionNy;
+		pointerStep = pc_onion_arrow_step_at(wx, wy);
+		if (pointerStep == 0 && pc_onion_confirm_hit(wx, wy)) pointerConfirm = true;
+		if (pointerStep != 0 || pointerConfirm) pc_menu_click_take(&onionNx, &onionNy);
+	}
+	const bool pointerBack = pc_menu_click_take_back();
+	const bool pointerUp   = pointerStep < 0;
+	const bool pointerDown = pointerStep > 0;
+#else
+	const bool pointerConfirm = false;
+	const bool pointerBack    = false;
+	const bool pointerUp      = false;
+	const bool pointerDown    = false;
+#endif
 	mWindowPaneMgr->update(WindowPaneMgr::MODE_Hold, 0.0f, 0.0f);
 	mMarkerPicture->move(RoundOff(NMathF::sin(mFrameTimer) * 50.0f + mMarkerBasePosition.x),
 	                     RoundOff(NMathF::sin(2.0f * mFrameTimer) * 30.0f + mMarkerBasePosition.y));
@@ -266,14 +310,14 @@ bool zen::DrawContainer::operationStatus()
 	const bool pcStep10 = pc_settings_get_onion_step10() && mController->keyDown(KBBTN_Y);
 	if (pcStep10) {
 		mTransferSpeed = 0.0f;
-		if (mZenController.keyRepeat(KBBTN_MSTICK_UP) || mController->keyClick(KBBTN_MSTICK_UP)) {
+		if (mZenController.keyRepeat(KBBTN_MSTICK_UP) || mController->keyClick(KBBTN_MSTICK_UP) || pointerUp) {
 			mTransferDelta += 10;
-		} else if (mZenController.keyRepeat(KBBTN_MSTICK_DOWN) || mController->keyClick(KBBTN_MSTICK_DOWN)) {
+		} else if (mZenController.keyRepeat(KBBTN_MSTICK_DOWN) || mController->keyClick(KBBTN_MSTICK_DOWN) || pointerDown) {
 			mTransferDelta -= 10;
 		}
 	} else
 #endif
-	if (mZenController.keyRepeat(KBBTN_MSTICK_UP) || mController->keyClick(KBBTN_MSTICK_UP)) {
+	if (mZenController.keyRepeat(KBBTN_MSTICK_UP) || mController->keyClick(KBBTN_MSTICK_UP) || pointerUp) {
 		if (mController->keyClick(KBBTN_MSTICK_UP)) {
 			mTransferSpeed = 1.0f;
 		} else {
@@ -281,7 +325,7 @@ bool zen::DrawContainer::operationStatus()
 				mTransferSpeed = 1.0f;
 			}
 		}
-	} else if (mZenController.keyRepeat(KBBTN_MSTICK_DOWN) || mController->keyClick(KBBTN_MSTICK_DOWN)) {
+	} else if (mZenController.keyRepeat(KBBTN_MSTICK_DOWN) || mController->keyClick(KBBTN_MSTICK_DOWN) || pointerDown) {
 		if (mController->keyClick(KBBTN_MSTICK_DOWN)) {
 			mTransferSpeed = -1.0f;
 		} else {
@@ -331,13 +375,13 @@ bool zen::DrawContainer::operationStatus()
 
 	setDispParam();
 
-	if (mController->keyClick(KBBTN_START | KBBTN_A)) {
+	if (mController->keyClick(KBBTN_START | KBBTN_A) || pointerConfirm) {
 		mFrameTimer = 0.0f;
 		mState      = STATE_End;
 		SeSystem::playSysSe(SYSSE_CMENU_OFF);
 	}
 
-	if (mController->keyClick(KBBTN_B)) {
+	if (mController->keyClick(KBBTN_B) || pointerBack) {
 		mFrameTimer    = 0.0f;
 		mState         = STATE_End;
 		mTransferDelta = 0;
@@ -430,6 +474,18 @@ void zen::DrawContainer::draw(Graphics& gfx)
 		P2DPerspGraph graph(0, 0, virtW, virtH, 30.0f, 1.0f, 5000.0f);
 		graph.setPort();
 		mScreen.draw((virtW - 640) / 2, (virtH - 480) / 2, &graph);
+		if (mState == STATE_Operation && pc_menu_click_read_pointer_normalized(nullptr, nullptr) && pc_settings_p2d_active()) {
+			const PcMenuClickRect chip = pc_onion_confirm_rect(virtW, virtH);
+			float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+			if (pc_gfx_project_current(f32(chip.minX), f32(chip.minY), 0.0f, &x0, &y0)
+			    && pc_gfx_project_current(f32(chip.maxX), f32(chip.maxY), 0.0f, &x1, &y1)) {
+				pc_onion_confirm_mark(x0, y0, x1, y1);
+			}
+			PcSettingsP2DFrame frame(virtW, virtH);
+			pc_settings_p2d_plate(chip.minX, chip.minY, chip.maxX - chip.minX, chip.maxY - chip.minY, 2);
+			pc_settings_p2d_text_styled(chip.minX + 48, chip.minY + 12, "OK", Colour(255, 245, 210, 255),
+			                            Colour(255, 196, 64, 255), 18, 22);
+		}
 		pc_gfx_set_hud_wide(0);
 #else
 		mPerspGraph->setPort();

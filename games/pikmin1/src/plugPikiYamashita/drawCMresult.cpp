@@ -6,6 +6,9 @@
 #include "zen/DrawSave.h"
 #include "zen/EffectMgr2D.h"
 #include "zen/Number.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_menu_click.h"
+#endif
 
 /**
  * @todo: Documentation
@@ -252,8 +255,15 @@ bool zen::DrawCMresult::modeAppear(Controller*)
  */
 bool zen::DrawCMresult::modeOperation(Controller* controller)
 {
+#if defined(PIKI_PC_PORT)
+	pc_menu_click_claim_pointer_menu();
+	bool pointerGo = pc_menu_click_take(nullptr, nullptr) || pc_menu_click_take_back();
+#else
+	bool pointerGo = false;
+#endif
 	if (_88 < _84) {
-		if (controller->keyClick(KBBTN_START | KBBTN_A)) {
+		if (controller->keyClick(KBBTN_START | KBBTN_A) || pointerGo) {
+			pointerGo = false;
 			SeSystem::playSysSe(SYSSE_DECIDE1);
 			_88 = _84;
 			mScoreMgr.appear(1.0f);
@@ -266,7 +276,7 @@ bool zen::DrawCMresult::modeOperation(Controller* controller)
 
 		SeSystem::playSysSe(SYSSE_CMENU_SELECT);
 	} else if (mScoreMgr.getEventFlag() & 0x2) {
-		if (controller->keyClick(KBBTN_START | KBBTN_A)) {
+		if (controller->keyClick(KBBTN_START | KBBTN_A) || pointerGo) {
 			SeSystem::playSysSe(SYSSE_DECIDE1);
 #if defined(VERSION_PIKIDEMO)
 			gsys->forceHardReset();
