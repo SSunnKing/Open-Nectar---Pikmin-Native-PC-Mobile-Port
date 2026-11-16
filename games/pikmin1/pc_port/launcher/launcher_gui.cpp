@@ -15,6 +15,7 @@
 //    botones de cristal) se lee de los datos que el usuario extrajo de su
 //    propio disco. Sin instalación se dibuja una pradera con flores.
 #include "launcher_gui.h"
+#include "../pc_mac_keys.h"
 
 #include "bti_decode.h"
 #include "button_layout.h"
@@ -3882,6 +3883,9 @@ bool HubWindow::open(const HubState& state, std::string& error)
         error = SDL_GetError();
         return false;
     }
+    // The launcher is its own process. A held key would open the macOS accent
+    // popup here too. Text fields in this window stay on; only the popup goes.
+    pc_mac_disable_press_and_hold();
     // Controllers opened before or after launch. A failure here leaves the
     // mouse and keyboard launcher unchanged.
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");

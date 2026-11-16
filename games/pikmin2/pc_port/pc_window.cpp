@@ -3,6 +3,7 @@
 #endif
 #include "pc_window.h"
 #include "pc_menu_pad.h"
+#include "pc_mac_keys.h"
 
 static_assert(PAD_BUTTON_LEFT == PC_MENU_PAD_LEFT && PAD_BUTTON_RIGHT == PC_MENU_PAD_RIGHT
                   && PAD_BUTTON_DOWN == PC_MENU_PAD_DOWN && PAD_BUTTON_UP == PC_MENU_PAD_UP
@@ -835,7 +836,25 @@ bool pc_window_save_key_bindings(const char* path) {
     return true;
 }
 
+static bool sTextInputWanted = false;
+
+void pc_window_set_text_input_wanted(bool wanted) {
+    sTextInputWanted = wanted;
+    if (!SDL_WasInit(SDL_INIT_VIDEO)) return;
+    if (wanted) SDL_StartTextInput();
+    else SDL_StopTextInput();
+}
+
+static void pc_window_keep_text_input_off() {
+    if (sTextInputWanted) return;
+    if (SDL_WasInit(SDL_INIT_VIDEO) && SDL_IsTextInputActive() == SDL_TRUE)
+        SDL_StopTextInput();
+}
+
 bool pc_window_init(const char* title, int width, int height) {
+    // Before the window exists: a system SDL build does not set this, so a
+    // held key would open the macOS accent popup (Pikmin 1, issue #206).
+    pc_mac_disable_press_and_hold();
     // The PC entry point creates the window before System::Initialise so GX can
     // build its GL resources. PADInit is called later by ControllerMgr and also
     // requests window initialisation. Recreating it there switches to a fresh
@@ -843,6 +862,7 @@ bool pc_window_init(const char* title, int width, int height) {
     // two black windows. Keep the original window and context instead.
     if (sWindow && sGLContext) {
         SDL_GL_MakeCurrent(sWindow, sGLContext);
+        pc_window_keep_text_input_off();
         return true;
     }
 
@@ -1012,7 +1032,8 @@ bool pc_window_init(const char* title, int width, int height) {
 
     // SDL turns text input on when video starts, and on macOS that lets a held
     // key open the accent picker during gameplay (sdl2-compat does not hide
-    // it). Text fields turn it on while they are open.
+    // it). Text fields turn it on while they are open. Focus can turn it back
+    // on, so each poll stops it again unless a field asked for it.
     SDL_StopTextInput();
 
     printf("[PC Port] SDL2 window and GL context initialized successfully (%dx%d)\n", sWindowWidth, sWindowHeight);
@@ -1191,6 +1212,7 @@ static int pc_window_poll_one(SDL_Event* event)
 }
 
 void pc_window_poll_events(PADStatus* pad) {
+    pc_window_keep_text_input_off();
     pc_xinput_usb_update();
 #if PIKI_P2_HOST
     // Pikmin 2: el audio lo pauta la cola de SDL desde VIWaitForRetrace.
