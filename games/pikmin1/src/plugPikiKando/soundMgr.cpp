@@ -692,9 +692,29 @@ int SeSystem::createEvent(SeContext* context, int eventType, SVector_* soundOffs
 				ERROR("failed to create JacEvent !!\n");
 			}
 			// add new event to our list
+#if defined(PIKI_PC_PORT)
+			// #329: releaseEvent() only frees a slot when the farthest entry
+			// still owns a Jac handle. Entries stored here with handle -1 (Jac
+			// refuses events during some cutscenes, or has none free) cannot be
+			// released, so the list stays full and the append below wrote past
+			// mEvents[mMaxEventCount - 1], walking over the next heap blocks
+			// (it hit pikihead/leaf Mesh data). Reuse the farthest slot then.
+			int slot = mCurrentEventCount;
+			if (slot >= mMaxEventCount) {
+				slot = farthestEventIdx;
+				if (mEvents[slot].mContext && mEvents[slot].mContext != context) {
+					mEvents[slot].mContext->mEventHandle = -1;
+				}
+			} else {
+				mCurrentEventCount++;
+			}
+			mEvents[slot].mHandle  = eventHandle;
+			mEvents[slot].mContext = context;
+#else
 			mEvents[mCurrentEventCount].mHandle  = eventHandle;
 			mEvents[mCurrentEventCount].mContext = context;
 			mCurrentEventCount++;
+#endif
 			context->mEventHandle = eventHandle;
 			context->mEventType   = eventType;
 			newHandle             = eventHandle;
