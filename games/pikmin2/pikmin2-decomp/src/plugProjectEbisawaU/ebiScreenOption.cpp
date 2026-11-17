@@ -388,7 +388,8 @@ bool TOption::doUpdateStateWait()
         }
         add(mPaneDeflickerYes, 5, 1); add(mPaneDeflickerNo, 5, 0);
         add(mButtonPaneList[6], 6, 0);
-        add(E2DScreen_searchAssert(mMainScreen, MC8("Nbotn")), 8, 0);
+        add(E2DScreen_searchAssert(mMainScreen, MC8("Tmod")), 8, 0);
+        add(E2DScreen_searchAssert(mMainScreen, MC8("Pbbt")), 8, 0);
         PcPointerRect rects[64] = {};
         for (int i = 0; i < n; ++i) rects[i] = pc_pointer_rect(targets[i]);
         float x, y; int width = 0, height = 0;
@@ -673,7 +674,11 @@ bool TOption::doUpdateStateWait()
         if (progress > 1.0f) progress = 1.0f;
         return 1.0f + amount * progress * progress * (3.0f - 2.0f * progress);
     };
-    E2DScreen_searchAssert(mMainScreen, MC8("Nbotn"))->updateScale(easedHover(32, pcHoverKind == 8, .12f));
+    const float backHover = easedHover(32, pcHoverKind == 8, .12f);
+    E2DScreen_searchAssert(mMainScreen, MC8("Tmod"))->updateScale(backHover);
+    E2DScreen_searchAssert(mMainScreen, MC8("Tmods"))->updateScale(backHover);
+    E2DScreen_searchAssert(mMainScreen, MC8("Pbbt"))->updateScale(backHover);
+    E2DScreen_searchAssert(mMainScreen, MC8("Pbbts"))->updateScale(backHover);
     mPaneRumbleYes->updateScale(mButtonPuruAnim[0].mScale * easedHover(25, pcHoverKind == 1 && pcHoverValue == 1, .08f));
     mPaneRumbleNo->updateScale(mButtonPuruAnim[1].mScale * easedHover(26, pcHoverKind == 1 && pcHoverValue == 0, .08f));
     for (int i = 0; i < 3; ++i)
