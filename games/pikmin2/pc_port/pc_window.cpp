@@ -313,6 +313,9 @@ SDL_Scancode pc_window_default_key_binding2(int action) {
     case PC_KEY_ACT_A: return static_cast<SDL_Scancode>(PC_BIND_MOUSE_BASE + SDL_BUTTON_LEFT);
     case PC_KEY_ACT_B: return static_cast<SDL_Scancode>(PC_BIND_MOUSE_BASE + SDL_BUTTON_RIGHT);
     case PC_KEY_ACT_Z: return static_cast<SDL_Scancode>(PC_BIND_MOUSE_BASE + SDL_BUTTON_MIDDLE);
+    // Left Option also opens the pause menu. Enter stays the first binding,
+    // and inside the menu it confirms, including Go to Sunset.
+    case PC_KEY_ACT_START: return SDL_SCANCODE_LALT;
     default: return SDL_SCANCODE_UNKNOWN;
     }
 }
