@@ -3844,7 +3844,7 @@ void pc_settings_touch_tap(float x, float y) {
 
 bool pc_settings_prompt_active(void) {
     return pc_newgame_prompt_active() || pc_playercount_prompt_active() || pc_devassign_prompt_active()
-        || pc_captain_prompt_active();
+        || pc_captain_prompt_active() || pc_captain_select_active();
 }
 
 // El launcher deja Load/Textures/.activate al descargar un pack: se
@@ -6116,6 +6116,36 @@ void csCoopPressed(int player, bool pressed[CS_InputCount])
     }
 }
 
+// Mouse hover over the Captains screen: a card moves `cursor` to it, Start
+// reports onStart, and the hand cursor shows over every clickable part.
+// Applies only when the pointer enters a new target, so keys and pad still move
+// the cursor while the mouse rests. sCsHovered tells whether a card was entered.
+bool sCsHovered = false;
+void csHover(bool* onStart, int* cursor)
+{
+    static int sLast = -1;
+    sCsHovered = false;
+    if (onStart) *onStart = false;
+#if PIKI_PC_MENU_TAP
+    float hx = 0.0f, hy = 0.0f;
+    int which = 0, hit = CS_HIT_NONE;
+    if (pc_menu_hover(&hx, &hy)) hit = csPointerHit(hx, hy, &which);
+    pc_menu_set_hand(hit != CS_HIT_NONE);
+    const int key = hit == CS_HIT_CARD ? which : hit == CS_HIT_START ? 100 : -1;
+    if (key != sLast) {
+        sLast = key;
+        if (hit == CS_HIT_CARD && cursor) {
+            *cursor    = which;
+            sCsHovered = true;
+        } else if (hit == CS_HIT_START && onStart) {
+            *onStart = true;
+        }
+    }
+#else
+    (void)cursor;
+#endif
+}
+
 void csCoopStart()
 {
     sConfig.p2Captain1 = sCapSelChoice[0];
@@ -6129,15 +6159,22 @@ void csCoopStart()
 
 void pcCaptainSelectCoopInput()
 {
-    sTouchTapPending = false;
-    if (menuAcceptClick()) {
+    const int owner = pc_window_get_keyboard_owner() == 1 ? 1 : 0;
+    {
         float nx = 0.0f, ny = 0.0f;
-        int which = 0;
-        if (menuMouseNorm(&nx, &ny) && csPointerHit(nx, ny, &which) == CS_HIT_CARD) {
-            const int owner = pc_window_get_keyboard_owner() == 1 ? 1 : 0;
-            sCsCursor[owner] = which;
+        bool clicked = false;
+        if (sTouchTapPending) {
+            sTouchTapPending = false;
+            nx = sTouchTapX;
+            ny = sTouchTapY;
+            clicked = true;
+        } else if (menuAcceptClick()) {
+            clicked = menuMouseNorm(&nx, &ny);
         }
+        int which = 0;
+        if (clicked && csPointerHit(nx, ny, &which) == CS_HIT_CARD) sCsCursor[owner] = which;
     }
+    csHover(nullptr, sCsReady[owner] ? nullptr : &sCsCursor[owner]);
     bool pressed[2][CS_InputCount];
     for (int p = 0; p < 2; p++) csCoopPressed(p, pressed[p]);
     const bool bothReady = sCsReady[0] && sCsReady[1];
@@ -6287,6 +6324,13 @@ void pcCaptainSelectInput()
             if (row < 2) sCapSelIndex += kCsCols;
             else sCapSelStart = true;
         }
+    }
+
+    {
+        bool onStart = false;
+        csHover(&onStart, &sCapSelIndex);
+        if (onStart) sCapSelStart = true;
+        else if (sCsHovered) sCapSelStart = false;
     }
 
     // A click on a card assigns that card. A click on Start, or on empty
