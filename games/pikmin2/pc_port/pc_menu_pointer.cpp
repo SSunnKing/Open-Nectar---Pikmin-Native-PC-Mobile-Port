@@ -36,6 +36,13 @@ bool pc_pointer_take(float* x, float* y) {
     pending = false;
     return true;
 }
+bool pc_pointer_peek(float* x, float* y) {
+    if (!pending) return false;
+    if (x) *x = clickX;
+    if (y) *y = clickY;
+    return true;
+}
+void pc_pointer_drop() { pending = false; }
 void pc_pointer_track(const void* id) {
     if (!id) return;
     Pane* p = find(id);

@@ -26,8 +26,15 @@ void pc_menu_queue_button(unsigned short button);
 // Mouse only: where the pointer rests (window-normalised), false once a key or
 // pad button was used. Screens test it with pc_menu_pane_hit.
 bool pc_menu_hover(float* nx, float* ny);
-// Asks for the hand cursor this update; call every update with true or false.
+// Asks for the hand cursor this update. Only a true request counts, so two
+// parts of one screen can each ask without cancelling the other; the request
+// lapses a few ticks after the pointer leaves.
 void pc_menu_set_hand(bool hand);
+// Reads the pending mouse click without consuming it (the mouse only);
+// pc_menu_drop_tap consumes it. For a part of a screen that must not steal
+// clicks meant for the rest, such as the page arrows.
+bool pc_menu_peek_tap(float* nx, float* ny);
+void pc_menu_drop_tap();
 #endif
 
 #endif

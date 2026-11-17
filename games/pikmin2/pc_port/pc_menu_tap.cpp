@@ -43,7 +43,9 @@ bool pc_menu_pane_hit(const void* pane, float nx, float ny, float margin) {
 }
 
 bool pc_menu_hover(float* nx, float* ny) { return pc_pointer_hover(nx, ny); }
-void pc_menu_set_hand(bool hand) { pc_pointer_set_hand(hand); }
+void pc_menu_set_hand(bool hand) { if (hand) pc_pointer_set_hand(true); }
+bool pc_menu_peek_tap(float* nx, float* ny) { return pc_pointer_peek(nx, ny); }
+void pc_menu_drop_tap() { pc_pointer_drop(); }
 
 void pc_menu_queue_button(unsigned short button) {
 #if PIKI_PC_TOUCH

@@ -55,4 +55,12 @@ int main() {
     pc_pointer_queue_button(0x1);
     CHECK(pc_pointer_take_buttons() == 0x101);
     CHECK(pc_pointer_take_buttons() == 0);
+
+    // Peek reads a click without consuming it; drop consumes it.
+    pc_pointer_reset();
+    pc_pointer_post(.3f, .4f);
+    CHECK(pc_pointer_peek(&x, &y) && x == .3f && y == .4f);
+    CHECK(pc_pointer_peek(nullptr, nullptr));
+    pc_pointer_drop();
+    CHECK(!pc_pointer_peek(nullptr, nullptr) && !pc_pointer_take(nullptr, nullptr));
 }

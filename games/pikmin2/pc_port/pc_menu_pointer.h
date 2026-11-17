@@ -14,6 +14,9 @@ void pc_pointer_disarm_hover();
 bool pc_pointer_hover(float* x, float* y);
 void pc_pointer_post(float x, float y);
 bool pc_pointer_take(float* x, float* y);
+// Reads the pending click without consuming it; pc_pointer_drop consumes it.
+bool pc_pointer_peek(float* x, float* y);
+void pc_pointer_drop();
 void pc_pointer_track(const void* pane);
 bool pc_pointer_tracked(const void* pane);
 void pc_pointer_drawn(const void* pane, float x0, float y0, float x1, float y1);
