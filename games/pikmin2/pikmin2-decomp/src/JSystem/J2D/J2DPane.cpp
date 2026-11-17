@@ -685,7 +685,10 @@ void J2DPane::draw(f32 x, f32 y, const J2DGrafContext* grafContext, bool isOrtho
 
 
 #if defined(PIKI_PC_PORT) && PIKI_P2_HOST
-        if (unkBool && getTypeID() != PANETYPE_Pane) {
+        // A pane a menu asks about directly is recorded even when it is flagged
+        // invisible: the pause menus draw their option text through hidden text
+        // boxes, and the boxes still know where the text goes.
+        if ((unkBool && getTypeID() != PANETYPE_Pane) || pc_pointer_tracked(this)) {
             bool tracked = false;
             for (J2DPane* p = this; p && !tracked; p = p->mTree.getParent() ? p->mTree.getParent()->getObject() : nullptr)
                 tracked = pc_pointer_tracked(p);

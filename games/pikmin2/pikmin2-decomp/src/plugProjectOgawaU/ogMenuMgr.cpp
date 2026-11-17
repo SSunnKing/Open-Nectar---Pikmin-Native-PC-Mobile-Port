@@ -6,25 +6,54 @@
 #include "efx2d/T2DCursor.h"
 #include "System.h"
 
-#if PIKI_PC_TOUCH
-extern "C" bool pc_touch_pane_hit(const void* pane, float nx, float ny, float margin);
-#endif
+#include "pc_menu_tap.h"
 
 namespace og {
 namespace Screen {
 
-#if PIKI_PC_TOUCH
-int MenuMgr::pcTouchTappedOption(bool tapped, f32 x, f32 y) const
+#if PIKI_PC_MENU_TAP
+// The pane an option is tested against: its text box, or the main pane if
+// there is none. The text boxes of the pause-style menus are flagged invisible
+// but still carry the text's position, which the pane tracker records.
+J2DPane* MenuMgr::pcOptionPane(int i) const
+{
+	if (mTextBoxPanes && mTextBoxPanes[i]) return mTextBoxPanes[i];
+	if (mTextBoxTakuPanes && mTextBoxTakuPanes[i]) return mTextBoxTakuPanes[i];
+	return mMainPanes ? mMainPanes[i] : nullptr;
+}
+
+int MenuMgr::pcOptionAt(f32 nx, f32 ny) const
 {
 	int hit = -1;
+	// Every option is asked about every frame so each keeps being tracked.
 	for (int i = 0; i < mElementCount; i++) {
-		// El texto de la opción es lo que se ve; el pane principal, por si no hay.
-		J2DPane* pane = mTextBoxPanes && mTextBoxPanes[i] ? mTextBoxPanes[i]
-		              : mTextBoxTakuPanes && mTextBoxTakuPanes[i] ? mTextBoxTakuPanes[i]
-		                                                         : (mMainPanes ? mMainPanes[i] : nullptr);
-		if (pc_touch_pane_hit(pane, x, y, 0.012f) && tapped && hit < 0) hit = i;
+		if (pc_menu_pane_hit(pcOptionPane(i), nx, ny, 0.012f) && hit < 0) hit = i;
 	}
 	return hit;
+}
+
+int MenuMgr::pcTappedOption(bool tapped, f32 x, f32 y) const
+{
+	const int hit = pcOptionAt(x, y);
+	return tapped ? hit : -1;
+}
+
+int MenuMgr::pcHoveredOption() const
+{
+	static const MenuMgr* sOwner = nullptr;
+	static int sLast             = -1;
+	float hx = 0.0f, hy = 0.0f;
+	const bool hovering = pc_menu_hover(&hx, &hy);
+	const int hit       = pcOptionAt(hx, hy);
+	const int shown     = hovering ? hit : -1;
+	pc_menu_set_hand(shown >= 0);
+	if (sOwner != this) {
+		sOwner = this;
+		sLast  = -1;
+	}
+	const int entered = shown != sLast ? shown : -1;
+	sLast             = shown;
+	return entered;
 }
 #endif
 
