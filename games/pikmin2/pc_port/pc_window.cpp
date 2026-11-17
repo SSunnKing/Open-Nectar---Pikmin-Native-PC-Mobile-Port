@@ -1361,7 +1361,12 @@ void pc_window_poll_events(PADStatus* pad) {
                     if (w > 0 && h > 0) {
                         const float nx = float(event.button.x) / w, ny = float(event.button.y) / h;
                         // A button plate takes the click first and presses its pad button.
-                        if (!pc_plate_click(nx, ny)) pc_pointer_post(nx, ny);
+                        if (!pc_plate_click(nx, ny)) {
+                            pc_pointer_post(nx, ny);
+                        } else if (pc_settings_prompt_active()) {
+                            // Port prompts read their buttons from the settings layer, not the pad.
+                            pc_settings_touch_buttons(pc_pointer_take_buttons());
+                        }
                     }
                 }
                 if (event.type == SDL_MOUSEBUTTONDOWN && event.button.which != SDL_TOUCH_MOUSEID

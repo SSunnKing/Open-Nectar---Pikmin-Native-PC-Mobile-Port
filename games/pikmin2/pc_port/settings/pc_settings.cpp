@@ -5814,8 +5814,10 @@ void pcDevAssignPromptInput()
         const int player = sDevAssignStep == COOPASSIGN_WaitP1 ? 0 : 1;
         int kind = PC_INPUT_DEV_NONE, id = -1;
         bool pressed = pc_window_take_button_press(&kind, &id);
-#if PIKI_PC_TOUCH
-        // Táctil: un toque vale como "P1 = pantalla" (va al pad 0). P2 necesita un mando.
+#if PIKI_PC_MENU_TAP
+        // Touch or mouse: a tap counts as "P1 = this screen" (a click is the keyboard
+        // and mouse). Player 2 needs another device, so a tap does not count for P2.
+        pc_menu_plate(PAD_BUTTON_B, "B Back");
         if (sTouchTapPending) {
             sTouchTapPending = false;
             if (player == 0 && !pressed) {
@@ -5855,6 +5857,12 @@ void pcDevAssignPromptInput()
 
     // Confirmación: con teclado y con los dos mandos. Los flancos van por
     // acción, no por mando: se combina el estado de los dos y se detecta una vez.
+#if PIKI_PC_MENU_TAP
+    pc_menu_plate(PAD_BUTTON_B, "B Back");
+    pc_menu_plate(PAD_BUTTON_A, "A OK");
+    pc_menu_plate(PAD_BUTTON_RIGHT, "Right");
+    pc_menu_plate(PAD_BUTTON_LEFT, "Left");
+#endif
     bool left   = keyWentDown(SDL_SCANCODE_LEFT)  || keyWentDown(SDL_SCANCODE_A);
     bool right  = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
     bool accept = menuOkKey();
