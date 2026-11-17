@@ -1712,6 +1712,10 @@ void pc_window_poll_events(PADStatus* pad) {
         pc_touch_set_visible(false);
     }
 #endif
+#if PIKI_P2_HOST
+    // A pointer menu presses pad A for a click it handled (pc_menu_queue_button).
+    button |= pc_pointer_take_buttons();
+#endif
 
     // ── Mouse Input (Virtual Cursor) ──
     // In mouse modes: mouse controls virtual cursor (separate from movement stick)

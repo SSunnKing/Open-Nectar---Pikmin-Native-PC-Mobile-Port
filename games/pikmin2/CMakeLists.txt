@@ -377,6 +377,7 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
         ${PC_PORT_DIR}/pc_pad_axis.cpp
         ${PC_PORT_DIR}/pc_menu_pad.cpp
         ${PC_PORT_DIR}/pc_menu_pointer.cpp
+        ${PC_PORT_DIR}/pc_menu_tap.cpp
         ${PC_PORT_DIR}/pc_menu_mode.cpp
         ${PC_PORT_DIR}/pc_text_box.cpp
         ${PC_PORT_DIR}/pc_menu_repeat.cpp

@@ -19,5 +19,10 @@ bool pc_pointer_tracked(const void* pane);
 void pc_pointer_drawn(const void* pane, float x0, float y0, float x1, float y1);
 PcPointerRect pc_pointer_rect(const void* pane);
 int pc_pointer_hit(float x, float y, const PcPointerRect* rects, const bool* active, int count, float margin);
+// Pane rectangle test in drawable pixels. Asking also starts tracking the pane.
+bool pc_pointer_pane_hit(const void* pane, float nx, float ny, float margin, int width, int height);
+// Pad buttons a menu injects for the next pad sample (the click was not pad A).
+void pc_pointer_queue_button(unsigned short button);
+unsigned short pc_pointer_take_buttons();
 void pc_pointer_reset();
 #endif

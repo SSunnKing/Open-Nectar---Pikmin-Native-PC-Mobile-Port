@@ -7,6 +7,7 @@ Pane panes[128] = {};
 int tick = 0, claim = -100, posted = -100;
 float clickX = 0, clickY = 0;
 bool pending = false, hover = false, hand = false;
+unsigned short queuedButtons = 0;
 int handTick = -100;
 float hoverX = 0, hoverY = 0;
 Pane* find(const void* id) {
@@ -72,4 +73,14 @@ int pc_pointer_hit(float x, float y, const PcPointerRect* rects, const bool* act
     }
     return -1;
 }
-void pc_pointer_reset() { for (auto& pane : panes) pane = {}; tick = 0; claim = posted = -100; pending = hover = hand = false; handTick = -100; }
+bool pc_pointer_pane_hit(const void* pane, float nx, float ny, float margin, int width, int height) {
+    if (!pane) return false;
+    pc_pointer_track(pane);
+    const PcPointerRect r = pc_pointer_rect(pane);
+    if (!r.valid || width <= 0 || height <= 0) return false;
+    const float x = nx * width, y = ny * height, m = margin * height;
+    return x >= r.x0 - m && x <= r.x1 + m && y >= r.y0 - m && y <= r.y1 + m;
+}
+void pc_pointer_queue_button(unsigned short button) { queuedButtons |= button; }
+unsigned short pc_pointer_take_buttons() { const unsigned short b = queuedButtons; queuedButtons = 0; return b; }
+void pc_pointer_reset() { queuedButtons = 0; for (auto& pane : panes) pane = {}; tick = 0; claim = posted = -100; pending = hover = hand = false; handTick = -100; }

@@ -39,4 +39,20 @@ int main() {
     CHECK(pc_pointer_hit(0, 0, rects, active, 3, 2) == -1);
     for (int i = 0; i < 7; ++i) pc_pointer_tick();
     CHECK(!pc_pointer_rect(&first).valid);
+
+    // Pane test: the first ask only starts tracking; hits need a drawn rect.
+    pc_pointer_reset();
+    int pane;
+    CHECK(!pc_pointer_pane_hit(&pane, .5f, .5f, 0, 1000, 500));
+    CHECK(!pc_pointer_pane_hit(nullptr, .5f, .5f, 0, 1000, 500));
+    pc_pointer_drawn(&pane, 400, 200, 600, 300);
+    CHECK(pc_pointer_pane_hit(&pane, .5f, .5f, 0, 1000, 500));
+    CHECK(!pc_pointer_pane_hit(&pane, .7f, .5f, 0, 1000, 500));
+    CHECK(pc_pointer_pane_hit(&pane, .7f, .5f, .25f, 1000, 500)); // margin is a fraction of height
+    CHECK(!pc_pointer_pane_hit(&pane, .5f, .5f, 0, 0, 0));
+    // Queued buttons are taken once.
+    pc_pointer_queue_button(0x100);
+    pc_pointer_queue_button(0x1);
+    CHECK(pc_pointer_take_buttons() == 0x101);
+    CHECK(pc_pointer_take_buttons() == 0);
 }
