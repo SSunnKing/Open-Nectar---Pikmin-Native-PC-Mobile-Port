@@ -232,6 +232,62 @@ int main()
 		expect((button & PC_MENU_PAD_START) != 0, 1, "rebound Start stays Start");
 	}
 
+	// Mac portable Return is SDL_SCANCODE_KP_ENTER, not SDL_SCANCODE_RETURN.
+	// The keyboard layer still sets Start, because that key is the Return
+	// binding. In a menu it must match Space: A on, Start off.
+	{
+		expect(pc_menu_pad_is_enter_event(SDL_SCANCODE_KP_ENTER, 0), 1, "KP_ENTER is an Enter event");
+		expect(pc_menu_pad_enter_down(false, true, false, false), 1, "KP_ENTER state bit is Enter");
+		expect(pc_menu_pad_binding_is_enter(SDL_SCANCODE_RETURN), 1, "the default Start binding is Enter");
+		expect(pc_menu_pad_start_binding_down(SDL_SCANCODE_RETURN, false, true), 1,
+		       "Return binding is held for a portable Enter key");
+		expect(pc_menu_pad_start_binding_down(SDL_SCANCODE_P, false, true), 0,
+		       "a non-Enter Start binding ignores the portable key");
+
+		PcMenuPadKeys keys = keysNone();
+		keys.enter = pc_menu_pad_enter_down(false, true, false, false);
+		keys.kpEnter = keys.enter;
+		std::uint16_t button = PC_MENU_PAD_START;
+		std::int8_t sx = 0, sy = 0;
+		apply(keys, true, false, startKey, 0, button, sx, sy);
+		expect((button & PC_MENU_PAD_A) != 0, 1, "menu portable Enter sets A");
+		expect((button & PC_MENU_PAD_START) != 0, 0, "menu portable Enter clears Start");
+
+		PcMenuPadKeys typed = keysNone();
+		typed.enter = true;
+		std::uint16_t typedButton = PC_MENU_PAD_START;
+		apply(typed, true, false, startKey, 0, typedButton, sx, sy);
+		expect(button, typedButton, "menu portable Enter matches Return");
+	}
+
+	// The state array missed Return. The key event still says SDLK_RETURN
+	// with scancode UNKNOWN, which is what text input does. The latch makes
+	// that Enter, and the menu mask matches Space.
+	{
+		PcMenuEnterLatch latch = {};
+		pc_menu_pad_note_enter(latch, SDL_SCANCODE_UNKNOWN, SDLK_RETURN, true);
+		expect(latch.down, 1, "SDLK_RETURN with scancode UNKNOWN latches Enter");
+		expect(pc_menu_pad_enter_down(false, false, false, latch.down), 1, "the latch is Enter");
+		pc_menu_pad_note_enter(latch, SDL_SCANCODE_A, SDLK_a, true);
+		expect(latch.down, 1, "a letter does not clear the Enter latch");
+		pc_menu_pad_note_enter(latch, SDL_SCANCODE_UNKNOWN, SDLK_RETURN, false);
+		expect(latch.down, 0, "Enter up clears the latch");
+
+		PcMenuEnterLatch held = {};
+		pc_menu_pad_note_enter(held, SDL_SCANCODE_RETURN2, SDLK_RETURN2, true);
+		expect(pc_menu_pad_is_enter_event(SDL_SCANCODE_RETURN2, 0), 1, "RETURN2 is an Enter event");
+		expect(pc_menu_pad_enter_down(false, false, true, false), 1, "RETURN2 state bit is Enter");
+
+		PcMenuPadKeys keys = keysNone();
+		keys.enter = pc_menu_pad_enter_down(false, false, false, held.down);
+		keys.kpEnter = keys.enter;
+		std::uint16_t button = PC_MENU_PAD_START;
+		std::int8_t sx = 0, sy = 0;
+		apply(keys, true, false, startKey, 0, button, sx, sy);
+		expect((button & PC_MENU_PAD_A) != 0, 1, "menu latched Enter sets A");
+		expect((button & PC_MENU_PAD_START) != 0, 0, "menu latched Enter clears Start");
+	}
+
 	// Free play leaves the pad the keyboard layer already filled.
 	{
 		PcMenuPadKeys keys = keysNone();
