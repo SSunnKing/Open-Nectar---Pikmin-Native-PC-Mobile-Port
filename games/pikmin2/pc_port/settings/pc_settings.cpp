@@ -44,6 +44,7 @@
 
 #include "pc_window.h"
 #include "pc_menu_tap.h"
+#include "pc_dpad_keys.h"
 #include "pc_menu_pointer.h"
 #include "pc_pause_key.h"
 #include "pc_gyro.h"
@@ -1193,6 +1194,7 @@ void saveConfig() {
     }
     out << "# Open Nectar settings (F1 in-game to change)\n";
     out << "pauseAltDefaultMigrated = 1\n";
+    out << "dpadSecondDefaultMigrated = 1\n";
     out << "windowWidth = " << sConfig.windowWidth << "\n";
     out << "windowHeight = " << sConfig.windowHeight << "\n";
     out << "displayMode = " << sConfig.displayMode << "\n";
@@ -1330,6 +1332,7 @@ void loadConfig() {
     }
     sHadConfigFile = true;
     bool pauseAltDefaultMigrated = false;
+    bool dpadSecondDefaultMigrated = false;
     bool pauseSecondBindingStored = false;
     std::string line;
     while (std::getline(in, line)) {
@@ -1621,6 +1624,9 @@ void loadConfig() {
         else if (key == "pauseAltDefaultMigrated") {
             pauseAltDefaultMigrated = atoi(val.c_str()) != 0;
         }
+        else if (key == "dpadSecondDefaultMigrated") {
+            dpadSecondDefaultMigrated = atoi(val.c_str()) != 0;
+        }
         else if (key.rfind("key2_", 0) == 0) {
             int idx = atoi(key.substr(5).c_str());
             if (idx >= 0 && idx < PC_KEY_ACT_COUNT) {
@@ -1669,6 +1675,19 @@ void loadConfig() {
     sConfig.keyboardBindings2[PC_KEY_ACT_START] = pc_pause_second_binding(
         sConfig.keyboardBindings[PC_KEY_ACT_START], sConfig.keyboardBindings2[PC_KEY_ACT_START],
         pauseAltDefaultMigrated, pauseAltInUse);
+    // Older settings gain the number keys for the D-pad actions once. An action whose
+    // second key was never saved starts without one, because the file lists every action.
+    if (!dpadSecondDefaultMigrated) {
+        const int actions[4] = { PC_KEY_ACT_DPAD_UP, PC_KEY_ACT_DPAD_DOWN, PC_KEY_ACT_DPAD_LEFT, PC_KEY_ACT_DPAD_RIGHT };
+        for (int d = 0; d < 4; ++d) {
+            const int wanted = pc_dpad_default_second(d);
+            bool inUse = false;
+            for (int i = 0; i < PC_KEY_ACT_COUNT; ++i) {
+                if (sConfig.keyboardBindings[i] == wanted || (i != actions[d] && sConfig.keyboardBindings2[i] == wanted)) inUse = true;
+            }
+            sConfig.keyboardBindings2[actions[d]] = pc_dpad_second_binding(d, sConfig.keyboardBindings2[actions[d]], false, inUse);
+        }
+    }
 #if PIKI_P2_HOST
     pc_p2_captain_set_choice(0, sConfig.p2Captain1);
     pc_p2_captain_set_choice(1, sConfig.p2Captain2);

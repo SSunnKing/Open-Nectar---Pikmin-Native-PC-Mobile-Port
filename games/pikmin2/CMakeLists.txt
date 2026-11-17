@@ -692,6 +692,9 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
         pikmin2_add_host_test(p2_pause_key_test
             ${PC_PORT_DIR}/pc_pause_key_test.cpp
         )
+        pikmin2_add_host_test(p2_dpad_keys_test
+            ${PC_PORT_DIR}/pc_dpad_keys_test.cpp
+        )
         pikmin2_add_host_test(p2_text_box_test
             ${PC_PORT_DIR}/pc_text_box_test.cpp
         )

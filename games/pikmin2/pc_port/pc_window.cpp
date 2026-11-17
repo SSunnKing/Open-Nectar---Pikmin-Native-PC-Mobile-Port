@@ -3,6 +3,7 @@
 #endif
 #include "pc_window.h"
 #include "pc_menu_pad.h"
+#include "pc_dpad_keys.h"
 #if PIKI_P2_HOST
 #include "pc_menu_pointer.h"
 #endif
@@ -328,6 +329,11 @@ SDL_Scancode pc_window_default_key_binding2(int action) {
     // Left Option also opens the pause menu. Enter stays the first binding,
     // and inside the menu it confirms, including Go to Sunset.
     case PC_KEY_ACT_START: return SDL_SCANCODE_LALT;
+    // In play the D-pad sprays and switches the Pikmin type; number keys do it too.
+    case PC_KEY_ACT_DPAD_UP: return static_cast<SDL_Scancode>(pc_dpad_default_second(0));
+    case PC_KEY_ACT_DPAD_DOWN: return static_cast<SDL_Scancode>(pc_dpad_default_second(1));
+    case PC_KEY_ACT_DPAD_LEFT: return static_cast<SDL_Scancode>(pc_dpad_default_second(2));
+    case PC_KEY_ACT_DPAD_RIGHT: return static_cast<SDL_Scancode>(pc_dpad_default_second(3));
     default: return SDL_SCANCODE_UNKNOWN;
     }
 }
