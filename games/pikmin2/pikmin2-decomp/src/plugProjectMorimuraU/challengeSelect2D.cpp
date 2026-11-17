@@ -1,4 +1,8 @@
 #ifdef PIKI_PC_PORT
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 #include "pc_p2_captain_preview.h"
 #endif
 #include "Morimura/challengeSelect2d.h"
@@ -1601,6 +1605,15 @@ bool TChallengeSelect::doUpdate()
 
 	if (mCanInput && mDisp->mStatus == Screen::Game2DMgr::CHECK2D_ChallengeSelect_Default
 	    && !static_cast<TChallengeSelectScene*>(getOwner())->mConfirmEndWindow->mHasDrawn) {
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_B, "B Back");
+	pc_menu_plate(PAD_BUTTON_A, "A Select");
+	pc_menu_plate(PAD_TRIGGER_Z, "Z Rules");
+	pc_menu_plate(PAD_BUTTON_RIGHT, "Right");
+	pc_menu_plate(PAD_BUTTON_LEFT, "Left");
+	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
+	pc_menu_plate(PAD_BUTTON_UP, "Up");
+#endif
 		if (mControls->getButtonDown() & Controller::PRESS_Z && mPlayModeScreen->mState == 0) {
 			if (mRulesScreen->mScaleGrowRate <= 0.0f) {
 				openWindow();

@@ -38,6 +38,21 @@ int MenuMgr::pcTappedOption(bool tapped, f32 x, f32 y) const
 	return tapped ? hit : -1;
 }
 
+int MenuMgr::pcPointerUpdate(int current, bool* activate) const
+{
+	pc_menu_claim();
+	float tx = 0.0f, ty = 0.0f;
+	const bool tapped = pc_menu_take_tap(&tx, &ty);
+	const int opt     = pcTappedOption(tapped, tx, ty);
+	const int hov     = pcHoveredOption();
+	*activate         = false;
+	if (opt >= 0) {
+		*activate = true;
+		return opt;
+	}
+	return hov >= 0 && hov != current ? hov : -1;
+}
+
 int MenuMgr::pcHoveredOption() const
 {
 	static const MenuMgr* sOwner = nullptr;

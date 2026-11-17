@@ -6568,7 +6568,7 @@ void pc_menu_plates_draw(void)
     int right = sw - 40;
     bool overAny = false;
     for (int i = 0; i < count; ++i) {
-        const int w = 24 + int(strlen(requests[i].label)) * 10 < 84 ? 84 : 24 + int(strlen(requests[i].label)) * 10;
+        const int w = 20 + int(strlen(requests[i].label)) * 9 < 52 ? 52 : 20 + int(strlen(requests[i].label)) * 9;
         const int x = right - w;
         right = x - gap;
         rects[i] = { (float(x) / sw) * uiWidth + (0.5f - uiWidth * 0.5f), float(y) / sh,

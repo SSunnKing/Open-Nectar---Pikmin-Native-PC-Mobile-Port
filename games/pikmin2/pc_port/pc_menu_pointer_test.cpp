@@ -77,7 +77,13 @@ int main() {
     pc_plate_request(0x200, "B Back");
     PcPlateRequest taken[PC_PLATE_MAX];
     CHECK(pc_plate_take_requests(taken) == 2 && taken[1].pad == 0x200 && taken[0].label[0] == 'A');
-    CHECK(pc_plate_take_requests(taken) == 0);
+    CHECK(pc_plate_take_requests(taken) == 2); // still there on the next draw
+    pc_plate_request(0x100, "A OK"); // same update: no duplicate
+    CHECK(pc_plate_take_requests(taken) == 2);
+    for (int i = 0; i < 7; ++i) pc_pointer_tick();
+    CHECK(pc_plate_take_requests(taken) == 0); // lapsed after the screen stopped asking
+    pc_plate_request(0x100, "A OK");
+    pc_plate_request(0x200, "B Back");
     const PcPointerRect plateRects[2] = {{.1f, .9f, .2f, .95f, true}, {.3f, .9f, .4f, .95f, true}};
     const unsigned short platePads[2] = {0x100, 0x200};
     pc_plate_set_layout(plateRects, platePads, 2);

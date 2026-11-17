@@ -1,3 +1,7 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 #include "og/newScreen/TitleMsg.h"
 #include "og/newScreen/ogUtil.h"
 #include "og/newScreen/AnaDemo.h"
@@ -479,6 +483,21 @@ bool ObjAnaDemo::doUpdate()
 		break;
 
 			}	case ANADEMOSTATE_IdleWait: {
+#if PIKI_PC_MENU_TAP
+		bool pcActivate = false;
+		pc_menu_plate(PAD_BUTTON_B, "B Cancel");
+		if (mMenuMgr) {
+			const int sel = mMenuMgr->pcPointerUpdate(mCurrMenuSel, &pcActivate);
+			if (sel >= 0 && sel != (int)mCurrMenuSel) {
+				mCurrMenuSel = sel;
+				mMenuMgr->select(mCurrMenuSel);
+				if (mMenuSelTitle) {
+					mMenuSelYes->blink(mCurrMenuSel == 0 ? 0.6f : 0.0f, 0.0f);
+					mMenuSelNo->blink(mCurrMenuSel == 1 ? 0.6f : 0.0f, 0.0f);
+				}
+			}
+		}
+#endif
 		if (pad->isButtonDown(Controller::PRESS_UP)) {
 			if (mCurrMenuSel > 0) {
 				mCurrMenuSel--;
@@ -518,7 +537,11 @@ bool ObjAnaDemo::doUpdate()
 					}
 				}
 			}
+#if PIKI_PC_MENU_TAP
+		} else if (pad->isButtonDown(Controller::PRESS_A) || pcActivate) {
+#else
 		} else if (pad->isButtonDown(Controller::PRESS_A)) {
+#endif
 			if (mMenuMgr)
 				mMenuMgr->killCursor();
 			if (mCurrMenuSel == 0) {

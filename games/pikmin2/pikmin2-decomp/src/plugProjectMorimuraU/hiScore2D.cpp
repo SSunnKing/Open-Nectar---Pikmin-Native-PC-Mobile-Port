@@ -1,3 +1,7 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 #include "Morimura/HiScore.h"
 #ifdef PIKI_PC_PORT
 extern "C" void pc_gfx_p2_black_sides(void);
@@ -433,6 +437,11 @@ u64 THiScore::getNameID(int id)
 bool THiScore::doUpdate()
 {
 	if (mCanInput) {
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_B, "B Back");
+	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
+	pc_menu_plate(PAD_BUTTON_UP, "Up");
+#endif
 		Controller* input = mController;
 		if (input->getButtonDown() & Controller::PRESS_B) {
 			if (!mIsSection) {

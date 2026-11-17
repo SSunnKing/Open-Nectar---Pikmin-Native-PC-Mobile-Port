@@ -1,3 +1,7 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 #include "kh/khFinalResult.h"
 #include "Controller.h"
 #include "PSSystem/PSSystemIF.h"
@@ -567,6 +571,11 @@ void ObjFinalResult::statusNormal()
 		mFadePaneAButton->fadeout();
 	}
 	mFadePane3DStick->fadein();
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_A, "A Continue");
+	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
+	pc_menu_plate(PAD_BUTTON_UP, "Up");
+#endif
 	Controller* pad = getGamePad();
 	if (pad->getButton() & Controller::PRESS_UP) {
 		if (mCurrentPage) {

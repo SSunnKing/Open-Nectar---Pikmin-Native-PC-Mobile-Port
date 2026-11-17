@@ -98,17 +98,22 @@ bool pc_pointer_pane_hit(const void* pane, float nx, float ny, float margin, int
 void pc_pointer_queue_button(unsigned short button) { queuedButtons |= button; }
 unsigned short pc_pointer_take_buttons() { const unsigned short b = queuedButtons; queuedButtons = 0; return b; }
 bool pc_pointer_mouse_active() { return mouseActive; }
+int plateBatchTick = -100;
 void pc_plate_request(unsigned short pad, const char* label) {
+    // A new update replaces the previous batch; repeats within one update are ignored.
+    if (tick != plateBatchTick) { plateBatchTick = tick; plateRequestCount = 0; }
+    for (int i = 0; i < plateRequestCount; ++i) if (plateRequests[i].pad == pad) return;
     if (plateRequestCount >= PC_PLATE_MAX) return;
     PcPlateRequest& r = plateRequests[plateRequestCount++];
     r.pad = pad;
     std::snprintf(r.label, sizeof(r.label), "%s", label ? label : "");
 }
+// Requests stay for a few ticks so a screen that updates slower than the overlay
+// draws still shows its plates every frame.
 int pc_plate_take_requests(PcPlateRequest* out) {
-    const int n = plateRequestCount;
-    for (int i = 0; i < n; ++i) out[i] = plateRequests[i];
-    plateRequestCount = 0;
-    return n;
+    if (tick - plateBatchTick > 6) { plateRequestCount = 0; return 0; }
+    for (int i = 0; i < plateRequestCount; ++i) out[i] = plateRequests[i];
+    return plateRequestCount;
 }
 void pc_plate_set_layout(const PcPointerRect* rects, const unsigned short* pads, int count) {
     plateLayoutCount = count < PC_PLATE_MAX ? count : PC_PLATE_MAX;
@@ -128,4 +133,4 @@ bool pc_plate_click(float nx, float ny) {
     return true;
 }
 bool pc_plate_hover(float nx, float ny) { return plateAt(nx, ny) >= 0; }
-void pc_pointer_reset() { mouseActive = false; plateRequestCount = plateLayoutCount = 0; queuedButtons = 0; for (auto& pane : panes) pane = {}; tick = 0; claim = posted = -100; pending = hover = hand = false; handTick = -100; }
+void pc_pointer_reset() { mouseActive = false; plateRequestCount = plateLayoutCount = 0; plateBatchTick = -100; queuedButtons = 0; for (auto& pane : panes) pane = {}; tick = 0; claim = posted = -100; pending = hover = hand = false; handTick = -100; }

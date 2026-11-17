@@ -1,3 +1,7 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 #include "kh/khDayEndResult.h"
 #include "Game/gamePlayData.h"
 #include "Game/Piki.h"
@@ -836,6 +840,11 @@ void ObjDayEndResultItem::statusNormal()
 	}
 
 	if (mFlags & 0x1) {
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_A, "A Continue");
+	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
+	pc_menu_plate(PAD_BUTTON_UP, "Up");
+#endif
 		if (getGamePad()->getButton() & Controller::PRESS_UP && mCurrentSelectId != 0) {
 			mCurrentSelectId--;
 			if (mScrollUpDelay >= 1) {
@@ -1330,6 +1339,10 @@ bool ObjDayEndResultIncP::doUpdate()
 		break;
 	}
 
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_B, "B Back");
+	pc_menu_plate(PAD_BUTTON_A, "A Next");
+#endif
 	if (getGamePad()->getButtonDown() & (Controller::PRESS_A | Controller::PRESS_B)) {
 		if (getGamePad()->getButtonDown() & Controller::PRESS_A && mStatus == INCPSTATUS_Slot && !isFlag(0x40)) {
 			mFlags |= 0x20;
@@ -1965,6 +1978,12 @@ bool ObjDayEndResultMail::doUpdateFadeout()
  */
 void ObjDayEndResultMail::statusNormal()
 {
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_TRIGGER_R, "R Next");
+	pc_menu_plate(PAD_TRIGGER_L, "L Prev");
+	pc_menu_plate(PAD_BUTTON_B, "B Back");
+	pc_menu_plate(PAD_BUTTON_A, "A Save");
+#endif
 	if (getGamePad()->getButtonDown() & Controller::PRESS_A) {
 		mFlags |= 4;
 		mSaveMgr->start();

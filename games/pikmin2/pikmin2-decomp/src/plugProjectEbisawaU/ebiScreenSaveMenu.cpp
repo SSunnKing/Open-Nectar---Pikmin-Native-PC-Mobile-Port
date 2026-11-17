@@ -1,3 +1,7 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 #include "ebi/Screen/TSaveMenu.h"
 #include "System.h"
 #include "og/newScreen/ogUtil.h"
@@ -377,6 +381,12 @@ void TSaveMenu::updateMsg_()
 		case MESSAGE_NoSaveOption:
 			int index1, index2;
 			getMenuMinMax(index1, index2);
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_B, "B Cancel");
+	pc_menu_plate(PAD_BUTTON_A, "A OK");
+	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
+	pc_menu_plate(PAD_BUTTON_UP, "Up");
+#endif
 			if (mController->isMoveUp()) {
 				if (!mSelectedOption) {
 					mSelectedOption = true;

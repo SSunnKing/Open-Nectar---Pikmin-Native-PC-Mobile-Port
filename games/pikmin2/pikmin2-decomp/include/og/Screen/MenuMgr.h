@@ -53,6 +53,11 @@ struct MenuMgr {
 	/// Also asks for the hand cursor while it rests on any option.
 	int pcHoveredOption() const;
 	J2DPane* pcOptionPane(int i) const;
+	/// One call per update for a screen that has no click code of its own: claims
+	/// the pointer and returns the option the mouse chose (-1 for none), by hover
+	/// or click. *activate is set when the mouse clicked an option, which is the
+	/// same as pressing A on it.
+	int pcPointerUpdate(int current, bool* activate) const;
 	/// Option under a window-normalised point (-1 if none). Options laid out on
 	/// tiny marker panes get a box sized from the spacing between them.
 	int pcOptionAt(f32 nx, f32 ny) const;

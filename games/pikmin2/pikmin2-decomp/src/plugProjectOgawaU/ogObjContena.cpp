@@ -1,3 +1,7 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 #include "og/newScreen/Contena.h"
 #ifdef PIKI_PC_PORT
 extern "C" int pc_settings_get_onion_step10(void);
@@ -477,6 +481,13 @@ bool ObjContena::moveContena()
 	if (!data->mState) {
 		data->mState = 1;
 	} else {
+#if PIKI_PC_MENU_TAP
+		// Mouse: plates for the keys this screen reads. Up puts a Pikmin in, Down takes one out.
+		pc_menu_plate(PAD_BUTTON_B, "B Cancel");
+		pc_menu_plate(PAD_BUTTON_A, "A OK");
+		pc_menu_plate(PAD_BUTTON_DOWN, "Down (out)");
+		pc_menu_plate(PAD_BUTTON_UP, "Up (in)");
+#endif
 		if (mController->getButtonDown() & Controller::PRESS_B) {
 			mDisp->mDataContena = mDataContena;
 			data->mState        = 2;
