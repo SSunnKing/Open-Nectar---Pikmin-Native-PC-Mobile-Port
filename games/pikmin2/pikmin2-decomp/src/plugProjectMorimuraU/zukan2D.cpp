@@ -579,6 +579,10 @@ bool TZukanBase::doUpdate()
 		pc_menu_plate(PAD_BUTTON_A, "A Zoom");
 		pc_menu_plate(PAD_BUTTON_Y, "Y Louie");
 		pc_menu_plate(PAD_BUTTON_X, "X Olimar");
+		pc_menu_plate(PAD_TRIGGER_R, "R Switch");
+		pc_menu_plate(PAD_TRIGGER_L, "L Switch");
+		pc_menu_plate(PAD_BUTTON_RIGHT, "Right");
+		pc_menu_plate(PAD_BUTTON_LEFT, "Left");
 		pc_menu_plate(PAD_BUTTON_DOWN, "Down");
 		pc_menu_plate(PAD_BUTTON_UP, "Up");
 #endif

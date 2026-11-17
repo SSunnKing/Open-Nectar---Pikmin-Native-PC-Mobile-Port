@@ -33,7 +33,7 @@ bool pc_pointer_mouse_active();
 // On-screen button plates for screens with nothing to click: a screen asks for
 // its plates every update, the overlay draws them while the mouse is in use,
 // and a click on one presses its pad button.
-const int PC_PLATE_MAX = 8;
+const int PC_PLATE_MAX = 12;
 struct PcPlateRequest { unsigned short pad; char label[24]; };
 void pc_plate_request(unsigned short pad, const char* label);
 int pc_plate_take_requests(PcPlateRequest* out); // the overlay takes and clears them

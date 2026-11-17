@@ -6583,11 +6583,14 @@ void pc_menu_plates_draw(void)
 
     PcPointerRect rects[PC_PLATE_MAX];
     unsigned short pads[PC_PLATE_MAX];
-    const int h = 30, gap = 8, y = sh - 52;
+    const int h = 30, gap = 8, firstY = sh - 52, leftEdge = 40;
+    int y = firstY;
     int right = sw - 40;
     bool overAny = false;
     for (int i = 0; i < count; ++i) {
         const int w = 20 + int(strlen(requests[i].label)) * 9 < 52 ? 52 : 20 + int(strlen(requests[i].label)) * 9;
+        // Out of width: continue on a row above.
+        if (right - w < leftEdge) { y -= h + gap; right = sw - 40; }
         const int x = right - w;
         right = x - gap;
         rects[i] = { (float(x) / sw) * uiWidth + (0.5f - uiWidth * 0.5f), float(y) / sh,
