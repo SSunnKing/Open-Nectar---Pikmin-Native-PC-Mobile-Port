@@ -376,6 +376,7 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
         ${PC_PORT_DIR}/mods/pc_hd_model_convert.cpp
         ${PC_PORT_DIR}/pc_pad_axis.cpp
         ${PC_PORT_DIR}/pc_menu_pad.cpp
+        ${PC_PORT_DIR}/pc_menu_pointer.cpp
         ${PC_PORT_DIR}/pc_menu_mode.cpp
         ${PC_PORT_DIR}/pc_text_box.cpp
         ${PC_PORT_DIR}/pc_menu_repeat.cpp
@@ -682,6 +683,10 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
         )
         pikmin2_add_host_test(p2_cursor_ring_test
             ${PC_PORT_DIR}/pc_cursor_ring_test.cpp
+        )
+        pikmin2_add_host_test(p2_menu_pointer_test
+            ${PC_PORT_DIR}/pc_menu_pointer_test.cpp
+            ${PC_PORT_DIR}/pc_menu_pointer.cpp
         )
         pikmin2_add_host_test(p2_pause_key_test
             ${PC_PORT_DIR}/pc_pause_key_test.cpp

@@ -5,6 +5,10 @@
 #include "PSSystem/PSSystemIF.h"
 #include "SoundID.h"
 #include "Dolphin/rand.h"
+#if defined(PIKI_PC_PORT) && PIKI_P2_HOST
+#include "pc_menu_pointer.h"
+void pc_gfx_get_drawable_size(int*, int*);
+#endif
 #if PIKI_PC_TOUCH
 extern "C" void pc_touch_claim_game_menu(void);
 extern "C" bool pc_touch_take_game_menu_tap(float* x, float* y);
@@ -563,6 +567,9 @@ void TTitleMenu::doSetArchive(JKRArchive* arc)
  */
 void TTitleMenu::doOpenScreen(ArgOpen* arg)
 {
+#if defined(PIKI_PC_PORT) && PIKI_P2_HOST
+    pc_pointer_claim();
+#endif
 
 	P2ASSERTLINE(197, arg);
 
@@ -695,6 +702,10 @@ void TTitleMenu::doCloseScreen(ArgClose*)
  */
 bool TTitleMenu::doUpdateStateOpen()
 {
+#if defined(PIKI_PC_PORT) && PIKI_P2_HOST
+    pc_pointer_claim();
+    pc_pointer_take(nullptr, nullptr);
+#endif
 	mMainScreen->update();
 	E2DCallBack_AnmBase* anm = nullptr; // otro mState: sin animación que esperar
 	switch (mState) {
@@ -767,6 +778,46 @@ bool TTitleMenu::doUpdateStateWait()
 		}
 		mAnims1[mState][mSelectID].play(sys->mDeltaTime * 60.0f, J3DAA_UNKNOWN_0, true);
 	}
+
+#if defined(PIKI_PC_PORT) && PIKI_P2_HOST
+    pc_pointer_claim();
+    PcPointerRect rects[EBI_TITLE_MENU_NUM] = {};
+    bool active[EBI_TITLE_MENU_NUM] = {};
+    for (int i = 0; i < menuNum(); ++i) {
+        pc_pointer_track(mCategoryPanes[i]);
+        rects[i] = pc_pointer_rect(mCategoryPanes[i]);
+        active[i] = mCategoryPanes[i] && !(mState == 0 && i == 2)
+            && !(Game::gGameConfig.mParms.mE3version.mData && i != 1 && i != 2);
+    }
+    float px = 0, py = 0;
+    int width = 0, height = 0;
+    pc_gfx_get_drawable_size(&width, &height);
+    int hit = -1;
+    if (pc_pointer_take(&px, &py) && width > 0 && height > 0)
+        hit = pc_pointer_hit(px * width, py * height, rects, active, menuNum(), height * 0.01f);
+    float hoverX = 0, hoverY = 0;
+    if (hit < 0 && width > 0 && height > 0 && pc_pointer_hover(&hoverX, &hoverY)) {
+        const int hover = pc_pointer_hit(hoverX * width, hoverY * height, rects, active, menuNum(), height * 0.01f);
+        if (hover >= 0 && hover != mSelectID) {
+            const int prev = mSelectID;
+            mSelectID = hover;
+            if (mPad.mSelIndex == &mPcVisPos) mPcVisPos = pcIdxToVis(hover);
+            mAnims1[mState][mSelectID].play(sys->mDeltaTime * 60.0f, J3DAA_UNKNOWN_0, true);
+            showPika_(mSelectID);
+            mObjIcon[mSelectID].start(); mObjIcon2[mSelectID].start();
+            mObjIcon[prev].stop(); mObjIcon2[prev].stop();
+            PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+            mMenuCloseCounter = mMenuCloseCounterMax = 30.0f / sys->mDeltaTime;
+        }
+    }
+    if (hit >= 0) {
+        mSelectID = hit;
+        if (mPad.mSelIndex == &mPcVisPos) mPcVisPos = pcIdxToVis(hit);
+        mDecidedMenuOption = true;
+        PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_DECIDE, 0);
+        return true;
+    }
+#endif
 
 #if PIKI_PC_TOUCH
 	// Táctil: tocar una opción la elige; tocar la elegida entra (como A).

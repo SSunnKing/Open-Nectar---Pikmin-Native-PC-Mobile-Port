@@ -3,6 +3,9 @@
 #endif
 #include "pc_window.h"
 #include "pc_menu_pad.h"
+#if PIKI_P2_HOST
+#include "pc_menu_pointer.h"
+#endif
 #include "pc_text_box.h"
 #include "pc_mac_keys.h"
 #include "pc_pad_filter.h"
@@ -1228,6 +1231,21 @@ void pc_window_poll_events(PADStatus* pad) {
     pc_window_keep_text_input_off();
     pc_xinput_usb_update();
 #if PIKI_P2_HOST
+    static Uint32 pointerTickAt = 0;
+    if (pad && SDL_GetTicks() - pointerTickAt >= 16) {
+        pointerTickAt = SDL_GetTicks();
+        pc_pointer_tick();
+    }
+    static bool pointerWasClaimed = false;
+    const bool pointerClaimed = pc_pointer_claimed();
+    if (pointerClaimed != pointerWasClaimed && !sSettingsMenuOpen) {
+        SDL_SetRelativeMouseMode(!pointerClaimed && sMouseRelativeMode ? SDL_TRUE : SDL_FALSE);
+        SDL_ShowCursor(pointerClaimed ? SDL_ENABLE : SDL_DISABLE);
+        sMouseCursorDeltaX = sMouseCursorDeltaY = 0.0f;
+    }
+    pointerWasClaimed = pointerClaimed;
+#endif
+#if PIKI_P2_HOST
     // Pikmin 2: el audio lo pauta la cola de SDL desde VIWaitForRetrace.
 #elif PIKI_USE_JAUDIO
     PikiJAudioTick();
@@ -1237,6 +1255,10 @@ void pc_window_poll_events(PADStatus* pad) {
 
     SDL_Event event;
     while (pc_window_poll_one(&event)) {
+#if PIKI_P2_HOST
+        if ((event.type == SDL_KEYDOWN && !event.key.repeat) || event.type == SDL_CONTROLLERBUTTONDOWN)
+            pc_pointer_disarm_hover();
+#endif
         if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
             pc_menu_pad_note_enter(sEnterLatch, event.key.keysym.scancode, event.key.keysym.sym,
                                    event.type == SDL_KEYDOWN);
@@ -1291,6 +1313,15 @@ void pc_window_poll_events(PADStatus* pad) {
                 break;
             }
 #endif
+#if PIKI_P2_HOST
+            case SDL_MOUSEMOTION:
+                if (event.motion.which != SDL_TOUCH_MOUSEID && pc_pointer_claimed() && !sSettingsMenuOpen) {
+                    int w = 0, h = 0;
+                    if (sWindow) SDL_GetWindowSize(sWindow, &w, &h);
+                    if (w > 0 && h > 0) pc_pointer_move(float(event.motion.x) / w, float(event.motion.y) / h);
+                }
+                break;
+#endif
             case SDL_MOUSEBUTTONDOWN:
             case SDL_MOUSEBUTTONUP:
                 // A finger is also a mouse event. Leave that out of the press
@@ -1301,6 +1332,14 @@ void pc_window_poll_events(PADStatus* pad) {
                 pc_menu_pad_note_mouse_button(sRealMouseButtons, sMousePressedMask,
                                               event.button.which, event.button.button,
                                               event.type == SDL_MOUSEBUTTONDOWN);
+#if PIKI_P2_HOST
+                if (event.type == SDL_MOUSEBUTTONDOWN && event.button.which != SDL_TOUCH_MOUSEID
+                    && event.button.button == SDL_BUTTON_LEFT && pc_pointer_claimed() && !sSettingsMenuOpen) {
+                    int w = 0, h = 0;
+                    if (sWindow) SDL_GetWindowSize(sWindow, &w, &h);
+                    if (w > 0 && h > 0) pc_pointer_post(float(event.button.x) / w, float(event.button.y) / h);
+                }
+#endif
                 if (event.type != SDL_MOUSEBUTTONDOWN)
                     break;
                 if (event.button.which != SDL_TOUCH_MOUSEID && event.button.button >= 1 && event.button.button <= 8)
@@ -1308,7 +1347,7 @@ void pc_window_poll_events(PADStatus* pad) {
                 // Issue #52: Escape (or the OS) can drop the mouse out of
                 // relative mode, which froze the cursor until the option was
                 // toggled. A click in the window takes it back.
-                if (!sSettingsMenuOpen && effectiveControlMode() == PC_CONTROL_MOUSE_CURSOR && !sMouseRelativeMode
+                if (!sSettingsMenuOpen && !pc_pointer_claimed() && effectiveControlMode() == PC_CONTROL_MOUSE_CURSOR && !sMouseRelativeMode
                     && event.button.which != SDL_TOUCH_MOUSEID) {
                     sMouseRelativeMode = true;
                     SDL_SetRelativeMouseMode(SDL_TRUE);
@@ -1349,7 +1388,7 @@ void pc_window_poll_events(PADStatus* pad) {
                 // Some platforms release the relative-mode grab while the
                 // window is unfocused; put it back on return (issue #52).
                 if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED && !sSettingsMenuOpen) {
-                    SDL_SetRelativeMouseMode(sMouseRelativeMode ? SDL_TRUE : SDL_FALSE);
+                    SDL_SetRelativeMouseMode(sMouseRelativeMode && !pc_pointer_claimed() ? SDL_TRUE : SDL_FALSE);
                 }
                 break;
             case SDL_CONTROLLERDEVICEADDED:
@@ -1375,7 +1414,7 @@ void pc_window_poll_events(PADStatus* pad) {
                 }
                 // Toggle relative mouse mode with Tab key
                 if (event.key.keysym.scancode == SDL_SCANCODE_TAB
-                    && effectiveControlMode() == PC_CONTROL_MOUSE_CURSOR && !sSettingsMenuOpen) {
+                    && effectiveControlMode() == PC_CONTROL_MOUSE_CURSOR && !sSettingsMenuOpen && !pc_pointer_claimed()) {
                     sMouseRelativeMode = !sMouseRelativeMode;
                     SDL_SetRelativeMouseMode(sMouseRelativeMode ? SDL_TRUE : SDL_FALSE);
                     // Clear mouse deltas on relative mode toggle
@@ -1392,7 +1431,7 @@ void pc_window_poll_events(PADStatus* pad) {
                     printf("[PC Port] Mouse relative mode: %s\n", sMouseRelativeMode ? "ON" : "OFF");
                 }
                 // Escape key exits relative mode (for menus)
-                if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE && sMouseRelativeMode) {
+                if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE && sMouseRelativeMode && !pc_pointer_claimed()) {
                     sMouseRelativeMode = false;
                     SDL_SetRelativeMouseMode(SDL_FALSE);
                     // Clear mouse deltas on escape
@@ -1450,7 +1489,8 @@ void pc_window_poll_events(PADStatus* pad) {
     // reports a finger, so mouse-button bindings use the real-mouse mask.
     // Un clic que sube antes de esta muestra (clics rápidos para lanzar,
     // issue #165) cuenta como pulsado en ella; la siguiente lo ve soltado.
-    const Uint32 boundMouse = sRealMouseButtons | sPadMousePressed;
+    if (pc_pointer_claimed()) sMousePressedMask &= ~SDL_BUTTON(SDL_BUTTON_LEFT);
+    const Uint32 boundMouse = (sRealMouseButtons | sPadMousePressed) & (pc_pointer_claimed() ? ~SDL_BUTTON(SDL_BUTTON_LEFT) : ~0u);
     sPadMousePressed = 0;
     // La segunda tecla con un clic solo cuenta fuera de Classic, como los clics
     // fijos que sustituye (en Classic el ratón no juega).
@@ -1566,7 +1606,7 @@ void pc_window_poll_events(PADStatus* pad) {
         // A click shorter than this sample is only in the press mask. Leave
         // that mask alone: pollMenuInput takes it later for F1 and the other
         // prompts, and consume then clears this pad. Both masks omit a finger.
-        keys.clickLeft  = pc_menu_pad_click(sRealMouseButtons, sMousePressedMask, SDL_BUTTON_LEFT);
+        keys.clickLeft  = !pc_pointer_claimed() && pc_menu_pad_click(sRealMouseButtons, sMousePressedMask, SDL_BUTTON_LEFT);
         keys.clickRight = pc_menu_pad_click(sRealMouseButtons, sMousePressedMask, SDL_BUTTON_RIGHT);
         auto keyBindHeld = [&](int bind) {
             if (bind <= 0 || bind >= SDL_NUM_SCANCODES)
@@ -1663,7 +1703,7 @@ void pc_window_poll_events(PADStatus* pad) {
     // ── Mouse Input (Virtual Cursor) ──
     // In mouse modes: mouse controls virtual cursor (separate from movement stick)
     // Movement stick (stickX/stickY) comes from WASD or gamepad left stick
-    if (effectiveControlMode() != PC_CONTROL_CLASSIC) {
+    if (effectiveControlMode() != PC_CONTROL_CLASSIC && !pc_pointer_claimed()) {
         int mouseX, mouseY;
         Uint32 mouseState = 0;
         bool isRelative = sMouseRelativeMode;
@@ -2177,9 +2217,9 @@ void pc_window_set_settings_menu_open(bool open) {
         return;
     }
 
-    SDL_ShowCursor(SDL_DISABLE);
+    SDL_ShowCursor(pc_pointer_claimed() ? SDL_ENABLE : SDL_DISABLE);
     sMouseRelativeMode = effectiveControlMode() == PC_CONTROL_MOUSE_CURSOR;
-    SDL_SetRelativeMouseMode(sMouseRelativeMode ? SDL_TRUE : SDL_FALSE);
+    SDL_SetRelativeMouseMode(sMouseRelativeMode && !pc_pointer_claimed() ? SDL_TRUE : SDL_FALSE);
     
     // Consume any pending relative mouse motion after menu closes
     if (sMouseRelativeMode) {
