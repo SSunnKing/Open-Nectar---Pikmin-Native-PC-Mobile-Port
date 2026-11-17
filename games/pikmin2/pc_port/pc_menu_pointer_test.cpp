@@ -17,6 +17,9 @@ int main() {
     float x = 0, y = 0;
     CHECK(pc_pointer_take(&x, &y) && x == .25f && y == .75f);
     CHECK(!pc_pointer_take(nullptr, nullptr));
+    pc_pointer_post(.4f, .6f);
+    for (int i = 0; i < 12; ++i) { pc_pointer_claim(); pc_pointer_tick(); }
+    CHECK(pc_pointer_take(&x, &y) && x == .4f && y == .6f);
     pc_pointer_post(0, 0);
     for (int i = 0; i < 7; ++i) pc_pointer_tick();
     CHECK(!pc_pointer_take(nullptr, nullptr));

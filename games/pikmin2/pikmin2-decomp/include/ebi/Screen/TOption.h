@@ -102,6 +102,9 @@ struct TOption : public TScreenBase {
 
 	// _00     = VTBL
 	// _00-_08 = TScreenBase
+#if defined(PIKI_PC_PORT) && PIKI_P2_HOST
+    float mPcHoverProgress[50] = {};
+#endif
 	Controller* mController;                // _00C
 	u8 mEnabled;                            // _010
 	EUTPadInterface_countNum mInputBgmVol;  // _014

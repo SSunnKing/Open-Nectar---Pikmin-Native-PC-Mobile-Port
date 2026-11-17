@@ -3,19 +3,22 @@
 
 namespace {
 struct Pane { const void* id; PcPointerRect rect; int asked, drawn; };
-Pane panes[32] = {};
+Pane panes[128] = {};
 int tick = 0, claim = -100, posted = -100;
 float clickX = 0, clickY = 0;
-bool pending = false, hover = false;
+bool pending = false, hover = false, hand = false;
+int handTick = -100;
 float hoverX = 0, hoverY = 0;
 Pane* find(const void* id) {
     for (auto& pane : panes) if (pane.id == id) return &pane;
     return nullptr;
 }
 }
-void pc_pointer_tick() { ++tick; if (tick - posted > 6) pending = false; }
+void pc_pointer_tick() { ++tick; if (tick - posted > 30 || tick - claim > 6) pending = false; }
 void pc_pointer_claim() { claim = tick; }
 bool pc_pointer_claimed() { return tick - claim <= 6; }
+void pc_pointer_set_hand(bool wanted) { hand = wanted; handTick = tick; }
+bool pc_pointer_hand() { return pc_pointer_claimed() && tick - handTick <= 6 && hand; }
 void pc_pointer_move(float x, float y) { hoverX = x; hoverY = y; hover = true; }
 void pc_pointer_disarm_hover() { hover = false; }
 bool pc_pointer_hover(float* x, float* y) {
@@ -69,4 +72,4 @@ int pc_pointer_hit(float x, float y, const PcPointerRect* rects, const bool* act
     }
     return -1;
 }
-void pc_pointer_reset() { for (auto& pane : panes) pane = {}; tick = 0; claim = posted = -100; pending = hover = false; }
+void pc_pointer_reset() { for (auto& pane : panes) pane = {}; tick = 0; claim = posted = -100; pending = hover = hand = false; handTick = -100; }

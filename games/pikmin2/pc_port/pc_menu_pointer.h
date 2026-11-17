@@ -7,6 +7,8 @@ struct PcPointerRect { float x0, y0, x1, y1; bool valid; };
 void pc_pointer_tick();
 void pc_pointer_claim();
 bool pc_pointer_claimed();
+void pc_pointer_set_hand(bool hand);
+bool pc_pointer_hand();
 void pc_pointer_move(float x, float y);
 void pc_pointer_disarm_hover();
 bool pc_pointer_hover(float* x, float* y);

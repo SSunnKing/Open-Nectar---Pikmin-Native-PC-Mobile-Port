@@ -1239,11 +1239,24 @@ void pc_window_poll_events(PADStatus* pad) {
     static bool pointerWasClaimed = false;
     const bool pointerClaimed = pc_pointer_claimed();
     if (pointerClaimed != pointerWasClaimed && !sSettingsMenuOpen) {
+        // The click that focuses a pointer menu must also reach its target.
+        SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, pointerClaimed ? "1" : "0");
         SDL_SetRelativeMouseMode(!pointerClaimed && sMouseRelativeMode ? SDL_TRUE : SDL_FALSE);
         SDL_ShowCursor(pointerClaimed ? SDL_ENABLE : SDL_DISABLE);
         sMouseCursorDeltaX = sMouseCursorDeltaY = 0.0f;
     }
     pointerWasClaimed = pointerClaimed;
+    static SDL_Cursor* pointerArrow = nullptr;
+    static SDL_Cursor* pointerHand = nullptr;
+    static int pointerShape = -1;
+    const int wantedShape = !sSettingsMenuOpen && pc_pointer_hand() ? 1 : 0;
+    if (pointerShape != wantedShape) {
+        if (!pointerArrow) pointerArrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
+        if (!pointerHand) pointerHand = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
+        SDL_Cursor* cursor = wantedShape ? pointerHand : pointerArrow;
+        if (cursor) SDL_SetCursor(cursor);
+        pointerShape = wantedShape;
+    }
 #endif
 #if PIKI_P2_HOST
     // Pikmin 2: el audio lo pauta la cola de SDL desde VIWaitForRetrace.
