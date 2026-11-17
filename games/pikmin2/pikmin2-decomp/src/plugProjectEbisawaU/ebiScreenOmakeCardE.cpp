@@ -1,3 +1,7 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 #include "ebi/Omake.h"
 #ifdef PIKI_PC_PORT
 extern "C" void pc_gfx_p2_extend_shade(float gxY0, float gxY1, float stripW);
@@ -124,6 +128,10 @@ bool TOmakeCardE::doUpdateStateWait()
 
 	switch (mState) {
 	case MainMenu: {
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_A, "A OK");
+	pc_menu_plate(PAD_BUTTON_B, "B Back");
+#endif
 		u32 press = mInput->getButtonDown();
 		if (press & Controller::PRESS_A) {
 			PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_DECIDE, 0);

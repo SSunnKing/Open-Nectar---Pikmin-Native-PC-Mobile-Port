@@ -1,3 +1,7 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 #include "ebi/Progre.h"
 #include "ebi/E2DGraph.h"
 #include "og/newScreen/ogUtil.h"
@@ -247,6 +251,11 @@ void TScreenProgre::update()
 		switch (mStateScreen) {
 		case ProgreScreen_Msg00:
 			if (mCounterFadein == 0 && !mSelected) {
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_A, "A OK");
+	pc_menu_plate(PAD_BUTTON_RIGHT, "Right");
+	pc_menu_plate(PAD_BUTTON_LEFT, "Left");
+#endif
 				if (mController->isMoveRight()) {
 					if (mSelect == 1) {
 						mSelect = 0;
