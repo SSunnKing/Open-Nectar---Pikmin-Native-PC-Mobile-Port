@@ -5,7 +5,7 @@
 namespace {
 struct Pane { const void* id; PcPointerRect rect; int asked, drawn; };
 Pane panes[128] = {};
-int tick = 0, claim = -100, posted = -100;
+int tick = 0, claim = -100, posted = -100, lastTrackAsk = -100;
 float clickX = 0, clickY = 0;
 bool pending = false, hover = false, hand = false;
 unsigned short queuedButtons = 0;
@@ -53,6 +53,7 @@ bool pc_pointer_peek(float* x, float* y) {
 void pc_pointer_drop() { pending = false; }
 void pc_pointer_track(const void* id) {
     if (!id) return;
+    lastTrackAsk = tick;
     Pane* p = find(id);
     if (!p) {
         for (auto& candidate : panes) if (!candidate.id || tick - candidate.asked > 120) { p = &candidate; break; }
@@ -61,6 +62,7 @@ void pc_pointer_track(const void* id) {
     }
     p->asked = tick;
 }
+bool pc_pointer_panes_active() { return tick - lastTrackAsk <= 6; }
 bool pc_pointer_tracked(const void* id) { Pane* p = find(id); return p && tick - p->asked <= 6; }
 void pc_pointer_drawn(const void* id, float x0, float y0, float x1, float y1) {
     Pane* p = find(id);
@@ -142,4 +144,4 @@ bool pc_plate_click(float nx, float ny) {
     return true;
 }
 bool pc_plate_hover(float nx, float ny) { return plateAt(nx, ny) >= 0; }
-void pc_pointer_reset() { mouseActive = false; dragX = dragY = 0; plateRequestCount = plateLayoutCount = 0; plateBatchTick = -100; queuedButtons = 0; for (auto& pane : panes) pane = {}; tick = 0; claim = posted = -100; pending = hover = hand = false; handTick = -100; }
+void pc_pointer_reset() { mouseActive = false; dragX = dragY = 0; plateRequestCount = plateLayoutCount = 0; plateBatchTick = -100; queuedButtons = 0; for (auto& pane : panes) pane = {}; tick = 0; claim = posted = lastTrackAsk = -100; pending = hover = hand = false; handTick = -100; }

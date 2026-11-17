@@ -97,4 +97,13 @@ int main() {
     pc_pointer_add_drag(.1f, 0);
     CHECK(pc_pointer_take_drag(&x, &y) && x > .19f && x < .21f && y < -.19f && y > -.21f);
     CHECK(!pc_pointer_take_drag(nullptr, nullptr));
+
+    // The draw hook's guard: inactive until a screen asks, active for a few ticks after.
+    pc_pointer_reset();
+    CHECK(!pc_pointer_panes_active());
+    int guardPane;
+    pc_pointer_track(&guardPane);
+    CHECK(pc_pointer_panes_active());
+    for (int i = 0; i < 7; ++i) pc_pointer_tick();
+    CHECK(!pc_pointer_panes_active());
 }

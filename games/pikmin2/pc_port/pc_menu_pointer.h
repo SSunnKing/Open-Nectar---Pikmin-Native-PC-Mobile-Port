@@ -19,6 +19,9 @@ bool pc_pointer_peek(float* x, float* y);
 void pc_pointer_drop();
 void pc_pointer_track(const void* pane);
 bool pc_pointer_tracked(const void* pane);
+// True while any screen has asked about a pane in the last few ticks. O(1), so the
+// J2D draw hook can skip its per-pane work in gameplay, where no menu asks.
+bool pc_pointer_panes_active();
 void pc_pointer_drawn(const void* pane, float x0, float y0, float x1, float y1);
 PcPointerRect pc_pointer_rect(const void* pane);
 int pc_pointer_hit(float x, float y, const PcPointerRect* rects, const bool* active, int count, float margin);
