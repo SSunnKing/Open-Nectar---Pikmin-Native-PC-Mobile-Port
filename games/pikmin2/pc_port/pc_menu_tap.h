@@ -25,6 +25,8 @@ bool pc_menu_pane_hit(const void* pane, float nx, float ny, float margin);
 // plate shows while the mouse is in use and a click presses `padButton`.
 // Asking also claims the pointer for the screen.
 void pc_menu_plate(unsigned short padButton, const char* label);
+// Mouse drag since the last call, window-normalised (left button held).
+bool pc_menu_take_drag(float* dx, float* dy);
 // Presses a pad button for the next sample, through the device that tapped.
 void pc_menu_queue_button(unsigned short button);
 // Mouse only: where the pointer rests (window-normalised), false once a key or

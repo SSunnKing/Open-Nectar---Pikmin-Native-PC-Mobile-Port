@@ -29,6 +29,10 @@ void pc_pointer_queue_button(unsigned short button);
 unsigned short pc_pointer_take_buttons();
 // True from the last mouse move or click until a key or pad button is used.
 bool pc_pointer_mouse_active();
+// Mouse drag with the left button held, window-normalised, summed since the last
+// take. For screens that pan by dragging, such as the radar.
+void pc_pointer_add_drag(float dx, float dy);
+bool pc_pointer_take_drag(float* dx, float* dy);
 
 // On-screen button plates for screens with nothing to click: a screen asks for
 // its plates every update, the overlay draws them while the mouse is in use,

@@ -13,6 +13,7 @@
 #include "Game/Cave/RandMapMgr.h"
 #include "Radar.h"
 #include "nans.h"
+#include "pc_menu_tap.h"
 int pc_window_take_wheel_steps(void);
 
 #ifdef PIKI_PC_PORT
@@ -479,6 +480,21 @@ void ObjSMenuMap::transMap()
 	inputs.x = mController->getMainStickX();
 	inputs.y = mController->getMainStickY();
 
+#if PIKI_PC_MENU_TAP
+	// Mouse: dragging with the left button pans the map like the stick.
+	{
+		pc_menu_claim();
+		float dx = 0.0f, dy = 0.0f;
+		if (pc_menu_take_drag(&dx, &dy)) {
+			inputs.x = -dx * 40.0f;
+			inputs.y = dy * 40.0f;
+			if (inputs.x > 1.0f) inputs.x = 1.0f;
+			if (inputs.x < -1.0f) inputs.x = -1.0f;
+			if (inputs.y > 1.0f) inputs.y = 1.0f;
+			if (inputs.y < -1.0f) inputs.y = -1.0f;
+		}
+	}
+#endif
 	if (mController->isButtonHeld(JUTGamePad::PRESS_DPAD_UP)) {
 		inputs.y = 1.0f;
 	}

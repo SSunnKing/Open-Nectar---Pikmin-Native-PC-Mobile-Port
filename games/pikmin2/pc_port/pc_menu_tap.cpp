@@ -48,6 +48,7 @@ void pc_menu_plate(unsigned short padButton, const char* label) {
     pc_pointer_claim();
     pc_plate_request(padButton, label);
 }
+bool pc_menu_take_drag(float* dx, float* dy) { return pc_pointer_take_drag(dx, dy); }
 bool pc_menu_peek_tap(float* nx, float* ny) { return pc_pointer_peek(nx, ny); }
 void pc_menu_drop_tap() { pc_pointer_drop(); }
 

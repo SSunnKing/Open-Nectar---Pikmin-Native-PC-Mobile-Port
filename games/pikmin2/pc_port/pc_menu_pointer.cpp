@@ -10,6 +10,7 @@ float clickX = 0, clickY = 0;
 bool pending = false, hover = false, hand = false;
 unsigned short queuedButtons = 0;
 bool mouseActive = false;
+float dragX = 0, dragY = 0;
 PcPlateRequest plateRequests[PC_PLATE_MAX];
 int plateRequestCount = 0;
 PcPointerRect plateRects[PC_PLATE_MAX];
@@ -98,6 +99,14 @@ bool pc_pointer_pane_hit(const void* pane, float nx, float ny, float margin, int
 void pc_pointer_queue_button(unsigned short button) { queuedButtons |= button; }
 unsigned short pc_pointer_take_buttons() { const unsigned short b = queuedButtons; queuedButtons = 0; return b; }
 bool pc_pointer_mouse_active() { return mouseActive; }
+void pc_pointer_add_drag(float dx, float dy) { dragX += dx; dragY += dy; }
+bool pc_pointer_take_drag(float* dx, float* dy) {
+    const bool any = dragX != 0 || dragY != 0;
+    if (dx) *dx = dragX;
+    if (dy) *dy = dragY;
+    dragX = dragY = 0;
+    return any;
+}
 int plateBatchTick = -100;
 void pc_plate_request(unsigned short pad, const char* label) {
     // A new update replaces the previous batch; repeats within one update are ignored.
@@ -133,4 +142,4 @@ bool pc_plate_click(float nx, float ny) {
     return true;
 }
 bool pc_plate_hover(float nx, float ny) { return plateAt(nx, ny) >= 0; }
-void pc_pointer_reset() { mouseActive = false; plateRequestCount = plateLayoutCount = 0; plateBatchTick = -100; queuedButtons = 0; for (auto& pane : panes) pane = {}; tick = 0; claim = posted = -100; pending = hover = hand = false; handTick = -100; }
+void pc_pointer_reset() { mouseActive = false; dragX = dragY = 0; plateRequestCount = plateLayoutCount = 0; plateBatchTick = -100; queuedButtons = 0; for (auto& pane : panes) pane = {}; tick = 0; claim = posted = -100; pending = hover = hand = false; handTick = -100; }

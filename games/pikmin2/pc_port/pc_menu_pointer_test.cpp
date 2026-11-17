@@ -90,4 +90,11 @@ int main() {
     CHECK(!pc_plate_click(.25f, .92f) && !pc_plate_hover(.25f, .92f));
     CHECK(pc_plate_hover(.35f, .92f) && pc_plate_click(.35f, .92f));
     CHECK(pc_pointer_take_buttons() == 0x200);
+
+    // Drag sums and clears on take.
+    pc_pointer_reset();
+    pc_pointer_add_drag(.1f, -.2f);
+    pc_pointer_add_drag(.1f, 0);
+    CHECK(pc_pointer_take_drag(&x, &y) && x > .19f && x < .21f && y < -.19f && y > -.21f);
+    CHECK(!pc_pointer_take_drag(nullptr, nullptr));
 }

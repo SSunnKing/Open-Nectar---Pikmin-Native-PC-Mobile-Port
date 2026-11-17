@@ -1340,6 +1340,8 @@ void pc_window_poll_events(PADStatus* pad) {
                     int w = 0, h = 0;
                     if (sWindow) SDL_GetWindowSize(sWindow, &w, &h);
                     if (w > 0 && h > 0) pc_pointer_move(float(event.motion.x) / w, float(event.motion.y) / h);
+                    if ((event.motion.state & SDL_BUTTON_LMASK) && w > 0 && h > 0)
+                        pc_pointer_add_drag(float(event.motion.xrel) / w, float(event.motion.yrel) / h);
                 }
                 break;
 #endif
