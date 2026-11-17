@@ -3,6 +3,7 @@
 #endif
 #include "pc_window.h"
 #include "pc_menu_pad.h"
+#include "pc_text_box.h"
 
 static_assert(PAD_BUTTON_LEFT == PC_MENU_PAD_LEFT && PAD_BUTTON_RIGHT == PC_MENU_PAD_RIGHT
                   && PAD_BUTTON_DOWN == PC_MENU_PAD_DOWN && PAD_BUTTON_UP == PC_MENU_PAD_UP
@@ -1401,6 +1402,7 @@ void pc_window_poll_events(PADStatus* pad) {
         }
     }
 
+    pc_text_update_input(sEnterLatch.down);
     if (!pad) return;
 
     // Reset pad status for Channel 0

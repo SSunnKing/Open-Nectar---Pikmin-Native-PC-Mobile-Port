@@ -377,6 +377,7 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
         ${PC_PORT_DIR}/pc_pad_axis.cpp
         ${PC_PORT_DIR}/pc_menu_pad.cpp
         ${PC_PORT_DIR}/pc_menu_mode.cpp
+        ${PC_PORT_DIR}/pc_text_box.cpp
         ${PC_PORT_DIR}/pc_menu_repeat.cpp
         ${PC_PORT_DIR}/pc_photo_mode.cpp
         ${PC_PORT_DIR}/settings/pc_settings.cpp
@@ -670,6 +671,9 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
         pikmin2_add_host_test(p2_menu_pad_test
             ${PC_PORT_DIR}/pc_menu_pad_test.cpp
             ${PC_PORT_DIR}/pc_menu_pad.cpp
+        )
+        pikmin2_add_host_test(p2_text_box_test
+            ${PC_PORT_DIR}/pc_text_box_test.cpp
         )
         pikmin2_add_host_test(p2_coop_movie_protagonist_test
             ${PC_PORT_DIR}/pc_p2_coop_movie_protagonist_test.cpp
