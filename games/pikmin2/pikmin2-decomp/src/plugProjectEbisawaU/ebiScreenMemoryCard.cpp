@@ -6,6 +6,7 @@
 #include "PSSystem/PSSystemIF.h"
 #include "Controller.h"
 #include "SoundID.h"
+#include "pc_menu_tap.h"
 
 namespace ebi {
 namespace Screen {
@@ -694,6 +695,9 @@ void TMemoryCard::startState(enumState state)
  */
 void TMemoryCard::update()
 {
+#if PIKI_PC_MENU_TAP
+	bool pcPressA = false;
+#endif
 	switch (mState) {
 	case MEMCARD_Disabled:
 		break;
@@ -701,6 +705,32 @@ void TMemoryCard::update()
 		if (mInputDelay) {
 			if (PC_ORIG_TICK()) mInputDelay--;
 		}
+#if PIKI_PC_MENU_TAP
+		// Pointer: hover picks Yes or No, a click picks it and presses A.
+		pcPressA = false;
+		{
+			pc_menu_claim();
+			float tx = 0.0f, ty = 0.0f, hx = 0.0f, hy = 0.0f;
+			const bool tapped   = pc_menu_take_tap(&tx, &ty);
+			const bool hovering = pc_menu_hover(&hx, &hy);
+			const float px = tapped ? tx : hx, py = tapped ? ty : hy;
+			const bool onYes = pc_menu_pane_hit(mPaneMsg1, px, py, 0.02f) && (tapped || hovering);
+			const bool onNo  = pc_menu_pane_hit(mPaneMsg2, px, py, 0.02f) && (tapped || hovering);
+			const int pointed = onYes ? 1 : onNo ? 0 : -1;
+			pc_menu_set_hand(!mInputDelay && mCanExit && pointed >= 0);
+			if (!mInputDelay && mCanExit && pointed >= 0) {
+				if (pointed != mSelectionIdx) {
+					mSelectionIdx = pointed;
+					mBlinkFont1.disable();
+					mBlinkFont2.disable();
+					(pointed ? mBlinkFont1 : mBlinkFont2).enable();
+					mCursor1.mIsLeft = mCursor2.mIsLeft = pointed != 0;
+					PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+				}
+				pcPressA = tapped;
+			}
+		}
+#endif
 		if (!mInputDelay && mCanExit) {
 			if (mController->isMoveRight()) {
 				if (mSelectionIdx == 1) {
@@ -720,7 +750,11 @@ void TMemoryCard::update()
 					mCursor2.mIsLeft = true;
 					PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
 				}
+#if PIKI_PC_MENU_TAP
+			} else if ((mController->getButtonDown() & Controller::PRESS_A) || pcPressA) {
+#else
 			} else if (mController->getButtonDown() & Controller::PRESS_A) {
+#endif
 				if (mSelectionIdx == 1) {
 					mBlinkFont1.setPaneColors(1);
 					mBlinkFont2.setPaneColors(0);

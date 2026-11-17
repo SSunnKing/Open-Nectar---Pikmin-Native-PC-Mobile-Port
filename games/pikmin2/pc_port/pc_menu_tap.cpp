@@ -42,6 +42,9 @@ bool pc_menu_pane_hit(const void* pane, float nx, float ny, float margin) {
     return hit;
 }
 
+bool pc_menu_hover(float* nx, float* ny) { return pc_pointer_hover(nx, ny); }
+void pc_menu_set_hand(bool hand) { pc_pointer_set_hand(hand); }
+
 void pc_menu_queue_button(unsigned short button) {
 #if PIKI_PC_TOUCH
     if (!lastTapWasMouse) { pc_touch_queue_game_button(button); return; }
