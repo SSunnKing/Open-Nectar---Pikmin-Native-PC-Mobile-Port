@@ -63,4 +63,25 @@ int main() {
     CHECK(pc_pointer_peek(nullptr, nullptr));
     pc_pointer_drop();
     CHECK(!pc_pointer_peek(nullptr, nullptr) && !pc_pointer_take(nullptr, nullptr));
+
+    // Plates: requests are taken once; a click on a laid-out plate queues its pad button.
+    pc_pointer_reset();
+    CHECK(!pc_pointer_mouse_active());
+    pc_pointer_move(.5f, .5f);
+    CHECK(pc_pointer_mouse_active());
+    pc_pointer_disarm_hover();
+    CHECK(!pc_pointer_mouse_active());
+    pc_pointer_post(.1f, .1f);
+    CHECK(pc_pointer_mouse_active());
+    pc_plate_request(0x100, "A OK");
+    pc_plate_request(0x200, "B Back");
+    PcPlateRequest taken[PC_PLATE_MAX];
+    CHECK(pc_plate_take_requests(taken) == 2 && taken[1].pad == 0x200 && taken[0].label[0] == 'A');
+    CHECK(pc_plate_take_requests(taken) == 0);
+    const PcPointerRect plateRects[2] = {{.1f, .9f, .2f, .95f, true}, {.3f, .9f, .4f, .95f, true}};
+    const unsigned short platePads[2] = {0x100, 0x200};
+    pc_plate_set_layout(plateRects, platePads, 2);
+    CHECK(!pc_plate_click(.25f, .92f) && !pc_plate_hover(.25f, .92f));
+    CHECK(pc_plate_hover(.35f, .92f) && pc_plate_click(.35f, .92f));
+    CHECK(pc_pointer_take_buttons() == 0x200);
 }

@@ -1352,7 +1352,11 @@ void pc_window_poll_events(PADStatus* pad) {
                     && event.button.button == SDL_BUTTON_LEFT && pc_pointer_claimed() && !sSettingsMenuOpen) {
                     int w = 0, h = 0;
                     if (sWindow) SDL_GetWindowSize(sWindow, &w, &h);
-                    if (w > 0 && h > 0) pc_pointer_post(float(event.button.x) / w, float(event.button.y) / h);
+                    if (w > 0 && h > 0) {
+                        const float nx = float(event.button.x) / w, ny = float(event.button.y) / h;
+                        // A button plate takes the click first and presses its pad button.
+                        if (!pc_plate_click(nx, ny)) pc_pointer_post(nx, ny);
+                    }
                 }
                 if (event.type == SDL_MOUSEBUTTONDOWN && event.button.which != SDL_TOUCH_MOUSEID
                     && event.button.button == SDL_BUTTON_LEFT && pc_settings_prompt_active()) {

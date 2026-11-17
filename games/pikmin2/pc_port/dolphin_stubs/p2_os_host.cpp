@@ -1397,6 +1397,7 @@ void VIWaitForRetrace()
 	pc_newgame_prompt_draw();
 	pc_devassign_prompt_draw();
 	pc_captain_select_draw();
+	pc_menu_plates_draw();
 	pc_speedrun_menu_draw();
 	pc_erased_notice_draw();
 	pc_settings_draw();

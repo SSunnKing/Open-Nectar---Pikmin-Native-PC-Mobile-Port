@@ -1,5 +1,6 @@
 #include "pc_menu_pointer.h"
 #include <algorithm>
+#include <cstdio>
 
 namespace {
 struct Pane { const void* id; PcPointerRect rect; int asked, drawn; };
@@ -8,6 +9,12 @@ int tick = 0, claim = -100, posted = -100;
 float clickX = 0, clickY = 0;
 bool pending = false, hover = false, hand = false;
 unsigned short queuedButtons = 0;
+bool mouseActive = false;
+PcPlateRequest plateRequests[PC_PLATE_MAX];
+int plateRequestCount = 0;
+PcPointerRect plateRects[PC_PLATE_MAX];
+unsigned short platePads[PC_PLATE_MAX];
+int plateLayoutCount = 0;
 int handTick = -100;
 float hoverX = 0, hoverY = 0;
 Pane* find(const void* id) {
@@ -20,15 +27,15 @@ void pc_pointer_claim() { claim = tick; }
 bool pc_pointer_claimed() { return tick - claim <= 6; }
 void pc_pointer_set_hand(bool wanted) { hand = wanted; handTick = tick; }
 bool pc_pointer_hand() { return pc_pointer_claimed() && tick - handTick <= 6 && hand; }
-void pc_pointer_move(float x, float y) { hoverX = x; hoverY = y; hover = true; }
-void pc_pointer_disarm_hover() { hover = false; }
+void pc_pointer_move(float x, float y) { hoverX = x; hoverY = y; hover = true; mouseActive = true; }
+void pc_pointer_disarm_hover() { hover = false; mouseActive = false; }
 bool pc_pointer_hover(float* x, float* y) {
     if (!hover) return false;
     if (x) *x = hoverX;
     if (y) *y = hoverY;
     return true;
 }
-void pc_pointer_post(float x, float y) { hover = false; clickX = x; clickY = y; posted = tick; pending = true; }
+void pc_pointer_post(float x, float y) { hover = false; mouseActive = true; clickX = x; clickY = y; posted = tick; pending = true; }
 bool pc_pointer_take(float* x, float* y) {
     if (!pending) return false;
     if (x) *x = clickX;
@@ -90,4 +97,35 @@ bool pc_pointer_pane_hit(const void* pane, float nx, float ny, float margin, int
 }
 void pc_pointer_queue_button(unsigned short button) { queuedButtons |= button; }
 unsigned short pc_pointer_take_buttons() { const unsigned short b = queuedButtons; queuedButtons = 0; return b; }
-void pc_pointer_reset() { queuedButtons = 0; for (auto& pane : panes) pane = {}; tick = 0; claim = posted = -100; pending = hover = hand = false; handTick = -100; }
+bool pc_pointer_mouse_active() { return mouseActive; }
+void pc_plate_request(unsigned short pad, const char* label) {
+    if (plateRequestCount >= PC_PLATE_MAX) return;
+    PcPlateRequest& r = plateRequests[plateRequestCount++];
+    r.pad = pad;
+    std::snprintf(r.label, sizeof(r.label), "%s", label ? label : "");
+}
+int pc_plate_take_requests(PcPlateRequest* out) {
+    const int n = plateRequestCount;
+    for (int i = 0; i < n; ++i) out[i] = plateRequests[i];
+    plateRequestCount = 0;
+    return n;
+}
+void pc_plate_set_layout(const PcPointerRect* rects, const unsigned short* pads, int count) {
+    plateLayoutCount = count < PC_PLATE_MAX ? count : PC_PLATE_MAX;
+    for (int i = 0; i < plateLayoutCount; ++i) { plateRects[i] = rects[i]; platePads[i] = pads[i]; }
+}
+static int plateAt(float nx, float ny) {
+    for (int i = 0; i < plateLayoutCount; ++i) {
+        const PcPointerRect& r = plateRects[i];
+        if (r.valid && nx >= r.x0 && nx <= r.x1 && ny >= r.y0 && ny <= r.y1) return i;
+    }
+    return -1;
+}
+bool pc_plate_click(float nx, float ny) {
+    const int i = plateAt(nx, ny);
+    if (i < 0) return false;
+    queuedButtons |= platePads[i];
+    return true;
+}
+bool pc_plate_hover(float nx, float ny) { return plateAt(nx, ny) >= 0; }
+void pc_pointer_reset() { mouseActive = false; plateRequestCount = plateLayoutCount = 0; queuedButtons = 0; for (auto& pane : panes) pane = {}; tick = 0; claim = posted = -100; pending = hover = hand = false; handTick = -100; }

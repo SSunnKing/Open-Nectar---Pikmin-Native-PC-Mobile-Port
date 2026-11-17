@@ -27,5 +27,20 @@ bool pc_pointer_pane_hit(const void* pane, float nx, float ny, float margin, int
 // Pad buttons a menu injects for the next pad sample (the click was not pad A).
 void pc_pointer_queue_button(unsigned short button);
 unsigned short pc_pointer_take_buttons();
+// True from the last mouse move or click until a key or pad button is used.
+bool pc_pointer_mouse_active();
+
+// On-screen button plates for screens with nothing to click: a screen asks for
+// its plates every update, the overlay draws them while the mouse is in use,
+// and a click on one presses its pad button.
+const int PC_PLATE_MAX = 8;
+struct PcPlateRequest { unsigned short pad; char label[24]; };
+void pc_plate_request(unsigned short pad, const char* label);
+int pc_plate_take_requests(PcPlateRequest* out); // the overlay takes and clears them
+// The drawn layout in window-normalised rectangles, for hit tests.
+void pc_plate_set_layout(const PcPointerRect* rects, const unsigned short* pads, int count);
+// A click on a plate queues its pad button; true when it hit one.
+bool pc_plate_click(float nx, float ny);
+bool pc_plate_hover(float nx, float ny);
 void pc_pointer_reset();
 #endif

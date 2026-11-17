@@ -21,6 +21,10 @@ bool pc_menu_take_tap(float* nx, float* ny);
 // fractions of the window height. The first call for a pane only starts
 // tracking it.
 bool pc_menu_pane_hit(const void* pane, float nx, float ny, float margin);
+// A button plate for a screen with nothing to click: call every update. The
+// plate shows while the mouse is in use and a click presses `padButton`.
+// Asking also claims the pointer for the screen.
+void pc_menu_plate(unsigned short padButton, const char* label);
 // Presses a pad button for the next sample, through the device that tapped.
 void pc_menu_queue_button(unsigned short button);
 // Mouse only: where the pointer rests (window-normalised), false once a key or

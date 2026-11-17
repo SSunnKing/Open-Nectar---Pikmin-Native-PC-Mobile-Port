@@ -14,11 +14,9 @@
 #include "efx2d/T2DChangesmoke.h"
 #include "Controller.h"
 #include "System.h" // PC_ORIG_DT_SCALE / PC_DAMP
-#if PIKI_PC_TOUCH
-extern "C" void pc_touch_claim_game_menu(void);
-extern "C" bool pc_touch_take_game_menu_tap(float* x, float* y);
-extern "C" bool pc_touch_pane_hit(const void* pane, float nx, float ny, float margin);
-// Zona tocada en el mapa: getTarget la devuelve en vez de leer la cruceta.
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+// Area tapped or clicked on the map: getTarget returns it instead of reading the D-pad.
 static int sPcTouchTarget = -1;
 #endif
 
@@ -1361,24 +1359,35 @@ bool WorldMap::changeState()
 {
 	bool isStateChange = false;
 
-#if PIKI_PC_TOUCH
+#if PIKI_PC_MENU_TAP
 	// Tactil, como el mapa de Pikmin 1: tocar la zona seleccionada es A, otra
 	// zona abierta lleva alli el cohete y L/R abren Piklopedia/Tesoros. Los
 	// paneles se consultan cada frame para que el toque los siga.
 	bool pcTapA = false, pcTapL = false, pcTapR = false;
 	{
-		pc_touch_claim_game_menu();
+		pc_menu_claim();
 		float nx = 0.0f, ny = 0.0f;
-		const bool tapped = pc_touch_take_game_menu_tap(&nx, &ny);
+		const bool tapped = pc_menu_take_tap(&nx, &ny);
 		for (int i = 0; i < mOpenCourses && i < 4; i++) {
 			J2DPane* point = mScreenKitagawa->search(getSerialTagName(MC8("Npoint0"), i));
-			if (point && pc_touch_pane_hit(point, nx, ny, 0.04f) && tapped) {
+			if (point && pc_menu_pane_hit(point, nx, ny, 0.04f) && tapped) {
 				if (i == mCurrentCourseIndex) pcTapA = true;
 				else sPcTouchTarget = i;
 			}
 		}
-		if (pc_touch_pane_hit(mScreenInfo->search(MC8("Nlbtn")), nx, ny, 0.02f) && tapped) pcTapL = true;
-		if (pc_touch_pane_hit(mScreenInfo->search(MC8("Nrbtn")), nx, ny, 0.02f) && tapped) pcTapR = true;
+		if (pc_menu_pane_hit(mScreenInfo->search(MC8("Nlbtn")), nx, ny, 0.1f) && tapped) pcTapL = true;
+		if (pc_menu_pane_hit(mScreenInfo->search(MC8("Nrbtn")), nx, ny, 0.1f) && tapped) pcTapR = true;
+		// Mouse: the hand shows over an open area, the selected one included, and the L/R buttons.
+		float hx = 0.0f, hy = 0.0f;
+		if (pc_menu_hover(&hx, &hy)) {
+			bool overAny = pc_menu_pane_hit(mScreenInfo->search(MC8("Nlbtn")), hx, hy, 0.1f)
+			            || pc_menu_pane_hit(mScreenInfo->search(MC8("Nrbtn")), hx, hy, 0.1f);
+			for (int i = 0; i < mOpenCourses && i < 4; i++) {
+				J2DPane* point = mScreenKitagawa->search(getSerialTagName(MC8("Npoint0"), i));
+				if (point && pc_menu_pane_hit(point, hx, hy, 0.04f)) overAny = true;
+			}
+			pc_menu_set_hand(overAny);
+		}
 	}
 	if (sPcTouchTarget >= 0) {
 		isStateChange   = true;
@@ -1517,7 +1526,7 @@ bool WorldMap::newMapOpen()
  */
 int WorldMap::getTarget()
 {
-#if PIKI_PC_TOUCH
+#if PIKI_PC_MENU_TAP
 	if (sPcTouchTarget >= 0) {
 		const int target = sPcTouchTarget;
 		sPcTouchTarget   = -1;

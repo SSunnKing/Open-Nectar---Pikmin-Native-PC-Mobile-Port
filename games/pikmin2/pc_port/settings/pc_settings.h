@@ -217,6 +217,8 @@ int  pc_captain_select_result(void);
 void pc_captain_select_draw(void);
 // Modelos de las tarjetas: después de pc_settings_p2_flush, antes de presentar.
 void pc_captain_select_draw_3d(void);
+// Button plates asked for with pc_menu_plate; drawn each frame while the mouse is in use.
+void pc_menu_plates_draw(void);
 int  pc_settings_get_speedrun_category(void);
 int  pc_settings_get_speedrun_splits_shown(void);
 // LiveSplit Server (pc_livesplit.cpp): encendido, ocultar el reloj propio con

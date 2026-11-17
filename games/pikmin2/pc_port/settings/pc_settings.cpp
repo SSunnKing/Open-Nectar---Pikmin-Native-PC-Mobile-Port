@@ -44,6 +44,7 @@
 
 #include "pc_window.h"
 #include "pc_menu_tap.h"
+#include "pc_menu_pointer.h"
 #include "pc_pause_key.h"
 #include "pc_gyro.h"
 #if !PIKI_P2_HOST
@@ -6532,6 +6533,58 @@ void pc_captain_select_draw(void)
 #endif
                          : "A: pick    L/R: switch captain    Start: go    B: back",
                  dim, kCsPanelW - 60);
+}
+
+// Button plates (pc_menu_plate): drawn while the mouse is in use, at the bottom
+// right of the 4:3 screen, laid out right to left in the order requested.
+void pc_menu_plates_draw(void)
+{
+    PC_SETTINGS_HOST_ALLOC();
+    PcPlateRequest requests[PC_PLATE_MAX];
+    const int count = pc_plate_take_requests(requests);
+    if (count == 0 || !pc_pointer_claimed() || !pc_pointer_mouse_active()) {
+        pc_plate_set_layout(nullptr, nullptr, 0);
+        return;
+    }
+    if (!gsys || !gsys->mDGXGfx) return;
+    DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+    ensureFont();
+    if (!sFont) return;
+
+    int sw, sh;
+    ngScreen(&sw, &sh);
+    PcSettingsP2DFrame nativeFrame(sw, sh);
+    Matrix4f ortho;
+    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, sw, sh));
+
+    const float window  = pc_gfx_get_window_aspect_ratio();
+    const float uiWidth = window > float(sw) / float(sh) ? (float(sw) / float(sh)) / window : 1.0f;
+    float hx = 0.0f, hy = 0.0f;
+    const bool hovering = pc_pointer_hover(&hx, &hy);
+
+    PcPointerRect rects[PC_PLATE_MAX];
+    unsigned short pads[PC_PLATE_MAX];
+    const int h = 30, gap = 8, y = sh - 52;
+    int right = sw - 40;
+    bool overAny = false;
+    for (int i = 0; i < count; ++i) {
+        const int w = 24 + int(strlen(requests[i].label)) * 10 < 84 ? 84 : 24 + int(strlen(requests[i].label)) * 10;
+        const int x = right - w;
+        right = x - gap;
+        rects[i] = { (float(x) / sw) * uiWidth + (0.5f - uiWidth * 0.5f), float(y) / sh,
+                     (float(x + w) / sw) * uiWidth + (0.5f - uiWidth * 0.5f), float(y + h) / sh, true };
+        pads[i] = requests[i].pad;
+        const bool over = hovering && hx >= rects[i].x0 && hx <= rects[i].x1 && hy >= rects[i].y0 && hy <= rects[i].y1;
+        overAny |= over;
+        const Colour fill = over ? Colour(90, 116, 180, 245) : Colour(26, 30, 48, 225);
+        gfx->setColour(fill, true);
+        gfx->setAuxColour(fill);
+        gfx->fillRectangle(RectArea(x, y, x + w, y + h));
+        ngrText(x + w / 2, y + (h - 12 * 3 / 2) / 2, requests[i].label, over ? Colour(255, 255, 255, 255) : Colour(205, 239, 250, 255), 12,
+                w - 12, true);
+    }
+    pc_plate_set_layout(rects, pads, count);
+    if (overAny) pc_pointer_set_hand(true);
 }
 
 void pc_captain_select_draw_3d(void)

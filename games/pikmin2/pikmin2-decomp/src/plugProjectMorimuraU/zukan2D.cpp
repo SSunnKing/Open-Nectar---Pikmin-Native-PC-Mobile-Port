@@ -16,6 +16,10 @@ extern "C" void pc_gfx_p2_black_sides(void);
 static const int unusedArray[] = { 0, 0, 0 };
 
 #include "nans.h"
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 
 namespace Morimura {
 s16 TZukanBase::mRequestTimerMax    = 10;
@@ -569,6 +573,15 @@ bool TZukanBase::doUpdate()
 
 	if (!mIsInDemo && mCanInput && mState < Screen::Game2DMgr::CHECK2D_Zukan_ExitStart && !isOpenConfirmWindow()) {
 		mIsInFadeInOut = false;
+#if PIKI_PC_MENU_TAP
+		// Mouse: button plates for the keys this screen reads. Up and Down scroll the list.
+		pc_menu_plate(PAD_BUTTON_B, "B Back");
+		pc_menu_plate(PAD_BUTTON_A, "A Zoom");
+		pc_menu_plate(PAD_BUTTON_Y, "Y Louie");
+		pc_menu_plate(PAD_BUTTON_X, "X Olimar");
+		pc_menu_plate(PAD_BUTTON_DOWN, "Down");
+		pc_menu_plate(PAD_BUTTON_UP, "Up");
+#endif
 		if (!mIsBigWindowOpened && !mWindow->mState) {
 			Controller* pad = mController;
 			if (pad->getButton() & Controller::ANALOG_UP) {
