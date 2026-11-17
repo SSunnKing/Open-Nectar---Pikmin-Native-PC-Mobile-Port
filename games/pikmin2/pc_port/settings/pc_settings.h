@@ -32,6 +32,8 @@ void pc_settings_request_toggle(void);
 /// frame; el toque usa coordenadas normalizadas de la ventana (0..1).
 void pc_settings_touch_buttons(unsigned short pressed);
 void pc_settings_touch_tap(float x, float y);
+// A port-drawn prompt (new game, player count, device assignment, captains) is open.
+bool pc_settings_prompt_active(void);
 /// Arrastre vertical normalizado (fracción de la altura de la ventana) sobre
 /// los menús del port: las listas con scroll lo convierten en filas.
 void pc_settings_touch_drag(float dy);

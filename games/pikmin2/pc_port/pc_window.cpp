@@ -1236,6 +1236,8 @@ void pc_window_poll_events(PADStatus* pad) {
         pointerTickAt = SDL_GetTicks();
         pc_pointer_tick();
     }
+    // Port-drawn prompts (new game, player count...) are pointer menus too.
+    if (pc_settings_prompt_active()) pc_pointer_claim();
     static bool pointerWasClaimed = false;
     const bool pointerClaimed = pc_pointer_claimed();
     if (pointerClaimed != pointerWasClaimed && !sSettingsMenuOpen) {
@@ -1351,6 +1353,12 @@ void pc_window_poll_events(PADStatus* pad) {
                     int w = 0, h = 0;
                     if (sWindow) SDL_GetWindowSize(sWindow, &w, &h);
                     if (w > 0 && h > 0) pc_pointer_post(float(event.button.x) / w, float(event.button.y) / h);
+                }
+                if (event.type == SDL_MOUSEBUTTONDOWN && event.button.which != SDL_TOUCH_MOUSEID
+                    && event.button.button == SDL_BUTTON_LEFT && pc_settings_prompt_active()) {
+                    int w = 0, h = 0;
+                    if (sWindow) SDL_GetWindowSize(sWindow, &w, &h);
+                    if (w > 0 && h > 0) pc_settings_touch_tap(float(event.button.x) / w, float(event.button.y) / h);
                 }
 #endif
                 if (event.type != SDL_MOUSEBUTTONDOWN)

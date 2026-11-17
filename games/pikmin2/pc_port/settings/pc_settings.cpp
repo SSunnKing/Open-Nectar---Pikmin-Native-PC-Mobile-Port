@@ -43,6 +43,7 @@
 #include <mutex>
 
 #include "pc_window.h"
+#include "pc_menu_tap.h"
 #include "pc_pause_key.h"
 #include "pc_gyro.h"
 #if !PIKI_P2_HOST
@@ -3841,6 +3842,11 @@ void pc_settings_touch_tap(float x, float y) {
     sTouchTapPending = true;
 }
 
+bool pc_settings_prompt_active(void) {
+    return pc_newgame_prompt_active() || pc_playercount_prompt_active() || pc_devassign_prompt_active()
+        || pc_captain_prompt_active();
+}
+
 // El launcher deja Load/Textures/.activate al descargar un pack: se
 // activa ese pack (su carpeta) y se borra el aviso. Al arrancar el juego y
 // en las órdenes del launcher (--settings-dump...).
@@ -5405,33 +5411,61 @@ void pcNewGamePromptInput()
     accept |= (sTouchFrameButtons & PAD_BUTTON_A) != 0;
     cancel |= (sTouchFrameButtons & PAD_BUTTON_B) != 0;
 
-    if (sTouchTapPending) {
-        sTouchTapPending = false;
+    // Where a point lands: an option box (row, col) or the Start button (col 0).
+    auto ngHit = [](float x, float y, int* row, int* col) {
         int sw, sh;
         ngScreen(&sw, &sh);
-        const float x = sTouchTapX * sw;
-        const float y = sTouchTapY * sh;
         const int panelX = sw / 2 - kNgPanelW / 2;
         const int panelY = sh / 2 - kNgPanelH / 2;
-        // Un toque elige la opción; el de Start empieza.
-        for (int row = 0; row < kNgRowCount; ++row) {
-            const float optY = float(ngRowY(panelY, row));
+        for (int r = 0; r < kNgRowCount; ++r) {
+            const float optY = float(ngRowY(panelY, r));
             for (int i = 0; i < 2; ++i) {
                 const float boxX = float(ngBoxX(panelX, i));
                 if (x >= boxX && x <= boxX + kNgBoxW && y >= optY - 8.0f && y <= optY + kNgBoxH + 8.0f) {
-                    sNewGamePromptRow = row;
-                    sNewGamePromptCol = i;
-                    ngSetRowValue(row, i);
+                    *row = r;
+                    *col = i;
+                    return true;
                 }
             }
         }
         const float startY = float(ngRowY(panelY, kNgStartRow));
         const float startX = float(ngStartX(panelX));
         if (x >= startX && x <= startX + kNgBoxW && y >= startY - 8.0f && y <= startY + kNgBoxH + 8.0f) {
-            sNewGamePromptRow = kNgStartRow;
-            accept            = true;
+            *row = kNgStartRow;
+            *col = 0;
+            return true;
+        }
+        return false;
+    };
+    int sw = 0, sh = 0;
+    ngScreen(&sw, &sh);
+    if (sTouchTapPending) {
+        sTouchTapPending = false;
+        // Un toque elige la opción; el de Start empieza.
+        int row = 0, col = 0;
+        if (ngHit(sTouchTapX * sw, sTouchTapY * sh, &row, &col)) {
+            sNewGamePromptRow = row;
+            if (row == kNgStartRow) {
+                accept = true;
+            } else {
+                sNewGamePromptCol = col;
+                ngSetRowValue(row, col);
+            }
         }
     }
+#if PIKI_PC_MENU_TAP
+    {
+        // Mouse hover: the cursor follows the pointer and the hand shows over a box.
+        float hx = 0.0f, hy = 0.0f;
+        int row = 0, col = 0;
+        const bool over = pc_menu_hover(&hx, &hy) && ngHit(hx * sw, hy * sh, &row, &col);
+        pc_menu_set_hand(over);
+        if (over && (row != sNewGamePromptRow || col != sNewGamePromptCol)) {
+            sNewGamePromptRow = row;
+            sNewGamePromptCol = col;
+        }
+    }
+#endif
 
     SDL_GameController* ctl = pc_window_get_controller();
     if (ctl) {
