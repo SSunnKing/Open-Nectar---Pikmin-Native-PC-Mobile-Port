@@ -13,6 +13,7 @@
 #include "Game/Cave/RandMapMgr.h"
 #include "Radar.h"
 #include "nans.h"
+int pc_window_take_wheel_steps(void);
 
 #ifdef PIKI_PC_PORT
 extern "C" float pc_window_free_camera_sub_y(void);
@@ -549,6 +550,21 @@ void ObjSMenuMap::scaleMap()
 #ifdef PIKI_PC_PORT
 	if (cstick == 0.0f) {
 		cstick = pc_window_free_camera_sub_y_for(pc_p2_coop_active() ? pc_p2_coop_menu_player() : 0); // co-op: quien abrió la pausa
+	}
+#endif
+#if defined(PIKI_PC_PORT) && PIKI_P2_HOST
+	// Mouse wheel zooms the radar, one notch for a few frames of the C-stick.
+	{
+		static int sWheelFrames = 0, sWheelDir = 0;
+		const int steps = pc_window_take_wheel_steps();
+		if (steps != 0) {
+			sWheelFrames = 6;
+			sWheelDir    = steps > 0 ? 1 : -1;
+		}
+		if (sWheelFrames > 0) {
+			--sWheelFrames;
+			cstick = (float)sWheelDir;
+		}
 	}
 #endif
 	if (cstick > 0.4f) {
