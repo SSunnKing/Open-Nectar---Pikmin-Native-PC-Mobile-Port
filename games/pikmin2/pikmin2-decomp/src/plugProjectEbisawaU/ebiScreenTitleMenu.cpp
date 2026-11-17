@@ -796,8 +796,10 @@ bool TTitleMenu::doUpdateStateWait()
     if (pc_pointer_take(&px, &py) && width > 0 && height > 0)
         hit = pc_pointer_hit(px * width, py * height, rects, active, menuNum(), height * 0.01f);
     float hoverX = 0, hoverY = 0;
+    pc_pointer_set_hand(false);
     if (hit < 0 && width > 0 && height > 0 && pc_pointer_hover(&hoverX, &hoverY)) {
         const int hover = pc_pointer_hit(hoverX * width, hoverY * height, rects, active, menuNum(), height * 0.01f);
+        pc_pointer_set_hand(hover >= 0);
         if (hover >= 0 && hover != mSelectID) {
             const int prev = mSelectID;
             mSelectID = hover;
