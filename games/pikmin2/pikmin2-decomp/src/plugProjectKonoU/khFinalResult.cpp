@@ -301,6 +301,7 @@ void ObjFinalResult::doCreate(JKRArchive* arc)
 
 #if PIKI_PC_MENU_TAP
 static int sFinalPage = -1;
+static int sFinalPick = -1;
 static float sFinalScale[8];
 static char sFinalFeel[8];
 
@@ -367,7 +368,11 @@ bool ObjFinalResult::doUpdate()
 			float tx = 0.0f, ty = 0.0f;
 			if (pc_menu_take_tap(&tx, &ty)) {
 				const int pressed = pcFinalPageAt(this, tx, ty);
-				if (pressed >= 0 && pressed < 8) pc_menu_hover_press(&sFinalFeel[pressed]);
+				if (pressed >= 0 && pressed < 8) {
+					pc_menu_hover_press(&sFinalFeel[pressed]);
+					if (pressed == mCurrentPage) pc_menu_queue_button(Controller::PRESS_A);
+					else sFinalPick = pressed;
+				}
 			}
 			for (int i = 0; i < 8; i++) {
 				sFinalScale[i] = pc_menu_hover_scale(&sFinalFeel[i], i == sFinalPage, 0.06f, sys->mDeltaTime);
@@ -647,8 +652,14 @@ void ObjFinalResult::statusNormal()
 	pc_menu_plate(PAD_BUTTON_A, "A Continue");
 	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
 	pc_menu_plate(PAD_BUTTON_UP, "Up");
+	// Those Up and Down plates already take the wheel, one page per notch.
 #endif
 	Controller* pad = getGamePad();
+	if (pad->getButton() & (Controller::PRESS_UP | Controller::PRESS_DOWN)) {
+#if PIKI_PC_MENU_TAP
+		sFinalPick = -1;
+#endif
+	}
 	if (pad->getButton() & Controller::PRESS_UP) {
 		if (mCurrentPage) {
 			mCurrentPage--;
@@ -674,6 +685,35 @@ void ObjFinalResult::statusNormal()
 			PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
 		}
 	}
+#if PIKI_PC_MENU_TAP
+	else if (sFinalPick >= 0 && sFinalPick != mCurrentPage
+	         && !(pad->getButton() & (Controller::PRESS_UP | Controller::PRESS_DOWN))) {
+		const int step = pc_list_step_toward(mCurrentPage, sFinalPick, mCurrentPage != 0, mCurrentPage != 7);
+		if (step > 0) {
+			mCurrentPage++;
+			mScreen->search(getSerialTagName(MC8("Nsel00"), mCurrentPage - 1))->setAlpha(msVal.mSelectionAlpha);
+			mScreen->search(getSerialTagName(MC8("Nsel00"), mCurrentPage))->setAlpha(255);
+			mScreen->search(getSerialTagName(MC8("Nicon00"), mCurrentPage - 1))->setAlpha(msVal.mSelectionAlpha);
+			mScreen->search(getSerialTagName(MC8("Nicon00"), mCurrentPage))->setAlpha(255);
+			mState = StatusScrollDown;
+			statusScrollDown();
+			PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+		} else if (step < 0) {
+			mCurrentPage--;
+			mScreen->search(getSerialTagName(MC8("Nsel00"), mCurrentPage + 1))->setAlpha(msVal.mSelectionAlpha);
+			mScreen->search(getSerialTagName(MC8("Nsel00"), mCurrentPage))->setAlpha(255);
+			mScreen->search(getSerialTagName(MC8("Nicon00"), mCurrentPage + 1))->setAlpha(msVal.mSelectionAlpha);
+			mScreen->search(getSerialTagName(MC8("Nicon00"), mCurrentPage))->setAlpha(255);
+			mState = StatusScrollUp;
+			statusScrollUp();
+			PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+		} else {
+			sFinalPick = -1;
+		}
+	} else if (sFinalPick == mCurrentPage) {
+		sFinalPick = -1;
+	}
+#endif
 }
 
 /**
