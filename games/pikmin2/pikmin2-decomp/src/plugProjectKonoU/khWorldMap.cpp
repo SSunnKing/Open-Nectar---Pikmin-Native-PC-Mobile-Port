@@ -18,6 +18,17 @@
 #if PIKI_PC_MENU_TAP
 // Area tapped or clicked on the map: getTarget returns it instead of reading the D-pad.
 static int sPcTouchTarget = -1;
+static float sPointHover[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+static float sButtonHover[2] = { 1.0f, 1.0f };
+
+static void pcWorldMapScale(J2DPane* pane, float& prev, bool over)
+{
+	if (!pane) return;
+	const float next = pc_menu_hover_scale(pane, over, 0.08f, sys->mDeltaTime);
+	if (prev <= 0.0f) prev = 1.0f;
+	pane->updateScale(pane->getScaleX() / prev * next, pane->getScaleY() / prev * next);
+	prev = next;
+}
 #endif
 
 static void _Print(char* format, ...)
@@ -1379,15 +1390,24 @@ bool WorldMap::changeState()
 		if (pc_menu_pane_hit(mScreenInfo->search(MC8("Nrbtn")), nx, ny, 0.1f) && tapped) pcTapR = true;
 		// Mouse: the hand shows over an open area, the selected one included, and the L/R buttons.
 		float hx = 0.0f, hy = 0.0f;
+		int overPoint = -1;
+		bool overL = false, overR = false;
 		if (pc_menu_hover(&hx, &hy)) {
-			bool overAny = pc_menu_pane_hit(mScreenInfo->search(MC8("Nlbtn")), hx, hy, 0.1f)
-			            || pc_menu_pane_hit(mScreenInfo->search(MC8("Nrbtn")), hx, hy, 0.1f);
+			J2DPane* left  = mScreenInfo->search(MC8("Nlbtn"));
+			J2DPane* right = mScreenInfo->search(MC8("Nrbtn"));
+			overL = left && pc_menu_pane_hit(left, hx, hy, 0.1f);
+			overR = right && pc_menu_pane_hit(right, hx, hy, 0.1f);
 			for (int i = 0; i < mOpenCourses && i < 4; i++) {
 				J2DPane* point = mScreenKitagawa->search(getSerialTagName(MC8("Npoint0"), i));
-				if (point && pc_menu_pane_hit(point, hx, hy, 0.04f)) overAny = true;
+				if (point && pc_menu_pane_hit(point, hx, hy, 0.04f)) overPoint = i;
 			}
-			pc_menu_set_hand(overAny);
+			pc_menu_set_hand(overPoint >= 0 || overL || overR);
 		}
+		for (int i = 0; i < 4; i++) {
+			pcWorldMapScale(mScreenKitagawa->search(getSerialTagName(MC8("Npoint0"), i)), sPointHover[i], i == overPoint);
+		}
+		pcWorldMapScale(mScreenInfo->search(MC8("Nlbtn")), sButtonHover[0], overL);
+		pcWorldMapScale(mScreenInfo->search(MC8("Nrbtn")), sButtonHover[1], overR);
 	}
 	if (sPcTouchTarget >= 0) {
 		isStateChange   = true;
