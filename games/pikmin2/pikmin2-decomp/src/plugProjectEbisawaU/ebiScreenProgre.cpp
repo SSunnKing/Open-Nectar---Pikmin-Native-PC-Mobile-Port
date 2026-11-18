@@ -13,6 +13,8 @@
 static const char className[] = "ebiScreenProgre";
 
 #if PIKI_PC_MENU_TAP
+static float sProgreHover[2] = { 1.0f, 1.0f };
+
 // 1 is Yes, 0 is No, -1 is empty space.
 static int pcProgreChoiceAt(ebi::TScreenProgre* self, float nx, float ny)
 {
@@ -270,6 +272,16 @@ void TScreenProgre::update()
 		float hx = 0.0f, hy = 0.0f;
 		const int over = pc_menu_hover(&hx, &hy) ? pcProgreChoiceAt(this, hx, hy) : -1;
 		if (over >= 0) pc_menu_set_hand(true);
+		J2DPane* choices[2] = { mPaneNo, mPaneYes };
+		for (int i = 0; i < 2; i++) {
+			J2DPane* pane = choices[i];
+			if (!pane) continue;
+			const float next = pc_menu_hover_scale(pane, i == over, 0.06f, sys->mDeltaTime);
+			float prev       = sProgreHover[i];
+			if (prev <= 0.0f) prev = 1.0f;
+			pane->updateScale(pane->getScaleX() / prev * next, pane->getScaleY() / prev * next);
+			sProgreHover[i] = next;
+		}
 	}
 #endif
 				if (mController->isMoveRight()) {
