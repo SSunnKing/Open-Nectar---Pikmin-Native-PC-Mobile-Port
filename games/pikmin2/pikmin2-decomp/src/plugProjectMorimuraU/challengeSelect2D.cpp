@@ -1576,6 +1576,32 @@ void TChallengeSelect::doCreate(JKRArchive* arc)
  * @note Address: 0x80390780
  * @note Size: 0x14CC
  */
+#if PIKI_PC_MENU_TAP
+// Course icon under the pointer, limited to stages the stick can reach.
+static int pcChallengeCourseAt(TChallengeSelect* self, float nx, float ny)
+{
+	int hit = -1;
+	if (!self->mPanelList) return hit;
+	int last = self->mMaxStages;
+	if (last >= CHALLENGE_COURSE_COUNT) last = CHALLENGE_COURSE_COUNT - 1;
+	for (int i = 0; i <= last; i++) {
+		J2DPane* pane = self->mPanelList[i] ? self->mPanelList[i]->mPane1 : nullptr;
+		if (pane && pane->isVisible() && pc_menu_pane_hit(pane, nx, ny, 0.02f)) hit = i;
+	}
+	return hit;
+}
+
+// 0 is 1P, 1 is 2P when a second controller is connected.
+static int pcChallengeModeAt(TChallengeSelect* self, float nx, float ny)
+{
+	TChallengePlayModeScreen* screen = self->mPlayModeScreen;
+	if (!screen) return -1;
+	if (screen->mPaneList0[0] && pc_menu_pane_hit(screen->mPaneList0[0], nx, ny, 0.02f)) return 0;
+	if (self->mConnect2p && screen->mPaneList0[1] && pc_menu_pane_hit(screen->mPaneList0[1], nx, ny, 0.02f)) return 1;
+	return -1;
+}
+#endif
+
 bool TChallengeSelect::doUpdate()
 {
 	TChallengePlayModeScreen* screen;
@@ -1613,6 +1639,16 @@ bool TChallengeSelect::doUpdate()
 	pc_menu_plate(PAD_BUTTON_LEFT, "Left");
 	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
 	pc_menu_plate(PAD_BUTTON_UP, "Up");
+	{
+		float hx = 0.0f;
+		float hy = 0.0f;
+		int over = -1;
+		if (pc_menu_hover(&hx, &hy)) {
+			if (!mPlayModeScreen->isOpen() && rulesClosed) over = pcChallengeCourseAt(this, hx, hy);
+			else if (mPlayModeScreen->isState(TChallengePlayModeScreen::PlayModeScreen_Active)) over = pcChallengeModeAt(this, hx, hy);
+		}
+		if (over >= 0) pc_menu_set_hand(true);
+	}
 #endif
 		if (mControls->getButtonDown() & Controller::PRESS_Z && mPlayModeScreen->mState == 0) {
 			if (mRulesScreen->mScaleGrowRate <= 0.0f) {
