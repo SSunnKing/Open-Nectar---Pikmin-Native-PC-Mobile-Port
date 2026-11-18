@@ -41,6 +41,9 @@ void pc_menu_set_hand(bool hand);
 // clicks meant for the rest, such as the page arrows.
 bool pc_menu_peek_tap(float* nx, float* ny);
 void pc_menu_drop_tap();
+// Eased scale for a pane the screen already draws. 1 at rest. A click calls press.
+float pc_menu_hover_scale(const void* pane, bool hovered, float amount, float dt);
+void pc_menu_hover_press(const void* pane);
 #endif
 
 #endif

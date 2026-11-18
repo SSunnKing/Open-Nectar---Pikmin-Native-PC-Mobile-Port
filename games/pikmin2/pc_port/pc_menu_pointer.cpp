@@ -109,6 +109,91 @@ bool pc_pointer_take_drag(float* dx, float* dy) {
     dragX = dragY = 0;
     return any;
 }
+float pc_ease_smooth(float t)
+{
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    return t * t * (3.0f - 2.0f * t);
+}
+float pc_hover_advance(float progress, bool hovered, float dt, float seconds)
+{
+    if (seconds <= 0.0f) return hovered ? 1.0f : 0.0f;
+    progress += (hovered ? dt : -dt) / seconds;
+    if (progress < 0.0f) progress = 0.0f;
+    if (progress > 1.0f) progress = 1.0f;
+    return progress;
+}
+float pc_press_advance(float press, float dt, float seconds)
+{
+    if (press <= 0.0f) return 0.0f;
+    if (seconds <= 0.0f) return 0.0f;
+    press -= dt / seconds;
+    return press < 0.0f ? 0.0f : press;
+}
+float pc_hover_visual(float hover, float press, float amount)
+{
+    if (amount < 0.0f) amount = 0.0f;
+    return (1.0f + amount * pc_ease_smooth(hover)) * (1.0f + 0.08f * press);
+}
+namespace {
+struct Feel { const void* id; float hover; float press; };
+Feel paneFeels[32] = {};
+struct PlateFeel { unsigned short pad; float hover; float press; bool used; };
+PlateFeel plateFeels[PC_PLATE_MAX] = {};
+Feel* paneFeel(const void* id)
+{
+    Feel* free = nullptr;
+    for (auto& feel : paneFeels) {
+        if (feel.id == id) return &feel;
+        if (!free && !feel.id) free = &feel;
+    }
+    if (!free) {
+        for (auto& feel : paneFeels) {
+            if (feel.hover <= 0.0f && feel.press <= 0.0f) { free = &feel; break; }
+        }
+    }
+    if (!free) free = &paneFeels[0];
+    *free = { id, 0.0f, 0.0f };
+    return free;
+}
+PlateFeel* plateFeel(unsigned short pad)
+{
+    PlateFeel* free = nullptr;
+    for (auto& feel : plateFeels) {
+        if (feel.used && feel.pad == pad) return &feel;
+        if (!free && !feel.used) free = &feel;
+    }
+    if (!free) free = &plateFeels[0];
+    *free = { pad, 0.0f, 0.0f, true };
+    return free;
+}
+}
+float pc_pointer_hover_scale(const void* pane, bool hovered, float amount, float dt)
+{
+    if (!pane) return 1.0f;
+    Feel* feel = paneFeel(pane);
+    feel->hover = pc_hover_advance(feel->hover, hovered, dt, 0.12f);
+    feel->press = pc_press_advance(feel->press, dt, 0.10f);
+    return pc_hover_visual(feel->hover, feel->press, amount);
+}
+void pc_pointer_hover_press(const void* pane)
+{
+    if (!pane) return;
+    paneFeel(pane)->press = 1.0f;
+}
+float pc_plate_feel(unsigned short pad, bool over, float dt)
+{
+    PlateFeel* feel = plateFeel(pad);
+    feel->hover = pc_hover_advance(feel->hover, over, dt, 0.12f);
+    feel->press = pc_press_advance(feel->press, dt, 0.10f);
+    return pc_ease_smooth(feel->hover) > pc_ease_smooth(feel->press) ? pc_ease_smooth(feel->hover) : pc_ease_smooth(feel->press);
+}
+unsigned short pc_list_wheel_button(bool hasUp, bool hasDown, int steps, unsigned short up, unsigned short down)
+{
+    if (!hasUp || !hasDown || steps == 0) return 0;
+    return steps > 0 ? up : down;
+}
+int pc_pointer_frame() { return tick; }
 int plateBatchTick = -100;
 void pc_plate_request(unsigned short pad, const char* label) {
     // A new update replaces the previous batch; repeats within one update are ignored.
@@ -141,7 +226,21 @@ bool pc_plate_click(float nx, float ny) {
     const int i = plateAt(nx, ny);
     if (i < 0) return false;
     queuedButtons |= platePads[i];
+    plateFeel(platePads[i])->press = 1.0f;
     return true;
 }
 bool pc_plate_hover(float nx, float ny) { return plateAt(nx, ny) >= 0; }
-void pc_pointer_reset() { mouseActive = false; dragX = dragY = 0; plateRequestCount = plateLayoutCount = 0; plateBatchTick = -100; queuedButtons = 0; for (auto& pane : panes) pane = {}; tick = 0; claim = posted = lastTrackAsk = -100; pending = hover = hand = false; handTick = -100; }
+void pc_pointer_reset() {
+    mouseActive = false;
+    dragX = dragY = 0;
+    plateRequestCount = plateLayoutCount = 0;
+    plateBatchTick = -100;
+    queuedButtons = 0;
+    for (auto& pane : panes) pane = {};
+    for (auto& feel : paneFeels) feel = {};
+    for (auto& feel : plateFeels) feel = {};
+    tick = 0;
+    claim = posted = lastTrackAsk = -100;
+    pending = hover = hand = false;
+    handTick = -100;
+}

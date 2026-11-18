@@ -50,4 +50,22 @@ void pc_plate_set_layout(const PcPointerRect* rects, const unsigned short* pads,
 bool pc_plate_click(float nx, float ny);
 bool pc_plate_hover(float nx, float ny);
 void pc_pointer_reset();
+
+// Smoothstep used by Options and the plates. 0 and 1 stay put.
+float pc_ease_smooth(float t);
+// Move progress toward 1 while hovered and toward 0 otherwise. seconds is the full sweep.
+float pc_hover_advance(float progress, bool hovered, float dt, float seconds);
+// Decay a press that starts at 1. seconds is how long it takes to reach 0.
+float pc_press_advance(float press, float dt, float seconds);
+// Scale: 1 at rest, up to 1+amount while hovered, with a brief extra while press is set.
+float pc_hover_visual(float hover, float press, float amount);
+// Per-pane hover and press. A pane the screen scales each update.
+float pc_pointer_hover_scale(const void* pane, bool hovered, float amount, float dt);
+void pc_pointer_hover_press(const void* pane);
+// Plate highlight, 0 at rest and 1 fully hovered. A click on the plate arms the press.
+float pc_plate_feel(unsigned short pad, bool over, float dt);
+// Wheel on a screen that asked for both Up and Down. 0 when it should not scroll.
+// steps > 0 is Up, matching the settings menu.
+unsigned short pc_list_wheel_button(bool hasUp, bool hasDown, int steps, unsigned short up, unsigned short down);
+int pc_pointer_frame();
 #endif

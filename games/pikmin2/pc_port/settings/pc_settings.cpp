@@ -1816,7 +1816,7 @@ bool menuMouseNorm(float* nx, float* ny) {
 }
 
 // Accept: Enter, numpad Enter, Space, left click, and a non-mouse A binding.
-// Cancel: Escape, Backspace, right click, and a B binding that is not Shift.
+// Cancel: Escape, Backspace, right click, mouse Back, and a B binding that is not Shift.
 // A text field keeps Backspace for delete and does not call menuCancelKey.
 bool menuOkKey() {
     return keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_KP_ENTER)
@@ -1831,6 +1831,7 @@ static bool menuCancelBinding(int bind) {
 bool menuCancelKey() {
     return keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_BACKSPACE)
         || (sMenuMouseEdge & SDL_BUTTON(SDL_BUTTON_RIGHT)) != 0
+        || (sMenuMouseEdge & SDL_BUTTON(SDL_BUTTON_X1)) != 0
         || menuCancelBinding(pc_window_get_key_binding(PC_KEY_ACT_B))
         || menuCancelBinding(pc_window_get_key_binding2(PC_KEY_ACT_B));
 }
@@ -6588,6 +6589,11 @@ void pc_menu_plates_draw(void)
     const float uiWidth = window > float(sw) / float(sh) ? (float(sw) / float(sh)) / window : 1.0f;
     float hx = 0.0f, hy = 0.0f;
     const bool hovering = pc_pointer_hover(&hx, &hy);
+    static Uint32 plateFeelAt = 0;
+    const Uint32 plateNow = SDL_GetTicks();
+    float plateDt = plateFeelAt ? float(plateNow - plateFeelAt) / 1000.0f : 0.016f;
+    if (plateDt < 0.0f || plateDt > 0.1f) plateDt = 0.016f;
+    plateFeelAt = plateNow;
 
     PcPointerRect rects[PC_PLATE_MAX];
     unsigned short pads[PC_PLATE_MAX];
@@ -6595,6 +6601,7 @@ void pc_menu_plates_draw(void)
     int y = firstY;
     int right = sw - 40;
     bool overAny = false;
+    auto blend = [](int from, int to, float t) { return int(from + (to - from) * t); };
     for (int i = 0; i < count; ++i) {
         const int w = 20 + int(strlen(requests[i].label)) * 9 < 52 ? 52 : 20 + int(strlen(requests[i].label)) * 9;
         // Out of width: continue on a row above.
@@ -6606,12 +6613,15 @@ void pc_menu_plates_draw(void)
         pads[i] = requests[i].pad;
         const bool over = hovering && hx >= rects[i].x0 && hx <= rects[i].x1 && hy >= rects[i].y0 && hy <= rects[i].y1;
         overAny |= over;
-        const Colour fill = over ? Colour(90, 116, 180, 245) : Colour(26, 30, 48, 225);
+        // Eased hover, and a brighter inset while the click is still showing.
+        const float feel = pc_plate_feel(requests[i].pad, over, plateDt);
+        const int inset = int(2.0f * feel + 0.5f);
+        const Colour fill(blend(26, 210, feel), blend(30, 220, feel), blend(48, 245, feel), blend(225, 255, feel));
         gfx->setColour(fill, true);
         gfx->setAuxColour(fill);
-        gfx->fillRectangle(RectArea(x, y, x + w, y + h));
-        ngrText(x + w / 2, y + (h - 12 * 3 / 2) / 2, requests[i].label, over ? Colour(255, 255, 255, 255) : Colour(205, 239, 250, 255), 12,
-                w - 12, true);
+        gfx->fillRectangle(RectArea(x + inset, y + inset, x + w - inset, y + h - inset));
+        ngrText(x + w / 2, y + (h - 12 * 3 / 2) / 2, requests[i].label,
+                Colour(blend(205, 255, feel), blend(239, 255, feel), 250, 255), 12, w - 12, true);
     }
     pc_plate_set_layout(rects, pads, count);
     if (overAny) pc_pointer_set_hand(true);

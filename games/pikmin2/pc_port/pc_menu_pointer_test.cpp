@@ -106,4 +106,50 @@ int main() {
     CHECK(pc_pointer_panes_active());
     for (int i = 0; i < 7; ++i) pc_pointer_tick();
     CHECK(!pc_pointer_panes_active());
+
+    // Hover eases in and out. A press adds a brief extra, then falls away.
+    CHECK(pc_ease_smooth(0.0f) == 0.0f && pc_ease_smooth(1.0f) == 1.0f);
+    CHECK(pc_ease_smooth(0.5f) > 0.49f && pc_ease_smooth(0.5f) < 0.51f);
+    float progress = 0.0f;
+    progress = pc_hover_advance(progress, true, 0.06f, 0.12f);
+    CHECK(progress > 0.49f && progress < 0.51f);
+    progress = pc_hover_advance(progress, false, 0.12f, 0.12f);
+    CHECK(progress == 0.0f);
+    CHECK(pc_press_advance(1.0f, 0.05f, 0.10f) > 0.49f && pc_press_advance(1.0f, 0.05f, 0.10f) < 0.51f);
+    CHECK(pc_hover_visual(0.0f, 0.0f, 0.08f) == 1.0f);
+    CHECK(pc_hover_visual(1.0f, 0.0f, 0.08f) > 1.07f);
+    CHECK(pc_hover_visual(0.0f, 1.0f, 0.08f) > 1.07f);
+
+    pc_pointer_reset();
+    int row = 0;
+    const float resting = pc_pointer_hover_scale(&row, false, 0.08f, 0.016f);
+    CHECK(resting == 1.0f);
+    float grown = 1.0f;
+    for (int i = 0; i < 20; ++i) grown = pc_pointer_hover_scale(&row, true, 0.08f, 0.016f);
+    CHECK(grown > 1.07f);
+    pc_pointer_hover_press(&row);
+    const float pressed = pc_pointer_hover_scale(&row, true, 0.08f, 0.0f);
+    CHECK(pressed > grown);
+    float eased = pressed;
+    for (int i = 0; i < 30; ++i) eased = pc_pointer_hover_scale(&row, false, 0.08f, 0.016f);
+    CHECK(eased < 1.01f);
+
+    pc_pointer_reset();
+    CHECK(pc_plate_feel(0x200, false, 0.016f) == 0.0f);
+    float plate = 0.0f;
+    for (int i = 0; i < 20; ++i) plate = pc_plate_feel(0x200, true, 0.016f);
+    CHECK(plate > 0.9f);
+    const PcPointerRect one[] = {{0.0f, 0.0f, 1.0f, 1.0f, true}};
+    const unsigned short onePad[] = {0x200};
+    pc_plate_set_layout(one, onePad, 1);
+    CHECK(pc_plate_click(0.5f, 0.5f));
+    const float flashed = pc_plate_feel(0x200, false, 0.0f);
+    CHECK(flashed > 0.9f);
+
+    // The wheel scrolls only a list that has both directions, and positive is Up.
+    CHECK(pc_list_wheel_button(true, true, 2, 0x8, 0x4) == 0x8);
+    CHECK(pc_list_wheel_button(true, true, -1, 0x8, 0x4) == 0x4);
+    CHECK(pc_list_wheel_button(true, false, -1, 0x8, 0x4) == 0);
+    CHECK(pc_list_wheel_button(false, true, 1, 0x8, 0x4) == 0);
+    CHECK(pc_list_wheel_button(true, true, 0, 0x8, 0x4) == 0);
 }
