@@ -3,7 +3,9 @@
 #include "Dolphin/pad.h"
 #include "pc_menu_pointer.h"
 #include "gl/pc_gfx.h"
-#include "pc_window.h"
+// The legacy library does not get the SDL include path. The wheel is the one
+// window call this screen needs, same as the radar.
+int pc_window_take_wheel_steps(void);
 #endif
 #include "ebi/Omake.h"
 #ifdef PIKI_PC_PORT
