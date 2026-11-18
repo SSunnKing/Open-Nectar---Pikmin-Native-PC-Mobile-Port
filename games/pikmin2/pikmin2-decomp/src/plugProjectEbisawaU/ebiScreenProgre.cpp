@@ -272,6 +272,12 @@ void TScreenProgre::update()
 		float hx = 0.0f, hy = 0.0f;
 		const int over = pc_menu_hover(&hx, &hy) ? pcProgreChoiceAt(this, hx, hy) : -1;
 		if (over >= 0) pc_menu_set_hand(true);
+		float tx = 0.0f, ty = 0.0f;
+		if (pc_menu_take_tap(&tx, &ty)) {
+			const int pressed = pcProgreChoiceAt(this, tx, ty);
+			J2DPane* pane     = pressed == 1 ? mPaneYes : pressed == 0 ? mPaneNo : nullptr;
+			if (pane) pc_menu_hover_press(pane);
+		}
 		J2DPane* choices[2] = { mPaneNo, mPaneYes };
 		for (int i = 0; i < 2; i++) {
 			J2DPane* pane = choices[i];
