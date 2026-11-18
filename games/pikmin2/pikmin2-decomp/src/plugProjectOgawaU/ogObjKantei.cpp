@@ -16,6 +16,10 @@
  * @note Address: N/A
  * @note Size: 0xE4
  */
+#if PIKI_PC_MENU_TAP
+static char sKanteiName;
+#endif
+
 static void _Print(char* format, ...)
 {
 	OSReport(format, __FILE__);
@@ -432,6 +436,16 @@ bool ObjKantei::doUpdate()
 	}
 
 	commonUpdate();
+#if PIKI_PC_MENU_TAP
+	{
+		const bool live = mPaneName && mNameScale > 0.0f
+		                  && (mState == Kantei_PokoAppearDelay || mState == Kantei_Idle);
+		float hx = 0.0f, hy = 0.0f;
+		const bool over = live && pc_menu_hover(&hx, &hy);
+		const float hover = pc_menu_hover_scale(&sKanteiName, over, 0.06f, sys->mDeltaTime);
+		if (live) mPaneName->updateScale(mPaneName->getScaleX() * hover, mPaneName->getScaleY() * hover);
+	}
+#endif
 	return false;
 }
 
