@@ -345,6 +345,11 @@ bool ObjCaveResult::doUpdate()
 			const bool hovering = pc_menu_hover(&hx, &hy);
 			sCaveRow = pcCaveRowAt(this, hovering ? hx : -1.0f, hovering ? hy : -1.0f);
 			if (sCaveRow >= 0) pc_menu_set_hand(true);
+			float tx = 0.0f, ty = 0.0f;
+			if (pc_menu_take_tap(&tx, &ty)) {
+				const int pressed = pcCaveRowAt(this, tx, ty);
+				if (pressed >= 0 && pressed < 48) pc_menu_hover_press(&sCaveFeel[pressed]);
+			}
 			for (int i = 0; i < 48; i++) {
 				sCaveScale[i] = pc_menu_hover_scale(&sCaveFeel[i], i == sCaveRow, 0.06f, sys->mDeltaTime);
 			}
