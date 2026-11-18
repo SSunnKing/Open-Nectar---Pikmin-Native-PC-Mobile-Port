@@ -1,6 +1,9 @@
 #include "pc_menu_tap.h"
 #if PIKI_PC_MENU_TAP
 #include "Dolphin/pad.h"
+#include "pc_menu_pointer.h"
+#include "gl/pc_gfx.h"
+#include "System.h"
 #endif
 #include "kh/khFinalResult.h"
 #include "Controller.h"
@@ -296,6 +299,35 @@ void ObjFinalResult::doCreate(JKRArchive* arc)
 	Game::playData->mMailSaveData.set_history(-2);
 }
 
+#if PIKI_PC_MENU_TAP
+static int sFinalPage = -1;
+
+// Page under the pointer, from the same offset the draw uses. The stamped
+// stat panes are not hit targets.
+static int pcFinalPageAt(ObjFinalResult* self, float nx, float ny)
+{
+	if (!self->mScreen || !(self->mScrollMove > 0.0f) || !(self->mScissorBoundsHeight > 0.0f)) return -1;
+	J2DPane* mask = self->mScreen->search(MC8("Nmask"));
+	if (mask) pc_pointer_track(mask);
+	const PcPointerRect rect = pc_pointer_rect(mask);
+	if (!rect.valid) return -1;
+	int width = 0, height = 0;
+	pc_gfx_get_drawable_size(&width, &height);
+	float pointerY = 0.0f;
+	if (!pc_result_window_y(nx, ny, rect.x0, rect.y0, rect.x1, rect.y1, width, height,
+	                        self->mScissorBoundsHeight, &pointerY))
+		return -1;
+	int direction = 0;
+	float scrollY = 0.0f;
+	if (self->mState != ObjFinalResult::StatusNormal) {
+		scrollY   = self->mScrollYPos;
+		direction = self->mState == ObjFinalResult::StatusScrollUp ? -1 : 1;
+	}
+	return pc_result_page_at(pointerY, 8, self->mCurrentPage, direction, scrollY, self->mScrollMove,
+	                         self->mScissorBoundsHeight);
+}
+#endif
+
 /**
  * @note Address: 0x8040CF48
  * @note Size: 0x1BC
@@ -323,6 +355,15 @@ bool ObjFinalResult::doUpdate()
 		}
 
 	} else {
+#if PIKI_PC_MENU_TAP
+		pc_menu_claim();
+		{
+			float hx = 0.0f, hy = 0.0f;
+			const bool hovering = pc_menu_hover(&hx, &hy);
+			sFinalPage = pcFinalPageAt(this, hovering ? hx : -1.0f, hovering ? hy : -1.0f);
+			if (sFinalPage >= 0) pc_menu_set_hand(true);
+		}
+#endif
 		switch (mState) {
 		case StatusNormal:
 			statusNormal();
