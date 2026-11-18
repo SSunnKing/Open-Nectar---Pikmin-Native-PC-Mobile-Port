@@ -129,8 +129,20 @@ bool TOmakeCardE::doUpdateStateWait()
 	switch (mState) {
 	case MainMenu: {
 #if PIKI_PC_MENU_TAP
+	pc_menu_claim();
 	pc_menu_plate(PAD_BUTTON_A, "A OK");
 	pc_menu_plate(PAD_BUTTON_B, "B Back");
+	{
+		float hx = 0.0f, hy = 0.0f;
+		const bool hovering = pc_menu_hover(&hx, &hy);
+		J2DPane* card = mScreenObj->search('Tset');
+		const bool onUp = hovering && mPaneArrowUp && mPaneArrowUp->getAlpha() > 0
+		                  && pc_menu_pane_hit(mPaneArrowUp, hx, hy, 0.01f);
+		const bool onDown = hovering && mPaneArrowDown && mPaneArrowDown->getAlpha() > 0
+		                    && pc_menu_pane_hit(mPaneArrowDown, hx, hy, 0.01f);
+		const bool onCard = hovering && card && pc_menu_pane_hit(card, hx, hy, 0.0f);
+		if (onUp || onDown || onCard) pc_menu_set_hand(true);
+	}
 #endif
 		u32 press = mInput->getButtonDown();
 		if (press & Controller::PRESS_A) {
