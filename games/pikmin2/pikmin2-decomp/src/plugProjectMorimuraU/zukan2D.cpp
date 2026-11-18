@@ -19,6 +19,8 @@ static const int unusedArray[] = { 0, 0, 0 };
 #include "pc_menu_tap.h"
 #if PIKI_PC_MENU_TAP
 #include "Dolphin/pad.h"
+#include "pc_menu_pointer.h"
+#include "System.h"
 #endif
 
 namespace Morimura {
@@ -502,8 +504,39 @@ void TZukanBase::doCreate(JKRArchive* archive)
  * @note Address: 0x803718D8
  * @note Size: 0xFC8
  */
+#if PIKI_PC_MENU_TAP
+static int sZukanRow = -1;
+static int sZukanCol = -1;
+
+// Icon under the pointer. Big rows only have the center picture.
+static bool pcZukanIconAt(TZukanBase* self, float nx, float ny, int* row, int* col)
+{
+	*row = -1;
+	*col = -1;
+	if (!self->mIndexPaneList) return false;
+	for (int i = 0; i < self->mNumActiveRows; i++) {
+		TIndexPane* pane = self->mIndexPaneList[i];
+		if (!pane || !pane->getMainPane() || !pane->getMainPane()->isVisible() || !pane->mIconInfos) continue;
+		for (int j = 0; j < 3; j++) {
+			if (pane->mSizeType != TIndexPane::Size_Small && j != 1) continue;
+			TIconInfo* icon = pane->mIconInfos[j];
+			if (!icon || icon->mCategoryID < 0 || !icon->mPane || !icon->mPane->isVisible()) continue;
+			if (pc_menu_pane_hit(icon->mPane, nx, ny, 0.01f)) {
+				*row = i;
+				*col = j;
+			}
+		}
+	}
+	return *row >= 0;
+}
+#endif
+
 bool TZukanBase::doUpdate()
 {
+#if PIKI_PC_MENU_TAP
+	sZukanRow = -1;
+	sZukanCol = -1;
+#endif
 	if (!mIsInDemo) {
 		doUpdateIn();
 	}
@@ -585,6 +618,12 @@ bool TZukanBase::doUpdate()
 		pc_menu_plate(PAD_BUTTON_LEFT, "Left");
 		pc_menu_plate(PAD_BUTTON_DOWN, "Down");
 		pc_menu_plate(PAD_BUTTON_UP, "Up");
+		{
+			float hx = 0.0f;
+			float hy = 0.0f;
+			if (pc_menu_hover(&hx, &hy)) pcZukanIconAt(this, hx, hy, &sZukanRow, &sZukanCol);
+			if (sZukanRow >= 0) pc_menu_set_hand(true);
+		}
 #endif
 		if (!mIsBigWindowOpened && !mWindow->mState) {
 			Controller* pad = mController;
