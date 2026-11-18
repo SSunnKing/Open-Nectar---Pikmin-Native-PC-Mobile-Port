@@ -3,6 +3,7 @@
 #include "Dolphin/pad.h"
 #include "pc_menu_pointer.h"
 #include "gl/pc_gfx.h"
+#include "System.h"
 #endif
 #include "kh/khDayEndResult.h"
 #include "Game/gamePlayData.h"
@@ -586,6 +587,8 @@ bool ObjDayEndResultItem::doUpdateFadein()
 
 #if PIKI_PC_MENU_TAP
 static int sDayItemRow = -1;
+static float sDayItemScale[48];
+static char sDayItemFeel[48];
 
 // Treasure under the pointer, from the scroll layout. The two row panes are
 // restamped while drawing, so they are not hit targets.
@@ -626,6 +629,9 @@ bool ObjDayEndResultItem::doUpdate()
 		const bool hovering = pc_menu_hover(&hx, &hy);
 		sDayItemRow = pcDayItemAt(this, hovering ? hx : -1.0f, hovering ? hy : -1.0f);
 		if (sDayItemRow >= 0) pc_menu_set_hand(true);
+		for (int i = 0; i < 48; i++) {
+			sDayItemScale[i] = pc_menu_hover_scale(&sDayItemFeel[i], i == sDayItemRow, 0.06f, sys->mDeltaTime);
+		}
 	}
 #endif
 
@@ -821,6 +827,11 @@ void ObjDayEndResultItem::doDraw(Graphics& gfx)
 			}
 			mTreasurePokoCount[isOdd] = pokos;
 			mTreasurePokoCounter[isOdd]->update();
+#if PIKI_PC_MENU_TAP
+			float rowScale = i < 48 ? sDayItemScale[i] : 1.0f;
+			if (rowScale <= 0.0f) rowScale = 1.0f;
+			panes[isOdd]->updateScale(rowScale);
+#endif
 #if defined(VERSION_PAL)
 			if (mGXScissorBottomY)
 #endif
@@ -834,6 +845,9 @@ void ObjDayEndResultItem::doDraw(Graphics& gfx)
 		panes[!isOdd]->hide();
 		panes[isOdd]->show();
 		panes[isOdd]->add(0.0f, offs);
+#if PIKI_PC_MENU_TAP
+		panes[isOdd]->updateScale(1.0f);
+#endif
 		mScreenMain->search(icons[isOdd])->hide();
 		mScreenMain->search(names[isOdd])->hide();
 		mTreasurePokoCounter[isOdd]->hide();
@@ -841,6 +855,10 @@ void ObjDayEndResultItem::doDraw(Graphics& gfx)
 	}
 
 	GXSetScissor(left, top, width, height);
+#if PIKI_PC_MENU_TAP
+	panes[0]->updateScale(1.0f);
+	panes[1]->updateScale(1.0f);
+#endif
 	if (mFlags & 1 && mStatus != ITEMSTATUS_ForceScroll && mStatus != ITEMSTATUS_DrumRoll && mStatus != ITEMSTATUS_TotalValue) {
 		pane1->hide();
 		pane2->show();
