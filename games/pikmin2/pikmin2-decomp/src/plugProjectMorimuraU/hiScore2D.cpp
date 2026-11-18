@@ -1,6 +1,7 @@
 #include "pc_menu_tap.h"
 #if PIKI_PC_MENU_TAP
 #include "Dolphin/pad.h"
+#include "pc_menu_pointer.h"
 #endif
 #include "Morimura/HiScore.h"
 #ifdef PIKI_PC_PORT
@@ -438,6 +439,7 @@ u64 THiScore::getNameID(int id)
 #if PIKI_PC_MENU_TAP
 // Visible score row under the pointer. Hidden wrap-around panes are not rows.
 static int sHiScoreOver = -1;
+static int sHiScorePick = -1;
 static int pcHiScoreRowAt(THiScore* self, float nx, float ny)
 {
 	int hit = -1;
@@ -454,6 +456,7 @@ bool THiScore::doUpdate()
 {
 #if PIKI_PC_MENU_TAP
 	sHiScoreOver = -1;
+	if (!mCanInput) sHiScorePick = -1;
 #endif
 	if (mCanInput) {
 #if PIKI_PC_MENU_TAP
@@ -471,12 +474,18 @@ bool THiScore::doUpdate()
 		float ty = 0.0f;
 		if (pc_menu_take_tap(&tx, &ty)) {
 			const int pressed = pcHiScoreRowAt(this, tx, ty);
-			if (pressed >= 0) pc_menu_hover_press(mIndexPaneList[pressed]->getMainPane());
+			if (pressed >= 0) {
+				pc_menu_hover_press(mIndexPaneList[pressed]->getMainPane());
+				sHiScorePick = mIndexPaneList[pressed]->getIndex();
+			}
 		}
 	}
 #endif
 		Controller* input = mController;
 		if (input->getButtonDown() & Controller::PRESS_B) {
+#if PIKI_PC_MENU_TAP
+			sHiScorePick = -1;
+#endif
 			if (!mIsSection) {
 				P2ASSERTLINE(549, getOwner());
 				getOwner()->endScene(nullptr);
@@ -486,6 +495,9 @@ bool THiScore::doUpdate()
 			}
 			PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CANCEL, 0);
 		} else if ((input->getButton() & Controller::ANALOG_UP) || (input->getButton() & Controller::PRESS_DPAD_UP)) {
+#if PIKI_PC_MENU_TAP
+			sHiScorePick = -1;
+#endif
 			if (mState != 1) {
 				if (mIndPaneXDirection == 0.0f) {
 					mIndPaneXDirection = 1.0f;
@@ -498,6 +510,9 @@ bool THiScore::doUpdate()
 				}
 			}
 		} else if ((input->getButton() & Controller::ANALOG_DOWN) || (input->getButton() & Controller::PRESS_DPAD_DOWN)) {
+#if PIKI_PC_MENU_TAP
+			sHiScorePick = -1;
+#endif
 			if (mState != 2) {
 				if (mIndPaneXDirection == 0.0f) {
 					mIndPaneXDirection = -1.0f;
@@ -509,6 +524,20 @@ bool THiScore::doUpdate()
 					PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_ERROR, 0);
 				}
 			}
+#if PIKI_PC_MENU_TAP
+		} else if (sHiScorePick >= 0 && mIndexGroup && mIndexGroup->mStateID == TIndexGroup::IDGroup_Idle) {
+			const int step = pc_list_step_toward(mIndexPaneList[mCurrActiveRowSel]->getIndex(), sHiScorePick,
+			                                     mState != 1, mState != 2);
+			if (step > 0) {
+				if (mIndPaneXDirection == 0.0f) mIndPaneXDirection = -1.0f;
+				mIndexGroup->downIndex();
+			} else if (step < 0) {
+				if (mIndPaneXDirection == 0.0f) mIndPaneXDirection = 1.0f;
+				mIndexGroup->upIndex();
+			} else {
+				sHiScorePick = -1;
+			}
+#endif
 		}
 	}
 

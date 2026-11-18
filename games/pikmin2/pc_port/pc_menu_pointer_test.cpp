@@ -152,4 +152,11 @@ int main() {
     CHECK(pc_list_wheel_button(true, false, -1, 0x8, 0x4) == 0);
     CHECK(pc_list_wheel_button(false, true, 1, 0x8, 0x4) == 0);
     CHECK(pc_list_wheel_button(true, true, 0, 0x8, 0x4) == 0);
+
+    // A click on a list row steps toward that index, and stops at a blocked end.
+    CHECK(pc_list_step_toward(2, 2, true, true) == 0);
+    CHECK(pc_list_step_toward(2, 5, true, true) == 1);
+    CHECK(pc_list_step_toward(5, 2, true, true) == -1);
+    CHECK(pc_list_step_toward(2, 5, true, false) == 0);
+    CHECK(pc_list_step_toward(5, 2, false, true) == 0);
 }

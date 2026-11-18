@@ -193,6 +193,12 @@ unsigned short pc_list_wheel_button(bool hasUp, bool hasDown, int steps, unsigne
     if (!hasUp || !hasDown || steps == 0) return 0;
     return steps > 0 ? up : down;
 }
+int pc_list_step_toward(int selected, int target, bool canUp, bool canDown)
+{
+    if (target == selected) return 0;
+    if (target > selected) return canDown ? 1 : 0;
+    return canUp ? -1 : 0;
+}
 int pc_pointer_frame() { return tick; }
 int plateBatchTick = -100;
 void pc_plate_request(unsigned short pad, const char* label) {

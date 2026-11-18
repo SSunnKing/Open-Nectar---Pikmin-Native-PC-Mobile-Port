@@ -67,5 +67,8 @@ float pc_plate_feel(unsigned short pad, bool over, float dt);
 // Wheel on a screen that asked for both Up and Down. 0 when it should not scroll.
 // steps > 0 is Up, matching the settings menu.
 unsigned short pc_list_wheel_button(bool hasUp, bool hasDown, int steps, unsigned short up, unsigned short down);
+// One scroll step from the selected index toward a clicked row. +1 is down
+// (a higher index), -1 is up. 0 when already there or that end is blocked.
+int pc_list_step_toward(int selected, int target, bool canUp, bool canDown);
 int pc_pointer_frame();
 #endif
