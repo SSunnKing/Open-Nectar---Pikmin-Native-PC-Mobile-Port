@@ -267,6 +267,22 @@ bool TOmake::doUpdateStateWait()
 			if (!mCursor.mCounter && pc_menu_take_tap(&tx, &ty)) {
 				const int pressed = pcOmakeRowAt(this, tx, ty);
 				if (pressed >= 0 && mPaneList1[pressed]) pc_menu_hover_press(mPaneList1[pressed]);
+				if (pressed == mCurrSel) {
+					pc_menu_queue_button(Controller::PRESS_A);
+				} else if (pressed >= 0) {
+					const int prev = mCurrSel;
+					mCurrSel       = pressed;
+					JGeometry::TBox2f bounds;
+					bounds                 = *mPaneList2[mCurrSel]->getBounds();
+					mCursor.mBounds1       = mCursor.mBounds2;
+					mCursor.mBounds2       = bounds;
+					mCursor.mCounter       = mCursor.mCounterMax;
+					mCursor.mWindowPane    = mPaneList1[mCurrSel];
+					mCursor.mScaleMgr.up(0.1f, 30.0f, 0.6f, 0.0f);
+					mFonts[prev].disable();
+					mFonts[mCurrSel].enable();
+					PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+				}
 			}
 			for (int i = 0; i < 7; i++) {
 				J2DPane* row = mPaneList1[i];
