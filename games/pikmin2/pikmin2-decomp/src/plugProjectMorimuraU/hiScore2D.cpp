@@ -10,6 +10,7 @@ extern "C" void pc_gfx_p2_black_sides(void);
 #include "JSystem/JKernel/JKRArchive.h"
 #include "Morimura/mrUtil.h"
 #include "Controller.h"
+#include "System.h"
 #include "PSSystem/PSSystemIF.h"
 #include "Dolphin/rand.h"
 #include "trig.h"
@@ -436,6 +437,7 @@ u64 THiScore::getNameID(int id)
  */
 #if PIKI_PC_MENU_TAP
 // Visible score row under the pointer. Hidden wrap-around panes are not rows.
+static int sHiScoreOver = -1;
 static int pcHiScoreRowAt(THiScore* self, float nx, float ny)
 {
 	int hit = -1;
@@ -450,6 +452,9 @@ static int pcHiScoreRowAt(THiScore* self, float nx, float ny)
 
 bool THiScore::doUpdate()
 {
+#if PIKI_PC_MENU_TAP
+	sHiScoreOver = -1;
+#endif
 	if (mCanInput) {
 #if PIKI_PC_MENU_TAP
 	pc_menu_plate(PAD_BUTTON_B, "B Back");
@@ -460,6 +465,7 @@ bool THiScore::doUpdate()
 		float hy = 0.0f;
 		int over = -1;
 		if (pc_menu_hover(&hx, &hy)) over = pcHiScoreRowAt(this, hx, hy);
+		sHiScoreOver = over;
 		if (over >= 0) pc_menu_set_hand(true);
 	}
 #endif
@@ -594,7 +600,12 @@ bool THiScore::doUpdate()
 
 	if (mScaleMgrList) {
 		for (int i = 0; i < mNumActiveRows; i++) {
-			mIndexPaneList[i]->mPane->updateScale(mScaleMgrList[i]->calc());
+			f32 scale = mScaleMgrList[i]->calc();
+#if PIKI_PC_MENU_TAP
+			// Hover eases the row. It does not move the selection.
+			scale *= pc_menu_hover_scale(mIndexPaneList[i]->mPane, i == sHiScoreOver, 0.06f, sys->mDeltaTime);
+#endif
+			mIndexPaneList[i]->mPane->updateScale(scale);
 		}
 	} else {
 		for (int i = 0; i < mNumActiveRows; i++) {
