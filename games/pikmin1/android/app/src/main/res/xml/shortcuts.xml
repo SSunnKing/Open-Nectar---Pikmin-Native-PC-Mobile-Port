@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Static shortcuts on a long-press of the Open Nectar icon (#336).
+     Each one opens that game. The intent matches ShortcutActivity's filter:
+     VIEW opennectar://launch/pikmin1|pikmin2, plus the LAUNCH extra. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="pikmin1"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_pikmin"
+        android:shortcutLongLabel="@string/shortcut_pikmin_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="org.opennectar"
+            android:targetClass="org.opennectar.ShortcutActivity"
+            android:data="opennectar://launch/pikmin1">
+            <extra android:name="org.opennectar.LAUNCH" android:value="pikmin1" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="pikmin2"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_pikmin2"
+        android:shortcutLongLabel="@string/shortcut_pikmin2_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="org.opennectar"
+            android:targetClass="org.opennectar.ShortcutActivity"
+            android:data="opennectar://launch/pikmin2">
+            <extra android:name="org.opennectar.LAUNCH" android:value="pikmin2" />
+        </intent>
+    </shortcut>
+</shortcuts>

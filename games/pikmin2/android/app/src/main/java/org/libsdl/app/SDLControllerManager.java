@@ -92,6 +92,15 @@ public class SDLControllerManager
         mHapticHandler.stop(device_id);
     }
 
+    // Stick, trigger and hat motion. Android ORs source flags, so a Bluetooth
+    // DualShock 4 event is often SOURCE_JOYSTICK|SOURCE_GAMEPAD (and sometimes
+    // SOURCE_KEYBOARD) and is not equal to SOURCE_JOYSTICK. Some drivers also
+    // tag the stick axes SOURCE_GAMEPAD and omit SOURCE_CLASS_JOYSTICK.
+    public static boolean isJoystickMotionSource(int source) {
+        return (source & InputDevice.SOURCE_CLASS_JOYSTICK) != 0
+                || (source & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD;
+    }
+
     // Check if a given device is considered a possible SDL joystick
     public static boolean isDeviceSDLJoystick(int deviceId) {
         InputDevice device = InputDevice.getDevice(deviceId);
@@ -224,7 +233,7 @@ class SDLJoystickHandler_API16 extends SDLJoystickHandler {
                     List<InputDevice.MotionRange> ranges = joystickDevice.getMotionRanges();
                     Collections.sort(ranges, new RangeComparator());
                     for (InputDevice.MotionRange range : ranges) {
-                        if ((range.getSource() & InputDevice.SOURCE_CLASS_JOYSTICK) != 0) {
+                        if (SDLControllerManager.isJoystickMotionSource(range.getSource())) {
                             if (range.getAxis() == MotionEvent.AXIS_HAT_X || range.getAxis() == MotionEvent.AXIS_HAT_Y) {
                                 joystick.hats.add(range);
                             } else {
@@ -466,6 +475,24 @@ class SDLJoystickHandler_API19 extends SDLJoystickHandler_API16 {
                 button_mask |= masks[i];
             }
         }
+        // Face buttons are bits 0..3 (A B X Y), matching keycode_to_SDL.
+        // InputDevice.hasKeys() returns false for every KEYCODE_BUTTON_* on
+        // some Bluetooth HID gamepads (DualShock 4, Android 12+, including
+        // Samsung). The KeyEvents still arrive. An empty mask makes
+        // SDL_CreateMappingForAndroidController refuse a mapping, the pad is
+        // never opened, and only Cross/Circle survive as Enter/Escape.
+        final int faceButtons = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3);
+        if ((button_mask & faceButtons) == 0
+                && (joystickDevice.getSources() & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD) {
+            Log.i("SDL", "Gamepad \"" + joystickDevice.getName()
+                    + "\" reported no face buttons; assuming the standard Android layout");
+            button_mask |= faceButtons;
+            button_mask |= (1 << 4);  // back / select
+            button_mask |= (1 << 6);  // start
+            button_mask |= (1 << 7) | (1 << 8);   // stick clicks
+            button_mask |= (1 << 9) | (1 << 10);  // shoulders
+            button_mask |= (1 << 11) | (1 << 12) | (1 << 13) | (1 << 14); // d-pad
+        }
         return button_mask;
     }
 }
@@ -626,10 +653,11 @@ class SDLGenericMotionListener_API12 implements View.OnGenericMotionListener {
         float x, y;
         int action;
 
-        switch ( event.getSource() ) {
-            case InputDevice.SOURCE_JOYSTICK:
-                return SDLControllerManager.handleJoystickMotionEvent(event);
+        if (SDLControllerManager.isJoystickMotionSource(event.getSource())) {
+            return SDLControllerManager.handleJoystickMotionEvent(event);
+        }
 
+        switch ( event.getSource() ) {
             case InputDevice.SOURCE_MOUSE:
                 action = event.getActionMasked();
                 switch (action) {
@@ -755,10 +783,11 @@ class SDLGenericMotionListener_API26 extends SDLGenericMotionListener_API24 {
         float x, y;
         int action;
 
-        switch ( event.getSource() ) {
-            case InputDevice.SOURCE_JOYSTICK:
-                return SDLControllerManager.handleJoystickMotionEvent(event);
+        if (SDLControllerManager.isJoystickMotionSource(event.getSource())) {
+            return SDLControllerManager.handleJoystickMotionEvent(event);
+        }
 
+        switch ( event.getSource() ) {
             case InputDevice.SOURCE_MOUSE:
             // DeX desktop mouse cursor is a separate non-standard input type.
             case InputDevice.SOURCE_MOUSE | InputDevice.SOURCE_TOUCHSCREEN:
