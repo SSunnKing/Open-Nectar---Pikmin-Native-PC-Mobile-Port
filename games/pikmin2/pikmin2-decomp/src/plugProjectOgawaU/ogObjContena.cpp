@@ -501,6 +501,13 @@ bool ObjContena::moveContena()
 				else if (mPaneArrowDown && mPaneArrowDown->isVisible() && pc_menu_pane_hit(mPaneArrowDown, hx, hy, 0.02f)) sOnionArrow = 1;
 			}
 			if (sOnionArrow >= 0) pc_menu_set_hand(true);
+			float tx = 0.0f, ty = 0.0f;
+			if (pc_menu_take_tap(&tx, &ty)) {
+				J2DPane* arrow = nullptr;
+				if (mPaneArrowUp && mPaneArrowUp->isVisible() && pc_menu_pane_hit(mPaneArrowUp, tx, ty, 0.02f)) arrow = mPaneArrowUp;
+				else if (mPaneArrowDown && mPaneArrowDown->isVisible() && pc_menu_pane_hit(mPaneArrowDown, tx, ty, 0.02f)) arrow = mPaneArrowDown;
+				if (arrow) pc_menu_hover_press(arrow);
+			}
 		}
 #endif
 		if (mController->getButtonDown() & Controller::PRESS_B) {
