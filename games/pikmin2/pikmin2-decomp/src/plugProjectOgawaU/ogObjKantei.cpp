@@ -349,6 +349,7 @@ bool ObjKantei::doUpdate()
 			pcTap = pc_menu_take_tap(&tx, &ty);
 		}
 #endif
+		// B does nothing during the appraisal. Mouse Back and Backspace stay unused.
 		if (mStartTimer >= msVal.mNameAppearDelay || pad->getButtonDown() & Controller::PRESS_A
 		    || (mDisp->mSecondaryController && mDisp->mSecondaryController->getButtonDown() & Controller::PRESS_A)
 #if PIKI_PC_MENU_TAP
@@ -399,6 +400,7 @@ bool ObjKantei::doUpdate()
 				pcTap = pc_menu_take_tap(&tx, &ty);
 			}
 #endif
+			// B does nothing here either. The ship message, once open, has its own buttons.
 			if (pad && pad->getButtonDown() & Controller::PRESS_A
 			    || (mDisp->mSecondaryController && mDisp->mSecondaryController->getButtonDown() & Controller::PRESS_A)
 #if PIKI_PC_MENU_TAP
