@@ -152,6 +152,15 @@ bool TOmakeCardE::doUpdateStateWait()
 		if (mPaneArrowUp) mPaneArrowUp->updateScale(pc_menu_hover_scale(&sCardUpFeel, onUp, 0.06f, dt));
 		if (mPaneArrowDown) mPaneArrowDown->updateScale(pc_menu_hover_scale(&sCardDownFeel, onDown, 0.06f, dt));
 		if (card) card->updateScale(pc_menu_hover_scale(&sCardFeel, onCard && !onUp && !onDown, 0.06f, dt));
+		float tx = 0.0f, ty = 0.0f;
+		if (pc_menu_take_tap(&tx, &ty)) {
+			const bool pressUp = mPaneArrowUp && mPaneArrowUp->getAlpha() > 0 && pc_menu_pane_hit(mPaneArrowUp, tx, ty, 0.01f);
+			const bool pressDown = mPaneArrowDown && mPaneArrowDown->getAlpha() > 0 && pc_menu_pane_hit(mPaneArrowDown, tx, ty, 0.01f);
+			const bool pressCard = card && pc_menu_pane_hit(card, tx, ty, 0.0f);
+			if (pressUp) pc_menu_hover_press(&sCardUpFeel);
+			else if (pressDown) pc_menu_hover_press(&sCardDownFeel);
+			else if (pressCard) pc_menu_hover_press(&sCardFeel);
+		}
 	}
 #endif
 		u32 press = mInput->getButtonDown();
