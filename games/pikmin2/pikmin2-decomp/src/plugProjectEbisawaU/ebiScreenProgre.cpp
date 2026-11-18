@@ -316,6 +316,7 @@ void TScreenProgre::update()
 						mCursor2.mIsLeft = true;
 						PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
 					}
+				// B does nothing on this prompt. Mouse Back and Backspace stay unused.
 				} else if (mController->getButtonDown() & Controller::PRESS_A) {
 					setDecide();
 					return;
