@@ -482,6 +482,9 @@ bool ObjContena::moveContena()
 		mTimer2 -= sys->mDeltaTime;
 	}
 
+#if PIKI_PC_MENU_TAP
+	sOnionArrow = -1;
+#endif
 	if (!data->mState) {
 		data->mState = 1;
 	} else {
@@ -491,7 +494,6 @@ bool ObjContena::moveContena()
 		pc_menu_plate(PAD_BUTTON_A, "A OK");
 		pc_menu_plate(PAD_BUTTON_DOWN, "Down (out)");
 		pc_menu_plate(PAD_BUTTON_UP, "Up (in)");
-		sOnionArrow = -1;
 		{
 			float hx = 0.0f, hy = 0.0f;
 			if (pc_menu_hover(&hx, &hy)) {
@@ -601,6 +603,10 @@ void ObjContena::commonUpdate()
 
 		f32 scale3 = msVal._34 * (mScaleArrow1->calc() - 1.0f) + 1.0f;
 		f32 scale4 = msVal._34 * (mScaleArrow2->calc() - 1.0f) + 1.0f;
+#if PIKI_PC_MENU_TAP
+		scale3 *= pc_menu_hover_scale(mPaneArrowUp, sOnionArrow == 0, 0.06f, sys->mDeltaTime);
+		scale4 *= pc_menu_hover_scale(mPaneArrowDown, sOnionArrow == 1, 0.06f, sys->mDeltaTime);
+#endif
 		mPaneArrowUp->updateScale(scale3);
 		mPaneArrowDown->updateScale(scale4);
 	}
