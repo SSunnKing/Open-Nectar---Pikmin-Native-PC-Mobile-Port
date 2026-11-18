@@ -434,6 +434,20 @@ u64 THiScore::getNameID(int id)
  * @note Address: 0x8037E194
  * @note Size: 0x9F0
  */
+#if PIKI_PC_MENU_TAP
+// Visible score row under the pointer. Hidden wrap-around panes are not rows.
+static int pcHiScoreRowAt(THiScore* self, float nx, float ny)
+{
+	int hit = -1;
+	if (!self->mIndexPaneList) return hit;
+	for (int i = 0; i < self->mNumActiveRows; i++) {
+		J2DPane* pane = self->mIndexPaneList[i] ? self->mIndexPaneList[i]->getMainPane() : nullptr;
+		if (pane && pane->isVisible() && pc_menu_pane_hit(pane, nx, ny, 0.02f)) hit = i;
+	}
+	return hit;
+}
+#endif
+
 bool THiScore::doUpdate()
 {
 	if (mCanInput) {
@@ -441,6 +455,13 @@ bool THiScore::doUpdate()
 	pc_menu_plate(PAD_BUTTON_B, "B Back");
 	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
 	pc_menu_plate(PAD_BUTTON_UP, "Up");
+	{
+		float hx = 0.0f;
+		float hy = 0.0f;
+		int over = -1;
+		if (pc_menu_hover(&hx, &hy)) over = pcHiScoreRowAt(this, hx, hy);
+		if (over >= 0) pc_menu_set_hand(true);
+	}
 #endif
 		Controller* input = mController;
 		if (input->getButtonDown() & Controller::PRESS_B) {
