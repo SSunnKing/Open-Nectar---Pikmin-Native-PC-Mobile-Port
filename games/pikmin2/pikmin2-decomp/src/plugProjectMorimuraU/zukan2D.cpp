@@ -1447,11 +1447,18 @@ void TZukanBase::doUpdateOut()
 				J2DPane* pane   = icon->mPic;
 				if (icon->mParentIndex && icon->mPane->isVisible()) {
 					pane->show();
-					if (mIndexPaneList[i]->mSizeType == TIndexPane::Size_Small) {
-						pane->updateScale(mCategoryScale.x, mCategoryScale.y);
-					} else {
-						pane->updateScale(mCategoryScale.x * mLargeCategoryScale, mCategoryScale.y * mLargeCategoryScale);
+					f32 sx = mCategoryScale.x;
+					f32 sy = mCategoryScale.y;
+					if (mIndexPaneList[i]->mSizeType != TIndexPane::Size_Small) {
+						sx *= mLargeCategoryScale;
+						sy *= mLargeCategoryScale;
 					}
+#if PIKI_PC_MENU_TAP
+					const float hover = pc_menu_hover_scale(icon->mPane, i == sZukanRow && j == sZukanCol, 0.06f, sys->mDeltaTime);
+					sx *= hover;
+					sy *= hover;
+#endif
+					pane->updateScale(sx, sy);
 				} else {
 					pane->hide();
 				}
