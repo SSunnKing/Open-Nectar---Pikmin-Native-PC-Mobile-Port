@@ -4961,7 +4961,6 @@ void ngrScreen(int* w, int* h)
 
 // Código compartido (semilla + ajustes): campo de texto libre, como en Pikmin 1.
 bool sNgrShareEditing = false;
-bool sNgrTextWasOn    = false;
 char sNgrShareEdit[32];
 int  sNgrShareLen = 0;
 
@@ -4981,15 +4980,15 @@ void ngrShareBegin()
     sNgrShareEdit[0] = '\0';
     sNgrShareEditing = true;
     sNgrMessage[0]   = '\0';
-    // En Android abre el teclado virtual; se deja como estaba al salir.
-    sNgrTextWasOn = SDL_IsTextInputActive() == SDL_TRUE;
-    if (!sNgrTextWasOn) SDL_StartTextInput();
+    // En Android abre el teclado virtual. El juego lo apaga en cada frame
+    // salvo cuando un campo lo pide, para que macOS no muestre el acento.
+    pc_window_set_text_input_wanted(true);
 }
 
 void ngrShareEnd()
 {
     sNgrShareEditing = false;
-    if (!sNgrTextWasOn) SDL_StopTextInput();
+    pc_window_set_text_input_wanted(false);
 }
 
 void ngrShareType(char c)

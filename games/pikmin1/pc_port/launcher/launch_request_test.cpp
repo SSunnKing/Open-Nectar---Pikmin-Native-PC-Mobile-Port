@@ -102,5 +102,49 @@ int main()
     }
     check(launchFallbackNotice(LaunchTarget::Pikmin2, LaunchDecision::NotInstalled).find("Pikmin 2") == 0,
           "Pikmin 2 notice says Pikmin 2");
+
+    // Android shortcut Intent: extra, or a data URI, into the same launch target.
+    check(std::string(kAndroidLaunchExtra) == "org.opennectar.LAUNCH", "extra name");
+    check(parseAndroidLaunchChoice("pikmin1", "") == LaunchTarget::Pikmin1, "extra pikmin1");
+    check(parseAndroidLaunchChoice("pikmin2", "") == LaunchTarget::Pikmin2, "extra pikmin2");
+    check(parseAndroidLaunchChoice("", androidLaunchUri(LaunchTarget::Pikmin1)) == LaunchTarget::Pikmin1, "uri pikmin1");
+    check(parseAndroidLaunchChoice("", androidLaunchUri(LaunchTarget::Pikmin2)) == LaunchTarget::Pikmin2, "uri pikmin2");
+    check(parseAndroidLaunchChoice("pikmin2", androidLaunchUri(LaunchTarget::Pikmin1)) == LaunchTarget::Pikmin2,
+          "extra wins when both are set");
+    check(parseAndroidLaunchChoice("", androidLaunchUri(LaunchTarget::Pikmin2) + "?from=shortcut") == LaunchTarget::Pikmin2,
+          "uri query is not part of the name");
+    check(parseAndroidLaunchChoice("", androidLaunchUri(LaunchTarget::Pikmin1) + "#cover") == LaunchTarget::Pikmin1,
+          "uri fragment is not part of the name");
+    check(parseAndroidLaunchChoice("", androidLaunchUri(LaunchTarget::Pikmin1) + "/") == LaunchTarget::Pikmin1,
+          "one trailing slash is fine");
+    check(parseAndroidLaunchChoice("", "") == LaunchTarget::None, "no extra and no uri is a normal open");
+    check(parseAndroidLaunchChoice("", "https://example.com/pikmin1") == LaunchTarget::None, "other schemes are ignored");
+    check(parseAndroidLaunchChoice("", "opennectar://launch") == LaunchTarget::None, "uri without a game path is ignored");
+    check(parseAndroidLaunchChoice("pikmin3", androidLaunchUri(LaunchTarget::Pikmin1)) == LaunchTarget::Invalid,
+          "a bad extra is not rescued by the uri");
+    check(parseAndroidLaunchChoice("Pikmin1", "") == LaunchTarget::Invalid, "extra names are lowercase");
+    check(parseAndroidLaunchChoice("", std::string(kAndroidLaunchUriPrefix) + "pikmin3") == LaunchTarget::Invalid,
+          "unknown uri name is invalid");
+    check(parseAndroidLaunchChoice("", std::string(kAndroidLaunchUriPrefix)) == LaunchTarget::Invalid,
+          "our uri with no name is invalid");
+    check(parseAndroidLaunchChoice("", std::string(kAndroidLaunchUriPrefix) + "pikmin1/extra") == LaunchTarget::Invalid,
+          "extra uri path is invalid");
+    check(androidLaunchUri(LaunchTarget::None).empty() && androidLaunchUri(LaunchTarget::Invalid).empty(),
+          "no uri for a missing game");
+    const std::string invalidNotice = androidLaunchInvalidNotice();
+    check(!invalidNotice.empty() && invalidNotice.size() <= 80, "invalid shortcut notice is short");
+    check(invalidNotice.find("...") == std::string::npos && invalidNotice.find("\xE2\x80\xA6") == std::string::npos,
+          "invalid shortcut notice has no ellipsis");
+    check(invalidNotice.find("Pikmin") != std::string::npos && invalidNotice.find("Pikmin 2") != std::string::npos,
+          "invalid shortcut notice names both games");
+
+    // The three Android facts take the same decisions as a desktop --launch.
+    check(decideLaunch(androidLaunchFacts(true, false, true)) == LaunchDecision::Launch, "android: ready launches");
+    check(decideLaunch(androidLaunchFacts(false, false, true)) == LaunchDecision::NotInstalled, "android: not installed");
+    check(decideLaunch(androidLaunchFacts(false, true, false)) == LaunchDecision::NotInstalled,
+          "android: incomplete but not installed is not a repair");
+    check(decideLaunch(androidLaunchFacts(true, true, true)) == LaunchDecision::NeedsRepair, "android: incomplete install repairs");
+    check(decideLaunch(androidLaunchFacts(true, false, false)) == LaunchDecision::MissingExecutable,
+          "android: missing .so is a missing binary");
     return 0;
 }

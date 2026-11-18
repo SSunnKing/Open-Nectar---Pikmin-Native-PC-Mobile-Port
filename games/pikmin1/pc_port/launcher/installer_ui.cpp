@@ -1,5 +1,6 @@
 #include "installer_ui.h"
 #include "../pc_icon.h"
+#include "../pc_mac_keys.h"
 #include "dolphin_stubs/pc_card_save_root.h"
 #include "install_note_layout.h"
 #include "launcher_platform.h"
@@ -287,6 +288,8 @@ bool InstallerWindow::open(std::string& error)
         error = SDL_GetError();
         return false;
     }
+    // Same process rule as the game: a held key must not open the accent popup.
+    pc_mac_disable_press_and_hold();
     mImpl->window = SDL_CreateWindow("Open Nectar Installer", SDL_WINDOWPOS_CENTERED,
                                      SDL_WINDOWPOS_CENTERED, 760, 430, SDL_WINDOW_SHOWN);
     if (!mImpl->window) {

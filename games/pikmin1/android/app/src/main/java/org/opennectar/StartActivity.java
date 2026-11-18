@@ -274,8 +274,18 @@ public class StartActivity extends Activity {
     }
 
     private void openLauncher() {
-        startActivity(new Intent(this, LauncherActivity.class));
+        Intent intent = new Intent(this, LauncherActivity.class);
+        // A shortcut that arrived before the folder was ready keeps its game.
+        GameLaunch.copy(getIntent(), intent);
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(intent);
         finish();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
     }
 
     @Override

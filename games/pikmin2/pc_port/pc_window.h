@@ -215,6 +215,11 @@ const char* pc_window_get_last_error(void);
 void pc_window_set_mouse_relative_mode(bool enabled);
 bool pc_window_get_mouse_relative_mode(void);
 
+// A real text field (the randomizer share code) is the only place text input
+// stays on. Everywhere else it is forced off so a held key does not open the
+// macOS accent popup, and so Return reaches the menu pad.
+void pc_window_set_text_input_wanted(bool wanted);
+
 // Control mode selection
 void pc_window_set_control_mode(int mode);
 int pc_window_get_control_mode(void);
