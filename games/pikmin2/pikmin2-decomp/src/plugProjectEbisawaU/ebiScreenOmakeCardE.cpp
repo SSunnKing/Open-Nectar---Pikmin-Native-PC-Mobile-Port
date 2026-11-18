@@ -12,6 +12,12 @@ extern "C" void pc_gfx_p2_extend_shade(float gxY0, float gxY1, float stripW);
 
 static const char name[] = "ebiScreenOmakeCardE";
 
+#if PIKI_PC_MENU_TAP
+static char sCardFeel;
+static char sCardUpFeel;
+static char sCardDownFeel;
+#endif
+
 namespace ebi {
 namespace Screen {
 
@@ -142,6 +148,10 @@ bool TOmakeCardE::doUpdateStateWait()
 		                    && pc_menu_pane_hit(mPaneArrowDown, hx, hy, 0.01f);
 		const bool onCard = hovering && card && pc_menu_pane_hit(card, hx, hy, 0.0f);
 		if (onUp || onDown || onCard) pc_menu_set_hand(true);
+		const float dt = sys->mDeltaTime;
+		if (mPaneArrowUp) mPaneArrowUp->updateScale(pc_menu_hover_scale(&sCardUpFeel, onUp, 0.06f, dt));
+		if (mPaneArrowDown) mPaneArrowDown->updateScale(pc_menu_hover_scale(&sCardDownFeel, onDown, 0.06f, dt));
+		if (card) card->updateScale(pc_menu_hover_scale(&sCardFeel, onCard && !onUp && !onDown, 0.06f, dt));
 	}
 #endif
 		u32 press = mInput->getButtonDown();
