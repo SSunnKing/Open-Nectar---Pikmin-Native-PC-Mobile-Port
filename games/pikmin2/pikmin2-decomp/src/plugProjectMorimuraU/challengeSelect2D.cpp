@@ -1680,10 +1680,57 @@ bool TChallengeSelect::doUpdate()
 		if (pc_menu_take_tap(&tx, &ty)) {
 			if (!mPlayModeScreen->isOpen() && rulesClosed) {
 				const int course = pcChallengeCourseAt(this, tx, ty);
-				if (course >= 0) pc_menu_hover_press(mPanelList[course]->mPane1);
+				if (course >= 0) {
+					pc_menu_hover_press(mPanelList[course]->mPane1);
+					if (course == mCurrentSelection) {
+						if (mSelected1p) {
+							mPlayModeScreen->mAnimScreen[1]->blink(mTextFlashVal, 0.0f);
+							mPlayModeScreen->mAnimScreen[2]->blink(0.0f, 0.0f);
+						} else {
+							mPlayModeScreen->mAnimScreen[1]->blink(0.0f, 0.0f);
+							mPlayModeScreen->mAnimScreen[2]->blink(mTextFlashVal, 0.0f);
+						}
+						mPlayModeScreen->mDoShowNoController = false;
+						mPlayModeScreen->setState(TChallengePlayModeScreen::PlayModeScreen_Open);
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+					} else {
+						mRightOffset = course % 5;
+						mDownOffset  = course / 5;
+						if (mLevelNameMoveState < 0) mLevelNameMoveState = 3;
+						updatePanel = true;
+					}
+				}
 			} else if (mPlayModeScreen->isState(TChallengePlayModeScreen::PlayModeScreen_Active)) {
 				const int mode = pcChallengeModeAt(this, tx, ty);
-				if (mode >= 0) pc_menu_hover_press(mPlayModeScreen->mPaneList0[mode]);
+				if (mode >= 0) {
+					pc_menu_hover_press(mPlayModeScreen->mPaneList0[mode]);
+					const bool want1p = mode == 0;
+					if (want1p == mSelected1p) {
+						if (mSelected1p || (mConnect2p && !mSelected1p)) {
+							mPlayModeScreen->setState(TChallengePlayModeScreen::PlayModeScreen_Close);
+							if (!mIsSection) {
+								_134           = true;
+								demoStart();
+								mDisp->mStatus = Screen::Game2DMgr::CHECK2D_ChallengeSelect_InDemo;
+							}
+							mDisp->mStageNumber = mCurrentSelection;
+							mDisp->mPlayType    = mSelected1p ? 0 : 1;
+							PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_DECIDE, 0);
+						} else {
+							mPlayModeScreen->mDoShowNoController = true;
+							PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_ERROR, 0);
+						}
+					} else if (want1p) {
+						mPlayModeScreen->setBlink(mTextFlashVal);
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+						mSelected1p                          = true;
+						mPlayModeScreen->mDoShowNoController = false;
+					} else {
+						mPlayModeScreen->setBlink(mTextFlashVal);
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+						mSelected1p = false;
+					}
+				}
 			}
 		}
 	}
