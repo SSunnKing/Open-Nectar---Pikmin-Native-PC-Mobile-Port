@@ -13,6 +13,27 @@ extern "C" void pc_gfx_p2_extend_shade(float gxY0, float gxY1, float stripW);
 
 static const char className[] = "ebiScreenOmake";
 
+#if PIKI_PC_MENU_TAP
+namespace ebi {
+namespace Screen {
+struct TOmake;
+}
+}
+
+// A bonus row under the pointer, skipping the blank placeholder slots.
+static int pcOmakeRowAt(ebi::Screen::TOmake* self, float nx, float ny)
+{
+	int hit = -1;
+	for (int i = 0; i < 7; i++) {
+		J2DTextBox* msg = self->mPaneListMesg[i];
+		J2DPane* row    = self->mPaneList1[i];
+		if (!msg || !row || !row->isVisible() || msg->getUserInfo() == MC8("4844_00")) continue;
+		if (pc_menu_pane_hit(row, nx, ny, 0.01f)) hit = i;
+	}
+	return hit;
+}
+#endif
+
 namespace ebi {
 namespace Screen {
 
@@ -234,6 +255,14 @@ bool TOmake::doUpdateStateWait()
 
 	switch (mState2) {
 	case 0: {
+#if PIKI_PC_MENU_TAP
+		pc_menu_claim();
+		{
+			float hx = 0.0f, hy = 0.0f;
+			const int over = pc_menu_hover(&hx, &hy) ? pcOmakeRowAt(this, hx, hy) : -1;
+			if (over >= 0) pc_menu_set_hand(true);
+		}
+#endif
 		mInput.update();
 		if (mInput.mSelectionChanged) {
 
