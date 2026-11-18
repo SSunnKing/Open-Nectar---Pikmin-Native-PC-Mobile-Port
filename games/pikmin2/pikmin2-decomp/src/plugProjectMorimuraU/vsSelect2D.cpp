@@ -1295,6 +1295,17 @@ bool TVsSelect::doUpdate()
 			else sVsArrow = pcVsRulesArrow(this, hx, hy);
 		}
 		if (sVsCourse >= 0 || sVsArrow >= 0) pc_menu_set_hand(true);
+		float tx = 0.0f;
+		float ty = 0.0f;
+		if (pc_menu_take_tap(&tx, &ty) && mZoomState == 0) {
+			if (rulesinactive) {
+				const int row = pcVsCourseAt(this, tx, ty);
+				if (row >= 0) pc_menu_hover_press(mIndexPaneList[row]->getMainPane());
+			} else {
+				const int arrow = pcVsRulesArrow(this, tx, ty);
+				if (arrow >= 0) pc_menu_hover_press(mPaneRulesLR[arrow]);
+			}
+		}
 	}
 #endif
 		if (mZoomState == 0) {
