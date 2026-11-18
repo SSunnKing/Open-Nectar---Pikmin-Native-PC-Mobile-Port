@@ -3885,6 +3885,12 @@ bool HubWindow::open(const HubState& state, std::string& error)
     // Controllers opened before or after launch. A failure here leaves the
     // mouse and keyboard launcher unchanged.
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+#ifdef __ANDROID__
+    // The game sets this before SDL_Init (issue #177). The launcher did not,
+    // so HIDAPI still claimed a Bluetooth DualShock 4, the Android joystick
+    // was never created, and menus only saw Cross/Circle as Enter/Escape.
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "0");
+#endif
     m.gameController = SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) == 0;
     noteGamepadSubsystem(m.gameController);
 #ifdef __ANDROID__

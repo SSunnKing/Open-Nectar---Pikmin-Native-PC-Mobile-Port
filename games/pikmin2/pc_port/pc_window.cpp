@@ -3,6 +3,7 @@
 #endif
 #include "pc_window.h"
 #include "pc_menu_pad.h"
+#include "pc_pad_filter.h"
 
 static_assert(PAD_BUTTON_LEFT == PC_MENU_PAD_LEFT && PAD_BUTTON_RIGHT == PC_MENU_PAD_RIGHT
                   && PAD_BUTTON_DOWN == PC_MENU_PAD_DOWN && PAD_BUTTON_UP == PC_MENU_PAD_UP
@@ -71,18 +72,19 @@ static bool sLastInputIsGamepad = false;
 
 // DualSense on Linux also shows up as a motion-sensor joystick. Gravity on
 // that device's Y axis looks like a held stick, so the F1 menu walks itself.
+// On Android the same words are the name of the merged gamepad (issue #213).
 static bool pc_joystick_is_secondary(int index)
 {
 	const char* name = SDL_JoystickNameForIndex(index);
 	if (!name)
 		name = SDL_GameControllerNameForIndex(index);
-	if (!name)
-		return false;
-	std::string n(name);
-	for (char& c : n)
-		c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
-	return n.find("motion") != std::string::npos || n.find("touchpad") != std::string::npos
-	    || n.find("accelerometer") != std::string::npos || n.find("gyro") != std::string::npos;
+	const SDL_JoystickGUID guid = SDL_JoystickGetDeviceGUID(index);
+#if defined(__ANDROID__)
+	const bool android = true;
+#else
+	const bool android = false;
+#endif
+	return pc_pad_is_auxiliary_device(name, android, guid.data);
 }
 
 // Abre el joystick en la primera ranura libre (P1 y luego P2).
