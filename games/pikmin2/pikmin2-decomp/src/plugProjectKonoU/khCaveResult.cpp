@@ -288,6 +288,8 @@ void ObjCaveResult::doCreate(JKRArchive* arc)
 
 #if PIKI_PC_MENU_TAP
 static int sCaveRow = -1;
+static float sCaveScale[48];
+static char sCaveFeel[48];
 
 // Treasure under the pointer, from the scroll layout. The two row panes are restamped.
 static int pcCaveRowAt(ObjCaveResult* self, float nx, float ny)
@@ -343,6 +345,9 @@ bool ObjCaveResult::doUpdate()
 			const bool hovering = pc_menu_hover(&hx, &hy);
 			sCaveRow = pcCaveRowAt(this, hovering ? hx : -1.0f, hovering ? hy : -1.0f);
 			if (sCaveRow >= 0) pc_menu_set_hand(true);
+			for (int i = 0; i < 48; i++) {
+				sCaveScale[i] = pc_menu_hover_scale(&sCaveFeel[i], i == sCaveRow, 0.06f, sys->mDeltaTime);
+			}
 		}
 #endif
 		switch (mStatus) {
@@ -516,6 +521,11 @@ void ObjCaveResult::doDraw(Graphics& gfx)
 			}
 			mCurrOtaValues[isOdd] = next;
 			mCounterOtaValues[isOdd]->update();
+#if PIKI_PC_MENU_TAP
+			float rowScale = i < 48 ? sCaveScale[i] : 1.0f;
+			if (rowScale <= 0.0f) rowScale = 1.0f;
+			paneList[isOdd]->updateScale(rowScale);
+#endif
 			mScreenMain->draw(gfx, gfx.mOrthoGraph);
 		}
 		i++;
@@ -526,6 +536,9 @@ void ObjCaveResult::doDraw(Graphics& gfx)
 		paneList[!isOdd]->hide();
 		paneList[isOdd]->show();
 		paneList[isOdd]->add(0.0f, offs);
+#if PIKI_PC_MENU_TAP
+		paneList[isOdd]->updateScale(1.0f);
+#endif
 		setAlpha(isOdd, 255);
 		mScreenMain->search(icontags[isOdd])->hide();
 		mScreenMain->search(nametags[isOdd])->hide();
@@ -534,6 +547,10 @@ void ObjCaveResult::doDraw(Graphics& gfx)
 	}
 
 	GXSetScissor(x, y, wd, ht);
+#if PIKI_PC_MENU_TAP
+	paneList[0]->updateScale(1.0f);
+	paneList[1]->updateScale(1.0f);
+#endif
 	pane1->hide();
 	pane2->show();
 	paneList[0]->hide();
