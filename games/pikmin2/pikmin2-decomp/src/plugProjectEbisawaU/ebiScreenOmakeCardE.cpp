@@ -3,6 +3,7 @@
 #include "Dolphin/pad.h"
 #include "pc_menu_pointer.h"
 #include "gl/pc_gfx.h"
+#include "pc_window.h"
 #endif
 #include "ebi/Omake.h"
 #ifdef PIKI_PC_PORT
@@ -199,6 +200,12 @@ bool TOmakeCardE::doUpdateStateWait()
 			mState = EnteringZoomed;
 		}
 		mMesgScroll->scroll(mInput->mMStick.mYPos);
+#if PIKI_PC_MENU_TAP
+		// No Up or Down plate on this screen, so the wheel is free to take.
+		// One notch matches the click: a short hold of the stick.
+		const int wheel = pc_window_take_wheel_steps();
+		if (wheel != 0) mMesgScroll->scroll((float)wheel * 20.0f);
+#endif
 		f32 scroll            = mMesgScroll->getPosRate();
 		const int changeAlpha = sys->mDeltaTime * 2550.0f;
 		int alphaArrowUp      = mPaneArrowUp->getAlpha();
