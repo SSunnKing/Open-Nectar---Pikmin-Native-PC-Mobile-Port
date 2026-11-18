@@ -364,6 +364,11 @@ bool ObjFinalResult::doUpdate()
 			const bool hovering = pc_menu_hover(&hx, &hy);
 			sFinalPage = pcFinalPageAt(this, hovering ? hx : -1.0f, hovering ? hy : -1.0f);
 			if (sFinalPage >= 0) pc_menu_set_hand(true);
+			float tx = 0.0f, ty = 0.0f;
+			if (pc_menu_take_tap(&tx, &ty)) {
+				const int pressed = pcFinalPageAt(this, tx, ty);
+				if (pressed >= 0 && pressed < 8) pc_menu_hover_press(&sFinalFeel[pressed]);
+			}
 			for (int i = 0; i < 8; i++) {
 				sFinalScale[i] = pc_menu_hover_scale(&sFinalFeel[i], i == sFinalPage, 0.06f, sys->mDeltaTime);
 			}
