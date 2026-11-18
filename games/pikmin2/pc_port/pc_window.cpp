@@ -3,6 +3,7 @@
 #endif
 #include "pc_window.h"
 #include "pc_menu_pad.h"
+#include "pc_text_box.h"
 #include "pc_mac_keys.h"
 #include "pc_pad_filter.h"
 
@@ -244,6 +245,9 @@ static bool sSwarmPending[2]  = { false, false };
 
 bool pc_window_swarm_held(void) { return sSwarmHeld; }
 static bool sKeyBindingsInitialized = false;
+// Physical Enter, including a Mac portable Return key and a key the state
+// array missed. Sampled with the keyboard state in the menu translator.
+static PcMenuEnterLatch sEnterLatch = {};
 
 // Gamepad remapping state.
 static int sGamepadBindings[PC_KEY_ACT_COUNT];
@@ -318,6 +322,9 @@ SDL_Scancode pc_window_default_key_binding2(int action) {
     case PC_KEY_ACT_A: return static_cast<SDL_Scancode>(PC_BIND_MOUSE_BASE + SDL_BUTTON_LEFT);
     case PC_KEY_ACT_B: return static_cast<SDL_Scancode>(PC_BIND_MOUSE_BASE + SDL_BUTTON_RIGHT);
     case PC_KEY_ACT_Z: return static_cast<SDL_Scancode>(PC_BIND_MOUSE_BASE + SDL_BUTTON_MIDDLE);
+    // Left Option also opens the pause menu. Enter stays the first binding,
+    // and inside the menu it confirms, including Go to Sunset.
+    case PC_KEY_ACT_START: return SDL_SCANCODE_LALT;
     default: return SDL_SCANCODE_UNKNOWN;
     }
 }
@@ -1230,6 +1237,10 @@ void pc_window_poll_events(PADStatus* pad) {
 
     SDL_Event event;
     while (pc_window_poll_one(&event)) {
+        if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
+            pc_menu_pad_note_enter(sEnterLatch, event.key.keysym.scancode, event.key.keysym.sym,
+                                   event.type == SDL_KEYDOWN);
+        }
         switch (event.type) {
             case SDL_QUIT:
                 sShouldClose = true;
@@ -1331,8 +1342,10 @@ void pc_window_poll_events(PADStatus* pad) {
                     sMouseCursorDeltaY = 0.0f;
                 }
                 // The matching button-up can be dropped when the window loses focus.
-                if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+                if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
                     sRealMouseButtons = 0;
+                    sEnterLatch.down = false;
+                }
                 // Some platforms release the relative-mode grab while the
                 // window is unfocused; put it back on return (issue #52).
                 if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED && !sSettingsMenuOpen) {
@@ -1420,6 +1433,7 @@ void pc_window_poll_events(PADStatus* pad) {
         }
     }
 
+    pc_text_update_input(sEnterLatch.down);
     if (!pad) return;
 
     // Reset pad status for Channel 0
@@ -1473,7 +1487,19 @@ void pc_window_poll_events(PADStatus* pad) {
     if (held(PC_KEY_ACT_X))        button |= PAD_BUTTON_X;
     if (held(PC_KEY_ACT_Y))        button |= PAD_BUTTON_Y;
     if (held(PC_KEY_ACT_Z))        button |= PAD_TRIGGER_Z;
-    if (held(PC_KEY_ACT_START))    button |= PAD_BUTTON_START;
+    // Enter is Start. A Mac portable reports that key as KP_ENTER, and text
+    // input can leave it out of the state array, so the binding matches every
+    // physical Enter, not only SDL_SCANCODE_RETURN.
+    const bool enterDown = pc_menu_pad_enter_down(
+        state && state[SDL_SCANCODE_RETURN] != 0,
+        state && state[SDL_SCANCODE_KP_ENTER] != 0,
+        state && state[SDL_SCANCODE_RETURN2] != 0,
+        sEnterLatch.down);
+    auto startBindingHeld = [&](int bind) {
+        return pc_menu_pad_start_binding_down(bind, pc_window_binding_held(bind, state, boundMouse), enterDown);
+    };
+    if (startBindingHeld(sKeyBindings[PC_KEY_ACT_START]) || startBindingHeld(sKeyBindings2[PC_KEY_ACT_START]))
+        button |= PAD_BUTTON_START;
 
     // D-Pad
     if (held(PC_KEY_ACT_DPAD_UP))    button |= PAD_BUTTON_UP;
@@ -1519,8 +1545,11 @@ void pc_window_poll_events(PADStatus* pad) {
     if (pc_menu_mode_active()) {
         PcMenuPadKeys keys = {};
         auto down = [&](SDL_Scancode sc) { return state[sc] != 0; };
-        keys.enter     = down(SDL_SCANCODE_RETURN);
-        keys.kpEnter   = down(SDL_SCANCODE_KP_ENTER);
+        // Same Enter Space uses: Return, the portable Return key, Return2,
+        // or a key event the state array did not record. Menu mode turns it
+        // into A and takes Start back off.
+        keys.enter     = enterDown;
+        keys.kpEnter   = enterDown;
         keys.space     = down(SDL_SCANCODE_SPACE);
         keys.escape    = down(SDL_SCANCODE_ESCAPE);
         keys.backspace = down(SDL_SCANCODE_BACKSPACE);

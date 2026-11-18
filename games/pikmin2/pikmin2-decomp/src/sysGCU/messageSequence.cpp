@@ -6,6 +6,7 @@
 #include "PSSystem/PSSystemIF.h"
 #ifdef PIKI_PC_PORT
 extern bool gPcAutoAdvanceMovieText; // moviePlayer.cpp
+#include "pc_text_box.h"
 #endif
 
 namespace P2JME {
@@ -160,7 +161,27 @@ bool TSequenceProcessor::do_isReady()
 		setFlag(SeqProc_IsForceFinish);
 	}
 #endif
-	if (isFlag(SeqProc_IsWaitingPressA)) {
+#ifdef PIKI_PC_PORT
+	// Enter, Space and left click show a typing page, or turn a shown one.
+	// The press is used once, as in Pikmin 1. A controller button still takes
+	// the disc path below, and this flag keeps Space from doing both.
+	bool portHandled = false;
+	const bool pageShown = isFlag(SeqProc_IsWaitingPressA);
+	const PcTextBoxPress portPress = pc_text_box_port_press(pageShown, pc_text_port_accept_pressed());
+	if (portPress == PC_TEXT_BOX_NEXT_PAGE) {
+		resetAbtnWait();
+		resetFlag(SeqProc_IsForceFinish);
+		portHandled = true;
+	} else if (portPress == PC_TEXT_BOX_SHOW_PAGE) {
+		// Force-finish, then fall through so this call starts revealing the
+		// page. The press is already used, so the page does not also turn.
+		doFastForwardSE();
+		setFlag(SeqProc_IsForceFinish);
+	}
+#else
+	const bool portHandled = false;
+#endif
+	if (!portHandled && isFlag(SeqProc_IsWaitingPressA)) {
 		mPageFinishWaitTimer -= sys->mDeltaTime;
 		if (mPageFinishWaitTimer <= 0.0f) {
 			bool checkVars = (mController1 || mController2);
@@ -172,7 +193,7 @@ bool TSequenceProcessor::do_isReady()
 				resetFlag(SeqProc_IsForceFinish);
 			}
 		}
-	} else {
+	} else if (!portHandled) {
 		f32 frameCount = 1.0f;
 		if (isFlag(SeqProc_IsForceFinish)) {
 			frameCount = 10.0f;

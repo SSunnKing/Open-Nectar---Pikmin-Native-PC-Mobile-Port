@@ -26,6 +26,9 @@ extern "C" int pc_speedrun_active(void);
 #include "PSM/Demo.h"
 #include "Game/P2JST/ObjectSystem.h"
 #include "P2JME/Movie.h"
+#ifdef PIKI_PC_PORT
+#include "pc_text_box.h"
+#endif
 #include "JSystem/JStudio_JMessage.h"
 #include "JSystem/JStudio_JStage.h"
 #include "JSystem/JStudio_JParticle.h"
@@ -958,6 +961,14 @@ bool MoviePlayer::update(Controller* input1, Controller* input2)
 			}
 		}
 #ifdef PIKI_PC_PORT
+		// Enter, Space and left click skip a cutscene that is not waiting on
+		// its text box. The text box spends that press itself. Speedrun does
+		// not. A controller still uses the disc check above.
+		if (mDemoState == DEMOSTATE_Playing && mStudioControl && !mStudioControl->mSuspend) {
+			const bool textOpen = mTextControl && mTextControl->mIsActive;
+			if (!textOpen && pc_cutscene_port_skip(pc_speedrun_active(), false, pc_text_port_accept_pressed()))
+				skip();
+		}
 		// El salto pedido se cumple en cuanto el efecto en el juego ya se aplicó
 		// (fuera de la espera de texto: el botón ya se pulsó antes).
 		if (sPcDeferredGameplaySkip && mDemoState == DEMOSTATE_Playing && mStudioControl && !pcMovieGameplayTransitionPending(this)) {
