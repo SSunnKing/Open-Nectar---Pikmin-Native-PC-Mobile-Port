@@ -330,6 +330,9 @@ void ObjKantei::commonUpdate()
 bool ObjKantei::doUpdate()
 {
 	Controller* pad = getGamePad();
+#if PIKI_PC_MENU_TAP
+	bool pcTap = false;
+#endif
 	switch (mState) {
 	case Kantei_Begin:
 		mState      = Kantei_PokoAppearDelay;
@@ -341,12 +344,17 @@ bool ObjKantei::doUpdate()
 #if PIKI_PC_MENU_TAP
 		pc_menu_claim();
 		{
-			float hx = 0.0f, hy = 0.0f;
+			float hx = 0.0f, hy = 0.0f, tx = 0.0f, ty = 0.0f;
 			if (pc_menu_hover(&hx, &hy)) pc_menu_set_hand(true);
+			pcTap = pc_menu_take_tap(&tx, &ty);
 		}
 #endif
 		if (mStartTimer >= msVal.mNameAppearDelay || pad->getButtonDown() & Controller::PRESS_A
-		    || (mDisp->mSecondaryController && mDisp->mSecondaryController->getButtonDown() & Controller::PRESS_A)) {
+		    || (mDisp->mSecondaryController && mDisp->mSecondaryController->getButtonDown() & Controller::PRESS_A)
+#if PIKI_PC_MENU_TAP
+		    || pcTap
+#endif
+		    ) {
 			mState              = Kantei_SetPokoValue;
 			mDisp->mPelletValue = 0;
 			mPokoCounterCurr->startSlot(msVal.mPokoSlotFactor);
@@ -386,12 +394,17 @@ bool ObjKantei::doUpdate()
 #if PIKI_PC_MENU_TAP
 			pc_menu_claim();
 			{
-				float hx = 0.0f, hy = 0.0f;
+				float hx = 0.0f, hy = 0.0f, tx = 0.0f, ty = 0.0f;
 				if (pc_menu_hover(&hx, &hy)) pc_menu_set_hand(true);
+				pcTap = pc_menu_take_tap(&tx, &ty);
 			}
 #endif
 			if (pad && pad->getButtonDown() & Controller::PRESS_A
-			    || (mDisp->mSecondaryController && mDisp->mSecondaryController->getButtonDown() & Controller::PRESS_A)) {
+			    || (mDisp->mSecondaryController && mDisp->mSecondaryController->getButtonDown() & Controller::PRESS_A)
+#if PIKI_PC_MENU_TAP
+			    || pcTap
+#endif
+			    ) {
 				mShipMessageBoxID = mDisp->mPelletMessageID;
 				// if the tagID exists, open ship message box, unless in E3 mode
 				if (mShipMessageBoxID != 0 && !Game::gGameConfig.mParms.mE3version.mData) {
