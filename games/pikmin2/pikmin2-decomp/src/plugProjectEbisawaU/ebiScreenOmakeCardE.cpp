@@ -1,6 +1,8 @@
 #include "pc_menu_tap.h"
 #if PIKI_PC_MENU_TAP
 #include "Dolphin/pad.h"
+#include "pc_menu_pointer.h"
+#include "gl/pc_gfx.h"
 #endif
 #include "ebi/Omake.h"
 #ifdef PIKI_PC_PORT
@@ -160,6 +162,21 @@ bool TOmakeCardE::doUpdateStateWait()
 			if (pressUp) pc_menu_hover_press(&sCardUpFeel);
 			else if (pressDown) pc_menu_hover_press(&sCardDownFeel);
 			else if (pressCard) pc_menu_hover_press(&sCardFeel);
+			// The stick scrolls one frame at a time. A click is one sample, so it
+			// moves as far as a short hold of the stick. The arrows are up and down.
+			// The outer quarters of the card do the same, and the middle confirms.
+			int page = pressUp ? 1 : pressDown ? -1 : 0;
+			if (page == 0 && pressCard) {
+				const PcPointerRect rect = pc_pointer_rect(card);
+				int width = 0, height = 0;
+				pc_gfx_get_drawable_size(&width, &height);
+				const float span = rect.x1 - rect.x0;
+				const float px = tx * (float)width;
+				if (rect.valid && span > 0.0f && px < rect.x0 + span * 0.25f) page = 1;
+				else if (rect.valid && span > 0.0f && px > rect.x1 - span * 0.25f) page = -1;
+				else pc_menu_queue_button(Controller::PRESS_A);
+			}
+			if (page != 0 && mMesgScroll) mMesgScroll->scroll((float)page * 20.0f);
 		}
 	}
 #endif
@@ -169,6 +186,7 @@ bool TOmakeCardE::doUpdateStateWait()
 			mExitState = false;
 			return true;
 		}
+		// Mouse Back and Backspace already arrive as B while a menu is up.
 		if (press & Controller::PRESS_B) {
 			PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CANCEL, 0);
 			mExitState = true;
