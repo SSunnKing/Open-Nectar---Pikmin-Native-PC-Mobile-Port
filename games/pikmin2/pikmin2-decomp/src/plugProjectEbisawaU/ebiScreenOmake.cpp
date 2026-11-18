@@ -263,6 +263,11 @@ bool TOmake::doUpdateStateWait()
 			float hx = 0.0f, hy = 0.0f;
 			const int over = pc_menu_hover(&hx, &hy) ? pcOmakeRowAt(this, hx, hy) : -1;
 			if (over >= 0) pc_menu_set_hand(true);
+			float tx = 0.0f, ty = 0.0f;
+			if (!mCursor.mCounter && pc_menu_take_tap(&tx, &ty)) {
+				const int pressed = pcOmakeRowAt(this, tx, ty);
+				if (pressed >= 0 && mPaneList1[pressed]) pc_menu_hover_press(mPaneList1[pressed]);
+			}
 			for (int i = 0; i < 7; i++) {
 				J2DPane* row = mPaneList1[i];
 				if (!row) continue;
