@@ -70,5 +70,20 @@ unsigned short pc_list_wheel_button(bool hasUp, bool hasDown, int steps, unsigne
 // One scroll step from the selected index toward a clicked row. +1 is down
 // (a higher index), -1 is up. 0 when already there or that end is blocked.
 int pc_list_step_toward(int selected, int target, bool canUp, bool canDown);
+
+// A result list stamps two template rows. The draw's own test, in window
+// space where 0 is the top of the scissor:
+//   check = index * rowHeight + scroll
+//   hidden when check < -rowHeight or windowHeight < check.
+// top/bottom are that band. shown is false for a bad height or a hidden row.
+struct PcResultRowBand { float top, bottom; bool shown; };
+PcResultRowBand pc_result_row_band(int index, float rowHeight, float scroll, float windowHeight);
+// The shown row whose band contains pointerY, or -1. A shared edge belongs to
+// the lower row.
+int pc_result_row_at(float pointerY, int rowCount, float rowHeight, float scroll, float windowHeight);
+// Pointer into that window space, using the mask rectangle in drawable pixels.
+// False when the pointer is outside the mask or the sizes are unusable.
+bool pc_result_window_y(float nx, float ny, float maskX0, float maskY0, float maskX1, float maskY1,
+                        int drawableW, int drawableH, float windowHeight, float* outY);
 int pc_pointer_frame();
 #endif

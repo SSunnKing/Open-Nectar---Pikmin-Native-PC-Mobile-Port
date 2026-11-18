@@ -199,6 +199,37 @@ int pc_list_step_toward(int selected, int target, bool canUp, bool canDown)
     if (target > selected) return canDown ? 1 : 0;
     return canUp ? -1 : 0;
 }
+PcResultRowBand pc_result_row_band(int index, float rowHeight, float scroll, float windowHeight)
+{
+    PcResultRowBand row = {0.0f, 0.0f, false};
+    if (index < 0 || !(rowHeight > 0.0f) || !(windowHeight > 0.0f)) return row;
+    const float top = index * rowHeight + scroll;
+    row.top = top;
+    row.bottom = top + rowHeight;
+    row.shown = !(top < -rowHeight || windowHeight < top);
+    return row;
+}
+int pc_result_row_at(float pointerY, int rowCount, float rowHeight, float scroll, float windowHeight)
+{
+    int hit = -1;
+    for (int i = 0; i < rowCount; ++i) {
+        const PcResultRowBand row = pc_result_row_band(i, rowHeight, scroll, windowHeight);
+        if (!row.shown || pointerY < row.top || pointerY > row.bottom) continue;
+        hit = i;
+    }
+    return hit;
+}
+bool pc_result_window_y(float nx, float ny, float maskX0, float maskY0, float maskX1, float maskY1,
+                        int drawableW, int drawableH, float windowHeight, float* outY)
+{
+    if (!outY || drawableW <= 0 || drawableH <= 0 || !(windowHeight > 0.0f)) return false;
+    if (!(maskX1 > maskX0) || !(maskY1 > maskY0)) return false;
+    const float px = nx * (float)drawableW;
+    const float py = ny * (float)drawableH;
+    if (px < maskX0 || px > maskX1 || py < maskY0 || py > maskY1) return false;
+    *outY = (py - maskY0) / (maskY1 - maskY0) * windowHeight;
+    return true;
+}
 int pc_pointer_frame() { return tick; }
 int plateBatchTick = -100;
 void pc_plate_request(unsigned short pad, const char* label) {

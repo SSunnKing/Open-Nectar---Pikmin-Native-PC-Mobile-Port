@@ -159,4 +159,30 @@ int main() {
     CHECK(pc_list_step_toward(5, 2, true, true) == -1);
     CHECK(pc_list_step_toward(2, 5, true, false) == 0);
     CHECK(pc_list_step_toward(5, 2, false, true) == 0);
+
+    // Result rows use the draw's scissor test. Six rows fit in a window of 60
+    // when each row is 10 tall. Scroll 0 shows the top. Scroll -20 hides row 0.
+    const PcResultRowBand top = pc_result_row_band(0, 10.0f, 0.0f, 60.0f);
+    CHECK(top.shown && top.top == 0.0f && top.bottom == 10.0f);
+    CHECK(pc_result_row_band(5, 10.0f, 0.0f, 60.0f).shown);
+    CHECK(pc_result_row_band(6, 10.0f, 0.0f, 60.0f).shown);
+    CHECK(!pc_result_row_band(7, 10.0f, 0.0f, 60.0f).shown);
+    CHECK(!pc_result_row_band(0, 10.0f, -20.0f, 60.0f).shown);
+    CHECK(pc_result_row_band(1, 10.0f, -20.0f, 60.0f).shown);
+    CHECK(!pc_result_row_band(-1, 10.0f, 0.0f, 60.0f).shown);
+    CHECK(!pc_result_row_band(0, 0.0f, 0.0f, 60.0f).shown);
+    CHECK(pc_result_row_at(5.0f, 8, 10.0f, 0.0f, 60.0f) == 0);
+    CHECK(pc_result_row_at(15.0f, 8, 10.0f, 0.0f, 60.0f) == 1);
+    CHECK(pc_result_row_at(5.0f, 8, 10.0f, -20.0f, 60.0f) == 2);
+    CHECK(pc_result_row_at(100.0f, 8, 10.0f, 0.0f, 60.0f) == -1);
+    CHECK(pc_result_row_at(5.0f, 0, 10.0f, 0.0f, 60.0f) == -1);
+    // A shared edge belongs to the lower row.
+    CHECK(pc_result_row_at(10.0f, 8, 10.0f, 0.0f, 60.0f) == 1);
+
+    float windowY = -1.0f;
+    CHECK(pc_result_window_y(0.25f, 0.375f, 0.0f, 100.0f, 200.0f, 300.0f, 400, 400, 60.0f, &windowY));
+    CHECK(windowY == 15.0f);
+    CHECK(!pc_result_window_y(0.9f, 0.375f, 0.0f, 100.0f, 200.0f, 300.0f, 400, 400, 60.0f, &windowY));
+    CHECK(!pc_result_window_y(0.25f, 0.375f, 0.0f, 100.0f, 200.0f, 300.0f, 0, 400, 60.0f, &windowY));
+    CHECK(!pc_result_window_y(0.25f, 0.375f, 0.0f, 100.0f, 200.0f, 300.0f, 400, 400, 0.0f, &windowY));
 }
