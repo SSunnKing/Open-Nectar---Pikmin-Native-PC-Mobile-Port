@@ -2,6 +2,8 @@
 #include "pc_menu_tap.h"
 #if PIKI_PC_MENU_TAP
 #include "Dolphin/pad.h"
+#include "pc_menu_pointer.h"
+#include "System.h"
 #endif
 #include "pc_p2_captain_preview.h"
 #endif
@@ -1228,6 +1230,8 @@ void TVsSelect::doCreate(JKRArchive* arc)
  * @note Size: 0x1244
  */
 #if PIKI_PC_MENU_TAP
+static int sVsCourse = -1;
+static int sVsArrow  = -1;
 static int pcVsCourseAt(TVsSelect* self, float nx, float ny)
 {
 	int hit = -1;
@@ -1252,6 +1256,10 @@ static int pcVsRulesArrow(TVsSelect* self, float nx, float ny)
 
 bool TVsSelect::doUpdate()
 {
+#if PIKI_PC_MENU_TAP
+	sVsCourse = -1;
+	sVsArrow  = -1;
+#endif
 	if (mIsSection && mDoDebugScores) {
 		mPlayerWinCounts[0] = mDebugWinCounts[0];
 		mPlayerWinCounts[1] = mDebugWinCounts[1];
@@ -1282,12 +1290,11 @@ bool TVsSelect::doUpdate()
 	{
 		float hx = 0.0f;
 		float hy = 0.0f;
-		int over = -1;
 		if (pc_menu_hover(&hx, &hy) && mZoomState == 0) {
-			if (rulesinactive) over = pcVsCourseAt(this, hx, hy);
-			else over = pcVsRulesArrow(this, hx, hy);
+			if (rulesinactive) sVsCourse = pcVsCourseAt(this, hx, hy);
+			else sVsArrow = pcVsRulesArrow(this, hx, hy);
 		}
-		if (over >= 0) pc_menu_set_hand(true);
+		if (sVsCourse >= 0 || sVsArrow >= 0) pc_menu_set_hand(true);
 	}
 #endif
 		if (mZoomState == 0) {
@@ -1556,6 +1563,11 @@ bool TVsSelect::doUpdate()
 			mPaneRulesLR[0]->show();
 			mPaneRulesLR[1]->hide();
 		}
+#if PIKI_PC_MENU_TAP
+		for (int i = 0; i < 2; i++) {
+			mPaneRulesLR[i]->updateScale(pc_menu_hover_scale(mPaneRulesLR[i], i == sVsArrow, 0.06f, sys->mDeltaTime));
+		}
+#endif
 	}
 	mPaneRulesInfo->setOffset(mRulesPanePos.x + mRulesMoveXPos, mRulesPanePos.y);
 
@@ -1609,9 +1621,13 @@ bool TVsSelect::doUpdate()
 	mPaneStars->setAlpha(mPaneStarAlpha * 255.0f);
 
 	for (int i = 0; i < mNumActiveRows; i++) {
-		mActiveCourseThumbs[i]->updateScale(mWindowScale);
+		f32 rowScale = mWindowScale;
+#if PIKI_PC_MENU_TAP
+		rowScale *= pc_menu_hover_scale(mIndexPaneList[i]->getMainPane(), i == sVsCourse, 0.06f, sys->mDeltaTime);
+#endif
+		mActiveCourseThumbs[i]->updateScale(rowScale);
 		mActiveCourseThumbs[i]->setBasePosition(J2DPOS_Center);
-		mPaneLevelWindows[i]->updateScale(mWindowScale);
+		mPaneLevelWindows[i]->updateScale(rowScale);
 		mPaneLevelWindows[i]->setBasePosition(J2DPOS_Center);
 		if (i != mCurrActiveRowSel) {
 			mIndexPaneList[i]->mPane->setAlpha(mOtherLevelsFadeAlpha * 255.0f);
