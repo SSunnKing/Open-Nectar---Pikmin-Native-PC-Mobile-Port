@@ -467,6 +467,12 @@ bool THiScore::doUpdate()
 		if (pc_menu_hover(&hx, &hy)) over = pcHiScoreRowAt(this, hx, hy);
 		sHiScoreOver = over;
 		if (over >= 0) pc_menu_set_hand(true);
+		float tx = 0.0f;
+		float ty = 0.0f;
+		if (pc_menu_take_tap(&tx, &ty)) {
+			const int pressed = pcHiScoreRowAt(this, tx, ty);
+			if (pressed >= 0) pc_menu_hover_press(mIndexPaneList[pressed]->getMainPane());
+		}
 	}
 #endif
 		Controller* input = mController;
