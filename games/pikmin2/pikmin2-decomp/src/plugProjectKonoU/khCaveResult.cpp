@@ -288,6 +288,7 @@ void ObjCaveResult::doCreate(JKRArchive* arc)
 
 #if PIKI_PC_MENU_TAP
 static int sCaveRow = -1;
+static int sCavePick = -1;
 static float sCaveScale[48];
 static char sCaveFeel[48];
 
@@ -348,7 +349,11 @@ bool ObjCaveResult::doUpdate()
 			float tx = 0.0f, ty = 0.0f;
 			if (pc_menu_take_tap(&tx, &ty)) {
 				const int pressed = pcCaveRowAt(this, tx, ty);
-				if (pressed >= 0 && pressed < 48) pc_menu_hover_press(&sCaveFeel[pressed]);
+				if (pressed >= 0 && pressed < 48) {
+					pc_menu_hover_press(&sCaveFeel[pressed]);
+					if (!isFlag(CAVERESFLAG_CanScroll) || pressed == (int)mScrollSelIndex) pc_menu_queue_button(Controller::PRESS_A);
+					else sCavePick = pressed;
+				}
 			}
 			for (int i = 0; i < 48; i++) {
 				sCaveScale[i] = pc_menu_hover_scale(&sCaveFeel[i], i == sCaveRow, 0.06f, sys->mDeltaTime);
@@ -670,7 +675,13 @@ void ObjCaveResult::statusNormal()
 	pc_menu_plate(PAD_BUTTON_A, "A Continue");
 	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
 	pc_menu_plate(PAD_BUTTON_UP, "Up");
+	// Those Up and Down plates already take the wheel, one row per notch.
 #endif
+		if (getGamePad()->getButton() & (Controller::PRESS_UP | Controller::PRESS_DOWN)) {
+#if PIKI_PC_MENU_TAP
+			sCavePick = -1;
+#endif
+		}
 		// press up, begin scroll up state
 		if (getGamePad()->getButton() & (Controller::PRESS_UP) && mScrollSelIndex) {
 			mScrollSelIndex--;
@@ -699,6 +710,31 @@ void ObjCaveResult::statusNormal()
 			statusScrollDown();
 			return;
 		}
+#if PIKI_PC_MENU_TAP
+		if (sCavePick >= 0 && sCavePick != (int)mScrollSelIndex) {
+			const int step = pc_list_step_toward((int)mScrollSelIndex, sCavePick, mScrollSelIndex != 0,
+			                                     mScrollSelIndex != mScrollSelIndexMax);
+			if (step > 0) {
+				mScrollSelIndex++;
+				mScrollTargetDist      = msVal.mScrollTargetInitialDist;
+				mScrollMoveUpCounter   = 0;
+				mStatus                = CAVERES_ScrollDown;
+				statusScrollDown();
+				return;
+			}
+			if (step < 0) {
+				mScrollSelIndex--;
+				mScrollTargetDist      = msVal.mScrollTargetInitialDist;
+				mScrollMoveDownCounter = 0;
+				mStatus                = CAVERES_ScrollUp;
+				statusScrollUp();
+				return;
+			}
+			sCavePick = -1;
+		} else if (sCavePick == (int)mScrollSelIndex) {
+			sCavePick = -1;
+		}
+#endif
 
 		mScrollMoveDownCounter = 0;
 		mScrollMoveUpCounter   = 0;
