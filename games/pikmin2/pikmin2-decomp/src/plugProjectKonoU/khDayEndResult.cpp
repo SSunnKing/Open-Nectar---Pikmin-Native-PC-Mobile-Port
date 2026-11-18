@@ -1,6 +1,8 @@
 #include "pc_menu_tap.h"
 #if PIKI_PC_MENU_TAP
 #include "Dolphin/pad.h"
+#include "pc_menu_pointer.h"
+#include "gl/pc_gfx.h"
 #endif
 #include "kh/khDayEndResult.h"
 #include "Game/gamePlayData.h"
@@ -582,6 +584,33 @@ bool ObjDayEndResultItem::doUpdateFadein()
 	return result;
 }
 
+#if PIKI_PC_MENU_TAP
+static int sDayItemRow = -1;
+
+// Treasure under the pointer, from the scroll layout. The two row panes are
+// restamped while drawing, so they are not hit targets.
+static int pcDayItemAt(ObjDayEndResultItem* self, float nx, float ny)
+{
+	if (!self->mScreenMain) return -1;
+	J2DPane* mask = self->mScreenMain->search(MC8("Nmask"));
+	if (mask) pc_pointer_track(mask);
+	if (!mask || !(self->mItemRowHeight > 0.0f) || self->mGXScissorBottomY == 0) return -1;
+	const PcPointerRect rect = pc_pointer_rect(mask);
+	if (!rect.valid) return -1;
+	int width = 0, height = 0;
+	pc_gfx_get_drawable_size(&width, &height);
+	float pointerY = 0.0f;
+	if (!pc_result_window_y(nx, ny, rect.x0, rect.y0, rect.x1, rect.y1, width, height, (float)self->mGXScissorBottomY, &pointerY))
+		return -1;
+	if (!self->getDispMember()->isID(OWNER_KH, MEMBER_DAY_END_RESULT)) return -1;
+	DispDayEndResult* disp = static_cast<DispDayEndResult*>(self->getDispMember());
+	if (!disp->mItem.mResultNode) return -1;
+	int count = 0;
+	FOREACH_NODE(Game::Result::TNode, disp->mItem.mResultNode->mChild, node) { count++; }
+	return pc_result_row_at(pointerY, count, self->mItemRowHeight, self->mCurrentScrollYPos, (float)self->mGXScissorBottomY);
+}
+#endif
+
 /**
  * @note Address: 0x8040404C
  * @note Size: 0x2CC
@@ -590,6 +619,15 @@ bool ObjDayEndResultItem::doUpdate()
 {
 	updateCommon();
 	mScreenMain->update();
+#if PIKI_PC_MENU_TAP
+	pc_menu_claim();
+	{
+		float hx = 0.0f, hy = 0.0f;
+		const bool hovering = pc_menu_hover(&hx, &hy);
+		sDayItemRow = pcDayItemAt(this, hovering ? hx : -1.0f, hovering ? hy : -1.0f);
+		if (sDayItemRow >= 0) pc_menu_set_hand(true);
+	}
+#endif
 
 	switch (mStatus) {
 	case ITEMSTATUS_Normal:
