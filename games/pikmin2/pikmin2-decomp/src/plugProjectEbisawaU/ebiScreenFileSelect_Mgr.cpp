@@ -87,18 +87,31 @@ void FSMState_SelectYesNo::do_init(TMgr* mgr, Game::StateArg* arg)
 void FSMState_SelectYesNo::do_exec(TMgr* mgr)
 {
 #if PIKI_PC_MENU_TAP
-	// Táctil: tocar Sí o No lo elige y decide (como mover y pulsar A).
+	// Hover picks Yes or No and eases nothing by itself. A click confirms that one.
 	pc_menu_claim();
+	pc_menu_plate(Controller::PRESS_B, "B Cancel");
 	if (!mIsSelected) {
-		float tx = 0.0f, ty = 0.0f;
-		const bool tapped = pc_menu_take_tap(&tx, &ty);
-		const bool yes    = pc_menu_pane_hit(mgr->mMainScreen.mPaneMesgYes, tx, ty, 0.015f) && tapped;
-		const bool no     = pc_menu_pane_hit(mgr->mMainScreen.mPaneMesgNo, tx, ty, 0.015f) && tapped;
+		float hx = 0.0f, hy = 0.0f, tx = 0.0f, ty = 0.0f;
+		const bool hovering = pc_menu_hover(&hx, &hy);
+		const bool tapped   = pc_menu_take_tap(&tx, &ty);
+		const bool overYes  = pc_menu_pane_hit(mgr->mMainScreen.mPaneMesgYes, hx, hy, 0.015f) && hovering;
+		const bool overNo   = pc_menu_pane_hit(mgr->mMainScreen.mPaneMesgNo, hx, hy, 0.015f) && hovering;
+		const bool yes      = pc_menu_pane_hit(mgr->mMainScreen.mPaneMesgYes, tx, ty, 0.015f) && tapped;
+		const bool no       = pc_menu_pane_hit(mgr->mMainScreen.mPaneMesgNo, tx, ty, 0.015f) && tapped;
+		pc_menu_set_hand(overYes || overNo);
+		if (!yes && !no && overYes && !mYesNoState) {
+			mgr->mMainScreen.setYesNo(true);
+			mYesNoState = true;
+			PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+		} else if (!yes && !no && overNo && mYesNoState) {
+			mgr->mMainScreen.setYesNo(false);
+			mYesNoState = false;
+			PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+		}
 		if (yes || no) {
-			if (mYesNoState != yes) {
-				mgr->mMainScreen.setYesNo(yes);
-				mYesNoState = yes;
-			}
+			// The pop is the press, including a click on the choice already shown.
+			mgr->mMainScreen.setYesNo(yes);
+			mYesNoState = yes;
 			pc_menu_queue_button(PAD_BUTTON_A);
 		}
 	}
@@ -590,19 +603,39 @@ void FSMState00_SelectData::do_exec(TMgr* mgr)
 		int prev            = mgr->mCurrSelection;
 		mgr->mCountNumInterface.update();
 #if PIKI_PC_MENU_TAP
-		// Táctil: tocar una partida la elige; tocar la elegida entra (A).
-		// Copiar y borrar salen como botones de la capa (iconos X/Y del texto).
+		// Hover moves the highlight. A click on the highlighted file opens it.
+		// Tbt0 is the Copy prompt (Y) and Tbt1 is Erase (X); both are on screen
+		// only after a used file is selected. Empty space does nothing.
 		pc_menu_claim();
+		pc_menu_plate(Controller::PRESS_B, "B Back");
+		const bool copyShown = mgr->mMainScreen.mFlags.isSet(ebi::Screen::FileSelect::TMainScreen::FileSelectScreen_Copy);
+		if (copyShown) {
+			pc_menu_plate(PAD_BUTTON_Y, "Y Copy");
+			pc_menu_plate(PAD_BUTTON_X, "X Erase");
+		}
 		{
-			float tx = 0.0f, ty = 0.0f;
-			const bool tapped = pc_menu_take_tap(&tx, &ty);
-			const int ball    = pcTouchTappedBall(mgr, tapped, tx, ty);
-			if (ball >= 0) {
+			float hx = 0.0f, hy = 0.0f, tx = 0.0f, ty = 0.0f;
+			const bool hovering = pc_menu_hover(&hx, &hy);
+			const bool tapped   = pc_menu_take_tap(&tx, &ty);
+			const int hoverBall = pcTouchTappedBall(mgr, hovering, hx, hy);
+			const int ball      = pcTouchTappedBall(mgr, tapped, tx, ty);
+			const bool overCopy = pc_menu_pane_hit(mgr->mMainScreen.mPaneButton, hx, hy, 0.015f) && hovering && copyShown;
+			const bool overErase = pc_menu_pane_hit(mgr->mMainScreen.mPaneButtonB, hx, hy, 0.015f) && hovering && copyShown;
+			const bool hitCopy  = pc_menu_pane_hit(mgr->mMainScreen.mPaneButton, tx, ty, 0.015f) && tapped && copyShown;
+			const bool hitErase = pc_menu_pane_hit(mgr->mMainScreen.mPaneButtonB, tx, ty, 0.015f) && tapped && copyShown;
+			pc_menu_set_hand(hoverBall >= 0 || overCopy || overErase);
+			if (hitCopy) {
+				pc_menu_queue_button(PAD_BUTTON_Y);
+			} else if (hitErase) {
+				pc_menu_queue_button(PAD_BUTTON_X);
+			} else if (ball >= 0) {
 				if (ball != (int)mgr->mCurrSelection) {
 					mgr->mCurrSelection = ball;
 				} else if (!mCounter) {
 					pc_menu_queue_button(PAD_BUTTON_A);
 				}
+			} else if (hoverBall >= 0 && hoverBall != (int)mgr->mCurrSelection) {
+				mgr->mCurrSelection = hoverBall;
 			}
 		}
 #endif
@@ -795,15 +828,20 @@ void FSMState04_WhichDataDoYouCopyTo::do_exec(TMgr* mgr)
 		// store value before changes to see if a change happened
 		int prev = mgr->mCopySelection;
 #if PIKI_PC_MENU_TAP
-		// Táctil: tocar la partida destino mueve ahí el cursor; tocarla otra vez copia.
+		// Hover moves the destination. A click on it confirms. The source file is not a target.
 		bool pcTouchRight = false, pcTouchLeft = false;
 		pc_menu_claim();
+		pc_menu_plate(Controller::PRESS_B, "B Back");
 		{
-			float tx = 0.0f, ty = 0.0f;
-			const bool tapped = pc_menu_take_tap(&tx, &ty);
-			const int ball    = pcTouchTappedBall(mgr, tapped, tx, ty);
+			float hx = 0.0f, hy = 0.0f, tx = 0.0f, ty = 0.0f;
+			const bool hovering = pc_menu_hover(&hx, &hy);
+			const bool tapped   = pc_menu_take_tap(&tx, &ty);
+			const int hoverBall = pcTouchTappedBall(mgr, hovering, hx, hy);
+			const int ball      = pcTouchTappedBall(mgr, tapped, tx, ty);
+			static const int kRight[3] = { 2, 2, 1 };
+			const bool overDest = hovering && hoverBall >= 0 && hoverBall != (int)mgr->mCurrSelection;
+			pc_menu_set_hand(overDest);
 			if (ball >= 0 && ball != (int)mgr->mCurrSelection) {
-				static const int kRight[3] = { 2, 2, 1 }; // destino de "derecha" según el origen
 				if (ball == (int)mgr->mCopySelection) {
 					pc_menu_queue_button(PAD_BUTTON_A);
 				} else if (ball == kRight[mgr->mCurrSelection]) {
@@ -811,6 +849,9 @@ void FSMState04_WhichDataDoYouCopyTo::do_exec(TMgr* mgr)
 				} else {
 					pcTouchLeft = true;
 				}
+			} else if (overDest && hoverBall != (int)mgr->mCopySelection) {
+				if (hoverBall == kRight[mgr->mCurrSelection]) pcTouchRight = true;
+				else pcTouchLeft = true;
 			}
 		}
 		if (pcTouchRight || mgr->mController->isMoveRight()) {

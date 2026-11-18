@@ -146,6 +146,8 @@ void ObjSMenuBase::commonUpdateBase()
 		}
 		pc_menu_set_hand(overHover);
 	}
+	// B is not drawn on these pages. The plate is the clickable Back.
+	pc_menu_plate(Controller::PRESS_B, "B Back");
 #endif
 #if PIKI_PC_TOUCH
 	// Menú de pausa/radar/objetos: la pantalla es del menú (se toca lo que

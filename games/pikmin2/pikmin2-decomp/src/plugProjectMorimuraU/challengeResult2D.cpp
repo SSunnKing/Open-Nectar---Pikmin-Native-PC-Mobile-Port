@@ -10,6 +10,7 @@
 #include "Dolphin/rand.h"
 #include "Game/gameChallenge2D.h"
 #include "efx2d/T2DChangesmoke.h"
+#include "pc_menu_tap.h"
 
 static const char name[] = "challengeResult2D";
 
@@ -1175,6 +1176,13 @@ bool TChallengeResult::doUpdate()
 
 	if (mCanInput && mDisp->_10 == 0) {
 		if (mDemoState == 6) {
+#if PIKI_PC_MENU_TAP
+			// The prompt has no row to hit. Any click continues, and the plate is there too.
+			pc_menu_plate(Controller::PRESS_A, "A Continue");
+			float hx = 0.0f, hy = 0.0f, tx = 0.0f, ty = 0.0f;
+			if (pc_menu_hover(&hx, &hy)) pc_menu_set_hand(true);
+			if (pc_menu_take_tap(&tx, &ty)) pc_menu_queue_button(Controller::PRESS_A);
+#endif
 			if (mControls->getButtonDown() & Controller::PRESS_A) {
 				// skip prompt to save in certain test versions of the game
 				if (Game::gGameConfig.mParms.mNintendoVersion.mData || Game::gGameConfig.mParms.mE3version.mData) {
