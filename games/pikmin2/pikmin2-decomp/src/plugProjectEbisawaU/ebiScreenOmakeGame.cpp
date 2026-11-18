@@ -162,6 +162,26 @@ bool TOmakeGame::doUpdateStateWait()
 			if (!mCursor.mCounter && pc_menu_take_tap(&tx, &ty)) {
 				const int pressed = pcOmakeGameAt(this, tx, ty);
 				if (pressed >= 0 && mPaneGameSel[pressed]) pc_menu_hover_press(mPaneGameSel[pressed]);
+				if (pressed == mSelection) {
+					mExitState = false;
+				} else if (pressed >= 0) {
+					const int oldsel = mSelection;
+					mSelection       = pressed;
+					JGeometry::TBox2f box;
+					box                    = *mPaneSelectBox[mSelection]->getBounds();
+					mCursor.mBounds1       = mCursor.mBounds2;
+					mCursor.mBounds2       = box;
+					mCursor.mCounter       = mCursor.mCounterMax;
+					mCursor.mWindowPane    = mPaneGameSel[mSelection];
+					mCursor.mScaleMgr.up(0.1f, 30.0f, 0.6f, 0.0f);
+					mBlinkFont[oldsel].mIsTowardColor1 = false;
+					mBlinkFont[oldsel]._49             = true;
+					mBlinkFont[mSelection].enable();
+					openMsg(GameDesc);
+					mAnimationChangeGame.playBack(sys->mDeltaTime * 60.0f, false);
+					mIsChangedGameSel = false;
+					PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+				}
 			}
 			for (int i = 0; i < GameCount; i++) {
 				J2DPane* row = mPaneGameSel[i];
