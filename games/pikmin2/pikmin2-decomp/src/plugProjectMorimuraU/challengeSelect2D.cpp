@@ -1675,6 +1675,17 @@ bool TChallengeSelect::doUpdate()
 			else if (mPlayModeScreen->isState(TChallengePlayModeScreen::PlayModeScreen_Active)) sChallengeMode = pcChallengeModeAt(this, hx, hy);
 		}
 		if (sChallengeOver >= 0 || sChallengeMode >= 0) pc_menu_set_hand(true);
+		float tx = 0.0f;
+		float ty = 0.0f;
+		if (pc_menu_take_tap(&tx, &ty)) {
+			if (!mPlayModeScreen->isOpen() && rulesClosed) {
+				const int course = pcChallengeCourseAt(this, tx, ty);
+				if (course >= 0) pc_menu_hover_press(mPanelList[course]->mPane1);
+			} else if (mPlayModeScreen->isState(TChallengePlayModeScreen::PlayModeScreen_Active)) {
+				const int mode = pcChallengeModeAt(this, tx, ty);
+				if (mode >= 0) pc_menu_hover_press(mPlayModeScreen->mPaneList0[mode]);
+			}
+		}
 	}
 #endif
 		if (mControls->getButtonDown() & Controller::PRESS_Z && mPlayModeScreen->mState == 0) {
