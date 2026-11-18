@@ -351,6 +351,7 @@ bool ObjKantei::doUpdate()
 			float hx = 0.0f, hy = 0.0f, tx = 0.0f, ty = 0.0f;
 			if (pc_menu_hover(&hx, &hy)) pc_menu_set_hand(true);
 			pcTap = pc_menu_take_tap(&tx, &ty);
+			if (pcTap && mPaneName && mNameScale > 0.0f) pc_menu_hover_press(&sKanteiName);
 		}
 #endif
 		// B does nothing during the appraisal. Mouse Back and Backspace stay unused.
@@ -402,6 +403,7 @@ bool ObjKantei::doUpdate()
 				float hx = 0.0f, hy = 0.0f, tx = 0.0f, ty = 0.0f;
 				if (pc_menu_hover(&hx, &hy)) pc_menu_set_hand(true);
 				pcTap = pc_menu_take_tap(&tx, &ty);
+				if (pcTap && mPaneName && mNameScale > 0.0f) pc_menu_hover_press(&sKanteiName);
 			}
 #endif
 			// B does nothing here either. The ship message, once open, has its own buttons.
