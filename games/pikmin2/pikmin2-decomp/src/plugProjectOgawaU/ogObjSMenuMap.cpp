@@ -506,6 +506,9 @@ void ObjSMenuMap::transMap()
 		}
 		float dx = 0.0f, dy = 0.0f;
 		if (pc_menu_take_drag(&dx, &dy)) {
+			if (sMapIcon >= 0 && mRadarPaneList && mRadarPaneList[sMapIcon] && *mRadarPaneList[sMapIcon]) {
+				pc_menu_hover_press(*mRadarPaneList[sMapIcon]);
+			}
 			inputs.x = -dx * 40.0f;
 			inputs.y = dy * 40.0f;
 			if (inputs.x > 1.0f) inputs.x = 1.0f;
