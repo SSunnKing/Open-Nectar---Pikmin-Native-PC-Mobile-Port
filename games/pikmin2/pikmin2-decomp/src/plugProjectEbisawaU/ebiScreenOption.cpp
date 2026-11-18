@@ -429,6 +429,22 @@ bool TOption::doUpdateStateWait()
             const int hit = pc_pointer_hit(x * width, y * height, rects, nullptr, n, height * .008f);
             if (hit >= 0) {
                 const int v = value[hit];
+                int pressId = -1;
+                switch (kind[hit]) {
+                case 1: pressId = v ? 25 : 26; break;
+                case 2: pressId = 27 + v; break;
+                case 3: pressId = v - 1; break;
+                case 4: pressId = 10 + v - 1; break;
+                case 5: pressId = v ? 30 : 31; break;
+                case 8: pressId = 32; break;
+#if defined(VERSION_PAL)
+                case 0: pressId = 20 + v; break;
+#endif
+#if defined(VERSION_JP)
+                case 7: pressId = v ? 33 : 34; break;
+#endif
+                }
+                if (pressId >= 0 && pressId < 50) mPcPress[pressId] = 1.0f;
                 switch (kind[hit]) {
 #if defined(VERSION_PAL)
                 case 0: if (mOptionParamA.mLanguage != v) { mOptionParamA.mLanguage = v; mExitStatus = OptionState_Unk8; } break;
@@ -672,7 +688,13 @@ bool TOption::doUpdateStateWait()
         progress += hovered ? step : -step;
         if (progress < 0.0f) progress = 0.0f;
         if (progress > 1.0f) progress = 1.0f;
-        return 1.0f + amount * progress * progress * (3.0f - 2.0f * progress);
+        float& press = mPcPress[id];
+        if (press > 0.0f) {
+            press -= sys->mDeltaTime / 0.10f;
+            if (press < 0.0f) press = 0.0f;
+        }
+        const float hoverScale = 1.0f + amount * progress * progress * (3.0f - 2.0f * progress);
+        return hoverScale * (1.0f + 0.08f * press);
     };
     const float backHover = easedHover(32, pcHoverKind == 8, .12f);
     E2DScreen_searchAssert(mMainScreen, MC8("Tmod"))->updateScale(backHover);
@@ -698,6 +720,10 @@ bool TOption::doUpdateStateWait()
     const int flagAnim[] = {7, 11, 9, 10, 8};
     for (int i = 0; i < 5; ++i)
         mPaneLanguage[i]->updateScale(mButtonPuruAnim[flagAnim[i]].mScale * easedHover(20 + i, pcHoverKind == 0 && pcHoverValue == i, .15f));
+#endif
+#if defined(PIKI_PC_PORT) && PIKI_P2_HOST && defined(VERSION_JP)
+    mPaneRubyYes->updateScale(mButtonPuruAnim[7].mScale * easedHover(33, pcHoverKind == 7 && pcHoverValue == 1, .08f));
+    mPaneRubyNo->updateScale(mButtonPuruAnim[8].mScale * easedHover(34, pcHoverKind == 7 && pcHoverValue == 0, .08f));
 #endif
 
 #if defined(VERSION_US_DEMO1) // demo

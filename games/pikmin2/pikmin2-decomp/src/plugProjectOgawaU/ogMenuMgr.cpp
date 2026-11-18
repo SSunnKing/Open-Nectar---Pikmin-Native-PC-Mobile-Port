@@ -48,6 +48,7 @@ int MenuMgr::pcPointerUpdate(int current, bool* activate) const
 	*activate         = false;
 	if (opt >= 0) {
 		*activate = true;
+		pc_menu_hover_press(pcOptionPane(opt));
 		return opt;
 	}
 	return hov >= 0 && hov != current ? hov : -1;
@@ -429,12 +430,21 @@ void MenuMgr::update()
  */
 void MenuMgr::draw(J2DGrafContext* graf)
 {
+#if PIKI_PC_MENU_TAP
+	float hx = 0.0f, hy = 0.0f;
+	const bool hovering = mDoScale && pc_menu_hover(&hx, &hy);
+	const int over      = hovering ? pcOptionAt(hx, hy) : -1;
+#endif
 	for (int i = 0; i < mElementCount; i++) {
 		if (mDoScale) {
 			f32 scale = mScaleMgrs[i].calc();
 			if (mCSelectId == i) {
 				scale *= mSelectedExtraScale;
 			}
+#if PIKI_PC_MENU_TAP
+			// Port-only: the same eased hover and brief press Options uses.
+			scale *= pc_menu_hover_scale(mMainPanes[i], over == i, 0.06f, sys->mDeltaTime);
+#endif
 			mMainPanes[i]->updateScale(scale);
 		}
 	}
