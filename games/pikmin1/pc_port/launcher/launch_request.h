@@ -86,4 +86,60 @@ inline std::string launchFallbackNotice(LaunchTarget target, LaunchDecision deci
     return std::string();
 }
 
+// Android shortcut Intent (#336). Keep these in sync with GameLaunch.java.
+//   extra  Intent extra "org.opennectar.LAUNCH" = "pikmin1" or "pikmin2"
+//   data   Intent data URI "opennectar://launch/pikmin1" (or pikmin2)
+// A normal open sets neither (None). An explicit name that isn't a game is
+// Invalid, same as --launch=pikmin3. A URI with some other scheme is ignored.
+inline constexpr const char* kAndroidLaunchExtra = "org.opennectar.LAUNCH";
+inline constexpr const char* kAndroidLaunchUriPrefix = "opennectar://launch/";
+
+inline std::string androidLaunchUri(LaunchTarget target)
+{
+    const char* id = target == LaunchTarget::Pikmin2 ? "pikmin2" : target == LaunchTarget::Pikmin1 ? "pikmin1" : "";
+    return *id ? std::string(kAndroidLaunchUriPrefix) + id : std::string();
+}
+
+// The game named by an Android data URI, or None when it isn't one of ours.
+// Invalid when it is our URI but the name isn't a game (or is missing).
+inline LaunchTarget launchTargetFromAndroidUri(const std::string& data)
+{
+    const std::string prefix = kAndroidLaunchUriPrefix;
+    if (data.size() < prefix.size() || data.compare(0, prefix.size(), prefix) != 0) return LaunchTarget::None;
+    std::string name = data.substr(prefix.size());
+    const std::string::size_type cut = name.find_first_of("?#");
+    if (cut != std::string::npos) name.resize(cut);
+    if (!name.empty() && name.back() == '/') name.pop_back();
+    if (name.empty() || name.find('/') != std::string::npos) return LaunchTarget::Invalid;
+    return parseLaunchTarget(name);
+}
+
+// `extra` wins when it is set, including when it names an unknown game.
+// Both empty is a normal open.
+inline LaunchTarget parseAndroidLaunchChoice(const std::string& extra, const std::string& data)
+{
+    if (!extra.empty()) return parseLaunchTarget(extra);
+    if (data.empty()) return LaunchTarget::None;
+    return launchTargetFromAndroidUri(data);
+}
+
+// Home-screen notice when a shortcut named something that isn't a game.
+inline std::string androidLaunchInvalidNotice()
+{
+    return "That shortcut does not name Pikmin or Pikmin 2.";
+}
+
+// Android's view of the same three facts decideLaunch already uses.
+// `contentReady` is what the home screen calls installed. `incomplete` is
+// that install missing files the game opens (the repair case). `libraryPresent`
+// is the game's .so in the APK (the binary).
+inline LaunchFacts androidLaunchFacts(bool contentReady, bool incomplete, bool libraryPresent)
+{
+    LaunchFacts facts;
+    facts.assetsInstalled = contentReady;
+    facts.needsRepair = contentReady && incomplete;
+    facts.executablePresent = libraryPresent;
+    return facts;
+}
+
 } // namespace pikmin::launcher

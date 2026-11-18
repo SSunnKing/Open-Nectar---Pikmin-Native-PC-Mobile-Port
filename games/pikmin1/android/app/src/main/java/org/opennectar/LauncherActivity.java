@@ -1,11 +1,20 @@
 package org.opennectar;
 
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.RectF;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.view.WindowManager;
+
+import androidx.core.content.pm.ShortcutInfoCompat;
+import androidx.core.content.pm.ShortcutManagerCompat;
+import androidx.core.graphics.drawable.IconCompat;
 
 import org.libsdl.app.SDLActivity;
 
@@ -16,6 +25,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * Pantalla de inicio: el launcher de escritorio (Dear ImGui, el hub con
@@ -36,6 +46,14 @@ public class LauncherActivity extends SDLActivity {
     private boolean pickDone;
     private int pickedFd = -1;
 
+    // Shortcut intent (#336). launchPending starts true so the first native
+    // read sees a cold start. rememberLaunch sets it again from onNewIntent.
+    // The flag and the two strings move together under launchLock.
+    private final Object launchLock = new Object();
+    private boolean launchPending = true;
+    private String launchExtra = "";
+    private String launchData = "";
+
     @Override
     protected String[] getLibraries() {
         return new String[] { "SDL2", "nectar_launcher" };
@@ -49,12 +67,133 @@ public class LauncherActivity extends SDLActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // Before SDLActivity.onCreate: it treats any data URI as a dropped file.
+        // opennectar://launch/pikmin1 is a shortcut, and the extra already names the game.
+        rememberLaunch(getIntent());
+        Intent opening = getIntent();
+        if (opening != null && opening.getData() != null) {
+            opening.setData(null);
+            setIntent(opening);
+        }
         super.onCreate(savedInstanceState);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             WindowManager.LayoutParams lp = getWindow().getAttributes();
             lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
             getWindow().setAttributes(lp);
         }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        rememberLaunch(intent);
+        if (intent != null && intent.getData() != null) intent.setData(null);
+        if (intent != null) setIntent(intent);
+    }
+
+    private void rememberLaunch(Intent intent) {
+        synchronized (launchLock) {
+            String extra = GameLaunch.extra(intent);
+            String data = GameLaunch.data(intent);
+            launchExtra = extra != null ? extra : "";
+            launchData = data != null ? data : "";
+            launchPending = true;
+        }
+    }
+
+    /**
+     * Llamado desde el hilo de SDL. null si no hay un atajo nuevo. Si lo hay,
+     * [0] es el extra y [1] la URI (cadenas vacías si ese campo no venía).
+     */
+    public String[] takeLaunchChoice() {
+        synchronized (launchLock) {
+            if (!launchPending) return null;
+            launchPending = false;
+            return new String[] { launchExtra, launchData };
+        }
+    }
+
+    /** Carpeta de las .so del APK (libnectar.so, libnectar2.so, ...). */
+    public String nativeLibraryDir() {
+        String dir = getApplicationInfo().nativeLibraryDir;
+        return dir != null ? dir : "";
+    }
+
+    /**
+     * Create shortcut. null si el launcher aceptó el pin; si no, un motivo
+     * corto para el aviso del hub. Bloquea el hilo de SDL hasta el hilo de UI.
+     */
+    public String pinGameShortcut(String gameId, String title, byte[] png) {
+        if (Looper.myLooper() == Looper.getMainLooper()) return pinGameShortcutOnUi(gameId, title, png);
+        final String[] result = new String[1];
+        CountDownLatch latch = new CountDownLatch(1);
+        runOnUiThread(() -> {
+            try {
+                result[0] = pinGameShortcutOnUi(gameId, title, png);
+            } catch (Exception e) {
+                result[0] = "could not pin the shortcut";
+            }
+            latch.countDown();
+        });
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            return "could not pin the shortcut";
+        }
+        return result[0];
+    }
+
+    private String pinGameShortcutOnUi(String gameId, String title, byte[] png) {
+        if (!"pikmin1".equals(gameId) && !"pikmin2".equals(gameId)) return "unknown game";
+        if (title == null || title.isEmpty()) title = "pikmin2".equals(gameId) ? "Pikmin 2" : "Pikmin";
+        if (!ShortcutManagerCompat.isRequestPinShortcutSupported(this)) {
+            return "this home screen cannot pin shortcuts";
+        }
+        ShortcutInfoCompat info = new ShortcutInfoCompat.Builder(this, "pin-" + gameId)
+                .setShortLabel(title)
+                .setLongLabel(title)
+                .setIcon(shortcutIcon(png))
+                .setIntent(GameLaunch.view(this, gameId))
+                .build();
+        try {
+            if (!ShortcutManagerCompat.requestPinShortcut(this, info, null)) {
+                return "this home screen cannot pin shortcuts";
+            }
+        } catch (Exception e) {
+            return "this home screen cannot pin shortcuts";
+        }
+        return null;
+    }
+
+    /** Cover as an adaptive icon, inset so the launcher mask keeps the picture.
+     *  No cover (or a bad PNG): the Open Nectar icon. */
+    private IconCompat shortcutIcon(byte[] png) {
+        Bitmap decoded = png != null && png.length > 0 ? BitmapFactory.decodeByteArray(png, 0, png.length) : null;
+        if (decoded == null || decoded.getWidth() < 1 || decoded.getHeight() < 1) {
+            return IconCompat.createWithResource(this, R.mipmap.ic_launcher);
+        }
+        try {
+            Bitmap adaptive = adaptiveCover(decoded);
+            if (adaptive != decoded) decoded.recycle();
+            return IconCompat.createWithAdaptiveBitmap(adaptive);
+        } catch (Exception e) {
+            return IconCompat.createWithResource(this, R.mipmap.ic_launcher);
+        }
+    }
+
+    /** The cover sits in the inner 72/108 of the adaptive icon, so the mask doesn't crop it. */
+    private static Bitmap adaptiveCover(Bitmap cover) {
+        int size = Math.max(cover.getWidth(), cover.getHeight());
+        Bitmap out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(out);
+        float inner = size * (72f / 108f);
+        float scale = Math.min(inner / cover.getWidth(), inner / cover.getHeight());
+        float w = cover.getWidth() * scale;
+        float h = cover.getHeight() * scale;
+        float left = (size - w) / 2f;
+        float top = (size - h) / 2f;
+        canvas.drawBitmap(cover, null, new RectF(left, top, left + w, top + h), null);
+        return out;
     }
 
     /** Llamado desde el hilo de SDL: bloquea hasta que el usuario elige o cancela. */
@@ -178,6 +317,10 @@ public class LauncherActivity extends SDLActivity {
         Intent intent = new Intent(this, NectarActivity.class);
         intent.putExtra(NectarActivity.EXTRA_LIBRARY, library);
         intent.putExtra(NectarActivity.EXTRA_GAME_DIR, gameDir);
+        // The game is singleInstance in its own process. This brings that task
+        // forward; if it is already up, onNewIntent receives this library.
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         startActivity(intent);
     }
 }

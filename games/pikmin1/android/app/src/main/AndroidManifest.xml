@@ -51,13 +51,32 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Long-press shortcuts for Pikmin and Pikmin 2 (#336). They
+                 target ShortcutActivity, which forwards the game choice. -->
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
+        </activity>
+
+        <!-- Atajo de Pikmin / Pikmin 2. Sin ventana: reenvía el Intent al
+             launcher (o a StartActivity si la carpeta de datos aún no está). -->
+        <activity android:name="org.opennectar.ShortcutActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="opennectar" android:host="launch" />
+            </intent-filter>
         </activity>
 
         <!-- El launcher (hub Pikmin / Pikmin 2). Instala cada juego desde su
-             disco y abre NectarActivity con el elegido. -->
+             disco y abre NectarActivity con el elegido. singleTask: un atajo
+             con la app abierta llega por onNewIntent, no abre otro launcher. -->
         <activity android:name="org.opennectar.LauncherActivity"
             android:label="@string/app_name"
             android:exported="false"
+            android:launchMode="singleTask"
             android:screenOrientation="sensorLandscape"
             android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation" />
 
