@@ -20,6 +20,8 @@ struct TOmake;
 }
 }
 
+static float sOmakeHover[7] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+
 // A bonus row under the pointer, skipping the blank placeholder slots.
 static int pcOmakeRowAt(ebi::Screen::TOmake* self, float nx, float ny)
 {
@@ -261,6 +263,15 @@ bool TOmake::doUpdateStateWait()
 			float hx = 0.0f, hy = 0.0f;
 			const int over = pc_menu_hover(&hx, &hy) ? pcOmakeRowAt(this, hx, hy) : -1;
 			if (over >= 0) pc_menu_set_hand(true);
+			for (int i = 0; i < 7; i++) {
+				J2DPane* row = mPaneList1[i];
+				if (!row) continue;
+				const float next = pc_menu_hover_scale(row, i == over, 0.06f, sys->mDeltaTime);
+				float prev       = sOmakeHover[i];
+				if (prev <= 0.0f) prev = 1.0f;
+				row->updateScale(row->getScaleX() / prev * next, row->getScaleY() / prev * next);
+				sOmakeHover[i] = next;
+			}
 		}
 #endif
 		mInput.update();
