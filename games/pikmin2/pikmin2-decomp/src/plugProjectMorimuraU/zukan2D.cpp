@@ -623,6 +623,14 @@ bool TZukanBase::doUpdate()
 			float hy = 0.0f;
 			if (pc_menu_hover(&hx, &hy)) pcZukanIconAt(this, hx, hy, &sZukanRow, &sZukanCol);
 			if (sZukanRow >= 0) pc_menu_set_hand(true);
+			float tx = 0.0f;
+			float ty = 0.0f;
+			int clickRow = -1;
+			int clickCol = -1;
+			if (pc_menu_take_tap(&tx, &ty) && pcZukanIconAt(this, tx, ty, &clickRow, &clickCol)) {
+				TIconInfo* icon = mIndexPaneList[clickRow]->mIconInfos[clickCol];
+				if (icon && icon->mPane) pc_menu_hover_press(icon->mPane);
+			}
 		}
 #endif
 		if (!mIsBigWindowOpened && !mWindow->mState) {
