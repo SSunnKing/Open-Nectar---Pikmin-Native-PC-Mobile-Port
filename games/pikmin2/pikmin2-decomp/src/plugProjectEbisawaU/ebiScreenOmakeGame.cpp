@@ -12,6 +12,8 @@ extern "C" void pc_gfx_p2_extend_shade(float gxY0, float gxY1, float stripW);
 static const char name[] = "ebiScreenOmakeGame";
 
 #if PIKI_PC_MENU_TAP
+static float sOmakeGameHover[ebi::Screen::TOmakeGame::GameCount] = { 1.0f, 1.0f, 1.0f };
+
 static int pcOmakeGameAt(ebi::Screen::TOmakeGame* self, float nx, float ny)
 {
 	int hit = -1;
@@ -156,6 +158,15 @@ bool TOmakeGame::doUpdateStateWait()
 			float hx = 0.0f, hy = 0.0f;
 			const int over = pc_menu_hover(&hx, &hy) ? pcOmakeGameAt(this, hx, hy) : -1;
 			if (over >= 0) pc_menu_set_hand(true);
+			for (int i = 0; i < GameCount; i++) {
+				J2DPane* row = mPaneGameSel[i];
+				if (!row) continue;
+				const float next = pc_menu_hover_scale(row, i == over, 0.06f, sys->mDeltaTime);
+				float prev       = sOmakeGameHover[i];
+				if (prev <= 0.0f) prev = 1.0f;
+				row->updateScale(row->getScaleX() / prev * next, row->getScaleY() / prev * next);
+				sOmakeGameHover[i] = next;
+			}
 		}
 #endif
 		mPad.update();
