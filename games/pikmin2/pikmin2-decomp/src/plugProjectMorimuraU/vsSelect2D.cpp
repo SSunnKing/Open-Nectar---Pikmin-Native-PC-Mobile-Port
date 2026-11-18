@@ -1232,6 +1232,7 @@ void TVsSelect::doCreate(JKRArchive* arc)
 #if PIKI_PC_MENU_TAP
 static int sVsCourse = -1;
 static int sVsArrow  = -1;
+static int sVsPick   = -1;
 static int pcVsCourseAt(TVsSelect* self, float nx, float ny)
 {
 	int hit = -1;
@@ -1259,6 +1260,7 @@ bool TVsSelect::doUpdate()
 #if PIKI_PC_MENU_TAP
 	sVsCourse = -1;
 	sVsArrow  = -1;
+	if (!mCanInput) sVsPick = -1;
 #endif
 	if (mIsSection && mDoDebugScores) {
 		mPlayerWinCounts[0] = mDebugWinCounts[0];
@@ -1300,10 +1302,32 @@ bool TVsSelect::doUpdate()
 		if (pc_menu_take_tap(&tx, &ty) && mZoomState == 0) {
 			if (rulesinactive) {
 				const int row = pcVsCourseAt(this, tx, ty);
-				if (row >= 0) pc_menu_hover_press(mIndexPaneList[row]->getMainPane());
+				if (row >= 0) {
+					pc_menu_hover_press(mIndexPaneList[row]->getMainPane());
+					const int id  = mIndexPaneList[row]->getIndex();
+					const int sel = mIndexPaneList[mCurrActiveRowSel]->getIndex();
+					if (id == sel) {
+						sVsPick = -1;
+						if (!mIsSection) {
+							mIsDemoStarted = 1;
+							demoStart();
+						}
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_DECIDE, 0);
+						mRulesWindow->closeWindow();
+					} else {
+						sVsPick = id;
+					}
+				}
 			} else {
 				const int arrow = pcVsRulesArrow(this, tx, ty);
-				if (arrow >= 0) pc_menu_hover_press(mPaneRulesLR[arrow]);
+				if (arrow >= 0) {
+					pc_menu_hover_press(mPaneRulesLR[arrow]);
+					const bool forward = arrow == 1;
+					if (!mDoChangeRulesPage && ((forward && mCurrentRulesPage == 0) || (!forward && mCurrentRulesPage != 0))) {
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+						mDoChangeRulesPage = true;
+					}
+				}
 			}
 		}
 	}
@@ -1378,6 +1402,9 @@ bool TVsSelect::doUpdate()
 					PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_DECIDE, 0);
 					mRulesWindow->closeWindow();
 				} else if (mController->getButton() & (Controller::ANALOG_UP) || mController->getButton() & (Controller::PRESS_DPAD_UP)) {
+#if PIKI_PC_MENU_TAP
+					sVsPick = -1;
+#endif
 					if (mStickAnimState != 1) {
 						mIndexGroup->upIndex();
 					} else if (mIndexGroup->mStateID == TIndexGroup::IDGroup_Idle && !mIsSelectIndexChange) {
@@ -1386,12 +1413,23 @@ bool TVsSelect::doUpdate()
 					}
 				} else if (mController->getButton() & (Controller::ANALOG_DOWN)
 				           || mController->getButton() & (Controller::PRESS_DPAD_DOWN)) {
+#if PIKI_PC_MENU_TAP
+					sVsPick = -1;
+#endif
 					if (mStickAnimState != 2) {
 						mIndexGroup->downIndex();
 					} else if (mIndexGroup->mStateID == TIndexGroup::IDGroup_Idle && !mIsSelectIndexChange) {
 						mIsSelectIndexChange = true;
 						PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_ERROR, 0);
 					}
+#if PIKI_PC_MENU_TAP
+				} else if (sVsPick >= 0 && mIndexGroup && mIndexGroup->mStateID == TIndexGroup::IDGroup_Idle) {
+					const int step = pc_list_step_toward(mIndexPaneList[mCurrActiveRowSel]->getIndex(), sVsPick,
+					                                     mStickAnimState != 1, mStickAnimState != 2);
+					if (step > 0) mIndexGroup->downIndex();
+					else if (step < 0) mIndexGroup->upIndex();
+					else sVsPick = -1;
+#endif
 				}
 			}
 		} else if (mCanCancel && mController->getButtonDown() & Controller::PRESS_B) {
