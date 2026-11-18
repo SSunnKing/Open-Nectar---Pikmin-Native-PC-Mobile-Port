@@ -1,6 +1,9 @@
 #include "pc_menu_tap.h"
 #if PIKI_PC_MENU_TAP
 #include "Dolphin/pad.h"
+#include "pc_menu_pointer.h"
+#include "gl/pc_gfx.h"
+#include "System.h"
 #endif
 #include "types.h"
 #include "kh/khCaveResult.h"
@@ -283,6 +286,29 @@ void ObjCaveResult::doCreate(JKRArchive* arc)
 	}
 }
 
+#if PIKI_PC_MENU_TAP
+static int sCaveRow = -1;
+
+// Treasure under the pointer, from the scroll layout. The two row panes are restamped.
+static int pcCaveRowAt(ObjCaveResult* self, float nx, float ny)
+{
+	if (!self->mScreenMain) return -1;
+	J2DPane* mask = self->mScreenMain->search(MC8("Nmask"));
+	if (mask) pc_pointer_track(mask);
+	if (!mask || !(self->mScrollUpDown > 0.0f) || self->mScissorMax == 0 || !self->mResultNode) return -1;
+	const PcPointerRect rect = pc_pointer_rect(mask);
+	if (!rect.valid) return -1;
+	int width = 0, height = 0;
+	pc_gfx_get_drawable_size(&width, &height);
+	float pointerY = 0.0f;
+	if (!pc_result_window_y(nx, ny, rect.x0, rect.y0, rect.x1, rect.y1, width, height, (float)self->mScissorMax, &pointerY))
+		return -1;
+	int count = 0;
+	FOREACH_NODE(Game::Result::TNode, self->mResultNode->mChild, node) { count++; }
+	return pc_result_row_at(pointerY, count, self->mScrollUpDown, self->mScrollPos, (float)self->mScissorMax);
+}
+#endif
+
 /**
  * @note Address: 0x803F93F8
  * @note Size: 0x34C
@@ -310,6 +336,15 @@ bool ObjCaveResult::doUpdate()
 		}
 
 	} else {
+#if PIKI_PC_MENU_TAP
+		pc_menu_claim();
+		{
+			float hx = 0.0f, hy = 0.0f;
+			const bool hovering = pc_menu_hover(&hx, &hy);
+			sCaveRow = pcCaveRowAt(this, hovering ? hx : -1.0f, hovering ? hy : -1.0f);
+			if (sCaveRow >= 0) pc_menu_set_hand(true);
+		}
+#endif
 		switch (mStatus) {
 		case CAVERES_Normal:
 			statusNormal();
