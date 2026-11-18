@@ -16,6 +16,10 @@
 #include "pc_menu_tap.h"
 int pc_window_take_wheel_steps(void);
 
+#if PIKI_PC_MENU_TAP
+static int sMapIcon = -1;
+#endif
+
 #ifdef PIKI_PC_PORT
 extern "C" float pc_window_free_camera_sub_y(void);
 extern "C" float pc_window_free_camera_sub_y_for(int player);
@@ -484,6 +488,22 @@ void ObjSMenuMap::transMap()
 	// Mouse: dragging with the left button pans the map like the stick.
 	{
 		pc_menu_claim();
+		sMapIcon = -1;
+		{
+			float hx = 0.0f, hy = 0.0f;
+			bool hand = false;
+			if (pc_menu_hover(&hx, &hy)) {
+				if (mMapTexPane && pc_menu_pane_hit(mMapTexPane, hx, hy, 0.0f)) hand = true;
+				for (int i = 0; i < mMapIconNum && mRadarPaneList; i++) {
+					J2DPane* icon = mRadarPaneList[i] ? *mRadarPaneList[i] : nullptr;
+					if (icon && pc_menu_pane_hit(icon, hx, hy, 0.004f)) {
+						hand     = true;
+						sMapIcon = i;
+					}
+				}
+			}
+			if (hand) pc_menu_set_hand(true);
+		}
 		float dx = 0.0f, dy = 0.0f;
 		if (pc_menu_take_drag(&dx, &dy)) {
 			inputs.x = -dx * 40.0f;
