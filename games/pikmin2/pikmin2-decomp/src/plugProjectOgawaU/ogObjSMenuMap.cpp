@@ -893,6 +893,11 @@ void ObjSMenuMap::updateMap()
 	f32 angleOffs = 360.0f;
 	for (int i = 0; i < mMapIconNum; i++) {
 		f32 scaleFactor = msVal.mMapIconScaleBase;
+#if PIKI_PC_MENU_TAP
+		if (*mRadarPaneList[i]) {
+			scaleFactor *= pc_menu_hover_scale(*mRadarPaneList[i], i == sMapIcon, 0.12f, sys->mDeltaTime);
+		}
+#endif
 		(*mRadarPaneList[i])->updateScale(scaleFactor / scale);
 		(*mRadarPaneList[i])->setAngle(angleOffs - mMapAngle);
 	}
