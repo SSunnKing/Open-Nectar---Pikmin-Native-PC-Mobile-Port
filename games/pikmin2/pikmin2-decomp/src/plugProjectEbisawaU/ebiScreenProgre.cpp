@@ -12,6 +12,16 @@
 
 static const char className[] = "ebiScreenProgre";
 
+#if PIKI_PC_MENU_TAP
+// 1 is Yes, 0 is No, -1 is empty space.
+static int pcProgreChoiceAt(ebi::TScreenProgre* self, float nx, float ny)
+{
+	if (self->mPaneYes && pc_menu_pane_hit(self->mPaneYes, nx, ny, 0.02f)) return 1;
+	if (self->mPaneNo && pc_menu_pane_hit(self->mPaneNo, nx, ny, 0.02f)) return 0;
+	return -1;
+}
+#endif
+
 namespace ebi {
 
 /**
@@ -255,6 +265,12 @@ void TScreenProgre::update()
 	pc_menu_plate(PAD_BUTTON_A, "A OK");
 	pc_menu_plate(PAD_BUTTON_RIGHT, "Right");
 	pc_menu_plate(PAD_BUTTON_LEFT, "Left");
+	pc_menu_claim();
+	{
+		float hx = 0.0f, hy = 0.0f;
+		const int over = pc_menu_hover(&hx, &hy) ? pcProgreChoiceAt(this, hx, hy) : -1;
+		if (over >= 0) pc_menu_set_hand(true);
+	}
 #endif
 				if (mController->isMoveRight()) {
 					if (mSelect == 1) {
