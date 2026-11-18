@@ -629,6 +629,11 @@ bool ObjDayEndResultItem::doUpdate()
 		const bool hovering = pc_menu_hover(&hx, &hy);
 		sDayItemRow = pcDayItemAt(this, hovering ? hx : -1.0f, hovering ? hy : -1.0f);
 		if (sDayItemRow >= 0) pc_menu_set_hand(true);
+		float tx = 0.0f, ty = 0.0f;
+		if (pc_menu_take_tap(&tx, &ty)) {
+			const int pressed = pcDayItemAt(this, tx, ty);
+			if (pressed >= 0 && pressed < 48) pc_menu_hover_press(&sDayItemFeel[pressed]);
+		}
 		for (int i = 0; i < 48; i++) {
 			sDayItemScale[i] = pc_menu_hover_scale(&sDayItemFeel[i], i == sDayItemRow, 0.06f, sys->mDeltaTime);
 		}
