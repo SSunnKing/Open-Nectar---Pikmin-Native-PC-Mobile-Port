@@ -587,6 +587,7 @@ bool ObjDayEndResultItem::doUpdateFadein()
 
 #if PIKI_PC_MENU_TAP
 static int sDayItemRow = -1;
+static int sDayItemPick = -1;
 static float sDayItemScale[48];
 static char sDayItemFeel[48];
 
@@ -632,7 +633,12 @@ bool ObjDayEndResultItem::doUpdate()
 		float tx = 0.0f, ty = 0.0f;
 		if (pc_menu_take_tap(&tx, &ty)) {
 			const int pressed = pcDayItemAt(this, tx, ty);
-			if (pressed >= 0 && pressed < 48) pc_menu_hover_press(&sDayItemFeel[pressed]);
+			if (pressed >= 0 && pressed < 48) {
+				pc_menu_hover_press(&sDayItemFeel[pressed]);
+				// No scroll on a short list, and the top visible row is the one A acts on.
+				if ((mFlags & 0x1) == 0 || pressed == mCurrentSelectId) pc_menu_queue_button(Controller::PRESS_A);
+				else sDayItemPick = pressed;
+			}
 		}
 		for (int i = 0; i < 48; i++) {
 			sDayItemScale[i] = pc_menu_hover_scale(&sDayItemFeel[i], i == sDayItemRow, 0.06f, sys->mDeltaTime);
@@ -905,7 +911,13 @@ void ObjDayEndResultItem::statusNormal()
 	pc_menu_plate(PAD_BUTTON_A, "A Continue");
 	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
 	pc_menu_plate(PAD_BUTTON_UP, "Up");
+	// Those Up and Down plates already take the wheel, one row per notch.
 #endif
+		if (getGamePad()->getButton() & (Controller::PRESS_UP | Controller::PRESS_DOWN)) {
+#if PIKI_PC_MENU_TAP
+			sDayItemPick = -1;
+#endif
+		}
 		if (getGamePad()->getButton() & Controller::PRESS_UP && mCurrentSelectId != 0) {
 			mCurrentSelectId--;
 			if (mScrollUpDelay >= 1) {
@@ -928,10 +940,33 @@ void ObjDayEndResultItem::statusNormal()
 			mScrollUpDelay = 0;
 			mStatus        = ITEMSTATUS_ScrollDown;
 			statusScrollDown();
+#if PIKI_PC_MENU_TAP
+		} else if (sDayItemPick >= 0 && sDayItemPick != mCurrentSelectId) {
+			const int step = pc_list_step_toward(mCurrentSelectId, sDayItemPick, mCurrentSelectId != 0,
+			                                     mCurrentSelectId != mMaxScrollId);
+			if (step > 0) {
+				mCurrentSelectId++;
+				mScollMoveTargetTime = ObjDayEndResultBase::msVal._24;
+				mScrollUpDelay       = 0;
+				mStatus              = ITEMSTATUS_ScrollDown;
+				statusScrollDown();
+			} else if (step < 0) {
+				mCurrentSelectId--;
+				mScollMoveTargetTime = ObjDayEndResultBase::msVal._24;
+				mScrollDownDelay     = 0;
+				mStatus              = ITEMSTATUS_ScrollUp;
+				statusScrollUp();
+			} else {
+				sDayItemPick = -1;
+			}
+#endif
 		} else {
 			mScrollDownDelay     = 0;
 			mScrollUpDelay       = 0;
 			mScollMoveTargetTime = ObjDayEndResultBase::msVal._24;
+#if PIKI_PC_MENU_TAP
+			if (sDayItemPick == mCurrentSelectId) sDayItemPick = -1;
+#endif
 		}
 	}
 }
