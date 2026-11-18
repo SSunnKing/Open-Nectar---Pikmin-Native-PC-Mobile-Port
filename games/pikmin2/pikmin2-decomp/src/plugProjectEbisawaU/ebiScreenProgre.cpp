@@ -277,6 +277,14 @@ void TScreenProgre::update()
 			const int pressed = pcProgreChoiceAt(this, tx, ty);
 			J2DPane* pane     = pressed == 1 ? mPaneYes : pressed == 0 ? mPaneNo : nullptr;
 			if (pane) pc_menu_hover_press(pane);
+			if (pressed >= 0) {
+				mSelect = pressed;
+				mBlinkFontYes.disable();
+				mBlinkFontNo.disable();
+				(pressed ? mBlinkFontYes : mBlinkFontNo).enable();
+				mCursor1.mIsLeft = mCursor2.mIsLeft = pressed != 0;
+				setDecide();
+			}
 		}
 		J2DPane* choices[2] = { mPaneNo, mPaneYes };
 		for (int i = 0; i < 2; i++) {
