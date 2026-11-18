@@ -1,5 +1,6 @@
 package org.opennectar;
 
+import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
@@ -90,6 +91,28 @@ public class NectarActivity extends SDLActivity {
     private static boolean isGameLibrary(String name) {
         return name != null && (name.equals("nectar") || name.equals("nectar-pal")
                 || name.equals("nectar2") || name.equals("nectar2-pal"));
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        // A shortcut can ask for the other game while this process is still
+        // the one that loaded the first library. SDL will not load a second
+        // .so here, so start clean the way the online menu already restarts.
+        String next = intent != null ? intent.getStringExtra(EXTRA_LIBRARY) : null;
+        String current = gameLibrary();
+        if (next != null && isGameLibrary(next) && !next.equals(current)) {
+            Intent restart = new Intent(this, NectarActivity.class);
+            restart.putExtra(EXTRA_LIBRARY, next);
+            if (intent.getStringExtra(EXTRA_GAME_DIR) != null) {
+                restart.putExtra(EXTRA_GAME_DIR, intent.getStringExtra(EXTRA_GAME_DIR));
+            }
+            restart.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            startActivity(restart);
+            android.os.Process.killProcess(android.os.Process.myPid());
+            return;
+        }
+        if (intent != null) setIntent(intent);
     }
 
     @Override

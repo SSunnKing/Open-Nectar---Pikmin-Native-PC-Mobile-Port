@@ -1553,6 +1553,12 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_menu_pad_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_menu_pad_test COMMAND pc_menu_pad_test)
 
+    # Android merged-gamepad names versus desktop motion nodes (issue #213)
+    add_executable(pc_pad_filter_test pc_port/pc_pad_filter_test.cpp)
+    target_include_directories(pc_pad_filter_test PRIVATE pc_port)
+    target_compile_options(pc_pad_filter_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_pad_filter_test COMMAND pc_pad_filter_test)
+
     # GameCube PADClamp (no window). Links the decomp translation unit.
     add_executable(pc_pad_clamp_test pc_port/pc_pad_clamp_test.cpp src/pad/Padclamp.c)
     target_include_directories(pc_pad_clamp_test PRIVATE include pc_port)
@@ -1924,6 +1930,13 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_coop_switch_test PRIVATE pc_port)
     target_compile_options(pc_coop_switch_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_coop_switch_test COMMAND pc_coop_switch_test)
+
+    # Co-op onion enter: a cutscene whistle must not send the other captain's
+    # squad into ActEnter (upstream crash #348, "karl caught a cold").
+    add_executable(pc_squad_enter_test pc_port/pc_squad_enter_test.cpp)
+    target_include_directories(pc_squad_enter_test PRIVATE pc_port)
+    target_compile_options(pc_squad_enter_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_squad_enter_test COMMAND pc_squad_enter_test)
 
     # PKNI input-file format, yaw quantisation and the per-tick yaw and local slots.
     add_executable(pc_input_log_test

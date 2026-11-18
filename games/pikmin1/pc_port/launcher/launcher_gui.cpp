@@ -1427,14 +1427,9 @@ struct Hub {
     // Por encima del pie ("Installed in: ...").
     static float pageBottom(ImVec2 size) { return hubPageBottom(size.y); }
 
-    // Create shortcut (#336), the last row under each installed game. Not on
-    // Android: home-screen shortcuts there are separate.
-    static constexpr bool kShortcutButton =
-#ifdef __ANDROID__
-        false;
-#else
-        true;
-#endif
+    // Create shortcut (#336), the last row under each installed game.
+    // Android pins it on the home screen; the other systems write a shortcut.
+    static constexpr bool kShortcutButton = true;
 
     // Filas de botones bajo la portada de un juego.
     float columnRows(int game) const
@@ -3464,6 +3459,7 @@ struct HubWindow::Impl {
     bool playRequested = false;
     HubGame installGame = HubGame::Pikmin1; // juego que instalan los modales de rutas y progreso
     std::function<HubResult()> homeLoop;   // ver setHomeLoop
+    std::function<bool(HubGame& game)> pendingLaunch; // Android shortcut while the home screen is up
 
     enum class Modal { None, Paths, Progress, Message };
     Modal modal = Modal::None;
@@ -3889,6 +3885,12 @@ bool HubWindow::open(const HubState& state, std::string& error)
     // Controllers opened before or after launch. A failure here leaves the
     // mouse and keyboard launcher unchanged.
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+#ifdef __ANDROID__
+    // The game sets this before SDL_Init (issue #177). The launcher did not,
+    // so HIDAPI still claimed a Bluetooth DualShock 4, the Android joystick
+    // was never created, and menus only saw Cross/Circle as Enter/Escape.
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "0");
+#endif
     m.gameController = SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) == 0;
     noteGamepadSubsystem(m.gameController);
 #ifdef __ANDROID__
@@ -4019,7 +4021,15 @@ HubResult HubWindow::runHome()
     m.modal = Impl::Modal::None;
     m.hub->chosen = false;
     m.result = HubResult();
-    while (!m.quitRequested && !m.hub->chosen) m.frame();
+    while (!m.quitRequested && !m.hub->chosen) {
+        m.frame();
+        if (!m.pendingLaunch) continue;
+        HubGame game = HubGame::Pikmin1;
+        if (!m.pendingLaunch(game)) continue;
+        m.result.action = HubAction::Play;
+        m.result.game = game;
+        break;
+    }
     if (m.quitRequested) m.result.action = HubAction::Quit;
     return m.result;
 }
@@ -4040,6 +4050,8 @@ void HubWindow::showNotice(const std::string& text)
     mImpl->hub->notify(text);
     mImpl->hub->toastTime = 8.0f; // long enough to read before it fades
 }
+
+void HubWindow::setPendingLaunch(std::function<bool(HubGame& game)> poll) { mImpl->pendingLaunch = std::move(poll); }
 
 void HubWindow::markInstalled(HubGame game, const std::string& directory, const std::string& executable,
                               const std::string& discId)

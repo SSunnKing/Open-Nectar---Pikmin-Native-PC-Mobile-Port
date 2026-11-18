@@ -605,6 +605,10 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
             set(P2_HOST_TEST_TARGETS ${P2_HOST_TEST_TARGETS} ${target} PARENT_SCOPE)
         endfunction()
 
+        # Android merged-gamepad names versus desktop motion nodes (issue #213)
+        pikmin2_add_host_test(p2_pad_filter_test
+            ${PC_PORT_DIR}/pc_pad_filter_test.cpp
+        )
         # Readable host memory for the GX bounds (issue #45: macOS has no /proc)
         pikmin2_add_host_test(p2_host_readable_test
             ${CMAKE_CURRENT_SOURCE_DIR}/../pikmin1/pc_port/dolphin_stubs/pc_host_readable_test.cpp
