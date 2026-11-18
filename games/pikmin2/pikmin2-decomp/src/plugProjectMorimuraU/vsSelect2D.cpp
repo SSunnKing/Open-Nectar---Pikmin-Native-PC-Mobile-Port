@@ -1227,6 +1227,29 @@ void TVsSelect::doCreate(JKRArchive* arc)
  * @note Address: 0x8039D1E0
  * @note Size: 0x1244
  */
+#if PIKI_PC_MENU_TAP
+static int pcVsCourseAt(TVsSelect* self, float nx, float ny)
+{
+	int hit = -1;
+	if (!self->mIndexPaneList) return hit;
+	for (int i = 0; i < self->mNumActiveRows; i++) {
+		J2DPane* pane = self->mIndexPaneList[i] ? self->mIndexPaneList[i]->getMainPane() : nullptr;
+		if (pane && pane->isVisible() && pc_menu_pane_hit(pane, nx, ny, 0.02f)) hit = i;
+	}
+	return hit;
+}
+
+// 0 is the left rules arrow, 1 is the right one. Hidden arrows are not targets.
+static int pcVsRulesArrow(TVsSelect* self, float nx, float ny)
+{
+	for (int i = 0; i < 2; i++) {
+		J2DPane* pane = self->mPaneRulesLR[i];
+		if (pane && pane->isVisible() && pc_menu_pane_hit(pane, nx, ny, 0.04f)) return i;
+	}
+	return -1;
+}
+#endif
+
 bool TVsSelect::doUpdate()
 {
 	if (mIsSection && mDoDebugScores) {
@@ -1256,6 +1279,16 @@ bool TVsSelect::doUpdate()
 	pc_menu_plate(PAD_TRIGGER_L, "L");
 	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
 	pc_menu_plate(PAD_BUTTON_UP, "Up");
+	{
+		float hx = 0.0f;
+		float hy = 0.0f;
+		int over = -1;
+		if (pc_menu_hover(&hx, &hy) && mZoomState == 0) {
+			if (rulesinactive) over = pcVsCourseAt(this, hx, hy);
+			else over = pcVsRulesArrow(this, hx, hy);
+		}
+		if (over >= 0) pc_menu_set_hand(true);
+	}
 #endif
 		if (mZoomState == 0) {
 			if (rulesinactive) {
