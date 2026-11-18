@@ -230,6 +230,28 @@ bool pc_result_window_y(float nx, float ny, float maskX0, float maskY0, float ma
     *outY = (py - maskY0) / (maskY1 - maskY0) * windowHeight;
     return true;
 }
+float pc_result_page_top(int page, int current, int direction, float scrollY, float pageHeight)
+{
+    if (!(pageHeight > 0.0f)) return 0.0f;
+    const int anchor = current - direction;
+    return scrollY + (float)(page - anchor) * pageHeight;
+}
+int pc_result_page_at(float pointerY, int pageCount, int current, int direction, float scrollY,
+                      float pageHeight, float windowHeight)
+{
+    int hit = -1;
+    if (!(pageHeight > 0.0f) || !(windowHeight > 0.0f)) return -1;
+    for (int i = 0; i < pageCount; ++i) {
+        const float top = pc_result_page_top(i, current, direction, scrollY, pageHeight);
+        const float bottom = top + pageHeight;
+        const float low = top > 0.0f ? top : 0.0f;
+        const float high = bottom < windowHeight ? bottom : windowHeight;
+        if (!(high - low > 0.5f)) continue;
+        if (pointerY < top || pointerY > bottom) continue;
+        hit = i;
+    }
+    return hit;
+}
 int pc_pointer_frame() { return tick; }
 int plateBatchTick = -100;
 void pc_plate_request(unsigned short pad, const char* label) {

@@ -85,5 +85,13 @@ int pc_result_row_at(float pointerY, int rowCount, float rowHeight, float scroll
 // False when the pointer is outside the mask or the sizes are unusable.
 bool pc_result_window_y(float nx, float ny, float maskX0, float maskY0, float maskX1, float maskY1,
                         int drawableW, int drawableH, float windowHeight, float* outY);
+// Final-result pages. direction is +1 while the page index is increasing,
+// -1 while it is decreasing, and 0 while the list is idle. scrollY is the
+// draw offset of the page being left. The current page sits at 0 when idle.
+float pc_result_page_top(int page, int current, int direction, float scrollY, float pageHeight);
+// The page under pointerY, or -1. A page needs a real overlap with the window.
+// A shared edge belongs to the lower page.
+int pc_result_page_at(float pointerY, int pageCount, int current, int direction, float scrollY,
+                      float pageHeight, float windowHeight);
 int pc_pointer_frame();
 #endif

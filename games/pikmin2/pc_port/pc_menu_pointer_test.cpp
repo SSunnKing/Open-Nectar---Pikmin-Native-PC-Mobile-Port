@@ -185,4 +185,21 @@ int main() {
     CHECK(!pc_result_window_y(0.9f, 0.375f, 0.0f, 100.0f, 200.0f, 300.0f, 400, 400, 60.0f, &windowY));
     CHECK(!pc_result_window_y(0.25f, 0.375f, 0.0f, 100.0f, 200.0f, 300.0f, 0, 400, 60.0f, &windowY));
     CHECK(!pc_result_window_y(0.25f, 0.375f, 0.0f, 100.0f, 200.0f, 300.0f, 400, 400, 0.0f, &windowY));
+
+    CHECK(pc_result_page_top(3, 3, 0, 0.0f, 40.0f) == 0.0f);
+    CHECK(pc_result_page_top(4, 3, 0, 0.0f, 40.0f) == 40.0f);
+    CHECK(pc_result_page_at(10.0f, 8, 3, 0, 0.0f, 40.0f, 40.0f) == 3);
+    CHECK(pc_result_page_at(40.0f, 8, 3, 0, 0.0f, 40.0f, 40.0f) == 3);
+    // Scrolling toward a higher page: the old page slides up, the new one enters below.
+    CHECK(pc_result_page_top(3, 4, 1, -20.0f, 40.0f) == -20.0f);
+    CHECK(pc_result_page_top(4, 4, 1, -20.0f, 40.0f) == 20.0f);
+    CHECK(pc_result_page_at(10.0f, 8, 4, 1, -20.0f, 40.0f, 40.0f) == 3);
+    CHECK(pc_result_page_at(20.0f, 8, 4, 1, -20.0f, 40.0f, 40.0f) == 4);
+    CHECK(pc_result_page_at(30.0f, 8, 4, 1, -20.0f, 40.0f, 40.0f) == 4);
+    // Scrolling toward a lower page: the old page slides down, the new one enters above.
+    CHECK(pc_result_page_top(4, 3, -1, 20.0f, 40.0f) == 20.0f);
+    CHECK(pc_result_page_top(3, 3, -1, 20.0f, 40.0f) == -20.0f);
+    CHECK(pc_result_page_at(10.0f, 8, 3, -1, 20.0f, 40.0f, 40.0f) == 3);
+    CHECK(pc_result_page_at(30.0f, 8, 3, -1, 20.0f, 40.0f, 40.0f) == 4);
+    CHECK(pc_result_page_at(10.0f, 8, 3, 0, 0.0f, 0.0f, 40.0f) == -1);
 }
