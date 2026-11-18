@@ -158,6 +158,11 @@ bool TOmakeGame::doUpdateStateWait()
 			float hx = 0.0f, hy = 0.0f;
 			const int over = pc_menu_hover(&hx, &hy) ? pcOmakeGameAt(this, hx, hy) : -1;
 			if (over >= 0) pc_menu_set_hand(true);
+			float tx = 0.0f, ty = 0.0f;
+			if (!mCursor.mCounter && pc_menu_take_tap(&tx, &ty)) {
+				const int pressed = pcOmakeGameAt(this, tx, ty);
+				if (pressed >= 0 && mPaneGameSel[pressed]) pc_menu_hover_press(mPaneGameSel[pressed]);
+			}
 			for (int i = 0; i < GameCount; i++) {
 				J2DPane* row = mPaneGameSel[i];
 				if (!row) continue;
