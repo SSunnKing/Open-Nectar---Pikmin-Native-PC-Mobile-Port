@@ -3,6 +3,7 @@
 #endif
 #include "pc_window.h"
 #include "pc_menu_pad.h"
+#include "pc_text_box.h"
 #include "pc_mac_keys.h"
 #include "pc_pad_filter.h"
 
@@ -1429,6 +1430,7 @@ void pc_window_poll_events(PADStatus* pad) {
         }
     }
 
+    pc_text_update_input(sEnterLatch.down);
     if (!pad) return;
 
     // Reset pad status for Channel 0
