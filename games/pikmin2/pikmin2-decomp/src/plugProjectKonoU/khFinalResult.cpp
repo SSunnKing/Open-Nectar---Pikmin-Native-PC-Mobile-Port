@@ -301,6 +301,8 @@ void ObjFinalResult::doCreate(JKRArchive* arc)
 
 #if PIKI_PC_MENU_TAP
 static int sFinalPage = -1;
+static float sFinalScale[8];
+static char sFinalFeel[8];
 
 // Page under the pointer, from the same offset the draw uses. The stamped
 // stat panes are not hit targets.
@@ -362,6 +364,9 @@ bool ObjFinalResult::doUpdate()
 			const bool hovering = pc_menu_hover(&hx, &hy);
 			sFinalPage = pcFinalPageAt(this, hovering ? hx : -1.0f, hovering ? hy : -1.0f);
 			if (sFinalPage >= 0) pc_menu_set_hand(true);
+			for (int i = 0; i < 8; i++) {
+				sFinalScale[i] = pc_menu_hover_scale(&sFinalFeel[i], i == sFinalPage, 0.06f, sys->mDeltaTime);
+			}
 		}
 #endif
 		switch (mState) {
@@ -457,7 +462,15 @@ void ObjFinalResult::doDraw(Graphics& gfx)
 	}
 
 	if (mState == StatusNormal) {
+#if PIKI_PC_MENU_TAP
+		float pageScale = mCurrentPage >= 0 && mCurrentPage < 8 ? sFinalScale[mCurrentPage] : 1.0f;
+		if (pageScale <= 0.0f) pageScale = 1.0f;
+		pane3->updateScale(pageScale);
+#endif
 		drawReplace(gfx, mCurrentPage);
+#if PIKI_PC_MENU_TAP
+		pane3->updateScale(1.0f);
+#endif
 	} else {
 		f32 thing;
 		int page;
@@ -469,9 +482,22 @@ void ObjFinalResult::doDraw(Graphics& gfx)
 			page  = mCurrentPage - 1;
 		}
 		pane3->add(0.0f, mScrollYPos);
+#if PIKI_PC_MENU_TAP
+		float neighborScale = page >= 0 && page < 8 ? sFinalScale[page] : 1.0f;
+		if (neighborScale <= 0.0f) neighborScale = 1.0f;
+		pane3->updateScale(neighborScale);
+#endif
 		drawReplace(gfx, page);
 		pane3->add(0.0f, thing);
+#if PIKI_PC_MENU_TAP
+		float pageScale = mCurrentPage >= 0 && mCurrentPage < 8 ? sFinalScale[mCurrentPage] : 1.0f;
+		if (pageScale <= 0.0f) pageScale = 1.0f;
+		pane3->updateScale(pageScale);
+#endif
 		drawReplace(gfx, mCurrentPage);
+#if PIKI_PC_MENU_TAP
+		pane3->updateScale(1.0f);
+#endif
 	}
 	GXSetScissor(x1, x2, y1, y2);
 	gfx.mOrthoGraph.setPort();
