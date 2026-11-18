@@ -537,6 +537,10 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
         target_link_options(${P2_GAME} PRIVATE "-Wl,-z,max-page-size=16384")
     else()
         target_link_libraries(${P2_GAME} PRIVATE ${P2_LEGACY} m Threads::Threads ${P2_SDL_LIBS} OpenGL::GL)
+        if(APPLE)
+            # pc_mac_disable_press_and_hold calls the Objective-C runtime directly.
+            target_link_libraries(${P2_GAME} PRIVATE "-framework Foundation")
+        endif()
     endif()
     # Mandos Xbox 360 (XInput) por USB en macOS, que no trae driver para ellos:
     # se leen con libusb y se presentan a SDL como mando virtual (como en P1).
@@ -602,6 +606,10 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
             set(P2_HOST_TEST_TARGETS ${P2_HOST_TEST_TARGETS} ${target} PARENT_SCOPE)
         endfunction()
 
+        # Android merged-gamepad names versus desktop motion nodes (issue #213)
+        pikmin2_add_host_test(p2_pad_filter_test
+            ${PC_PORT_DIR}/pc_pad_filter_test.cpp
+        )
         # Readable host memory for the GX bounds (issue #45: macOS has no /proc)
         pikmin2_add_host_test(p2_host_readable_test
             ${CMAKE_CURRENT_SOURCE_DIR}/../pikmin1/pc_port/dolphin_stubs/pc_host_readable_test.cpp
@@ -675,6 +683,12 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
         pikmin2_add_host_test(p2_text_box_test
             ${PC_PORT_DIR}/pc_text_box_test.cpp
         )
+        pikmin2_add_host_test(p2_mac_keys_test
+            ${PC_PORT_DIR}/pc_mac_keys_test.cpp
+        )
+        if(APPLE)
+            target_link_libraries(p2_mac_keys_test PRIVATE "-framework Foundation")
+        endif()
         pikmin2_add_host_test(p2_coop_movie_protagonist_test
             ${PC_PORT_DIR}/pc_p2_coop_movie_protagonist_test.cpp
             ${PC_PORT_DIR}/pc_p2_coop_movie_protagonist.cpp

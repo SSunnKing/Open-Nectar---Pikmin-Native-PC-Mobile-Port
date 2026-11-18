@@ -105,6 +105,11 @@ public:
     void setHomeLoop(std::function<HubResult()> loop);
     // Short notice at the bottom of the home screen (why --launch opened it).
     void showNotice(const std::string& text);
+    // Android: a shortcut can arrive while the home screen is up (onNewIntent).
+    // Called every home frame. Empty elsewhere, so desktop never sees it.
+    // Return true to leave the home screen and play `game`; the callback
+    // shows the fallback notice itself when the game cannot start.
+    void setPendingLaunch(std::function<bool(HubGame& game)> poll);
     // The game's cover as a 256x256 PNG icon for its shortcut (#336), from
     // the launcher's cover cache. Empty if the cover was never downloaded.
     std::vector<unsigned char> gameIconPng(HubGame game) const;
