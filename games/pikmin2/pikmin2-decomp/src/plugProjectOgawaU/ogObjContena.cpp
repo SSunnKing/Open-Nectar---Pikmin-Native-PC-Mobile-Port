@@ -506,7 +506,10 @@ bool ObjContena::moveContena()
 				J2DPane* arrow = nullptr;
 				if (mPaneArrowUp && mPaneArrowUp->isVisible() && pc_menu_pane_hit(mPaneArrowUp, tx, ty, 0.02f)) arrow = mPaneArrowUp;
 				else if (mPaneArrowDown && mPaneArrowDown->isVisible() && pc_menu_pane_hit(mPaneArrowDown, tx, ty, 0.02f)) arrow = mPaneArrowDown;
-				if (arrow) pc_menu_hover_press(arrow);
+				if (arrow) {
+					pc_menu_hover_press(arrow);
+					pc_menu_queue_button(arrow == mPaneArrowUp ? PAD_BUTTON_UP : PAD_BUTTON_DOWN);
+				}
 			}
 		}
 #endif
