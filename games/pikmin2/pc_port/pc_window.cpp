@@ -1618,7 +1618,7 @@ void pc_window_poll_events(PADStatus* pad) {
     substickY = (s8)(cdirY * 127);
 
     // Menus share one mapping. Enter, Space and left click accept. Escape,
-    // Backspace and right click cancel. Arrows and WASD both move the cursor.
+    // Backspace, right click and mouse Back cancel. Arrows and WASD both move the cursor.
     // Shift never cancels here. Free play keeps the bindings filled in above.
     if (pc_menu_mode_active()) {
         PcMenuPadKeys keys = {};
@@ -1646,6 +1646,7 @@ void pc_window_poll_events(PADStatus* pad) {
         // prompts, and consume then clears this pad. Both masks omit a finger.
         keys.clickLeft  = !pc_pointer_claimed() && pc_menu_pad_click(sRealMouseButtons, sMousePressedMask, SDL_BUTTON_LEFT);
         keys.clickRight = pc_menu_pad_click(sRealMouseButtons, sMousePressedMask, SDL_BUTTON_RIGHT);
+        keys.clickX1    = pc_menu_pad_click(sRealMouseButtons, sMousePressedMask, SDL_BUTTON_X1);
         auto keyBindHeld = [&](int bind) {
             if (bind <= 0 || bind >= SDL_NUM_SCANCODES)
                 return false;

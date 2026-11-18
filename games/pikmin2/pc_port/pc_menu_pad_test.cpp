@@ -3,9 +3,9 @@
  * @brief Menu keys versus free-play keys on the virtual GameCube pad.
  *
  * Menus accept with Enter, Space and left click, and cancel with Escape,
- * Backspace and right click. Shift does not cancel. Free play keeps Enter as
- * Start and a Shift binding as B. No window is opened: the translator takes
- * the keys directly.
+ * Backspace, right click and the mouse Back button. Shift does not cancel.
+ * Free play keeps Enter as Start and a Shift binding as B. No window is
+ * opened: the translator takes the keys directly.
  */
 
 #include "pc_menu_pad.h"
@@ -169,6 +169,23 @@ int main()
 		std::int8_t sx = 0, sy = 0;
 		apply(keys, true, false, startKey, 0, button, sx, sy);
 		expect((button & PC_MENU_PAD_B) != 0, 1, "menu right click sets B");
+	}
+	{
+		PcMenuPadKeys keys = keysNone();
+		keys.clickX1 = true;
+		std::uint16_t button = 0;
+		std::int8_t sx = 0, sy = 0;
+		apply(keys, true, false, startKey, 0, button, sx, sy);
+		expect((button & PC_MENU_PAD_B) != 0, 1, "menu mouse Back sets B");
+		expect((button & PC_MENU_PAD_A) != 0, 0, "menu mouse Back is not A");
+	}
+	{
+		PcMenuPadKeys keys = keysNone();
+		keys.clickX1 = true;
+		std::uint16_t button = 0;
+		std::int8_t sx = 0, sy = 0;
+		apply(keys, false, false, startKey, 0, button, sx, sy);
+		expect((button & PC_MENU_PAD_B) != 0, 0, "free play ignores mouse Back");
 	}
 	{
 		PcMenuPadKeys keys = keysNone();

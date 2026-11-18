@@ -50,6 +50,11 @@ int main()
 	expect(pc_cutscene_port_skip(true, false, true), 0, "speedrun keeps the disc rule");
 	expect(pc_cutscene_port_skip(false, false, false), 0, "no press leaves the cutscene");
 
+	expect(pc_text_cancel_wants(true, false, false), 1, "Backspace is B");
+	expect(pc_text_cancel_wants(false, true, false), 1, "right click is B");
+	expect(pc_text_cancel_wants(false, false, true), 1, "mouse Back is B");
+	expect(pc_text_cancel_wants(false, false, false), 0, "nothing else is B");
+
 	if (sFailures == 0) {
 		std::printf("pc_text_box_test: all checks passed\n");
 		return 0;
