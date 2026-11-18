@@ -11,6 +11,18 @@ extern "C" void pc_gfx_p2_extend_shade(float gxY0, float gxY1, float stripW);
 
 static const char name[] = "ebiScreenOmakeGame";
 
+#if PIKI_PC_MENU_TAP
+static int pcOmakeGameAt(ebi::Screen::TOmakeGame* self, float nx, float ny)
+{
+	int hit = -1;
+	for (int i = 0; i < ebi::Screen::TOmakeGame::GameCount; i++) {
+		J2DPane* row = self->mPaneGameSel[i];
+		if (row && row->isVisible() && pc_menu_pane_hit(row, nx, ny, 0.01f)) hit = i;
+	}
+	return hit;
+}
+#endif
+
 namespace ebi {
 namespace Screen {
 
@@ -138,6 +150,14 @@ bool TOmakeGame::doUpdateStateWait()
 {
 	mScreenObj->update();
 	if (mExitState) {
+#if PIKI_PC_MENU_TAP
+		pc_menu_claim();
+		{
+			float hx = 0.0f, hy = 0.0f;
+			const int over = pc_menu_hover(&hx, &hy) ? pcOmakeGameAt(this, hx, hy) : -1;
+			if (over >= 0) pc_menu_set_hand(true);
+		}
+#endif
 		mPad.update();
 		if (mPad.mSelectionChanged) {
 			int oldsel = mPad.mLastIndex;
