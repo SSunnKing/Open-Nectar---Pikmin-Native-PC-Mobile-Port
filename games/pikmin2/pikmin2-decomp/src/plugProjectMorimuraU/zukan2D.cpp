@@ -507,6 +507,9 @@ void TZukanBase::doCreate(JKRArchive* archive)
 #if PIKI_PC_MENU_TAP
 static int sZukanRow = -1;
 static int sZukanCol = -1;
+static int sZukanPick = -1;
+static int sZukanPickCol = 0;
+static int sZukanPickSteps = 0;
 
 // Icon under the pointer. Big rows only have the center picture.
 static bool pcZukanIconAt(TZukanBase* self, float nx, float ny, int* row, int* col)
@@ -627,15 +630,41 @@ bool TZukanBase::doUpdate()
 			float ty = 0.0f;
 			int clickRow = -1;
 			int clickCol = -1;
-			if (pc_menu_take_tap(&tx, &ty) && pcZukanIconAt(this, tx, ty, &clickRow, &clickCol)) {
-				TIconInfo* icon = mIndexPaneList[clickRow]->mIconInfos[clickCol];
+			if (!mIsBigWindowOpened && !mWindow->mState && pc_menu_take_tap(&tx, &ty)
+			    && pcZukanIconAt(this, tx, ty, &clickRow, &clickCol)) {
+				TIndexPane* clicked = mIndexPaneList[clickRow];
+				TIconInfo* icon     = clicked->mIconInfos[clickCol];
 				if (icon && icon->mPane) pc_menu_hover_press(icon->mPane);
+				const bool big = clicked->mSizeType != TIndexPane::Size_Small;
+				const int col  = big ? 1 : clickCol;
+				if (clickRow == mCurrActiveRowSel && (big || mRightOffset == col)) {
+					sZukanPick = -1;
+					mState     = Screen::Game2DMgr::CHECK2D_Zukan_Changing;
+					if (mCameraFadeInLevel < 0.5f) {
+						if (!mIsBigWindowOpened) PSSystem::spSysIF->playSystemSe(PSSE_SY_CAMERAVIEW_CHANGE, 0);
+						mIsBigWindowOpened = true;
+					}
+					if (mWindow->mState) windowOpenClose(getXMsgID(clicked->getIndex()));
+				} else if (clickRow == mCurrActiveRowSel) {
+					sZukanPick   = -1;
+					mRightOffset = col;
+					isHorizontalScroll = true;
+					icon->startScaleUp(1.0f);
+					PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+				} else {
+					sZukanPick      = clicked->getIndex();
+					sZukanPickCol   = col;
+					sZukanPickSteps = 0;
+				}
 			}
 		}
 #endif
 		if (!mIsBigWindowOpened && !mWindow->mState) {
 			Controller* pad = mController;
 			if (pad->getButton() & Controller::ANALOG_UP) {
+#if PIKI_PC_MENU_TAP
+				sZukanPick = -1;
+#endif
 				if (mIsPreDebt && !mCanScroll) {
 					if (mCurrActiveRowSel > 0) {
 						mIndexGroup->upIndex();
@@ -649,6 +678,9 @@ bool TZukanBase::doUpdate()
 					mIndexGroup->upIndex();
 				}
 			} else if (pad->getButton() & Controller::ANALOG_DOWN) {
+#if PIKI_PC_MENU_TAP
+				sZukanPick = -1;
+#endif
 				if (mIsPreDebt && !mCanScroll) {
 					bool cantScroll = true;
 					if (_234 < 0) {
@@ -690,6 +722,27 @@ bool TZukanBase::doUpdate()
 					}
 				}
 			}
+#if PIKI_PC_MENU_TAP
+			else if (sZukanPick >= 0 && mIndexGroup && mIndexGroup->mStateID == TIndexGroup::IDGroup_Idle) {
+				TIndexPane* selected = mIndexPaneList[mCurrActiveRowSel];
+				if (selected->getIndex() == sZukanPick) {
+					if (selected->mSizeType == TIndexPane::Size_Small) mRightOffset = sZukanPickCol;
+					if (selected->mIconInfos && selected->mIconInfos[mRightOffset]) {
+						selected->mIconInfos[mRightOffset]->startScaleUp(1.0f);
+					}
+					PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+					sZukanPick = -1;
+				} else if (sZukanPickSteps > mNumActiveRows + 2) {
+					sZukanPick = -1;
+				} else {
+					const int step = pc_list_step_toward(selected->getIndex(), sZukanPick, true, true);
+					if (step > 0) mIndexGroup->downIndex();
+					else if (step < 0) mIndexGroup->upIndex();
+					else sZukanPick = -1;
+					sZukanPickSteps++;
+				}
+			}
+#endif
 		}
 
 		if (!mIndexGroup->mStateID && !isHorizontalScroll) {
