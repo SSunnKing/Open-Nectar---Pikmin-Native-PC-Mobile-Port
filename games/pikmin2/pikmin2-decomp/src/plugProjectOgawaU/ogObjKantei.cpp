@@ -1,3 +1,4 @@
+#include "pc_menu_tap.h"
 #include "og/newScreen/KanteiDemo.h"
 #include "og/Screen/ogScreen.h"
 #include "Morimura/mrUtil.h"
@@ -337,6 +338,13 @@ bool ObjKantei::doUpdate()
 
 	case Kantei_PokoAppearDelay:
 		mStartTimer += sys->mDeltaTime;
+#if PIKI_PC_MENU_TAP
+		pc_menu_claim();
+		{
+			float hx = 0.0f, hy = 0.0f;
+			if (pc_menu_hover(&hx, &hy)) pc_menu_set_hand(true);
+		}
+#endif
 		if (mStartTimer >= msVal.mNameAppearDelay || pad->getButtonDown() & Controller::PRESS_A
 		    || (mDisp->mSecondaryController && mDisp->mSecondaryController->getButtonDown() & Controller::PRESS_A)) {
 			mState              = Kantei_SetPokoValue;
@@ -374,20 +382,29 @@ bool ObjKantei::doUpdate()
 	case Kantei_Idle:
 		if (mIdleStateTimer > 0.0f) {
 			mIdleStateTimer -= sys->mDeltaTime;
-		} else if (pad && pad->getButtonDown() & Controller::PRESS_A
-		           || (mDisp->mSecondaryController && mDisp->mSecondaryController->getButtonDown() & Controller::PRESS_A)) {
-			mShipMessageBoxID = mDisp->mPelletMessageID;
-			// if the tagID exists, open ship message box, unless in E3 mode
-			if (mShipMessageBoxID != 0 && !Game::gGameConfig.mParms.mE3version.mData) {
-				u32 tagid  = 0;
-				u32 tagid2 = 0;
-				P2JME::convertU64ToMessageID(mShipMessageBoxID, &tagid, &tagid2);
-				mTControl->setMessageID(tagid, tagid2);
-				mInTextBox = true;
-				mState     = Kantei_MessageBox;
+		} else {
+#if PIKI_PC_MENU_TAP
+			pc_menu_claim();
+			{
+				float hx = 0.0f, hy = 0.0f;
+				if (pc_menu_hover(&hx, &hy)) pc_menu_set_hand(true);
+			}
+#endif
+			if (pad && pad->getButtonDown() & Controller::PRESS_A
+			    || (mDisp->mSecondaryController && mDisp->mSecondaryController->getButtonDown() & Controller::PRESS_A)) {
+				mShipMessageBoxID = mDisp->mPelletMessageID;
+				// if the tagID exists, open ship message box, unless in E3 mode
+				if (mShipMessageBoxID != 0 && !Game::gGameConfig.mParms.mE3version.mData) {
+					u32 tagid  = 0;
+					u32 tagid2 = 0;
+					P2JME::convertU64ToMessageID(mShipMessageBoxID, &tagid, &tagid2);
+					mTControl->setMessageID(tagid, tagid2);
+					mInTextBox = true;
+					mState     = Kantei_MessageBox;
 
-			} else {
-				finishKantei();
+				} else {
+					finishKantei();
+				}
 			}
 		}
 		break;
