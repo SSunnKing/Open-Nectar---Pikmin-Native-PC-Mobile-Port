@@ -2,6 +2,8 @@
 #include "pc_menu_tap.h"
 #if PIKI_PC_MENU_TAP
 #include "Dolphin/pad.h"
+#include "pc_menu_pointer.h"
+#include "System.h"
 #endif
 #include "pc_p2_captain_preview.h"
 #endif
@@ -818,6 +820,23 @@ void TChallengePlayModeScreen::create(char const* path, u32 flags)
  * @note Address: 0x8038DB1C
  * @note Size: 0x7FC
  */
+#if PIKI_PC_MENU_TAP
+static int sChallengeOver = -1;
+static int sChallengeMode = -1;
+static float sCourseHover[30];
+static float sModeHover[2] = { 1.0f, 1.0f };
+
+// The course pane's own update multiplies its current scale, so the previous
+// hover factor has to come back out before the new one goes in.
+static void pcApplyHover(J2DPane* pane, float& prev, bool over, float amount)
+{
+	const float next = pc_menu_hover_scale(pane, over, amount, sys->mDeltaTime);
+	if (prev <= 0.0f) prev = 1.0f;
+	pane->updateScale(pane->getScaleX() / prev * next, pane->getScaleY() / prev * next);
+	prev = next;
+}
+#endif
+
 void TChallengePlayModeScreen::update()
 {
 #if !defined(VERSION_JP)
@@ -1028,6 +1047,9 @@ void TChallengePlayModeScreen::update()
 			if (mState >= 2) {
 				for (int i = 0; i < 2; i++) {
 					mPaneList0[i]->updateScale(mScaleMgr[i]->calc());
+#if PIKI_PC_MENU_TAP
+					pcApplyHover(mPaneList0[i], sModeHover[i], i == sChallengeMode, 0.06f);
+#endif
 				}
 			}
 			mScreenObj->setXY(mMovePos, 0.0f);
@@ -1604,6 +1626,10 @@ static int pcChallengeModeAt(TChallengeSelect* self, float nx, float ny)
 
 bool TChallengeSelect::doUpdate()
 {
+#if PIKI_PC_MENU_TAP
+	sChallengeOver = -1;
+	sChallengeMode = -1;
+#endif
 	TChallengePlayModeScreen* screen;
 	if (mPlayModeScreen->isState(TChallengePlayModeScreen::PlayModeScreen_Active) != 0) {
 		// Check that player 2s controller is plugged in
@@ -1642,12 +1668,13 @@ bool TChallengeSelect::doUpdate()
 	{
 		float hx = 0.0f;
 		float hy = 0.0f;
-		int over = -1;
+		sChallengeOver = -1;
+		sChallengeMode = -1;
 		if (pc_menu_hover(&hx, &hy)) {
-			if (!mPlayModeScreen->isOpen() && rulesClosed) over = pcChallengeCourseAt(this, hx, hy);
-			else if (mPlayModeScreen->isState(TChallengePlayModeScreen::PlayModeScreen_Active)) over = pcChallengeModeAt(this, hx, hy);
+			if (!mPlayModeScreen->isOpen() && rulesClosed) sChallengeOver = pcChallengeCourseAt(this, hx, hy);
+			else if (mPlayModeScreen->isState(TChallengePlayModeScreen::PlayModeScreen_Active)) sChallengeMode = pcChallengeModeAt(this, hx, hy);
 		}
-		if (over >= 0) pc_menu_set_hand(true);
+		if (sChallengeOver >= 0 || sChallengeMode >= 0) pc_menu_set_hand(true);
 	}
 #endif
 		if (mControls->getButtonDown() & Controller::PRESS_Z && mPlayModeScreen->mState == 0) {
@@ -1865,6 +1892,9 @@ bool TChallengeSelect::doUpdate()
 	for (int i = 0; i < CHALLENGE_COURSE_COUNT; i++) {
 		TChallengePanel* panel = mPanelList[i];
 		panel->update(mCurrentSelection, updatePanel);
+#if PIKI_PC_MENU_TAP
+		if (panel->mPane1) pcApplyHover(panel->mPane1, sCourseHover[i], i == sChallengeOver, 0.06f);
+#endif
 		if (i == mCurrentSelection || panel->mIsUnlock) {
 			panel->addAlpha();
 		} else {
