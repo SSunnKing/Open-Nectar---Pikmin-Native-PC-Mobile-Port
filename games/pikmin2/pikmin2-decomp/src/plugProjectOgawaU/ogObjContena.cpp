@@ -18,6 +18,10 @@ extern "C" int pc_settings_get_onion_step10(void);
 #include "trig.h"
 #include "stdlib.h"
 
+#if PIKI_PC_MENU_TAP
+static int sOnionArrow = -1;
+#endif
+
 namespace og {
 namespace newScreen {
 
@@ -487,6 +491,15 @@ bool ObjContena::moveContena()
 		pc_menu_plate(PAD_BUTTON_A, "A OK");
 		pc_menu_plate(PAD_BUTTON_DOWN, "Down (out)");
 		pc_menu_plate(PAD_BUTTON_UP, "Up (in)");
+		sOnionArrow = -1;
+		{
+			float hx = 0.0f, hy = 0.0f;
+			if (pc_menu_hover(&hx, &hy)) {
+				if (mPaneArrowUp && mPaneArrowUp->isVisible() && pc_menu_pane_hit(mPaneArrowUp, hx, hy, 0.02f)) sOnionArrow = 0;
+				else if (mPaneArrowDown && mPaneArrowDown->isVisible() && pc_menu_pane_hit(mPaneArrowDown, hx, hy, 0.02f)) sOnionArrow = 1;
+			}
+			if (sOnionArrow >= 0) pc_menu_set_hand(true);
+		}
 #endif
 		if (mController->getButtonDown() & Controller::PRESS_B) {
 			mDisp->mDataContena = mDataContena;
