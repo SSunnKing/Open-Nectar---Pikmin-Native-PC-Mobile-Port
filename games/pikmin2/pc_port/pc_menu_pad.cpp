@@ -4,10 +4,10 @@ namespace {
 
 bool acceptBindingDown(int bind, const PcMenuPadKeys& keys)
 {
-	if (bind == SDL_SCANCODE_RETURN)
-		return keys.enter;
-	if (bind == SDL_SCANCODE_KP_ENTER)
-		return keys.kpEnter;
+	// Return, the portable Return key and Return2 are one accept key. The
+	// window sets both flags from pc_menu_pad_enter_down.
+	if (pc_menu_pad_binding_is_enter(bind))
+		return keys.enter || keys.kpEnter;
 	if (bind == SDL_SCANCODE_SPACE)
 		return keys.space;
 	if (bind == PC_BIND_MOUSE_BASE + SDL_BUTTON_LEFT)
@@ -71,6 +71,38 @@ bool pc_menu_pad_click(std::uint32_t held, std::uint32_t pressed, int sdlButton)
 bool pc_menu_pad_mouse_is_touch(std::uint32_t which)
 {
 	return which == SDL_TOUCH_MOUSEID;
+}
+
+bool pc_menu_pad_is_enter_event(int scancode, int keycode)
+{
+	if (scancode == SDL_SCANCODE_RETURN || scancode == SDL_SCANCODE_KP_ENTER
+	    || scancode == SDL_SCANCODE_RETURN2)
+		return true;
+	return keycode == SDLK_RETURN || keycode == SDLK_KP_ENTER || keycode == SDLK_RETURN2;
+}
+
+void pc_menu_pad_note_enter(PcMenuEnterLatch& latch, int scancode, int keycode, bool down)
+{
+	if (!pc_menu_pad_is_enter_event(scancode, keycode))
+		return;
+	latch.down = down;
+}
+
+bool pc_menu_pad_enter_down(bool stateReturn, bool stateKpEnter, bool stateReturn2, bool latched)
+{
+	return stateReturn || stateKpEnter || stateReturn2 || latched;
+}
+
+bool pc_menu_pad_binding_is_enter(int bind)
+{
+	return bind == SDL_SCANCODE_RETURN || bind == SDL_SCANCODE_KP_ENTER || bind == SDL_SCANCODE_RETURN2;
+}
+
+bool pc_menu_pad_start_binding_down(int bind, bool stateAtBind, bool enterDown)
+{
+	if (stateAtBind)
+		return true;
+	return pc_menu_pad_binding_is_enter(bind) && enterDown;
 }
 
 void pc_menu_pad_note_mouse_button(std::uint32_t& held, std::uint32_t& pressed,
