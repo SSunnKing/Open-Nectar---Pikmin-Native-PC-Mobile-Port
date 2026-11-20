@@ -209,6 +209,7 @@ struct PcConfig {
     int freeCamPadPct = 100;    // issue #66: sensibilidad del stick derecho con la cámara libre
     int eternalNight = 0;       // siempre de noche (luz y luna), el reloj del día sigue igual
     int fireflies = 0;          // luciérnagas por el escenario (de día o de noche)
+    int p2CarryColours = 0;     // issue #360: números de carga del color de la cebolla, como en Pikmin 2
     int p2Selection = 0;        // issue #67: cruceta como en Pikmin 2 (tipo fijo, arriba/abajo hoja/capullo/flor/bomba)
     // Reglas del modo VS (índices de las opciones del menú previo).
     int vsDuration = 2;  // 5 / 10 / 15 / 25 / 30 min
@@ -339,6 +340,7 @@ struct PcConfig {
         p2Selection = 0;
         eternalNight = 0;
         fireflies = 0;
+        p2CarryColours = 0;
         allOnions = 0;
         vsDuration = 2;
         vsRocketWin = 1;
@@ -1308,6 +1310,7 @@ void saveConfig() {
     out << "p2Selection = " << sConfig.p2Selection << "\n";
     out << "eternalNight = " << sConfig.eternalNight << "\n";
     out << "fireflies = " << sConfig.fireflies << "\n";
+    out << "p2CarryColours = " << sConfig.p2CarryColours << "\n";
     out << "hideOlimarText = " << sConfig.hideOlimarText << "\n";
     out << "speedrunIntroHidden = " << sConfig.speedrunIntroHidden << "\n";
     out << "speedrunCategory = " << sConfig.speedrunCategory << "\n";
@@ -1561,6 +1564,7 @@ void loadConfig() {
         }
         else if (key == "eternalNight") sConfig.eternalNight = atoi(val.c_str()) ? 1 : 0;
         else if (key == "fireflies") sConfig.fireflies = atoi(val.c_str()) ? 1 : 0;
+        else if (key == "p2CarryColours") sConfig.p2CarryColours = atoi(val.c_str()) ? 1 : 0;
         else if (key == "p2Selection") {
             sConfig.p2Selection = atoi(val.c_str()) ? 1 : 0;
         }
@@ -3148,6 +3152,9 @@ void modsRowChange(int row, bool left, bool right) {
     }
     else if (row == 41) {
         if (left || right) sPending.fireflies = sPending.fireflies ? 0 : 1;
+    }
+    else if (row == 45) {
+        if (left || right) sPending.p2CarryColours = sPending.p2CarryColours ? 0 : 1;
     }
     else if (row == 39) {
         if (left || right) sPending.p2Selection = sPending.p2Selection ? 0 : 1;
@@ -9229,6 +9236,7 @@ int pc_settings_get_breakable_gates(void) { if (pc_speedrun_active()) return 0;
 int pc_settings_get_p2_selection(void) { return sConfig.p2Selection; }
 int pc_settings_get_eternal_night(void) { return sConfig.eternalNight; }
 int pc_settings_get_fireflies(void) { return sConfig.fireflies; }
+int pc_settings_get_p2_carry_colours(void) { return sConfig.p2CarryColours; }
 float pc_settings_get_free_camera_pad_scale(void) { return sConfig.freeCamPadPct / 100.0f; }
 int pc_settings_get_bomb_control(void) { if (pc_speedrun_active()) return 0;
     return sConfig.bombControl;
@@ -9653,6 +9661,7 @@ void modsRowValue(int i, char* value, size_t n) {
     case 39: snprintf(value, n, "%s", sPending.p2Selection ? "On" : "Off"); break;
     case 40: snprintf(value, n, "%s", sPending.eternalNight ? "On" : "Off (original)"); break;
     case 41: snprintf(value, n, "%s", sPending.fireflies ? "On" : "Off (original)"); break;
+    case 45: snprintf(value, n, "%s", sPending.p2CarryColours ? "On" : "Off (original)"); break;
     case 43: snprintf(value, n, "%s", sPending.faceCursor ? "Cursor" : "Captain (default)"); break;
     case 42:
         if (sPending.bombRespawnSec <= 0) snprintf(value, n, "Off (original)");
@@ -9821,6 +9830,7 @@ const GroupRow kGameplayRows[] = {
     { SRC_MODS, 40, "Eternal Night", "Always night, whatever the day length: night lighting, and the moon crosses the day bar instead of the sun." },
     { SRC_MODS, 41, "Fireflies", "Fireflies drift around the field, by day or by night." },
     { SRC_MODS, 10, "Idle Pikmin Counter", "Shows how many Pikmin are standing around with nothing to do." },
+    { SRC_MODS, 45, "Pikmin 2 Carry Colours", "The numbers over a carried object take the colour of the Onion it is going to, as in Pikmin 2. Off: a blue number over a red one, as on GameCube." },
     { SRC_MODS, 36, "Hide Olimar's Messages", "Skips the messages Olimar shows while you play (first Pikmin, ship parts, tips). The ending messages still appear." },
 };
 

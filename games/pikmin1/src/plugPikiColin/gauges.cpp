@@ -16,6 +16,8 @@
 #include "netplay/pc_netplay_present.h"
 #include "timing/pc_render_phase.h"
 #include "GlobalGameOptions.h"
+#include "pc_carry_gauge_colour.h"
+#include "settings/pc_settings.h"
 #endif
 
 /// Life gauge border color for bar-style health gauges (grey by default, never used in-game).
@@ -192,10 +194,13 @@ void GaugeInfo::refresh(Graphics& gfx)
 
 	// bottom value first (red, changing value showing how many Pikmin are lifting/pushing/moving the object)
 	Colour colour;
-	colour.set(255, 32, 32, (int)mDisplayAlpha);
 #if defined(PIKI_PC_PORT)
-	if (mCarryColor == Blue) colour.set(32, 32, 255, (int)mDisplayAlpha);
-	else if (mCarryColor == Yellow) colour.set(255, 255, 32, (int)mDisplayAlpha);
+	// GameCube: blue over red. The "Pikmin 2 Carry Colours" setting tints both
+	// numbers with the destination Onion's colour (upstream issue #360).
+	const PcCarryGaugeColours carryColours = pc_carry_gauge_colours(pc_settings_get_p2_carry_colours() != 0, mCarryColor);
+	colour.set(carryColours.bottom.r, carryColours.bottom.g, carryColours.bottom.b, (int)mDisplayAlpha);
+#else
+	colour.set(255, 32, 32, (int)mDisplayAlpha);
 #endif
 
 	// makes a visually "dominant" value by scaling down the other digit to 75%
@@ -219,9 +224,10 @@ void GaugeInfo::refresh(Graphics& gfx)
 	// draw center of top number (blue, static value showing target amount to move object) 10 units above line
 	pos.y += 10.0f;
 #if defined(PIKI_PC_PORT)
-	if (mCarryColor < 0)
-#endif
+	colour.set(carryColours.top.r, carryColours.top.g, carryColours.top.b, (int)mDisplayAlpha);
+#else
 	colour.set(32, 32, 255, (int)mDisplayAlpha);
+#endif
 	showDigits(pos, colour, mMinCount, mDigitHalfWidth * topScale, mDigitHalfHeight * topScale);
 
 	STACK_PAD_VAR(1);
