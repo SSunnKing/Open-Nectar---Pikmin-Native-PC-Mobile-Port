@@ -74,6 +74,9 @@ int pc_settings_get_teki_health_pct(void);
 int pc_settings_get_infinite_day(void);
 int pc_settings_get_eternal_night(void);
 int pc_settings_get_fireflies(void);
+/// Carry counter numbers in the destination Onion's colour, as in Pikmin 2
+/// (upstream issue #360). Off: blue over red, as on GameCube.
+int pc_settings_get_p2_carry_colours(void);
 int pc_settings_get_free_camera(void);
 /// Free Camera: L mira hacia el cursor en vez de al frente del capitán.
 int pc_settings_get_face_cursor(void);
