@@ -105,6 +105,14 @@ struct DocGuard {
 };
 
 /// Malla estática de un .mod del juego metida en el mapa.
+/// Material del suelo: uno de los de un .mod de escenario del juego.
+struct DocMaterial {
+	std::string source = "courses/practice/practice.mod";
+	int index          = 14;
+	int attribute      = 2; ///< terreno para el juego: 0 sólido, 1 roca, 2 hierba, 3 madera, 4 barro
+	double uvScale     = 0; ///< unidades de UV por unidad de mundo; 0 = la del escenario original
+};
+
 struct DocProp {
 	/// Ruta en dataDir, p. ej. "objects/hinderrock/cube10.mod", o "map:..."
 	/// (un archivo de la carpeta del mapa: mallas importadas, en meshes/).
@@ -120,14 +128,10 @@ struct DocProp {
 	/// Escala con la que se importó la malla (0 = no se sabe). Las mallas del
 	/// mismo nivel se importan con la misma para que encajen.
 	double importScale = 0;
-};
-
-/// Material del suelo: uno de los de un .mod de escenario del juego.
-struct DocMaterial {
-	std::string source = "courses/practice/practice.mod";
-	int index          = 14;
-	int attribute      = 2; ///< terreno para el juego: 0 sólido, 1 roca, 2 hierba, 3 madera, 4 barro
-	double uvScale     = 0; ///< unidades de UV por unidad de mundo; 0 = la del escenario original
+	/// Pintura sobre la malla (issue #376): por triángulo, en el orden de
+	/// propTriangles(), 0 = su material y k = paintPalette[k - 1].
+	std::vector<DocMaterial> paintPalette;
+	std::vector<std::uint8_t> paint;
 };
 
 /// Bloque de terreno (issue #376): una caja que se coloca, se estira y se
@@ -435,6 +439,8 @@ struct MapProp {
 	bool collide;
 	bool ground  = false;
 	bool visible = true;
+	std::vector<MapMaterial> paintPalette; ///< ver DocProp::paint
+	std::vector<std::uint8_t> paint;
 };
 
 enum MapObjective { MAPGOAL_Parts, MAPGOAL_Pellets, MAPGOAL_Pikmin, MAPGOAL_Boss, MAPGOAL_Survive, MAPGOAL_Waves };

@@ -167,8 +167,24 @@ private:
 
 	// ── Terreno ──
 	bool ensureTerrain();
-	/// Agua en un nivel importado: pasa a poner un bloque de agua (true).
-	bool waterOnImportedLevel(Tool t);
+	/// En un nivel importado (sin terreno propio): el agua pasa a poner un
+	/// bloque de agua y la pintura pinta la malla, sin pasar el mapa a
+	/// cuadrícula (true si se ha encargado de elegir la herramienta).
+	bool toolOnImportedLevel(Tool t);
+	// Pintura sobre las mallas importadas (issue #376).
+	bool meshPaintMode() const;
+	struct MeshPaintTris {
+		std::string asset;
+		Xform pose;
+		std::vector<std::array<V3, 3>> world; ///< en el orden de DocProp::paint
+	};
+	std::map<int, MeshPaintTris> meshPaintCache_; ///< por índice de prop
+	const MeshPaintTris& meshPaintTris(int prop);
+	bool meshPaintRay(const Ray& ray, V3& hit);
+	void applyMeshPaint(const V3& at);
+	void drawMeshPaintOptions();
+	std::vector<nectar::DocMaterial> meshPaintPalette_;
+	int meshPaintMaterial_ = 0; ///< -1 = quitar la pintura
 	/// Papel de una malla importada (0 suelo, 1 solo colisión, 2 solo visual, 3 objeto sólido).
 	static void applyMeshRole(nectar::DocProp& p, int role);
 	int meshRole_           = 0;
@@ -371,6 +387,7 @@ private:
 	// -1 añadir a la paleta, -2 paredes del borde, k cambiar el k,
 	// kMatBrowserBlock - i el material del bloque i.
 	static constexpr int kMatBrowserBlock = -10;
+	static constexpr int kMatBrowserMeshPaint = -3; ///< añadir a la paleta de pintar mallas
 	int matBrowserTarget_ = -1;
 	std::string matBrowserCourse_;
 	std::map<std::string, std::shared_ptr<nectar::Model>> courseModels_;

@@ -426,6 +426,15 @@ void parseDoc(const json& root, MapDoc& m)
 		d.ground  = p.value("ground", false);
 		d.visible = p.value("visible", true);
 		d.importScale = p.value("importScale", 0.0);
+		if (p.contains("paint")) {
+			const json& pj = p.at("paint");
+			for (const json& mj : pj.value("palette", json::array())) d.paintPalette.push_back(parseMaterial(mj));
+			if (d.paintPalette.size() > 255) throw std::runtime_error(tr("pintura: más de 255 materiales en una malla"));
+			d.paint = fromBase64(pj.at("tris").get<std::string>());
+			for (std::uint8_t k : d.paint) {
+				if (k > d.paintPalette.size()) throw std::runtime_error(tr("pintura: un triángulo usa un material que no está en su lista"));
+			}
+		}
 		m.props.push_back(d);
 	}
 
@@ -998,7 +1007,8 @@ bool expandMap(const MapDoc& d, MapData& m, std::string& error, bool validate)
 			}
 		}
 		for (const DocProp& p : d.props) {
-			MapProp prop { p.asset, float(p.x), float(p.y), float(p.z), deg(float(p.rx)), deg(float(p.ry)), deg(float(p.rz)), float(p.scale), p.collide, p.ground, p.visible };
+			MapProp prop { p.asset, float(p.x), float(p.y), float(p.z), deg(float(p.rx)), deg(float(p.ry)), deg(float(p.rz)), float(p.scale), p.collide, p.ground, p.visible, {}, p.paint };
+			for (const DocMaterial& dm : p.paintPalette) prop.paintPalette.push_back(mapMaterial(dm, p.ground));
 			m.props.push_back(prop);
 			if (twin) {
 				prop.x  = -prop.x;
@@ -1200,6 +1210,11 @@ std::string writeMapDoc(const MapDoc& d)
 		if (p.ground) pj["ground"] = true;
 		if (!p.visible) pj["visible"] = false;
 		if (p.importScale > 0) pj["importScale"] = p.importScale;
+		if (!p.paintPalette.empty() && !p.paint.empty()) {
+			json palette = json::array();
+			for (const DocMaterial& m : p.paintPalette) palette.push_back(materialJson(m));
+			pj["paint"] = { { "palette", palette }, { "tris", toBase64(p.paint) } };
+		}
 		props.push_back(pj);
 	}
 	}

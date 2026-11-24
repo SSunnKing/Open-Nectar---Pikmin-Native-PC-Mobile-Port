@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -50,6 +51,11 @@ int main()
 	collision.visible     = false;
 	collision.importScale = 2.5;
 	doc.props.push_back(collision);
+	DocProp painted;
+	painted.asset        = "map:meshes/level.mod";
+	painted.paintPalette = { DocMaterial { "courses/practice/practice.mod", 0, 1, 0 } };
+	painted.paint        = { 0, 1, 1, 0, 1 };
+	doc.props.push_back(painted);
 
 	MapDoc back;
 	std::string error;
@@ -63,12 +69,17 @@ int main()
 		      "wall block keeps its material");
 	}
 
-	check(!back.props.empty() && !back.props.back().visible && near(back.props.back().importScale, 2.5),
+	check(back.props.size() >= 2 && !back.props[back.props.size() - 2].visible && near(back.props[back.props.size() - 2].importScale, 2.5),
 	      "a collision-only mesh keeps visible = false and its import scale");
+	check(!back.props.empty() && back.props.back().paint == std::vector<std::uint8_t> { 0, 1, 1, 0, 1 } && back.props.back().paintPalette.size() == 1
+	          && back.props.back().paintPalette[0].attribute == 1,
+	      "mesh paint survives the round trip");
 
 	MapData map;
 	check(expandMap(back, map, error, false), "the map with blocks expands");
-	check(!map.props.empty() && !map.props.back().visible, "visible = false reaches the expanded prop");
+	check(map.props.size() >= 2 && !map.props[map.props.size() - 2].visible, "visible = false reaches the expanded prop");
+	check(!map.props.empty() && map.props.back().paint.size() == 5 && (map.props.back().paintPalette[0].code >> 29) == 1u,
+	      "mesh paint reaches the expanded prop with its terrain code");
 	check(map.blocks.size() == 2, "one expanded block per block without symmetry");
 	if (map.blocks.size() == 2) {
 		check(map.blocks[0].kind == MAPBLOCK_Water && map.blocks[1].kind == MAPBLOCK_Wall, "block kinds expand");

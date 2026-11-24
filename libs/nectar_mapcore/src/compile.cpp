@@ -350,6 +350,13 @@ f32 maxPondDepth(const MapData& map)
 // única articulación del mapa.
 
 // Lo que se añade a las tablas del mapa por los props.
+struct MaterialUse {
+	int material = 0;               // índice en el .mod de salida
+	u32 flags    = 1 | 4 | 8;       // formato de vértice
+	f32 scale[8] = { 1.0f / 512.0f }; // UV por unidad de mundo, por canal
+	u32 code     = kFloorCode;
+};
+
 struct PropTables {
 	std::vector<std::vector<u8>> textures, texAttrs, tevInfos, materials;
 };
@@ -372,7 +379,24 @@ void putBE32(std::vector<u8>& b, std::size_t at, u32 v)
 	for (int i = 0; i < 4; i++) b[at + std::size_t(i)] = u8(v >> (24 - 8 * i));
 }
 
-bool addProp(const MapProp& prop, const Model& model, PropContext& ctx, std::string& error)
+// Pintura de los props: UV de mundo proyectadas por el eje más cercano a la
+// normal de la cara (en planta lo que mira arriba, de lado las paredes).
+void triplanarUv(const V3& n, const V3& p, f32& u, f32& v)
+{
+	const f32 ax = std::fabs(n.x), ay = std::fabs(n.y), az = std::fabs(n.z);
+	if (ay >= ax && ay >= az) {
+		u = p.x;
+		v = p.z;
+	} else if (ax >= az) {
+		u = p.z;
+		v = p.y;
+	} else {
+		u = p.x;
+		v = p.y;
+	}
+}
+
+bool addProp(const MapProp& prop, const Model& model, PropContext& ctx, const std::vector<MaterialUse>& paintUses, std::string& error)
 {
 	const std::size_t collStart = ctx.coll.size();
 	if (ctx.tables.materials.size() + std::size_t(ctx.baseMaterials) + model.materials.size() > 0x7FFF) {
@@ -416,9 +440,17 @@ bool addProp(const MapProp& prop, const Model& model, PropContext& ctx, std::str
 		for (const Vec2& t : model.uvs[k]) ctx.uvs[k].push_back({ t.x, t.y });
 	}
 
+	// Triángulos pintados: una malla por material de su lista. `ordinal`
+	// cuenta todos los triángulos del modelo como propTriangles().
+	std::vector<MeshBuild> painted;
+	for (const MaterialUse& use : paintUses) painted.push_back(MeshBuild { use.material, use.flags, {}, {} });
+	std::size_t ordinal = 0;
 	for (std::size_t mi = 0; mi < model.meshes.size(); mi++) {
 		const int mat = mats[mi];
-		if (mat < 0 || std::size_t(mat) >= model.materials.size()) continue;
+		if (mat < 0 || std::size_t(mat) >= model.materials.size()) {
+			for (const ModMtxGroup& g : model.meshes[mi].groups) ordinal += g.tris.size();
+			continue;
+		}
 		const ModMesh& mesh = model.meshes[mi];
 		// Sin matrices propias (todo va colocado) ni NBT (sin ese bloque, la
 		// normal sale de la tabla normal).
@@ -427,6 +459,9 @@ bool addProp(const MapProp& prop, const Model& model, PropContext& ctx, std::str
 		std::map<std::pair<int, int>, int> posIndex, nrmIndex;
 		for (const ModMtxGroup& g : mesh.groups) {
 			for (const ModTriangle& t : g.tris) {
+				const std::size_t paintK = ordinal < prop.paint.size() ? prop.paint[ordinal] : 0;
+				ordinal++;
+				const bool isPainted = paintK > 0 && paintK <= painted.size();
 				Tri tri {};
 				tri.code = kWallCode;
 				V3 world[3];
@@ -475,18 +510,37 @@ bool addProp(const MapProp& prop, const Model& model, PropContext& ctx, std::str
 						if (tri.n[k] < 0) tri.n[k] = ni;
 					}
 				}
-				std::array<int, 3> uv[8];
-				for (int c = 0; c < 8; c++) {
-					for (int k = 0; k < 3; k++) uv[c][k] = t.v[k].uv[c] >= 0 ? t.v[k].uv[c] + uvOff[c] : 0;
-					out.uv[c].push_back(uv[c]);
+				if (isPainted) {
+					// Su material de la lista, con UV de mundo.
+					MeshBuild& pm        = painted[paintK - 1];
+					const MaterialUse& u = paintUses[paintK - 1];
+					V3 fn                = cross(world[1] - world[0], world[2] - world[0]);
+					for (int c = 0; c < 8; c++) {
+						if (!(pm.flags & (1u << (3 + c)))) continue;
+						std::array<int, 3> at;
+						for (int k = 0; k < 3; k++) {
+							f32 a, b;
+							triplanarUv(fn, world[k], a, b);
+							at[k] = int(ctx.uvs[c].size());
+							ctx.uvs[c].push_back({ a * u.scale[c], b * u.scale[c] });
+						}
+						pm.uv[c].push_back(at);
+					}
+					pm.tris.push_back(tri);
+				} else {
+					std::array<int, 3> uv[8];
+					for (int c = 0; c < 8; c++) {
+						for (int k = 0; k < 3; k++) uv[c][k] = t.v[k].uv[c] >= 0 ? t.v[k].uv[c] + uvOff[c] : 0;
+						out.uv[c].push_back(uv[c]);
+					}
+					out.tris.push_back(tri);
 				}
-				out.tris.push_back(tri);
 
 				if (prop.collide && model.collision.empty()) {
 					// Colisión con la cara hacia fuera: si la del triángulo no
 					// coincide con su normal de vértice, se le da la vuelta.
 					Tri c = tri;
-					if (prop.ground) c.code = kFloorCode;
+					if (prop.ground) c.code = isPainted ? paintUses[paintK - 1].code : kFloorCode;
 					const V3 face = triNormal(ctx.verts, c);
 					const V3 vn   = ctx.normals[std::size_t(tri.n[0])];
 					if (face.DP(vn) < 0.0f) std::swap(c.v[1], c.v[2]);
@@ -496,6 +550,9 @@ bool addProp(const MapProp& prop, const Model& model, PropContext& ctx, std::str
 		}
 		// Solo colisión: la malla no se dibuja (la visual va en otro prop).
 		if (!out.tris.empty() && prop.visible) ctx.meshes.push_back(std::move(out));
+	}
+	for (MeshBuild& pm : painted) {
+		if (!pm.tris.empty() && prop.visible) ctx.meshes.push_back(std::move(pm));
 	}
 	// Con colisión propia (recortes de escenarios): esa, con sus códigos (el
 	// agua sigue siendo agua), en vez de los triángulos que se dibujan.
@@ -538,13 +595,6 @@ void writeTable(Writer& w, u32 chunk, const std::vector<std::vector<u8>>& base, 
 // ── Materiales del terreno ─────────────────────────────────────────────────
 // Un material de un escenario del juego se usa con el formato de vértice y la
 // escala de textura de la malla original que lo lleva: así se ve como allí.
-
-struct MaterialUse {
-	int material = 0;               // índice en el .mod de salida
-	u32 flags    = 1 | 4 | 8;       // formato de vértice
-	f32 scale[8] = { 1.0f / 512.0f }; // UV por unidad de mundo, por canal
-	u32 code     = kFloorCode;
-};
 
 // Ruido de valor suave en [0, 1] (determinista: el mismo mapa da el mismo
 // resultado). Sirve para variar el tono y deformar las UV del terreno, que si
@@ -1526,7 +1576,11 @@ bool compileMap(const MapData& map, const GameFileReader& read, const std::strin
 				}
 				it = loaded.emplace(prop.asset, std::move(model)).first;
 			}
-			if (!addProp(prop, it->second, ctx, error)) return false;
+			std::vector<MaterialUse> paintUses(prop.paintPalette.size());
+			for (std::size_t k = 0; k < prop.paintPalette.size(); k++) {
+				if (!resolve(prop.paintPalette[k], paintUses[k])) return false;
+			}
+			if (!addProp(prop, it->second, ctx, paintUses, error)) return false;
 		}
 		groundRanges = ctx.groundColl;
 		result.props = map.props.size();
@@ -2196,6 +2250,35 @@ bool compileMap(const MapData& map, const GameFileReader& read, const std::strin
 	result.collisionTris = coll.size();
 	result.routePoints   = points.size();
 	return buildIni(map, read, modPath, result.ini, error);
+}
+
+std::vector<std::array<Vec3, 3>> propTriangles(const Model& model)
+{
+	// Mismo orden y misma pose que addProp (todos los triángulos, también los
+	// de mallas sin material, que allí se saltan pero cuentan).
+	const std::vector<Mat34> pose = model.bindPose();
+	std::vector<std::array<Vec3, 3>> out;
+	for (const ModMesh& mesh : model.meshes) {
+		for (const ModMtxGroup& g : mesh.groups) {
+			for (const ModTriangle& t : g.tris) {
+				std::array<Vec3, 3> tri;
+				for (int k = 0; k < 3; k++) {
+					const ModVertex& v = t.v[k];
+					Mat34 m;
+					if (v.mtxSlot >= 0 && std::size_t(v.mtxSlot) < g.deps.size()) {
+						const int dep = g.deps[std::size_t(v.mtxSlot)];
+						if (dep >= 0 && std::size_t(dep) < model.vtxMatrices.size() && model.vtxMatrices[std::size_t(dep)].joint) {
+							const int key = model.vtxMatrices[std::size_t(dep)].index;
+							if (std::size_t(key) < pose.size()) m = pose[std::size_t(key)];
+						}
+					}
+					tri[std::size_t(k)] = v.pos >= 0 && std::size_t(v.pos) < model.positions.size() ? m.point(model.positions[std::size_t(v.pos)]) : Vec3 {};
+				}
+				out.push_back(tri);
+			}
+		}
+	}
+	return out;
 }
 
 } // namespace nectar
