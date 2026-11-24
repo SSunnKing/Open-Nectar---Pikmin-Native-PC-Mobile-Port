@@ -1,3 +1,10 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#include "pc_menu_pointer.h"
+#include "gl/pc_gfx.h"
+#include "System.h"
+#endif
 #include "types.h"
 #include "kh/khCaveResult.h"
 #include "kh/khLostItem.h"
@@ -279,6 +286,32 @@ void ObjCaveResult::doCreate(JKRArchive* arc)
 	}
 }
 
+#if PIKI_PC_MENU_TAP
+static int sCaveRow = -1;
+static int sCavePick = -1;
+static float sCaveScale[48];
+static char sCaveFeel[48];
+
+// Treasure under the pointer, from the scroll layout. The two row panes are restamped.
+static int pcCaveRowAt(ObjCaveResult* self, float nx, float ny)
+{
+	if (!self->mScreenMain) return -1;
+	J2DPane* mask = self->mScreenMain->search(MC8("Nmask"));
+	if (mask) pc_pointer_track(mask);
+	if (!mask || !(self->mScrollUpDown > 0.0f) || self->mScissorMax == 0 || !self->mResultNode) return -1;
+	const PcPointerRect rect = pc_pointer_rect(mask);
+	if (!rect.valid) return -1;
+	int width = 0, height = 0;
+	pc_gfx_get_drawable_size(&width, &height);
+	float pointerY = 0.0f;
+	if (!pc_result_window_y(nx, ny, rect.x0, rect.y0, rect.x1, rect.y1, width, height, (float)self->mScissorMax, &pointerY))
+		return -1;
+	int count = 0;
+	FOREACH_NODE(Game::Result::TNode, self->mResultNode->mChild, node) { count++; }
+	return pc_result_row_at(pointerY, count, self->mScrollUpDown, self->mScrollPos, (float)self->mScissorMax);
+}
+#endif
+
 /**
  * @note Address: 0x803F93F8
  * @note Size: 0x34C
@@ -306,6 +339,27 @@ bool ObjCaveResult::doUpdate()
 		}
 
 	} else {
+#if PIKI_PC_MENU_TAP
+		pc_menu_claim();
+		{
+			float hx = 0.0f, hy = 0.0f;
+			const bool hovering = pc_menu_hover(&hx, &hy);
+			sCaveRow = pcCaveRowAt(this, hovering ? hx : -1.0f, hovering ? hy : -1.0f);
+			if (sCaveRow >= 0) pc_menu_set_hand(true);
+			float tx = 0.0f, ty = 0.0f;
+			if (pc_menu_take_tap(&tx, &ty)) {
+				const int pressed = pcCaveRowAt(this, tx, ty);
+				if (pressed >= 0 && pressed < 48) {
+					pc_menu_hover_press(&sCaveFeel[pressed]);
+					if (!isFlag(CAVERESFLAG_CanScroll) || pressed == (int)mScrollSelIndex) pc_menu_queue_button(Controller::PRESS_A);
+					else sCavePick = pressed;
+				}
+			}
+			for (int i = 0; i < 48; i++) {
+				sCaveScale[i] = pc_menu_hover_scale(&sCaveFeel[i], i == sCaveRow, 0.06f, sys->mDeltaTime);
+			}
+		}
+#endif
 		switch (mStatus) {
 		case CAVERES_Normal:
 			statusNormal();
@@ -477,6 +531,11 @@ void ObjCaveResult::doDraw(Graphics& gfx)
 			}
 			mCurrOtaValues[isOdd] = next;
 			mCounterOtaValues[isOdd]->update();
+#if PIKI_PC_MENU_TAP
+			float rowScale = i < 48 ? sCaveScale[i] : 1.0f;
+			if (rowScale <= 0.0f) rowScale = 1.0f;
+			paneList[isOdd]->updateScale(rowScale);
+#endif
 			mScreenMain->draw(gfx, gfx.mOrthoGraph);
 		}
 		i++;
@@ -487,6 +546,9 @@ void ObjCaveResult::doDraw(Graphics& gfx)
 		paneList[!isOdd]->hide();
 		paneList[isOdd]->show();
 		paneList[isOdd]->add(0.0f, offs);
+#if PIKI_PC_MENU_TAP
+		paneList[isOdd]->updateScale(1.0f);
+#endif
 		setAlpha(isOdd, 255);
 		mScreenMain->search(icontags[isOdd])->hide();
 		mScreenMain->search(nametags[isOdd])->hide();
@@ -495,6 +557,10 @@ void ObjCaveResult::doDraw(Graphics& gfx)
 	}
 
 	GXSetScissor(x, y, wd, ht);
+#if PIKI_PC_MENU_TAP
+	paneList[0]->updateScale(1.0f);
+	paneList[1]->updateScale(1.0f);
+#endif
 	pane1->hide();
 	pane2->show();
 	paneList[0]->hide();
@@ -605,6 +671,17 @@ void ObjCaveResult::statusNormal()
 
 	mFadePane4->fadein();
 	if (isFlag(CAVERESFLAG_CanScroll)) {
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_A, "A Continue");
+	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
+	pc_menu_plate(PAD_BUTTON_UP, "Up");
+	// Those Up and Down plates already take the wheel, one row per notch.
+#endif
+		if (getGamePad()->getButton() & (Controller::PRESS_UP | Controller::PRESS_DOWN)) {
+#if PIKI_PC_MENU_TAP
+			sCavePick = -1;
+#endif
+		}
 		// press up, begin scroll up state
 		if (getGamePad()->getButton() & (Controller::PRESS_UP) && mScrollSelIndex) {
 			mScrollSelIndex--;
@@ -633,6 +710,31 @@ void ObjCaveResult::statusNormal()
 			statusScrollDown();
 			return;
 		}
+#if PIKI_PC_MENU_TAP
+		if (sCavePick >= 0 && sCavePick != (int)mScrollSelIndex) {
+			const int step = pc_list_step_toward((int)mScrollSelIndex, sCavePick, mScrollSelIndex != 0,
+			                                     mScrollSelIndex != mScrollSelIndexMax);
+			if (step > 0) {
+				mScrollSelIndex++;
+				mScrollTargetDist      = msVal.mScrollTargetInitialDist;
+				mScrollMoveUpCounter   = 0;
+				mStatus                = CAVERES_ScrollDown;
+				statusScrollDown();
+				return;
+			}
+			if (step < 0) {
+				mScrollSelIndex--;
+				mScrollTargetDist      = msVal.mScrollTargetInitialDist;
+				mScrollMoveDownCounter = 0;
+				mStatus                = CAVERES_ScrollUp;
+				statusScrollUp();
+				return;
+			}
+			sCavePick = -1;
+		} else if (sCavePick == (int)mScrollSelIndex) {
+			sCavePick = -1;
+		}
+#endif
 
 		mScrollMoveDownCounter = 0;
 		mScrollMoveUpCounter   = 0;

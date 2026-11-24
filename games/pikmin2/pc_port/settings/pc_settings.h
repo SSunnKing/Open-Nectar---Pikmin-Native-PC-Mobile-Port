@@ -32,6 +32,8 @@ void pc_settings_request_toggle(void);
 /// frame; el toque usa coordenadas normalizadas de la ventana (0..1).
 void pc_settings_touch_buttons(unsigned short pressed);
 void pc_settings_touch_tap(float x, float y);
+// A port-drawn prompt (new game, player count, device assignment, captains) is open.
+bool pc_settings_prompt_active(void);
 /// Arrastre vertical normalizado (fracción de la altura de la ventana) sobre
 /// los menús del port: las listas con scroll lo convierten en filas.
 void pc_settings_touch_drag(float dy);
@@ -215,6 +217,8 @@ int  pc_captain_select_result(void);
 void pc_captain_select_draw(void);
 // Modelos de las tarjetas: después de pc_settings_p2_flush, antes de presentar.
 void pc_captain_select_draw_3d(void);
+// Button plates asked for with pc_menu_plate; drawn each frame while the mouse is in use.
+void pc_menu_plates_draw(void);
 int  pc_settings_get_speedrun_category(void);
 int  pc_settings_get_speedrun_splits_shown(void);
 // LiveSplit Server (pc_livesplit.cpp): encendido, ocultar el reloj propio con

@@ -1,3 +1,7 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 #include "og/newScreen/UfoMenu.h"
 #include "og/Screen/ogScreen.h"
 #include "og/Screen/callbackNodes.h"
@@ -173,7 +177,25 @@ bool ObjUfoMenu::doUpdate()
 			}
 		}
 	}
+#if PIKI_PC_MENU_TAP
+	bool pcActivate = false;
+	pc_menu_plate(PAD_BUTTON_B, "B Back");
+	if (mDisp->mHasWhite && mDisp->mHasPurple) {
+		const int sel = mMenu->pcPointerUpdate(mSelectIndex, &pcActivate);
+		if (sel >= 0 && sel != (int)mSelectIndex) {
+			mSelectIndex = sel;
+			mMenu->select(mSelectIndex & 0xffff);
+			setSelectPikmin(mSelectIndex);
+		}
+	} else {
+		pc_menu_claim();
+		float tx = 0.0f, ty = 0.0f;
+		pcActivate = pc_menu_take_tap(&tx, &ty);
+	}
+	if ((pad->getButtonDown() & Controller::PRESS_A) || pcActivate) {
+#else
 	if (pad->getButtonDown() & Controller::PRESS_A) {
+#endif
 		ogSound->setDecide();
 		ret = 1;
 		if (mSelectIndex == 0) {

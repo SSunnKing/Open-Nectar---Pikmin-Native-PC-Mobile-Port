@@ -5,6 +5,7 @@
 namespace {
 
 PcTextAccept sAccept;
+PcTextAccept sCancel;
 bool sLatchedEnter = false;
 
 bool portAcceptDown()
@@ -23,6 +24,17 @@ bool portAcceptDown()
 	return (SDL_GetMouseState(&x, &y) & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
 }
 
+bool portCancelDown()
+{
+	int numKeys = 0;
+	const Uint8* state = SDL_GetKeyboardState(&numKeys);
+	const bool backspace = state && SDL_SCANCODE_BACKSPACE < numKeys && state[SDL_SCANCODE_BACKSPACE] != 0;
+	int x = 0, y = 0;
+	const Uint32 buttons = SDL_GetMouseState(&x, &y);
+	return pc_text_cancel_wants(backspace, (buttons & SDL_BUTTON(SDL_BUTTON_RIGHT)) != 0,
+	                            (buttons & SDL_BUTTON(SDL_BUTTON_X1)) != 0);
+}
+
 } // namespace
 
 void pc_text_update_input(bool latchedEnter)
@@ -30,9 +42,16 @@ void pc_text_update_input(bool latchedEnter)
 	sLatchedEnter = latchedEnter;
 	if (!portAcceptDown())
 		pc_text_take_accept(sAccept, false);
+	if (!portCancelDown())
+		pc_text_take_accept(sCancel, false);
 }
 
 bool pc_text_port_accept_pressed(void)
 {
 	return pc_text_take_accept(sAccept, portAcceptDown());
+}
+
+bool pc_text_port_cancel_pressed(void)
+{
+	return pc_text_take_accept(sCancel, portCancelDown());
 }

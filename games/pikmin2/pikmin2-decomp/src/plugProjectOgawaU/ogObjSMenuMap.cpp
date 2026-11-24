@@ -13,6 +13,12 @@
 #include "Game/Cave/RandMapMgr.h"
 #include "Radar.h"
 #include "nans.h"
+#include "pc_menu_tap.h"
+int pc_window_take_wheel_steps(void);
+
+#if PIKI_PC_MENU_TAP
+static int sMapIcon = -1;
+#endif
 
 #ifdef PIKI_PC_PORT
 extern "C" float pc_window_free_camera_sub_y(void);
@@ -478,6 +484,40 @@ void ObjSMenuMap::transMap()
 	inputs.x = mController->getMainStickX();
 	inputs.y = mController->getMainStickY();
 
+#if PIKI_PC_MENU_TAP
+	// Mouse: dragging with the left button pans the map like the stick.
+	{
+		pc_menu_claim();
+		sMapIcon = -1;
+		{
+			float hx = 0.0f, hy = 0.0f;
+			bool hand = false;
+			if (pc_menu_hover(&hx, &hy)) {
+				if (mMapTexPane && pc_menu_pane_hit(mMapTexPane, hx, hy, 0.0f)) hand = true;
+				for (int i = 0; i < mMapIconNum && mRadarPaneList; i++) {
+					J2DPane* icon = mRadarPaneList[i] ? *mRadarPaneList[i] : nullptr;
+					if (icon && pc_menu_pane_hit(icon, hx, hy, 0.004f)) {
+						hand     = true;
+						sMapIcon = i;
+					}
+				}
+			}
+			if (hand) pc_menu_set_hand(true);
+		}
+		float dx = 0.0f, dy = 0.0f;
+		if (pc_menu_take_drag(&dx, &dy)) {
+			if (sMapIcon >= 0 && mRadarPaneList && mRadarPaneList[sMapIcon] && *mRadarPaneList[sMapIcon]) {
+				pc_menu_hover_press(*mRadarPaneList[sMapIcon]);
+			}
+			inputs.x = -dx * 40.0f;
+			inputs.y = dy * 40.0f;
+			if (inputs.x > 1.0f) inputs.x = 1.0f;
+			if (inputs.x < -1.0f) inputs.x = -1.0f;
+			if (inputs.y > 1.0f) inputs.y = 1.0f;
+			if (inputs.y < -1.0f) inputs.y = -1.0f;
+		}
+	}
+#endif
 	if (mController->isButtonHeld(JUTGamePad::PRESS_DPAD_UP)) {
 		inputs.y = 1.0f;
 	}
@@ -549,6 +589,21 @@ void ObjSMenuMap::scaleMap()
 #ifdef PIKI_PC_PORT
 	if (cstick == 0.0f) {
 		cstick = pc_window_free_camera_sub_y_for(pc_p2_coop_active() ? pc_p2_coop_menu_player() : 0); // co-op: quien abrió la pausa
+	}
+#endif
+#if defined(PIKI_PC_PORT) && PIKI_P2_HOST
+	// Mouse wheel zooms the radar, one notch for a few frames of the C-stick.
+	{
+		static int sWheelFrames = 0, sWheelDir = 0;
+		const int steps = pc_window_take_wheel_steps();
+		if (steps != 0) {
+			sWheelFrames = 6;
+			sWheelDir    = steps > 0 ? 1 : -1;
+		}
+		if (sWheelFrames > 0) {
+			--sWheelFrames;
+			cstick = (float)sWheelDir;
+		}
 	}
 #endif
 	if (cstick > 0.4f) {
@@ -841,6 +896,11 @@ void ObjSMenuMap::updateMap()
 	f32 angleOffs = 360.0f;
 	for (int i = 0; i < mMapIconNum; i++) {
 		f32 scaleFactor = msVal.mMapIconScaleBase;
+#if PIKI_PC_MENU_TAP
+		if (*mRadarPaneList[i]) {
+			scaleFactor *= pc_menu_hover_scale(*mRadarPaneList[i], i == sMapIcon, 0.12f, sys->mDeltaTime);
+		}
+#endif
 		(*mRadarPaneList[i])->updateScale(scaleFactor / scale);
 		(*mRadarPaneList[i])->setAngle(angleOffs - mMapAngle);
 	}

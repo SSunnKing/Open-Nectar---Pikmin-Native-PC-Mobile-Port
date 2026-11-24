@@ -1,3 +1,7 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 #include "ebi/Screen/TSaveMenu.h"
 #include "System.h"
 #include "og/newScreen/ogUtil.h"
@@ -363,6 +367,9 @@ void TSaveMenu::updateMsg_()
 	if (mTextCounter) {
 		if (PC_ORIG_TICK()) mTextCounter--;
 	}
+#if PIKI_PC_MENU_TAP
+	bool pcPressA = false;
+#endif
 	switch (mStateID) {
 	case MSG_Open:
 		if (!mTextCounter) {
@@ -377,6 +384,37 @@ void TSaveMenu::updateMsg_()
 		case MESSAGE_NoSaveOption:
 			int index1, index2;
 			getMenuMinMax(index1, index2);
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_B, "B Cancel");
+	pc_menu_plate(PAD_BUTTON_A, "A OK");
+	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
+	pc_menu_plate(PAD_BUTTON_UP, "Up");
+#endif
+#if PIKI_PC_MENU_TAP
+			// Mouse: hover picks Save or Don't Save, a click picks it and presses A.
+			pcPressA = false;
+			{
+				float tx = 0.0f, ty = 0.0f, hx = 0.0f, hy = 0.0f;
+				const bool tapped   = pc_menu_take_tap(&tx, &ty);
+				const bool hovering = pc_menu_hover(&hx, &hy);
+				const float px = tapped ? tx : hx, py = tapped ? ty : hy;
+				const bool onFirst  = pc_menu_pane_hit(mAnimScreen[index1]->mMsgBodyPane, px, py, 0.02f) && (tapped || hovering);
+				const bool onSecond = pc_menu_pane_hit(mAnimScreen[index2]->mMsgBodyPane, px, py, 0.02f) && (tapped || hovering);
+				pc_menu_set_hand(onFirst || onSecond);
+				const int pointed = onFirst ? 1 : onSecond ? 0 : -1;
+				if (pointed >= 0) {
+					if ((pointed == 1) != mSelectedOption) {
+						mSelectedOption = pointed == 1;
+						mAnimScreen[index1]->blink(mSelectedOption ? 0.6f : 0.0f, 0.0f);
+						mAnimScreen[index2]->blink(mSelectedOption ? 0.0f : 0.6f, 0.0f);
+						mCursor1.mIsLeft = mSelectedOption;
+						mCursor2.mIsLeft = mSelectedOption;
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+					}
+					pcPressA = tapped;
+				}
+			}
+#endif
 			if (mController->isMoveUp()) {
 				if (!mSelectedOption) {
 					mSelectedOption = true;
@@ -395,7 +433,11 @@ void TSaveMenu::updateMsg_()
 					mCursor2.mIsLeft = mSelectedOption;
 					PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
 				}
+#if PIKI_PC_MENU_TAP
+			} else if ((mController->getButtonDown() & Controller::PRESS_A) || pcPressA) {
+#else
 			} else if (mController->getButtonDown() & Controller::PRESS_A) {
+#endif
 				mPressedA = true;
 				if (mSelectedOption) {
 					mSelectState = 0;

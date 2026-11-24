@@ -3,6 +3,7 @@
 
 #include "types.h"
 #include "Vector2.h"
+#include "pc_menu_tap.h"
 
 struct J2DGrafContext;
 struct J2DPane;
@@ -44,10 +45,22 @@ struct MenuMgr {
 	void selectSub(u16);
 	void update();
 	void MenuOnOff();
-#if PIKI_PC_TOUCH
-	/// Táctil: opción tocada en este frame (-1 si ninguna). Llamar cada frame
-	/// mientras el menú se ve, para que la capa táctil sepa dónde está cada una.
-	int pcTouchTappedOption(bool tapped, f32 x, f32 y) const;
+#if PIKI_PC_MENU_TAP
+	/// Tap or click: option hit in this frame (-1 if none). Call every frame
+	/// while the menu is visible, so the pane tracker knows where each one is.
+	int pcTappedOption(bool tapped, f32 x, f32 y) const;
+	/// Mouse: option the pointer entered since the last call (-1 if none).
+	/// Also asks for the hand cursor while it rests on any option.
+	int pcHoveredOption() const;
+	J2DPane* pcOptionPane(int i) const;
+	/// One call per update for a screen that has no click code of its own: claims
+	/// the pointer and returns the option the mouse chose (-1 for none), by hover
+	/// or click. *activate is set when the mouse clicked an option, which is the
+	/// same as pressing A on it.
+	int pcPointerUpdate(int current, bool* activate) const;
+	/// Option under a window-normalised point (-1 if none). Options laid out on
+	/// tiny marker panes get a box sized from the spacing between them.
+	int pcOptionAt(f32 nx, f32 ny) const;
 #endif
 
 	int mCursorState;              // _00, Ill enum this eventually

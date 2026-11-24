@@ -1,3 +1,10 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#include "pc_menu_pointer.h"
+#include "gl/pc_gfx.h"
+#include "System.h"
+#endif
 #include "kh/khFinalResult.h"
 #include "Controller.h"
 #include "PSSystem/PSSystemIF.h"
@@ -292,6 +299,38 @@ void ObjFinalResult::doCreate(JKRArchive* arc)
 	Game::playData->mMailSaveData.set_history(-2);
 }
 
+#if PIKI_PC_MENU_TAP
+static int sFinalPage = -1;
+static int sFinalPick = -1;
+static float sFinalScale[8];
+static char sFinalFeel[8];
+
+// Page under the pointer, from the same offset the draw uses. The stamped
+// stat panes are not hit targets.
+static int pcFinalPageAt(ObjFinalResult* self, float nx, float ny)
+{
+	if (!self->mScreen || !(self->mScrollMove > 0.0f) || !(self->mScissorBoundsHeight > 0.0f)) return -1;
+	J2DPane* mask = self->mScreen->search(MC8("Nmask"));
+	if (mask) pc_pointer_track(mask);
+	const PcPointerRect rect = pc_pointer_rect(mask);
+	if (!rect.valid) return -1;
+	int width = 0, height = 0;
+	pc_gfx_get_drawable_size(&width, &height);
+	float pointerY = 0.0f;
+	if (!pc_result_window_y(nx, ny, rect.x0, rect.y0, rect.x1, rect.y1, width, height,
+	                        self->mScissorBoundsHeight, &pointerY))
+		return -1;
+	int direction = 0;
+	float scrollY = 0.0f;
+	if (self->mState != ObjFinalResult::StatusNormal) {
+		scrollY   = self->mScrollYPos;
+		direction = self->mState == ObjFinalResult::StatusScrollUp ? -1 : 1;
+	}
+	return pc_result_page_at(pointerY, 8, self->mCurrentPage, direction, scrollY, self->mScrollMove,
+	                         self->mScissorBoundsHeight);
+}
+#endif
+
 /**
  * @note Address: 0x8040CF48
  * @note Size: 0x1BC
@@ -319,6 +358,27 @@ bool ObjFinalResult::doUpdate()
 		}
 
 	} else {
+#if PIKI_PC_MENU_TAP
+		pc_menu_claim();
+		{
+			float hx = 0.0f, hy = 0.0f;
+			const bool hovering = pc_menu_hover(&hx, &hy);
+			sFinalPage = pcFinalPageAt(this, hovering ? hx : -1.0f, hovering ? hy : -1.0f);
+			if (sFinalPage >= 0) pc_menu_set_hand(true);
+			float tx = 0.0f, ty = 0.0f;
+			if (pc_menu_take_tap(&tx, &ty)) {
+				const int pressed = pcFinalPageAt(this, tx, ty);
+				if (pressed >= 0 && pressed < 8) {
+					pc_menu_hover_press(&sFinalFeel[pressed]);
+					if (pressed == mCurrentPage) pc_menu_queue_button(Controller::PRESS_A);
+					else sFinalPick = pressed;
+				}
+			}
+			for (int i = 0; i < 8; i++) {
+				sFinalScale[i] = pc_menu_hover_scale(&sFinalFeel[i], i == sFinalPage, 0.06f, sys->mDeltaTime);
+			}
+		}
+#endif
 		switch (mState) {
 		case StatusNormal:
 			statusNormal();
@@ -412,7 +472,15 @@ void ObjFinalResult::doDraw(Graphics& gfx)
 	}
 
 	if (mState == StatusNormal) {
+#if PIKI_PC_MENU_TAP
+		float pageScale = mCurrentPage >= 0 && mCurrentPage < 8 ? sFinalScale[mCurrentPage] : 1.0f;
+		if (pageScale <= 0.0f) pageScale = 1.0f;
+		pane3->updateScale(pageScale);
+#endif
 		drawReplace(gfx, mCurrentPage);
+#if PIKI_PC_MENU_TAP
+		pane3->updateScale(1.0f);
+#endif
 	} else {
 		f32 thing;
 		int page;
@@ -424,9 +492,22 @@ void ObjFinalResult::doDraw(Graphics& gfx)
 			page  = mCurrentPage - 1;
 		}
 		pane3->add(0.0f, mScrollYPos);
+#if PIKI_PC_MENU_TAP
+		float neighborScale = page >= 0 && page < 8 ? sFinalScale[page] : 1.0f;
+		if (neighborScale <= 0.0f) neighborScale = 1.0f;
+		pane3->updateScale(neighborScale);
+#endif
 		drawReplace(gfx, page);
 		pane3->add(0.0f, thing);
+#if PIKI_PC_MENU_TAP
+		float pageScale = mCurrentPage >= 0 && mCurrentPage < 8 ? sFinalScale[mCurrentPage] : 1.0f;
+		if (pageScale <= 0.0f) pageScale = 1.0f;
+		pane3->updateScale(pageScale);
+#endif
 		drawReplace(gfx, mCurrentPage);
+#if PIKI_PC_MENU_TAP
+		pane3->updateScale(1.0f);
+#endif
 	}
 	GXSetScissor(x1, x2, y1, y2);
 	gfx.mOrthoGraph.setPort();
@@ -567,7 +648,18 @@ void ObjFinalResult::statusNormal()
 		mFadePaneAButton->fadeout();
 	}
 	mFadePane3DStick->fadein();
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_A, "A Continue");
+	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
+	pc_menu_plate(PAD_BUTTON_UP, "Up");
+	// Those Up and Down plates already take the wheel, one page per notch.
+#endif
 	Controller* pad = getGamePad();
+	if (pad->getButton() & (Controller::PRESS_UP | Controller::PRESS_DOWN)) {
+#if PIKI_PC_MENU_TAP
+		sFinalPick = -1;
+#endif
+	}
 	if (pad->getButton() & Controller::PRESS_UP) {
 		if (mCurrentPage) {
 			mCurrentPage--;
@@ -593,6 +685,35 @@ void ObjFinalResult::statusNormal()
 			PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
 		}
 	}
+#if PIKI_PC_MENU_TAP
+	else if (sFinalPick >= 0 && sFinalPick != mCurrentPage
+	         && !(pad->getButton() & (Controller::PRESS_UP | Controller::PRESS_DOWN))) {
+		const int step = pc_list_step_toward(mCurrentPage, sFinalPick, mCurrentPage != 0, mCurrentPage != 7);
+		if (step > 0) {
+			mCurrentPage++;
+			mScreen->search(getSerialTagName(MC8("Nsel00"), mCurrentPage - 1))->setAlpha(msVal.mSelectionAlpha);
+			mScreen->search(getSerialTagName(MC8("Nsel00"), mCurrentPage))->setAlpha(255);
+			mScreen->search(getSerialTagName(MC8("Nicon00"), mCurrentPage - 1))->setAlpha(msVal.mSelectionAlpha);
+			mScreen->search(getSerialTagName(MC8("Nicon00"), mCurrentPage))->setAlpha(255);
+			mState = StatusScrollDown;
+			statusScrollDown();
+			PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+		} else if (step < 0) {
+			mCurrentPage--;
+			mScreen->search(getSerialTagName(MC8("Nsel00"), mCurrentPage + 1))->setAlpha(msVal.mSelectionAlpha);
+			mScreen->search(getSerialTagName(MC8("Nsel00"), mCurrentPage))->setAlpha(255);
+			mScreen->search(getSerialTagName(MC8("Nicon00"), mCurrentPage + 1))->setAlpha(msVal.mSelectionAlpha);
+			mScreen->search(getSerialTagName(MC8("Nicon00"), mCurrentPage))->setAlpha(255);
+			mState = StatusScrollUp;
+			statusScrollUp();
+			PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+		} else {
+			sFinalPick = -1;
+		}
+	} else if (sFinalPick == mCurrentPage) {
+		sFinalPick = -1;
+	}
+#endif
 }
 
 /**

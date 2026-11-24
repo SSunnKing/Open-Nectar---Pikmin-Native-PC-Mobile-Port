@@ -16,6 +16,12 @@ extern "C" void pc_gfx_p2_black_sides(void);
 static const int unusedArray[] = { 0, 0, 0 };
 
 #include "nans.h"
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#include "pc_menu_pointer.h"
+#include "System.h"
+#endif
 
 namespace Morimura {
 s16 TZukanBase::mRequestTimerMax    = 10;
@@ -498,8 +504,42 @@ void TZukanBase::doCreate(JKRArchive* archive)
  * @note Address: 0x803718D8
  * @note Size: 0xFC8
  */
+#if PIKI_PC_MENU_TAP
+static int sZukanRow = -1;
+static int sZukanCol = -1;
+static int sZukanPick = -1;
+static int sZukanPickCol = 0;
+static int sZukanPickSteps = 0;
+
+// Icon under the pointer. Big rows only have the center picture.
+static bool pcZukanIconAt(TZukanBase* self, float nx, float ny, int* row, int* col)
+{
+	*row = -1;
+	*col = -1;
+	if (!self->mIndexPaneList) return false;
+	for (int i = 0; i < self->mNumActiveRows; i++) {
+		TIndexPane* pane = self->mIndexPaneList[i];
+		if (!pane || !pane->getMainPane() || !pane->getMainPane()->isVisible() || !pane->mIconInfos) continue;
+		for (int j = 0; j < 3; j++) {
+			if (pane->mSizeType != TIndexPane::Size_Small && j != 1) continue;
+			TIconInfo* icon = pane->mIconInfos[j];
+			if (!icon || icon->mCategoryID < 0 || !icon->mPane || !icon->mPane->isVisible()) continue;
+			if (pc_menu_pane_hit(icon->mPane, nx, ny, 0.01f)) {
+				*row = i;
+				*col = j;
+			}
+		}
+	}
+	return *row >= 0;
+}
+#endif
+
 bool TZukanBase::doUpdate()
 {
+#if PIKI_PC_MENU_TAP
+	sZukanRow = -1;
+	sZukanCol = -1;
+#endif
 	if (!mIsInDemo) {
 		doUpdateIn();
 	}
@@ -569,9 +609,62 @@ bool TZukanBase::doUpdate()
 
 	if (!mIsInDemo && mCanInput && mState < Screen::Game2DMgr::CHECK2D_Zukan_ExitStart && !isOpenConfirmWindow()) {
 		mIsInFadeInOut = false;
+#if PIKI_PC_MENU_TAP
+		// Mouse: button plates for the keys this screen reads. Up and Down scroll the list.
+		pc_menu_plate(PAD_BUTTON_B, "B Back");
+		pc_menu_plate(PAD_BUTTON_A, "A Zoom");
+		pc_menu_plate(PAD_BUTTON_Y, "Y Louie");
+		pc_menu_plate(PAD_BUTTON_X, "X Olimar");
+		pc_menu_plate(PAD_TRIGGER_R, "R Switch");
+		pc_menu_plate(PAD_TRIGGER_L, "L Switch");
+		pc_menu_plate(PAD_BUTTON_RIGHT, "Right");
+		pc_menu_plate(PAD_BUTTON_LEFT, "Left");
+		pc_menu_plate(PAD_BUTTON_DOWN, "Down");
+		pc_menu_plate(PAD_BUTTON_UP, "Up");
+		{
+			float hx = 0.0f;
+			float hy = 0.0f;
+			if (pc_menu_hover(&hx, &hy)) pcZukanIconAt(this, hx, hy, &sZukanRow, &sZukanCol);
+			if (sZukanRow >= 0) pc_menu_set_hand(true);
+			float tx = 0.0f;
+			float ty = 0.0f;
+			int clickRow = -1;
+			int clickCol = -1;
+			if (!mIsBigWindowOpened && !mWindow->mState && pc_menu_take_tap(&tx, &ty)
+			    && pcZukanIconAt(this, tx, ty, &clickRow, &clickCol)) {
+				TIndexPane* clicked = mIndexPaneList[clickRow];
+				TIconInfo* icon     = clicked->mIconInfos[clickCol];
+				if (icon && icon->mPane) pc_menu_hover_press(icon->mPane);
+				const bool big = clicked->mSizeType != TIndexPane::Size_Small;
+				const int col  = big ? 1 : clickCol;
+				if (clickRow == mCurrActiveRowSel && (big || mRightOffset == col)) {
+					sZukanPick = -1;
+					mState     = Screen::Game2DMgr::CHECK2D_Zukan_Changing;
+					if (mCameraFadeInLevel < 0.5f) {
+						if (!mIsBigWindowOpened) PSSystem::spSysIF->playSystemSe(PSSE_SY_CAMERAVIEW_CHANGE, 0);
+						mIsBigWindowOpened = true;
+					}
+					if (mWindow->mState) windowOpenClose(getXMsgID(clicked->getIndex()));
+				} else if (clickRow == mCurrActiveRowSel) {
+					sZukanPick   = -1;
+					mRightOffset = col;
+					isHorizontalScroll = true;
+					icon->startScaleUp(1.0f);
+					PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+				} else {
+					sZukanPick      = clicked->getIndex();
+					sZukanPickCol   = col;
+					sZukanPickSteps = 0;
+				}
+			}
+		}
+#endif
 		if (!mIsBigWindowOpened && !mWindow->mState) {
 			Controller* pad = mController;
 			if (pad->getButton() & Controller::ANALOG_UP) {
+#if PIKI_PC_MENU_TAP
+				sZukanPick = -1;
+#endif
 				if (mIsPreDebt && !mCanScroll) {
 					if (mCurrActiveRowSel > 0) {
 						mIndexGroup->upIndex();
@@ -585,6 +678,9 @@ bool TZukanBase::doUpdate()
 					mIndexGroup->upIndex();
 				}
 			} else if (pad->getButton() & Controller::ANALOG_DOWN) {
+#if PIKI_PC_MENU_TAP
+				sZukanPick = -1;
+#endif
 				if (mIsPreDebt && !mCanScroll) {
 					bool cantScroll = true;
 					if (_234 < 0) {
@@ -626,6 +722,27 @@ bool TZukanBase::doUpdate()
 					}
 				}
 			}
+#if PIKI_PC_MENU_TAP
+			else if (sZukanPick >= 0 && mIndexGroup && mIndexGroup->mStateID == TIndexGroup::IDGroup_Idle) {
+				TIndexPane* selected = mIndexPaneList[mCurrActiveRowSel];
+				if (selected->getIndex() == sZukanPick) {
+					if (selected->mSizeType == TIndexPane::Size_Small) mRightOffset = sZukanPickCol;
+					if (selected->mIconInfos && selected->mIconInfos[mRightOffset]) {
+						selected->mIconInfos[mRightOffset]->startScaleUp(1.0f);
+					}
+					PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+					sZukanPick = -1;
+				} else if (sZukanPickSteps > mNumActiveRows + 2) {
+					sZukanPick = -1;
+				} else {
+					const int step = pc_list_step_toward(selected->getIndex(), sZukanPick, true, true);
+					if (step > 0) mIndexGroup->downIndex();
+					else if (step < 0) mIndexGroup->upIndex();
+					else sZukanPick = -1;
+					sZukanPickSteps++;
+				}
+			}
+#endif
 		}
 
 		if (!mIndexGroup->mStateID && !isHorizontalScroll) {
@@ -1391,11 +1508,18 @@ void TZukanBase::doUpdateOut()
 				J2DPane* pane   = icon->mPic;
 				if (icon->mParentIndex && icon->mPane->isVisible()) {
 					pane->show();
-					if (mIndexPaneList[i]->mSizeType == TIndexPane::Size_Small) {
-						pane->updateScale(mCategoryScale.x, mCategoryScale.y);
-					} else {
-						pane->updateScale(mCategoryScale.x * mLargeCategoryScale, mCategoryScale.y * mLargeCategoryScale);
+					f32 sx = mCategoryScale.x;
+					f32 sy = mCategoryScale.y;
+					if (mIndexPaneList[i]->mSizeType != TIndexPane::Size_Small) {
+						sx *= mLargeCategoryScale;
+						sy *= mLargeCategoryScale;
 					}
+#if PIKI_PC_MENU_TAP
+					const float hover = pc_menu_hover_scale(icon->mPane, i == sZukanRow && j == sZukanCol, 0.06f, sys->mDeltaTime);
+					sx *= hover;
+					sy *= hover;
+#endif
+					pane->updateScale(sx, sy);
 				} else {
 					pane->hide();
 				}

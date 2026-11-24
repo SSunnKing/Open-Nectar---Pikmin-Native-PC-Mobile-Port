@@ -1,4 +1,8 @@
 #include "ebi/Screen/TOption.h"
+#if defined(PIKI_PC_PORT) && PIKI_P2_HOST
+#include "pc_menu_pointer.h"
+void pc_gfx_get_drawable_size(int*, int*);
+#endif
 #include "ebi/E2DGraph.h"
 #include "Game/Data.h"
 #include "og/newScreen/ogUtil.h"
@@ -324,6 +328,9 @@ bool TOption::doUpdateStateOpen()
  */
 bool TOption::doUpdateStateWait()
 {
+#if defined(PIKI_PC_PORT) && PIKI_P2_HOST
+    int pcHoverKind = -1, pcHoverValue = -1;
+#endif
 	setOptionParamToScreen_();
 	mMainScreen->update();
 	if (mEnabled) {
@@ -355,6 +362,112 @@ bool TOption::doUpdateStateWait()
 		}
 	}
 	mExitStatus = OptionState_NULL;
+#if defined(PIKI_PC_PORT) && PIKI_P2_HOST
+    if (mEnabled) {
+        pc_pointer_claim();
+        J2DPane* targets[64] = {};
+        int kind[64] = {}, value[64] = {}, n = 0;
+        auto add = [&](J2DPane* pane, int k, int v) {
+            if (!pane) return;
+            targets[n] = pane; kind[n] = k; value[n++] = v;
+            pc_pointer_track(pane);
+        };
+#if defined(VERSION_PAL)
+        for (int i = 0; i < 5; ++i) add(mPaneLanguage[i], 0, i);
+#endif
+#if defined(VERSION_JP)
+        add(mPaneRubyYes, 7, 1); add(mPaneRubyNo, 7, 0);
+#endif
+        add(mPaneRumbleYes, 1, 1); add(mPaneRumbleNo, 1, 0);
+        for (int i = 0; i < 3; ++i) add(mPaneSoundType[i], 2, i);
+        for (int i = 0; i < 10; ++i) {
+            add(mPaneBgmVolume[i], 3, i + 1);
+            add(E2DScreen_searchAssert(mMainScreen, MC8("Pbgmm00c") + i * 0x100), 3, i + 1);
+            add(mPaneSfxVolume[i], 4, i + 1);
+            add(E2DScreen_searchAssert(mMainScreen, MC8("Psem00c") + i * 0x100), 4, i + 1);
+        }
+        add(mPaneDeflickerYes, 5, 1); add(mPaneDeflickerNo, 5, 0);
+        add(mButtonPaneList[6], 6, 0);
+        add(E2DScreen_searchAssert(mMainScreen, MC8("Tmod")), 8, 0);
+        add(E2DScreen_searchAssert(mMainScreen, MC8("Pbbt")), 8, 0);
+        PcPointerRect rects[64] = {};
+        for (int i = 0; i < n; ++i) rects[i] = pc_pointer_rect(targets[i]);
+        float x, y; int width = 0, height = 0;
+        pc_gfx_get_drawable_size(&width, &height);
+        float hx = 0, hy = 0;
+        pc_pointer_set_hand(false);
+        if (width > 0 && height > 0 && pc_pointer_hover(&hx, &hy)) {
+            const int over = pc_pointer_hit(hx * width, hy * height, rects, nullptr, n, height * .008f);
+            pc_pointer_set_hand(over >= 0);
+            if (over >= 0) {
+                pcHoverKind = kind[over]; pcHoverValue = value[over];
+                if (pcHoverKind == 3) mBlinkAlphaA.mPane = mPaneBgmVolume[pcHoverValue - 1];
+                if (pcHoverKind == 4) mBlinkAlphaA.mPane = mPaneSfxVolume[pcHoverValue - 1];
+                J2DTextBox* choice = nullptr;
+                if (kind[over] == 1) choice = value[over] ? mPaneRumbleYes : mPaneRumbleNo;
+                if (kind[over] == 2) choice = mPaneSoundType[value[over]];
+                if (kind[over] == 5) choice = value[over] ? mPaneDeflickerYes : mPaneDeflickerNo;
+                if (choice) { mFontColorActiveSel.applyColorsToPane(choice); mBlinkColor.mPane = choice; }
+            }
+            const int row = over >= 0 ? (kind[over] == 7 ? 0 : kind[over])
+                                      : (mCurrMainSelection == 5 ? 4 : -1);
+            if (row >= 0 && row != 5 && row <= 6 && row != mCurrMainSelection) {
+                const int previous = mCurrMainSelection;
+                mCurrMainSelection = row;
+                mNextSelection = previous;
+                mWindowCursor.mBounds1 = mWindowCursor.mBounds2;
+                mWindowCursor.mBounds2 = *mButtonPaneList[row]->getBounds();
+                mWindowCursor.mCounter = mWindowCursor.mCounterMax;
+                mWindowCursor.mScaleMgr.up(0.1f, 30.0f, 0.6f, 0.0f);
+                mWindowCursor.mWindowPane = mOptionPanes[row];
+                if (row == 6) mBlinkAlphaB.startToward0();
+                else if (previous == 6) mBlinkAlphaB.disable();
+                PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+            }
+        }
+        if (pc_pointer_take(&x, &y) && width > 0 && height > 0) {
+            const int hit = pc_pointer_hit(x * width, y * height, rects, nullptr, n, height * .008f);
+            if (hit >= 0) {
+                const int v = value[hit];
+                int pressId = -1;
+                switch (kind[hit]) {
+                case 1: pressId = v ? 25 : 26; break;
+                case 2: pressId = 27 + v; break;
+                case 3: pressId = v - 1; break;
+                case 4: pressId = 10 + v - 1; break;
+                case 5: pressId = v ? 30 : 31; break;
+                case 8: pressId = 32; break;
+#if defined(VERSION_PAL)
+                case 0: pressId = 20 + v; break;
+#endif
+#if defined(VERSION_JP)
+                case 7: pressId = v ? 33 : 34; break;
+#endif
+                }
+                if (pressId >= 0 && pressId < 50) mPcPress[pressId] = 1.0f;
+                switch (kind[hit]) {
+#if defined(VERSION_PAL)
+                case 0: if (mOptionParamA.mLanguage != v) { mOptionParamA.mLanguage = v; mExitStatus = OptionState_Unk8; } break;
+#endif
+#if defined(VERSION_JP)
+                case 7: if (mOptionParamA.mIsRubyFont != bool(v)) { mOptionParamA.mIsRubyFont = v; mExitStatus = OptionState_Unk1; } break;
+#endif
+                case 1: if (mOptionParamA.mIsRumble != bool(v)) { mOptionParamA.mIsRumble = v; mExitStatus = OptionState_SelRumble; } break;
+                case 2: if (mOptionParamA.mSoundMode != v) { mOptionParamA.mSoundMode = v; mExitStatus = OptionState_SelSoundMode; } break;
+                case 3: if (mOptionParamA.mBgmVolume != v) { mOptionParamA.mBgmVolume = v; mExitStatus = OptionState_SelBgmVol; } break;
+                case 4: if (mOptionParamA.mSeVolume != v) { mOptionParamA.mSeVolume = v; mExitStatus = OptionState_SelSfxVol; } break;
+                case 5: if (mOptionParamA.mUseDeflicker != bool(v)) { mOptionParamA.mUseDeflicker = v; mExitStatus = OptionState_SelDeflicker; } break;
+                case 6: mExitStatus = OptionState_SelSaveGame; break;
+                case 8: mExitStatus = OptionState_Exit; break;
+                }
+                if (mExitStatus != OptionState_NULL) {
+                    PSSystem::spSysIF->playSystemSe(kind[hit] == 6 ? PSSE_SY_MENU_DECIDE : kind[hit] == 8 ? PSSE_SY_MENU_CANCEL : PSSE_SY_SOUND_CONFIG, 0);
+                    return false;
+                }
+            }
+        }
+    }
+#endif
 
 	if (mEnabled && !mWindowCursor.mCounter) {
 		if (mController->getButtonDown() & Controller::PRESS_B) {
@@ -568,6 +681,50 @@ bool TOption::doUpdateStateWait()
 	mPaneSoundType[2]->updateScale(mButtonPuruAnim[4].mScale);
 	mPaneDeflickerYes->updateScale(mButtonPuruAnim[5].mScale);
 	mPaneDeflickerNo->updateScale(mButtonPuruAnim[6].mScale);
+#if defined(PIKI_PC_PORT) && PIKI_P2_HOST
+    auto easedHover = [&](int id, bool hovered, float amount) {
+        float& progress = mPcHoverProgress[id];
+        const float step = sys->mDeltaTime / 0.12f;
+        progress += hovered ? step : -step;
+        if (progress < 0.0f) progress = 0.0f;
+        if (progress > 1.0f) progress = 1.0f;
+        float& press = mPcPress[id];
+        if (press > 0.0f) {
+            press -= sys->mDeltaTime / 0.10f;
+            if (press < 0.0f) press = 0.0f;
+        }
+        const float hoverScale = 1.0f + amount * progress * progress * (3.0f - 2.0f * progress);
+        return hoverScale * (1.0f + 0.08f * press);
+    };
+    const float backHover = easedHover(32, pcHoverKind == 8, .12f);
+    E2DScreen_searchAssert(mMainScreen, MC8("Tmod"))->updateScale(backHover);
+    E2DScreen_searchAssert(mMainScreen, MC8("Tmods"))->updateScale(backHover);
+    E2DScreen_searchAssert(mMainScreen, MC8("Pbbt"))->updateScale(backHover);
+    E2DScreen_searchAssert(mMainScreen, MC8("Pbbts"))->updateScale(backHover);
+    mPaneRumbleYes->updateScale(mButtonPuruAnim[0].mScale * easedHover(25, pcHoverKind == 1 && pcHoverValue == 1, .08f));
+    mPaneRumbleNo->updateScale(mButtonPuruAnim[1].mScale * easedHover(26, pcHoverKind == 1 && pcHoverValue == 0, .08f));
+    for (int i = 0; i < 3; ++i)
+        mPaneSoundType[i]->updateScale(mButtonPuruAnim[2 + i].mScale * easedHover(27 + i, pcHoverKind == 2 && pcHoverValue == i, .08f));
+    mPaneDeflickerYes->updateScale(mButtonPuruAnim[5].mScale * easedHover(30, pcHoverKind == 5 && pcHoverValue == 1, .08f));
+    mPaneDeflickerNo->updateScale(mButtonPuruAnim[6].mScale * easedHover(31, pcHoverKind == 5 && pcHoverValue == 0, .08f));
+    for (int i = 0; i < 10; ++i) {
+        const float bgmHover = easedHover(i, pcHoverKind == 3 && pcHoverValue == i + 1, .3f);
+        const float sfxHover = easedHover(10 + i, pcHoverKind == 4 && pcHoverValue == i + 1, .3f);
+        mPaneBgmVolume[i]->updateScale(mBgmSelPuruAnimA[i].mScale * bgmHover);
+        E2DScreen_searchAssert(mMainScreen, MC8("Pbgmm00c") + i * 0x100)->updateScale(mBgmSelPuruAnimB[i].mScale * bgmHover);
+        mPaneSfxVolume[i]->updateScale(mSfxSelPuruAnimA[i].mScale * sfxHover);
+        E2DScreen_searchAssert(mMainScreen, MC8("Psem00c") + i * 0x100)->updateScale(mSfxSelPuruAnimB[i].mScale * sfxHover);
+    }
+#endif
+#if defined(PIKI_PC_PORT) && PIKI_P2_HOST && defined(VERSION_PAL)
+    const int flagAnim[] = {7, 11, 9, 10, 8};
+    for (int i = 0; i < 5; ++i)
+        mPaneLanguage[i]->updateScale(mButtonPuruAnim[flagAnim[i]].mScale * easedHover(20 + i, pcHoverKind == 0 && pcHoverValue == i, .15f));
+#endif
+#if defined(PIKI_PC_PORT) && PIKI_P2_HOST && defined(VERSION_JP)
+    mPaneRubyYes->updateScale(mButtonPuruAnim[7].mScale * easedHover(33, pcHoverKind == 7 && pcHoverValue == 1, .08f));
+    mPaneRubyNo->updateScale(mButtonPuruAnim[8].mScale * easedHover(34, pcHoverKind == 7 && pcHoverValue == 0, .08f));
+#endif
 
 #if defined(VERSION_US_DEMO1) // demo
 	mOptionPanes[0]->hide();

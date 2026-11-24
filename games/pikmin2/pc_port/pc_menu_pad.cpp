@@ -49,7 +49,8 @@ void pc_menu_pad_apply(const PcMenuPadKeys& keys, bool menuMode, bool nonShiftB,
 		button = static_cast<std::uint16_t>(button & ~PC_MENU_PAD_START);
 
 	button = static_cast<std::uint16_t>(button & ~PC_MENU_PAD_B);
-	if (keys.escape || keys.backspace || keys.clickRight || nonShiftB)
+	// Mouse Back matches Backspace: one page back, and it is not A.
+	if (keys.escape || keys.backspace || keys.clickRight || keys.clickX1 || nonShiftB)
 		button = static_cast<std::uint16_t>(button | PC_MENU_PAD_B);
 
 	const bool left  = keys.left || keys.keyA || stickX < 0 || (button & PC_MENU_PAD_LEFT) != 0;

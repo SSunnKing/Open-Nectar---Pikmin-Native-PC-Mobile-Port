@@ -8,10 +8,7 @@
 #include "System.h"
 #include "Controller.h"
 #include "trig.h"
-#if PIKI_PC_TOUCH
-extern "C" void pc_touch_claim_game_menu(void);
-extern "C" bool pc_touch_take_game_menu_tap(float* x, float* y);
-#endif
+#include "pc_menu_tap.h"
 
 /**
  * @note Address: N/A
@@ -532,13 +529,13 @@ bool ObjSMenuPause::menu_pause()
 	mMenuPause->update();
 
 	u32 input = pad->getButtonDown();
-#if PIKI_PC_TOUCH
+#if PIKI_PC_MENU_TAP
 	// Táctil: tocar una opción la elige; tocar la elegida es A.
-	pc_touch_claim_game_menu();
+	pc_menu_claim();
 	{
 		float tx = 0.0f, ty = 0.0f;
-		const bool tapped = pc_touch_take_game_menu_tap(&tx, &ty);
-		const int opt     = mMenuPause->pcTouchTappedOption(tapped, tx, ty);
+		const bool tapped = pc_menu_take_tap(&tx, &ty);
+		const int opt     = mMenuPause->pcTappedOption(tapped, tx, ty);
 		if (opt >= 0 && opt <= SELPAUSE_GoToSunset) {
 			if (opt == (int)mCurrSelPause) {
 				input |= Controller::PRESS_A;
@@ -548,6 +545,13 @@ bool ObjSMenuPause::menu_pause()
 				blink_TopMenu(mCurrSelPause);
 				input = 0;
 			}
+		}
+		// Mouse hover moves the choice like the arrow keys; hover alone does not activate.
+		const int hov = mMenuPause->pcHoveredOption();
+		if (hov >= 0 && hov <= SELPAUSE_GoToSunset && hov != (int)mCurrSelPause) {
+			mCurrSelPause = hov;
+			mMenuPause->select(mCurrSelPause);
+			blink_TopMenu(mCurrSelPause);
 		}
 	}
 #endif
@@ -622,13 +626,13 @@ bool ObjSMenuPause::menu_yuugata()
 	mMenuSunset->update();
 
 	u32 input = pad->getButtonDown();
-#if PIKI_PC_TOUCH
+#if PIKI_PC_MENU_TAP
 	// Táctil: tocar una opción la elige; tocar la elegida es A.
-	pc_touch_claim_game_menu();
+	pc_menu_claim();
 	{
 		float tx = 0.0f, ty = 0.0f;
-		const bool tapped = pc_touch_take_game_menu_tap(&tx, &ty);
-		const int opt     = mMenuSunset->pcTouchTappedOption(tapped, tx, ty);
+		const bool tapped = pc_menu_take_tap(&tx, &ty);
+		const int opt     = mMenuSunset->pcTappedOption(tapped, tx, ty);
 		if (opt >= 0 && opt <= SELSUNSET_Max) {
 			if (opt == (int)mCurrSelSunset) {
 				input |= Controller::PRESS_A;
@@ -638,6 +642,13 @@ bool ObjSMenuPause::menu_yuugata()
 				blink_Yuugata(mCurrSelSunset);
 				input = 0;
 			}
+		}
+		// Mouse hover moves the choice like the arrow keys; hover alone does not activate.
+		const int hov = mMenuSunset->pcHoveredOption();
+		if (hov >= 0 && hov <= SELSUNSET_Max && hov != (int)mCurrSelSunset) {
+			mCurrSelSunset = hov;
+			mMenuSunset->select(mCurrSelSunset);
+			blink_Yuugata(mCurrSelSunset);
 		}
 	}
 #endif
@@ -698,13 +709,13 @@ bool ObjSMenuPause::menu_zenkai()
 	mMenuReturn->update();
 
 	u32 input = pad->getButtonDown();
-#if PIKI_PC_TOUCH
+#if PIKI_PC_MENU_TAP
 	// Táctil: tocar una opción la elige; tocar la elegida es A.
-	pc_touch_claim_game_menu();
+	pc_menu_claim();
 	{
 		float tx = 0.0f, ty = 0.0f;
-		const bool tapped = pc_touch_take_game_menu_tap(&tx, &ty);
-		const int opt     = mMenuReturn->pcTouchTappedOption(tapped, tx, ty);
+		const bool tapped = pc_menu_take_tap(&tx, &ty);
+		const int opt     = mMenuReturn->pcTappedOption(tapped, tx, ty);
 		if (opt >= 0 && opt <= 1) {
 			if (opt == (int)mCurrSelReturn) {
 				input |= Controller::PRESS_A;
@@ -714,6 +725,13 @@ bool ObjSMenuPause::menu_zenkai()
 				blink_Zenkai(mCurrSelReturn);
 				input = 0;
 			}
+		}
+		// Mouse hover moves the choice like the arrow keys; hover alone does not activate.
+		const int hov = mMenuReturn->pcHoveredOption();
+		if (hov >= 0 && hov <= 1 && hov != (int)mCurrSelReturn) {
+			mCurrSelReturn = hov;
+			mMenuReturn->select(mCurrSelReturn);
+			blink_Zenkai(mCurrSelReturn);
 		}
 	}
 #endif

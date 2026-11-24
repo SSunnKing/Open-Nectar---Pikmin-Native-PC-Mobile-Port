@@ -33,11 +33,13 @@ struct PcMenuPadKeys {
 	bool keyA, keyD, keyW, keyS;
 	bool clickLeft;
 	bool clickRight;
+	// Mouse Back (SDL_BUTTON_X1). Same cancel as Backspace and right click.
+	bool clickX1;
 };
 
 // menuMode false leaves the pad alone (free play). menuMode true makes Enter,
-// Space and left click accept, Escape, Backspace and right click cancel, and
-// arrows and WASD both move the cursor. Shift never cancels.
+// Space and left click accept, Escape, Backspace, right click and the mouse
+// Back button cancel, and arrows and WASD both move the cursor. Shift never cancels.
 // nonShiftB is a non-Shift keyboard binding for B that is held right now.
 // bindStart / bindStart2 are the Start bindings, so an accept key bound to
 // Start does not also open leave or close a pause menu.

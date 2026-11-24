@@ -1,4 +1,10 @@
 #ifdef PIKI_PC_PORT
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#include "pc_menu_pointer.h"
+#include "System.h"
+#endif
 #include "pc_p2_captain_preview.h"
 #endif
 #include "Morimura/challengeSelect2d.h"
@@ -814,6 +820,23 @@ void TChallengePlayModeScreen::create(char const* path, u32 flags)
  * @note Address: 0x8038DB1C
  * @note Size: 0x7FC
  */
+#if PIKI_PC_MENU_TAP
+static int sChallengeOver = -1;
+static int sChallengeMode = -1;
+static float sCourseHover[30];
+static float sModeHover[2] = { 1.0f, 1.0f };
+
+// The course pane's own update multiplies its current scale, so the previous
+// hover factor has to come back out before the new one goes in.
+static void pcApplyHover(J2DPane* pane, float& prev, bool over, float amount)
+{
+	const float next = pc_menu_hover_scale(pane, over, amount, sys->mDeltaTime);
+	if (prev <= 0.0f) prev = 1.0f;
+	pane->updateScale(pane->getScaleX() / prev * next, pane->getScaleY() / prev * next);
+	prev = next;
+}
+#endif
+
 void TChallengePlayModeScreen::update()
 {
 #if !defined(VERSION_JP)
@@ -1024,6 +1047,9 @@ void TChallengePlayModeScreen::update()
 			if (mState >= 2) {
 				for (int i = 0; i < 2; i++) {
 					mPaneList0[i]->updateScale(mScaleMgr[i]->calc());
+#if PIKI_PC_MENU_TAP
+					pcApplyHover(mPaneList0[i], sModeHover[i], i == sChallengeMode, 0.06f);
+#endif
 				}
 			}
 			mScreenObj->setXY(mMovePos, 0.0f);
@@ -1572,8 +1598,38 @@ void TChallengeSelect::doCreate(JKRArchive* arc)
  * @note Address: 0x80390780
  * @note Size: 0x14CC
  */
+#if PIKI_PC_MENU_TAP
+// Course icon under the pointer, limited to stages the stick can reach.
+static int pcChallengeCourseAt(TChallengeSelect* self, float nx, float ny)
+{
+	int hit = -1;
+	if (!self->mPanelList) return hit;
+	int last = self->mMaxStages;
+	if (last >= CHALLENGE_COURSE_COUNT) last = CHALLENGE_COURSE_COUNT - 1;
+	for (int i = 0; i <= last; i++) {
+		J2DPane* pane = self->mPanelList[i] ? self->mPanelList[i]->mPane1 : nullptr;
+		if (pane && pane->isVisible() && pc_menu_pane_hit(pane, nx, ny, 0.02f)) hit = i;
+	}
+	return hit;
+}
+
+// 0 is 1P, 1 is 2P when a second controller is connected.
+static int pcChallengeModeAt(TChallengeSelect* self, float nx, float ny)
+{
+	TChallengePlayModeScreen* screen = self->mPlayModeScreen;
+	if (!screen) return -1;
+	if (screen->mPaneList0[0] && pc_menu_pane_hit(screen->mPaneList0[0], nx, ny, 0.02f)) return 0;
+	if (self->mConnect2p && screen->mPaneList0[1] && pc_menu_pane_hit(screen->mPaneList0[1], nx, ny, 0.02f)) return 1;
+	return -1;
+}
+#endif
+
 bool TChallengeSelect::doUpdate()
 {
+#if PIKI_PC_MENU_TAP
+	sChallengeOver = -1;
+	sChallengeMode = -1;
+#endif
 	TChallengePlayModeScreen* screen;
 	if (mPlayModeScreen->isState(TChallengePlayModeScreen::PlayModeScreen_Active) != 0) {
 		// Check that player 2s controller is plugged in
@@ -1601,6 +1657,84 @@ bool TChallengeSelect::doUpdate()
 
 	if (mCanInput && mDisp->mStatus == Screen::Game2DMgr::CHECK2D_ChallengeSelect_Default
 	    && !static_cast<TChallengeSelectScene*>(getOwner())->mConfirmEndWindow->mHasDrawn) {
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_B, "B Back");
+	pc_menu_plate(PAD_BUTTON_A, "A Select");
+	pc_menu_plate(PAD_TRIGGER_Z, "Z Rules");
+	pc_menu_plate(PAD_BUTTON_RIGHT, "Right");
+	pc_menu_plate(PAD_BUTTON_LEFT, "Left");
+	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
+	pc_menu_plate(PAD_BUTTON_UP, "Up");
+	{
+		float hx = 0.0f;
+		float hy = 0.0f;
+		sChallengeOver = -1;
+		sChallengeMode = -1;
+		if (pc_menu_hover(&hx, &hy)) {
+			if (!mPlayModeScreen->isOpen() && rulesClosed) sChallengeOver = pcChallengeCourseAt(this, hx, hy);
+			else if (mPlayModeScreen->isState(TChallengePlayModeScreen::PlayModeScreen_Active)) sChallengeMode = pcChallengeModeAt(this, hx, hy);
+		}
+		if (sChallengeOver >= 0 || sChallengeMode >= 0) pc_menu_set_hand(true);
+		float tx = 0.0f;
+		float ty = 0.0f;
+		if (pc_menu_take_tap(&tx, &ty)) {
+			if (!mPlayModeScreen->isOpen() && rulesClosed) {
+				const int course = pcChallengeCourseAt(this, tx, ty);
+				if (course >= 0) {
+					pc_menu_hover_press(mPanelList[course]->mPane1);
+					if (course == mCurrentSelection) {
+						if (mSelected1p) {
+							mPlayModeScreen->mAnimScreen[1]->blink(mTextFlashVal, 0.0f);
+							mPlayModeScreen->mAnimScreen[2]->blink(0.0f, 0.0f);
+						} else {
+							mPlayModeScreen->mAnimScreen[1]->blink(0.0f, 0.0f);
+							mPlayModeScreen->mAnimScreen[2]->blink(mTextFlashVal, 0.0f);
+						}
+						mPlayModeScreen->mDoShowNoController = false;
+						mPlayModeScreen->setState(TChallengePlayModeScreen::PlayModeScreen_Open);
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+					} else {
+						mRightOffset = course % 5;
+						mDownOffset  = course / 5;
+						if (mLevelNameMoveState < 0) mLevelNameMoveState = 3;
+						updatePanel = true;
+					}
+				}
+			} else if (mPlayModeScreen->isState(TChallengePlayModeScreen::PlayModeScreen_Active)) {
+				const int mode = pcChallengeModeAt(this, tx, ty);
+				if (mode >= 0) {
+					pc_menu_hover_press(mPlayModeScreen->mPaneList0[mode]);
+					const bool want1p = mode == 0;
+					if (want1p == mSelected1p) {
+						if (mSelected1p || (mConnect2p && !mSelected1p)) {
+							mPlayModeScreen->setState(TChallengePlayModeScreen::PlayModeScreen_Close);
+							if (!mIsSection) {
+								_134           = true;
+								demoStart();
+								mDisp->mStatus = Screen::Game2DMgr::CHECK2D_ChallengeSelect_InDemo;
+							}
+							mDisp->mStageNumber = mCurrentSelection;
+							mDisp->mPlayType    = mSelected1p ? 0 : 1;
+							PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_DECIDE, 0);
+						} else {
+							mPlayModeScreen->mDoShowNoController = true;
+							PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_ERROR, 0);
+						}
+					} else if (want1p) {
+						mPlayModeScreen->setBlink(mTextFlashVal);
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+						mSelected1p                          = true;
+						mPlayModeScreen->mDoShowNoController = false;
+					} else {
+						mPlayModeScreen->setBlink(mTextFlashVal);
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+						mSelected1p = false;
+					}
+				}
+			}
+		}
+	}
+#endif
 		if (mControls->getButtonDown() & Controller::PRESS_Z && mPlayModeScreen->mState == 0) {
 			if (mRulesScreen->mScaleGrowRate <= 0.0f) {
 				openWindow();
@@ -1816,6 +1950,9 @@ bool TChallengeSelect::doUpdate()
 	for (int i = 0; i < CHALLENGE_COURSE_COUNT; i++) {
 		TChallengePanel* panel = mPanelList[i];
 		panel->update(mCurrentSelection, updatePanel);
+#if PIKI_PC_MENU_TAP
+		if (panel->mPane1) pcApplyHover(panel->mPane1, sCourseHover[i], i == sChallengeOver, 0.06f);
+#endif
 		if (i == mCurrentSelection || panel->mIsUnlock) {
 			panel->addAlpha();
 		} else {

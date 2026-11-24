@@ -43,6 +43,9 @@
 #include <mutex>
 
 #include "pc_window.h"
+#include "pc_menu_tap.h"
+#include "pc_dpad_keys.h"
+#include "pc_menu_pointer.h"
 #include "pc_pause_key.h"
 #include "pc_gyro.h"
 #if !PIKI_P2_HOST
@@ -1191,6 +1194,7 @@ void saveConfig() {
     }
     out << "# Open Nectar settings (F1 in-game to change)\n";
     out << "pauseAltDefaultMigrated = 1\n";
+    out << "dpadSecondDefaultMigrated = 1\n";
     out << "windowWidth = " << sConfig.windowWidth << "\n";
     out << "windowHeight = " << sConfig.windowHeight << "\n";
     out << "displayMode = " << sConfig.displayMode << "\n";
@@ -1328,6 +1332,7 @@ void loadConfig() {
     }
     sHadConfigFile = true;
     bool pauseAltDefaultMigrated = false;
+    bool dpadSecondDefaultMigrated = false;
     bool pauseSecondBindingStored = false;
     std::string line;
     while (std::getline(in, line)) {
@@ -1619,6 +1624,9 @@ void loadConfig() {
         else if (key == "pauseAltDefaultMigrated") {
             pauseAltDefaultMigrated = atoi(val.c_str()) != 0;
         }
+        else if (key == "dpadSecondDefaultMigrated") {
+            dpadSecondDefaultMigrated = atoi(val.c_str()) != 0;
+        }
         else if (key.rfind("key2_", 0) == 0) {
             int idx = atoi(key.substr(5).c_str());
             if (idx >= 0 && idx < PC_KEY_ACT_COUNT) {
@@ -1667,6 +1675,19 @@ void loadConfig() {
     sConfig.keyboardBindings2[PC_KEY_ACT_START] = pc_pause_second_binding(
         sConfig.keyboardBindings[PC_KEY_ACT_START], sConfig.keyboardBindings2[PC_KEY_ACT_START],
         pauseAltDefaultMigrated, pauseAltInUse);
+    // Older settings gain the number keys for the D-pad actions once. An action whose
+    // second key was never saved starts without one, because the file lists every action.
+    if (!dpadSecondDefaultMigrated) {
+        const int actions[4] = { PC_KEY_ACT_DPAD_UP, PC_KEY_ACT_DPAD_DOWN, PC_KEY_ACT_DPAD_LEFT, PC_KEY_ACT_DPAD_RIGHT };
+        for (int d = 0; d < 4; ++d) {
+            const int wanted = pc_dpad_default_second(d);
+            bool inUse = false;
+            for (int i = 0; i < PC_KEY_ACT_COUNT; ++i) {
+                if (sConfig.keyboardBindings[i] == wanted || (i != actions[d] && sConfig.keyboardBindings2[i] == wanted)) inUse = true;
+            }
+            sConfig.keyboardBindings2[actions[d]] = pc_dpad_second_binding(d, sConfig.keyboardBindings2[actions[d]], false, inUse);
+        }
+    }
 #if PIKI_P2_HOST
     pc_p2_captain_set_choice(0, sConfig.p2Captain1);
     pc_p2_captain_set_choice(1, sConfig.p2Captain2);
@@ -1795,7 +1816,7 @@ bool menuMouseNorm(float* nx, float* ny) {
 }
 
 // Accept: Enter, numpad Enter, Space, left click, and a non-mouse A binding.
-// Cancel: Escape, Backspace, right click, and a B binding that is not Shift.
+// Cancel: Escape, Backspace, right click, mouse Back, and a B binding that is not Shift.
 // A text field keeps Backspace for delete and does not call menuCancelKey.
 bool menuOkKey() {
     return keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_KP_ENTER)
@@ -1810,6 +1831,7 @@ static bool menuCancelBinding(int bind) {
 bool menuCancelKey() {
     return keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_BACKSPACE)
         || (sMenuMouseEdge & SDL_BUTTON(SDL_BUTTON_RIGHT)) != 0
+        || (sMenuMouseEdge & SDL_BUTTON(SDL_BUTTON_X1)) != 0
         || menuCancelBinding(pc_window_get_key_binding(PC_KEY_ACT_B))
         || menuCancelBinding(pc_window_get_key_binding2(PC_KEY_ACT_B));
 }
@@ -3841,6 +3863,11 @@ void pc_settings_touch_tap(float x, float y) {
     sTouchTapPending = true;
 }
 
+bool pc_settings_prompt_active(void) {
+    return pc_newgame_prompt_active() || pc_playercount_prompt_active() || pc_devassign_prompt_active()
+        || pc_captain_prompt_active() || pc_captain_select_active();
+}
+
 // El launcher deja Load/Textures/.activate al descargar un pack: se
 // activa ese pack (su carpeta) y se borra el aviso. Al arrancar el juego y
 // en las órdenes del launcher (--settings-dump...).
@@ -5405,33 +5432,61 @@ void pcNewGamePromptInput()
     accept |= (sTouchFrameButtons & PAD_BUTTON_A) != 0;
     cancel |= (sTouchFrameButtons & PAD_BUTTON_B) != 0;
 
-    if (sTouchTapPending) {
-        sTouchTapPending = false;
+    // Where a point lands: an option box (row, col) or the Start button (col 0).
+    auto ngHit = [](float x, float y, int* row, int* col) {
         int sw, sh;
         ngScreen(&sw, &sh);
-        const float x = sTouchTapX * sw;
-        const float y = sTouchTapY * sh;
         const int panelX = sw / 2 - kNgPanelW / 2;
         const int panelY = sh / 2 - kNgPanelH / 2;
-        // Un toque elige la opción; el de Start empieza.
-        for (int row = 0; row < kNgRowCount; ++row) {
-            const float optY = float(ngRowY(panelY, row));
+        for (int r = 0; r < kNgRowCount; ++r) {
+            const float optY = float(ngRowY(panelY, r));
             for (int i = 0; i < 2; ++i) {
                 const float boxX = float(ngBoxX(panelX, i));
                 if (x >= boxX && x <= boxX + kNgBoxW && y >= optY - 8.0f && y <= optY + kNgBoxH + 8.0f) {
-                    sNewGamePromptRow = row;
-                    sNewGamePromptCol = i;
-                    ngSetRowValue(row, i);
+                    *row = r;
+                    *col = i;
+                    return true;
                 }
             }
         }
         const float startY = float(ngRowY(panelY, kNgStartRow));
         const float startX = float(ngStartX(panelX));
         if (x >= startX && x <= startX + kNgBoxW && y >= startY - 8.0f && y <= startY + kNgBoxH + 8.0f) {
-            sNewGamePromptRow = kNgStartRow;
-            accept            = true;
+            *row = kNgStartRow;
+            *col = 0;
+            return true;
+        }
+        return false;
+    };
+    int sw = 0, sh = 0;
+    ngScreen(&sw, &sh);
+    if (sTouchTapPending) {
+        sTouchTapPending = false;
+        // Un toque elige la opción; el de Start empieza.
+        int row = 0, col = 0;
+        if (ngHit(sTouchTapX * sw, sTouchTapY * sh, &row, &col)) {
+            sNewGamePromptRow = row;
+            if (row == kNgStartRow) {
+                accept = true;
+            } else {
+                sNewGamePromptCol = col;
+                ngSetRowValue(row, col);
+            }
         }
     }
+#if PIKI_PC_MENU_TAP
+    {
+        // Mouse hover: the cursor follows the pointer and the hand shows over a box.
+        float hx = 0.0f, hy = 0.0f;
+        int row = 0, col = 0;
+        const bool over = pc_menu_hover(&hx, &hy) && ngHit(hx * sw, hy * sh, &row, &col);
+        pc_menu_set_hand(over);
+        if (over && (row != sNewGamePromptRow || col != sNewGamePromptCol)) {
+            sNewGamePromptRow = row;
+            sNewGamePromptCol = col;
+        }
+    }
+#endif
 
     SDL_GameController* ctl = pc_window_get_controller();
     if (ctl) {
@@ -5760,8 +5815,10 @@ void pcDevAssignPromptInput()
         const int player = sDevAssignStep == COOPASSIGN_WaitP1 ? 0 : 1;
         int kind = PC_INPUT_DEV_NONE, id = -1;
         bool pressed = pc_window_take_button_press(&kind, &id);
-#if PIKI_PC_TOUCH
-        // Táctil: un toque vale como "P1 = pantalla" (va al pad 0). P2 necesita un mando.
+#if PIKI_PC_MENU_TAP
+        // Touch or mouse: a tap counts as "P1 = this screen" (a click is the keyboard
+        // and mouse). Player 2 needs another device, so a tap does not count for P2.
+        pc_menu_plate(PAD_BUTTON_B, "B Back");
         if (sTouchTapPending) {
             sTouchTapPending = false;
             if (player == 0 && !pressed) {
@@ -5801,6 +5858,12 @@ void pcDevAssignPromptInput()
 
     // Confirmación: con teclado y con los dos mandos. Los flancos van por
     // acción, no por mando: se combina el estado de los dos y se detecta una vez.
+#if PIKI_PC_MENU_TAP
+    pc_menu_plate(PAD_BUTTON_B, "B Back");
+    pc_menu_plate(PAD_BUTTON_A, "A OK");
+    pc_menu_plate(PAD_BUTTON_RIGHT, "Right");
+    pc_menu_plate(PAD_BUTTON_LEFT, "Left");
+#endif
     bool left   = keyWentDown(SDL_SCANCODE_LEFT)  || keyWentDown(SDL_SCANCODE_A);
     bool right  = keyWentDown(SDL_SCANCODE_RIGHT) || keyWentDown(SDL_SCANCODE_D);
     bool accept = menuOkKey();
@@ -6082,6 +6145,36 @@ void csCoopPressed(int player, bool pressed[CS_InputCount])
     }
 }
 
+// Mouse hover over the Captains screen: a card moves `cursor` to it, Start
+// reports onStart, and the hand cursor shows over every clickable part.
+// Applies only when the pointer enters a new target, so keys and pad still move
+// the cursor while the mouse rests. sCsHovered tells whether a card was entered.
+bool sCsHovered = false;
+void csHover(bool* onStart, int* cursor)
+{
+    static int sLast = -1;
+    sCsHovered = false;
+    if (onStart) *onStart = false;
+#if PIKI_PC_MENU_TAP
+    float hx = 0.0f, hy = 0.0f;
+    int which = 0, hit = CS_HIT_NONE;
+    if (pc_menu_hover(&hx, &hy)) hit = csPointerHit(hx, hy, &which);
+    pc_menu_set_hand(hit != CS_HIT_NONE);
+    const int key = hit == CS_HIT_CARD ? which : hit == CS_HIT_START ? 100 : -1;
+    if (key != sLast) {
+        sLast = key;
+        if (hit == CS_HIT_CARD && cursor) {
+            *cursor    = which;
+            sCsHovered = true;
+        } else if (hit == CS_HIT_START && onStart) {
+            *onStart = true;
+        }
+    }
+#else
+    (void)cursor;
+#endif
+}
+
 void csCoopStart()
 {
     sConfig.p2Captain1 = sCapSelChoice[0];
@@ -6095,15 +6188,22 @@ void csCoopStart()
 
 void pcCaptainSelectCoopInput()
 {
-    sTouchTapPending = false;
-    if (menuAcceptClick()) {
+    const int owner = pc_window_get_keyboard_owner() == 1 ? 1 : 0;
+    {
         float nx = 0.0f, ny = 0.0f;
-        int which = 0;
-        if (menuMouseNorm(&nx, &ny) && csPointerHit(nx, ny, &which) == CS_HIT_CARD) {
-            const int owner = pc_window_get_keyboard_owner() == 1 ? 1 : 0;
-            sCsCursor[owner] = which;
+        bool clicked = false;
+        if (sTouchTapPending) {
+            sTouchTapPending = false;
+            nx = sTouchTapX;
+            ny = sTouchTapY;
+            clicked = true;
+        } else if (menuAcceptClick()) {
+            clicked = menuMouseNorm(&nx, &ny);
         }
+        int which = 0;
+        if (clicked && csPointerHit(nx, ny, &which) == CS_HIT_CARD) sCsCursor[owner] = which;
     }
+    csHover(nullptr, sCsReady[owner] ? nullptr : &sCsCursor[owner]);
     bool pressed[2][CS_InputCount];
     for (int p = 0; p < 2; p++) csCoopPressed(p, pressed[p]);
     const bool bothReady = sCsReady[0] && sCsReady[1];
@@ -6253,6 +6353,13 @@ void pcCaptainSelectInput()
             if (row < 2) sCapSelIndex += kCsCols;
             else sCapSelStart = true;
         }
+    }
+
+    {
+        bool onStart = false;
+        csHover(&onStart, &sCapSelIndex);
+        if (onStart) sCapSelStart = true;
+        else if (sCsHovered) sCapSelStart = false;
     }
 
     // A click on a card assigns that card. A click on Start, or on empty
@@ -6454,6 +6561,70 @@ void pc_captain_select_draw(void)
 #endif
                          : "A: pick    L/R: switch captain    Start: go    B: back",
                  dim, kCsPanelW - 60);
+}
+
+// Button plates (pc_menu_plate): drawn while the mouse is in use, at the bottom
+// right of the 4:3 screen, laid out right to left in the order requested.
+void pc_menu_plates_draw(void)
+{
+    PC_SETTINGS_HOST_ALLOC();
+    PcPlateRequest requests[PC_PLATE_MAX];
+    const int count = pc_plate_take_requests(requests);
+    if (count == 0 || !pc_pointer_claimed() || !pc_pointer_mouse_active()) {
+        pc_plate_set_layout(nullptr, nullptr, 0);
+        return;
+    }
+    if (!gsys || !gsys->mDGXGfx) return;
+    DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+    ensureFont();
+    if (!sFont) return;
+
+    int sw, sh;
+    ngScreen(&sw, &sh);
+    PcSettingsP2DFrame nativeFrame(sw, sh);
+    Matrix4f ortho;
+    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, sw, sh));
+
+    const float window  = pc_gfx_get_window_aspect_ratio();
+    const float uiWidth = window > float(sw) / float(sh) ? (float(sw) / float(sh)) / window : 1.0f;
+    float hx = 0.0f, hy = 0.0f;
+    const bool hovering = pc_pointer_hover(&hx, &hy);
+    static Uint32 plateFeelAt = 0;
+    const Uint32 plateNow = SDL_GetTicks();
+    float plateDt = plateFeelAt ? float(plateNow - plateFeelAt) / 1000.0f : 0.016f;
+    if (plateDt < 0.0f || plateDt > 0.1f) plateDt = 0.016f;
+    plateFeelAt = plateNow;
+
+    PcPointerRect rects[PC_PLATE_MAX];
+    unsigned short pads[PC_PLATE_MAX];
+    const int h = 30, gap = 8, firstY = sh - 52, leftEdge = 40;
+    int y = firstY;
+    int right = sw - 40;
+    bool overAny = false;
+    auto blend = [](int from, int to, float t) { return int(from + (to - from) * t); };
+    for (int i = 0; i < count; ++i) {
+        const int w = 20 + int(strlen(requests[i].label)) * 9 < 52 ? 52 : 20 + int(strlen(requests[i].label)) * 9;
+        // Out of width: continue on a row above.
+        if (right - w < leftEdge) { y -= h + gap; right = sw - 40; }
+        const int x = right - w;
+        right = x - gap;
+        rects[i] = { (float(x) / sw) * uiWidth + (0.5f - uiWidth * 0.5f), float(y) / sh,
+                     (float(x + w) / sw) * uiWidth + (0.5f - uiWidth * 0.5f), float(y + h) / sh, true };
+        pads[i] = requests[i].pad;
+        const bool over = hovering && hx >= rects[i].x0 && hx <= rects[i].x1 && hy >= rects[i].y0 && hy <= rects[i].y1;
+        overAny |= over;
+        // Eased hover, and a brighter inset while the click is still showing.
+        const float feel = pc_plate_feel(requests[i].pad, over, plateDt);
+        const int inset = int(2.0f * feel + 0.5f);
+        const Colour fill(blend(26, 210, feel), blend(30, 220, feel), blend(48, 245, feel), blend(225, 255, feel));
+        gfx->setColour(fill, true);
+        gfx->setAuxColour(fill);
+        gfx->fillRectangle(RectArea(x + inset, y + inset, x + w - inset, y + h - inset));
+        ngrText(x + w / 2, y + (h - 12 * 3 / 2) / 2, requests[i].label,
+                Colour(blend(205, 255, feel), blend(239, 255, feel), 250, 255), 12, w - 12, true);
+    }
+    pc_plate_set_layout(rects, pads, count);
+    if (overAny) pc_pointer_set_hand(true);
 }
 
 void pc_captain_select_draw_3d(void)

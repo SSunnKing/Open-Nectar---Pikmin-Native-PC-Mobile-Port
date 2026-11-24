@@ -1,3 +1,7 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 #include "og/newScreen/FinalMsg.h"
 #include "og/newScreen/SMenu.h"
 #include "og/Screen/ogScreen.h"
@@ -126,6 +130,19 @@ bool ObjFinalMsg::menu()
 	mMenuMgr->update();
 
 	u32 input = pad->getButtonDown();
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_B, "B Quit");
+	{
+		bool pcActivate = false;
+		const int sel   = mMenuMgr->pcPointerUpdate(mCurrSel, &pcActivate);
+		if (sel >= 0 && sel != mCurrSel) {
+			mCurrSel = sel;
+			mMenuMgr->select(mCurrSel);
+			blink_Menu(mCurrSel);
+		}
+		if (pcActivate) input |= Controller::PRESS_A;
+	}
+#endif
 
 	if (input & Controller::PRESS_UP) {
 		if (mCurrSel > 0) {

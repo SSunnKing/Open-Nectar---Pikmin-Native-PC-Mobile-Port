@@ -56,9 +56,19 @@ inline bool pc_cutscene_port_skip(bool speedrun, bool textBoxOpen, bool acceptEd
 	return acceptEdge && !speedrun && !textBoxOpen;
 }
 
+// Backspace, right click and mouse Back are the text box's B: show a page
+// that is still typing. A shown page is not turned by B.
+inline bool pc_text_cancel_wants(bool backspace, bool rightClick, bool mouseBack)
+{
+	return backspace || rightClick || mouseBack;
+}
+
 // One press of Enter, Space or left click. Further calls in the same hold
 // return false, so a text box and a cutscene cannot both spend it.
 bool pc_text_port_accept_pressed(void);
+
+// One press of Backspace, right click or mouse Back.
+bool pc_text_port_cancel_pressed(void);
 
 // Observe releases even when neither a text box nor a cutscene is active.
 void pc_text_update_input(bool latchedEnter);

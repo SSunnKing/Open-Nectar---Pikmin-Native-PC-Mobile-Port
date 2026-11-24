@@ -7,10 +7,7 @@
 #include "System.h"
 #include "Controller.h"
 #include "trig.h"
-#if PIKI_PC_TOUCH
-extern "C" void pc_touch_claim_game_menu(void);
-extern "C" bool pc_touch_take_game_menu_tap(float* x, float* y);
-#endif
+#include "pc_menu_tap.h"
 
 /**
  * @note Address: N/A
@@ -290,13 +287,13 @@ bool ObjSMenuPauseDoukutu::menu_pause()
 	mMenuPause->update();
 
 	u32 input = pad->getButtonDown();
-#if PIKI_PC_TOUCH
+#if PIKI_PC_MENU_TAP
 	// Táctil: tocar una opción la elige; tocar la elegida es A.
-	pc_touch_claim_game_menu();
+	pc_menu_claim();
 	{
 		float tx = 0.0f, ty = 0.0f;
-		const bool tapped = pc_touch_take_game_menu_tap(&tx, &ty);
-		const int opt     = mMenuPause->pcTouchTappedOption(tapped, tx, ty);
+		const bool tapped = pc_menu_take_tap(&tx, &ty);
+		const int opt     = mMenuPause->pcTappedOption(tapped, tx, ty);
 		if (opt >= 0 && opt <= 1) {
 			if (opt == (int)mCurrPauseSel) {
 				input |= Controller::PRESS_A;
@@ -306,6 +303,13 @@ bool ObjSMenuPauseDoukutu::menu_pause()
 				set_Blink_Normal();
 				input = 0;
 			}
+		}
+		// Mouse hover moves the choice like the arrow keys; hover alone does not activate.
+		const int hov = mMenuPause->pcHoveredOption();
+		if (hov >= 0 && hov <= 1 && hov != (int)mCurrPauseSel) {
+			mCurrPauseSel = hov;
+			mMenuPause->select(mCurrPauseSel);
+			set_Blink_Normal();
 		}
 	}
 #endif
@@ -402,13 +406,13 @@ bool ObjSMenuPauseDoukutu::menu_giveup()
 	mMenuGiveup->update();
 
 	u32 input = pad->getButtonDown();
-#if PIKI_PC_TOUCH
+#if PIKI_PC_MENU_TAP
 	// Táctil: tocar una opción la elige; tocar la elegida es A.
-	pc_touch_claim_game_menu();
+	pc_menu_claim();
 	{
 		float tx = 0.0f, ty = 0.0f;
-		const bool tapped = pc_touch_take_game_menu_tap(&tx, &ty);
-		const int opt     = mMenuGiveup->pcTouchTappedOption(tapped, tx, ty);
+		const bool tapped = pc_menu_take_tap(&tx, &ty);
+		const int opt     = mMenuGiveup->pcTappedOption(tapped, tx, ty);
 		if (opt >= 0 && opt <= 1) {
 			if (opt == (int)mCurrGiveupSel) {
 				input |= Controller::PRESS_A;
@@ -418,6 +422,13 @@ bool ObjSMenuPauseDoukutu::menu_giveup()
 				set_Blink_YesNo();
 				input = 0;
 			}
+		}
+		// Mouse hover moves the choice like the arrow keys; hover alone does not activate.
+		const int hov = mMenuGiveup->pcHoveredOption();
+		if (hov >= 0 && hov <= 1 && hov != (int)mCurrGiveupSel) {
+			mCurrGiveupSel = hov;
+			mMenuGiveup->select(mCurrGiveupSel);
+			set_Blink_YesNo();
 		}
 	}
 #endif

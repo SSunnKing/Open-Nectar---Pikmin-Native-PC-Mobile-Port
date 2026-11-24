@@ -7,6 +7,7 @@
 #ifdef PIKI_PC_PORT
 extern bool gPcAutoAdvanceMovieText; // moviePlayer.cpp
 #include "pc_text_box.h"
+#include "pc_menu_tap.h"
 #endif
 
 namespace P2JME {
@@ -167,6 +168,12 @@ bool TSequenceProcessor::do_isReady()
 	// the disc path below, and this flag keeps Space from doing both.
 	bool portHandled = false;
 	const bool pageShown = isFlag(SeqProc_IsWaitingPressA);
+#if PIKI_PC_MENU_TAP
+	// The whole box is the click. The hand shows over it; empty space still turns the page.
+	pc_menu_claim();
+	float hx = 0.0f, hy = 0.0f;
+	if (pc_menu_hover(&hx, &hy)) pc_menu_set_hand(true);
+#endif
 	const PcTextBoxPress portPress = pc_text_box_port_press(pageShown, pc_text_port_accept_pressed());
 	if (portPress == PC_TEXT_BOX_NEXT_PAGE) {
 		resetAbtnWait();
@@ -198,7 +205,11 @@ bool TSequenceProcessor::do_isReady()
 		if (isFlag(SeqProc_IsForceFinish)) {
 			frameCount = 10.0f;
 		} else if ((mController1 && (mController1->getButtonDown() & Controller::PRESS_B))
-		           || (mController2 && (mController2->getButtonDown() & Controller::PRESS_B))) {
+		           || (mController2 && (mController2->getButtonDown() & Controller::PRESS_B))
+#ifdef PIKI_PC_PORT
+		           || pc_text_port_cancel_pressed()
+#endif
+		           ) {
 			doFastForwardSE();
 			setFlag(SeqProc_IsForceFinish);
 		} else if ((mController1 && (mController1->getButton() & Controller::PRESS_A))

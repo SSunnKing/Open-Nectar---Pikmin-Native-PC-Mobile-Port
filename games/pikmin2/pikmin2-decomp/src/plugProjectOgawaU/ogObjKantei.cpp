@@ -1,3 +1,4 @@
+#include "pc_menu_tap.h"
 #include "og/newScreen/KanteiDemo.h"
 #include "og/Screen/ogScreen.h"
 #include "Morimura/mrUtil.h"
@@ -15,6 +16,10 @@
  * @note Address: N/A
  * @note Size: 0xE4
  */
+#if PIKI_PC_MENU_TAP
+static char sKanteiName;
+#endif
+
 static void _Print(char* format, ...)
 {
 	OSReport(format, __FILE__);
@@ -329,6 +334,9 @@ void ObjKantei::commonUpdate()
 bool ObjKantei::doUpdate()
 {
 	Controller* pad = getGamePad();
+#if PIKI_PC_MENU_TAP
+	bool pcTap = false;
+#endif
 	switch (mState) {
 	case Kantei_Begin:
 		mState      = Kantei_PokoAppearDelay;
@@ -337,8 +345,22 @@ bool ObjKantei::doUpdate()
 
 	case Kantei_PokoAppearDelay:
 		mStartTimer += sys->mDeltaTime;
+#if PIKI_PC_MENU_TAP
+		pc_menu_claim();
+		{
+			float hx = 0.0f, hy = 0.0f, tx = 0.0f, ty = 0.0f;
+			if (pc_menu_hover(&hx, &hy)) pc_menu_set_hand(true);
+			pcTap = pc_menu_take_tap(&tx, &ty);
+			if (pcTap && mPaneName && mNameScale > 0.0f) pc_menu_hover_press(&sKanteiName);
+		}
+#endif
+		// B does nothing during the appraisal. Mouse Back and Backspace stay unused.
 		if (mStartTimer >= msVal.mNameAppearDelay || pad->getButtonDown() & Controller::PRESS_A
-		    || (mDisp->mSecondaryController && mDisp->mSecondaryController->getButtonDown() & Controller::PRESS_A)) {
+		    || (mDisp->mSecondaryController && mDisp->mSecondaryController->getButtonDown() & Controller::PRESS_A)
+#if PIKI_PC_MENU_TAP
+		    || pcTap
+#endif
+		    ) {
 			mState              = Kantei_SetPokoValue;
 			mDisp->mPelletValue = 0;
 			mPokoCounterCurr->startSlot(msVal.mPokoSlotFactor);
@@ -374,20 +396,36 @@ bool ObjKantei::doUpdate()
 	case Kantei_Idle:
 		if (mIdleStateTimer > 0.0f) {
 			mIdleStateTimer -= sys->mDeltaTime;
-		} else if (pad && pad->getButtonDown() & Controller::PRESS_A
-		           || (mDisp->mSecondaryController && mDisp->mSecondaryController->getButtonDown() & Controller::PRESS_A)) {
-			mShipMessageBoxID = mDisp->mPelletMessageID;
-			// if the tagID exists, open ship message box, unless in E3 mode
-			if (mShipMessageBoxID != 0 && !Game::gGameConfig.mParms.mE3version.mData) {
-				u32 tagid  = 0;
-				u32 tagid2 = 0;
-				P2JME::convertU64ToMessageID(mShipMessageBoxID, &tagid, &tagid2);
-				mTControl->setMessageID(tagid, tagid2);
-				mInTextBox = true;
-				mState     = Kantei_MessageBox;
+		} else {
+#if PIKI_PC_MENU_TAP
+			pc_menu_claim();
+			{
+				float hx = 0.0f, hy = 0.0f, tx = 0.0f, ty = 0.0f;
+				if (pc_menu_hover(&hx, &hy)) pc_menu_set_hand(true);
+				pcTap = pc_menu_take_tap(&tx, &ty);
+				if (pcTap && mPaneName && mNameScale > 0.0f) pc_menu_hover_press(&sKanteiName);
+			}
+#endif
+			// B does nothing here either. The ship message, once open, has its own buttons.
+			if (pad && pad->getButtonDown() & Controller::PRESS_A
+			    || (mDisp->mSecondaryController && mDisp->mSecondaryController->getButtonDown() & Controller::PRESS_A)
+#if PIKI_PC_MENU_TAP
+			    || pcTap
+#endif
+			    ) {
+				mShipMessageBoxID = mDisp->mPelletMessageID;
+				// if the tagID exists, open ship message box, unless in E3 mode
+				if (mShipMessageBoxID != 0 && !Game::gGameConfig.mParms.mE3version.mData) {
+					u32 tagid  = 0;
+					u32 tagid2 = 0;
+					P2JME::convertU64ToMessageID(mShipMessageBoxID, &tagid, &tagid2);
+					mTControl->setMessageID(tagid, tagid2);
+					mInTextBox = true;
+					mState     = Kantei_MessageBox;
 
-			} else {
-				finishKantei();
+				} else {
+					finishKantei();
+				}
 			}
 		}
 		break;
@@ -400,6 +438,16 @@ bool ObjKantei::doUpdate()
 	}
 
 	commonUpdate();
+#if PIKI_PC_MENU_TAP
+	{
+		const bool live = mPaneName && mNameScale > 0.0f
+		                  && (mState == Kantei_PokoAppearDelay || mState == Kantei_Idle);
+		float hx = 0.0f, hy = 0.0f;
+		const bool over = live && pc_menu_hover(&hx, &hy);
+		const float hover = pc_menu_hover_scale(&sKanteiName, over, 0.06f, sys->mDeltaTime);
+		if (live) mPaneName->updateScale(mPaneName->getScaleX() * hover, mPaneName->getScaleY() * hover);
+	}
+#endif
 	return false;
 }
 

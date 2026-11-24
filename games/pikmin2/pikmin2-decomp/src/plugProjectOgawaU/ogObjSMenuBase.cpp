@@ -5,6 +5,7 @@
 #include "Controller.h"
 #include "System.h"
 #include "trig.h"
+#include "pc_menu_tap.h"
 #if PIKI_PC_TOUCH
 extern "C" bool pc_touch_visible(void);
 extern "C" void pc_touch_claim_game_menu(void);
@@ -112,9 +113,42 @@ void ObjSMenuBase::doCreateAfter(JKRArchive* arc, P2DScreen::Mgr* scrn)
  * @note Address: 0x8031653C
  * @note Size: 0x20
  */
+#if PIKI_PC_MENU_TAP
+// Which page arrow the mouse clicked this frame: 1 = L, 2 = R. Only one in-level
+// menu page is active at a time.
+static int sPcArrow = 0;
+#endif
+
 void ObjSMenuBase::commonUpdateBase()
 {
 	updateYaji();
+#if PIKI_PC_MENU_TAP
+	// Mouse: the L and R arrows turn the page. The click is only peeked, so a
+	// click meant for an option below is left for the page to take.
+	pc_menu_claim();
+	sPcArrow = 0;
+	{
+		float hx = 0.0f, hy = 0.0f, tx = 0.0f, ty = 0.0f;
+		const bool hovering = pc_menu_hover(&hx, &hy);
+		const bool clicked  = pc_menu_peek_tap(&tx, &ty);
+		const bool live     = mEnableYaji && mAlpha != 0;
+		J2DPane* arrows[2]  = { mNyaji_l, mNyaji_r };
+		bool overHover      = false;
+		for (int i = 0; i < 2; i++) {
+			// Both coordinates are tested every frame so each arrow stays tracked.
+			const bool byHover = pc_menu_pane_hit(arrows[i], hx, hy, 0.01f) && hovering && live;
+			const bool byClick = pc_menu_pane_hit(arrows[i], tx, ty, 0.01f) && clicked && live;
+			overHover |= byHover;
+			if (byClick) {
+				pc_menu_drop_tap();
+				sPcArrow = i + 1;
+			}
+		}
+		pc_menu_set_hand(overHover);
+	}
+	// B is not drawn on these pages. The plate is the clickable Back.
+	pc_menu_plate(Controller::PRESS_B, "B Back");
+#endif
 #if PIKI_PC_TOUCH
 	// Menú de pausa/radar/objetos: la pantalla es del menú (se toca lo que
 	// dibuja) y deslizar en horizontal pasa de página (L/R).
@@ -140,10 +174,18 @@ bool ObjSMenuBase::doUpdate()
 
 	} else {
 		SceneSMenuBase* scene = static_cast<SceneSMenuBase*>(getOwner());
+#if PIKI_PC_MENU_TAP
+		if (scene->getGamePad()->isButtonDown(mButtonStates[1]) || sPcArrow == 2) {
+#else
 		if (scene->getGamePad()->isButtonDown(mButtonStates[1])) {
+#endif
 			ret            = true;
 			mCancelToState = MENUCLOSE_R;
+#if PIKI_PC_MENU_TAP
+		} else if (scene->getGamePad()->isButtonDown(mButtonStates[0]) || sPcArrow == 1) {
+#else
 		} else if (scene->getGamePad()->isButtonDown(mButtonStates[0])) {
+#endif
 			ret            = true;
 			mCancelToState = MENUCLOSE_L;
 		} else if (scene->getGamePad()->isButtonDown(Controller::PRESS_START | Controller::PRESS_B)) {

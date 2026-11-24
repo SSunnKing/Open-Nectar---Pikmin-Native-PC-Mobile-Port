@@ -1,3 +1,7 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 #include "og/newScreen/Contena.h"
 #ifdef PIKI_PC_PORT
 extern "C" int pc_settings_get_onion_step10(void);
@@ -13,6 +17,10 @@ extern "C" int pc_settings_get_onion_step10(void);
 #include "Controller.h"
 #include "trig.h"
 #include "stdlib.h"
+
+#if PIKI_PC_MENU_TAP
+static int sOnionArrow = -1;
+#endif
 
 namespace og {
 namespace newScreen {
@@ -474,9 +482,37 @@ bool ObjContena::moveContena()
 		mTimer2 -= sys->mDeltaTime;
 	}
 
+#if PIKI_PC_MENU_TAP
+	sOnionArrow = -1;
+#endif
 	if (!data->mState) {
 		data->mState = 1;
 	} else {
+#if PIKI_PC_MENU_TAP
+		// Mouse: plates for the keys this screen reads. Up puts a Pikmin in, Down takes one out.
+		pc_menu_plate(PAD_BUTTON_B, "B Cancel");
+		pc_menu_plate(PAD_BUTTON_A, "A OK");
+		pc_menu_plate(PAD_BUTTON_DOWN, "Down (out)");
+		pc_menu_plate(PAD_BUTTON_UP, "Up (in)");
+		{
+			float hx = 0.0f, hy = 0.0f;
+			if (pc_menu_hover(&hx, &hy)) {
+				if (mPaneArrowUp && mPaneArrowUp->isVisible() && pc_menu_pane_hit(mPaneArrowUp, hx, hy, 0.02f)) sOnionArrow = 0;
+				else if (mPaneArrowDown && mPaneArrowDown->isVisible() && pc_menu_pane_hit(mPaneArrowDown, hx, hy, 0.02f)) sOnionArrow = 1;
+			}
+			if (sOnionArrow >= 0) pc_menu_set_hand(true);
+			float tx = 0.0f, ty = 0.0f;
+			if (pc_menu_take_tap(&tx, &ty)) {
+				J2DPane* arrow = nullptr;
+				if (mPaneArrowUp && mPaneArrowUp->isVisible() && pc_menu_pane_hit(mPaneArrowUp, tx, ty, 0.02f)) arrow = mPaneArrowUp;
+				else if (mPaneArrowDown && mPaneArrowDown->isVisible() && pc_menu_pane_hit(mPaneArrowDown, tx, ty, 0.02f)) arrow = mPaneArrowDown;
+				if (arrow) {
+					pc_menu_hover_press(arrow);
+					pc_menu_queue_button(arrow == mPaneArrowUp ? PAD_BUTTON_UP : PAD_BUTTON_DOWN);
+				}
+			}
+		}
+#endif
 		if (mController->getButtonDown() & Controller::PRESS_B) {
 			mDisp->mDataContena = mDataContena;
 			data->mState        = 2;
@@ -577,6 +613,10 @@ void ObjContena::commonUpdate()
 
 		f32 scale3 = msVal._34 * (mScaleArrow1->calc() - 1.0f) + 1.0f;
 		f32 scale4 = msVal._34 * (mScaleArrow2->calc() - 1.0f) + 1.0f;
+#if PIKI_PC_MENU_TAP
+		scale3 *= pc_menu_hover_scale(mPaneArrowUp, sOnionArrow == 0, 0.06f, sys->mDeltaTime);
+		scale4 *= pc_menu_hover_scale(mPaneArrowDown, sOnionArrow == 1, 0.06f, sys->mDeltaTime);
+#endif
 		mPaneArrowUp->updateScale(scale3);
 		mPaneArrowDown->updateScale(scale4);
 	}

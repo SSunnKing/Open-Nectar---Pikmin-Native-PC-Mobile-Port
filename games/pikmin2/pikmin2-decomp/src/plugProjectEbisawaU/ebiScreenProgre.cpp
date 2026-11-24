@@ -1,3 +1,7 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 #include "ebi/Progre.h"
 #include "ebi/E2DGraph.h"
 #include "og/newScreen/ogUtil.h"
@@ -7,6 +11,18 @@
 #include "SoundID.h"
 
 static const char className[] = "ebiScreenProgre";
+
+#if PIKI_PC_MENU_TAP
+static float sProgreHover[2] = { 1.0f, 1.0f };
+
+// 1 is Yes, 0 is No, -1 is empty space.
+static int pcProgreChoiceAt(ebi::TScreenProgre* self, float nx, float ny)
+{
+	if (self->mPaneYes && pc_menu_pane_hit(self->mPaneYes, nx, ny, 0.02f)) return 1;
+	if (self->mPaneNo && pc_menu_pane_hit(self->mPaneNo, nx, ny, 0.02f)) return 0;
+	return -1;
+}
+#endif
 
 namespace ebi {
 
@@ -247,6 +263,41 @@ void TScreenProgre::update()
 		switch (mStateScreen) {
 		case ProgreScreen_Msg00:
 			if (mCounterFadein == 0 && !mSelected) {
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_A, "A OK");
+	pc_menu_plate(PAD_BUTTON_RIGHT, "Right");
+	pc_menu_plate(PAD_BUTTON_LEFT, "Left");
+	pc_menu_claim();
+	{
+		float hx = 0.0f, hy = 0.0f;
+		const int over = pc_menu_hover(&hx, &hy) ? pcProgreChoiceAt(this, hx, hy) : -1;
+		if (over >= 0) pc_menu_set_hand(true);
+		float tx = 0.0f, ty = 0.0f;
+		if (pc_menu_take_tap(&tx, &ty)) {
+			const int pressed = pcProgreChoiceAt(this, tx, ty);
+			J2DPane* pane     = pressed == 1 ? mPaneYes : pressed == 0 ? mPaneNo : nullptr;
+			if (pane) pc_menu_hover_press(pane);
+			if (pressed >= 0) {
+				mSelect = pressed;
+				mBlinkFontYes.disable();
+				mBlinkFontNo.disable();
+				(pressed ? mBlinkFontYes : mBlinkFontNo).enable();
+				mCursor1.mIsLeft = mCursor2.mIsLeft = pressed != 0;
+				setDecide();
+			}
+		}
+		J2DPane* choices[2] = { mPaneNo, mPaneYes };
+		for (int i = 0; i < 2; i++) {
+			J2DPane* pane = choices[i];
+			if (!pane) continue;
+			const float next = pc_menu_hover_scale(pane, i == over, 0.06f, sys->mDeltaTime);
+			float prev       = sProgreHover[i];
+			if (prev <= 0.0f) prev = 1.0f;
+			pane->updateScale(pane->getScaleX() / prev * next, pane->getScaleY() / prev * next);
+			sProgreHover[i] = next;
+		}
+	}
+#endif
 				if (mController->isMoveRight()) {
 					if (mSelect == 1) {
 						mSelect = 0;
@@ -265,6 +316,7 @@ void TScreenProgre::update()
 						mCursor2.mIsLeft = true;
 						PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
 					}
+				// B does nothing on this prompt. Mouse Back and Backspace stay unused.
 				} else if (mController->getButtonDown() & Controller::PRESS_A) {
 					setDecide();
 					return;

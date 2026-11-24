@@ -1,3 +1,7 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 #include "ebi/Omake.h"
 #ifdef PIKI_PC_PORT
 extern "C" void pc_gfx_p2_extend_shade(float gxY0, float gxY1, float stripW);
@@ -6,6 +10,20 @@ extern "C" void pc_gfx_p2_extend_shade(float gxY0, float gxY1, float stripW);
 #include "PSSystem/PSSystemIF.h"
 
 static const char name[] = "ebiScreenOmakeGame";
+
+#if PIKI_PC_MENU_TAP
+static float sOmakeGameHover[ebi::Screen::TOmakeGame::GameCount] = { 1.0f, 1.0f, 1.0f };
+
+static int pcOmakeGameAt(ebi::Screen::TOmakeGame* self, float nx, float ny)
+{
+	int hit = -1;
+	for (int i = 0; i < ebi::Screen::TOmakeGame::GameCount; i++) {
+		J2DPane* row = self->mPaneGameSel[i];
+		if (row && row->isVisible() && pc_menu_pane_hit(row, nx, ny, 0.01f)) hit = i;
+	}
+	return hit;
+}
+#endif
 
 namespace ebi {
 namespace Screen {
@@ -134,6 +152,48 @@ bool TOmakeGame::doUpdateStateWait()
 {
 	mScreenObj->update();
 	if (mExitState) {
+#if PIKI_PC_MENU_TAP
+		pc_menu_claim();
+		{
+			float hx = 0.0f, hy = 0.0f;
+			const int over = pc_menu_hover(&hx, &hy) ? pcOmakeGameAt(this, hx, hy) : -1;
+			if (over >= 0) pc_menu_set_hand(true);
+			float tx = 0.0f, ty = 0.0f;
+			if (!mCursor.mCounter && pc_menu_take_tap(&tx, &ty)) {
+				const int pressed = pcOmakeGameAt(this, tx, ty);
+				if (pressed >= 0 && mPaneGameSel[pressed]) pc_menu_hover_press(mPaneGameSel[pressed]);
+				if (pressed == mSelection) {
+					mExitState = false;
+				} else if (pressed >= 0) {
+					const int oldsel = mSelection;
+					mSelection       = pressed;
+					JGeometry::TBox2f box;
+					box                    = *mPaneSelectBox[mSelection]->getBounds();
+					mCursor.mBounds1       = mCursor.mBounds2;
+					mCursor.mBounds2       = box;
+					mCursor.mCounter       = mCursor.mCounterMax;
+					mCursor.mWindowPane    = mPaneGameSel[mSelection];
+					mCursor.mScaleMgr.up(0.1f, 30.0f, 0.6f, 0.0f);
+					mBlinkFont[oldsel].mIsTowardColor1 = false;
+					mBlinkFont[oldsel]._49             = true;
+					mBlinkFont[mSelection].enable();
+					openMsg(GameDesc);
+					mAnimationChangeGame.playBack(sys->mDeltaTime * 60.0f, false);
+					mIsChangedGameSel = false;
+					PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+				}
+			}
+			for (int i = 0; i < GameCount; i++) {
+				J2DPane* row = mPaneGameSel[i];
+				if (!row) continue;
+				const float next = pc_menu_hover_scale(row, i == over, 0.06f, sys->mDeltaTime);
+				float prev       = sOmakeGameHover[i];
+				if (prev <= 0.0f) prev = 1.0f;
+				row->updateScale(row->getScaleX() / prev * next, row->getScaleY() / prev * next);
+				sOmakeGameHover[i] = next;
+			}
+		}
+#endif
 		mPad.update();
 		if (mPad.mSelectionChanged) {
 			int oldsel = mPad.mLastIndex;
@@ -155,6 +215,10 @@ bool TOmakeGame::doUpdateStateWait()
 			PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
 		}
 		if (!mCursor.mCounter) {
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_B, "B Back");
+	pc_menu_plate(PAD_BUTTON_A, "A Select");
+#endif
 			if (mInput->getButtonDown() & Controller::PRESS_A) {
 				mExitState = false;
 			}

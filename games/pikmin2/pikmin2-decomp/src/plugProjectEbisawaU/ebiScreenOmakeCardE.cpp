@@ -1,3 +1,12 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#include "pc_menu_pointer.h"
+#include "gl/pc_gfx.h"
+// The legacy library does not get the SDL include path. The wheel is the one
+// window call this screen needs, same as the radar.
+int pc_window_take_wheel_steps(void);
+#endif
 #include "ebi/Omake.h"
 #ifdef PIKI_PC_PORT
 extern "C" void pc_gfx_p2_extend_shade(float gxY0, float gxY1, float stripW);
@@ -7,6 +16,12 @@ extern "C" void pc_gfx_p2_extend_shade(float gxY0, float gxY1, float stripW);
 #include "PSSystem/PSSystemIF.h"
 
 static const char name[] = "ebiScreenOmakeCardE";
+
+#if PIKI_PC_MENU_TAP
+static char sCardFeel;
+static char sCardUpFeel;
+static char sCardDownFeel;
+#endif
 
 namespace ebi {
 namespace Screen {
@@ -124,12 +139,57 @@ bool TOmakeCardE::doUpdateStateWait()
 
 	switch (mState) {
 	case MainMenu: {
+#if PIKI_PC_MENU_TAP
+	pc_menu_claim();
+	pc_menu_plate(PAD_BUTTON_A, "A OK");
+	pc_menu_plate(PAD_BUTTON_B, "B Back");
+	{
+		float hx = 0.0f, hy = 0.0f;
+		const bool hovering = pc_menu_hover(&hx, &hy);
+		J2DPane* card = mScreenObj->search('Tset');
+		const bool onUp = hovering && mPaneArrowUp && mPaneArrowUp->getAlpha() > 0
+		                  && pc_menu_pane_hit(mPaneArrowUp, hx, hy, 0.01f);
+		const bool onDown = hovering && mPaneArrowDown && mPaneArrowDown->getAlpha() > 0
+		                    && pc_menu_pane_hit(mPaneArrowDown, hx, hy, 0.01f);
+		const bool onCard = hovering && card && pc_menu_pane_hit(card, hx, hy, 0.0f);
+		if (onUp || onDown || onCard) pc_menu_set_hand(true);
+		const float dt = sys->mDeltaTime;
+		if (mPaneArrowUp) mPaneArrowUp->updateScale(pc_menu_hover_scale(&sCardUpFeel, onUp, 0.06f, dt));
+		if (mPaneArrowDown) mPaneArrowDown->updateScale(pc_menu_hover_scale(&sCardDownFeel, onDown, 0.06f, dt));
+		if (card) card->updateScale(pc_menu_hover_scale(&sCardFeel, onCard && !onUp && !onDown, 0.06f, dt));
+		float tx = 0.0f, ty = 0.0f;
+		if (pc_menu_take_tap(&tx, &ty)) {
+			const bool pressUp = mPaneArrowUp && mPaneArrowUp->getAlpha() > 0 && pc_menu_pane_hit(mPaneArrowUp, tx, ty, 0.01f);
+			const bool pressDown = mPaneArrowDown && mPaneArrowDown->getAlpha() > 0 && pc_menu_pane_hit(mPaneArrowDown, tx, ty, 0.01f);
+			const bool pressCard = card && pc_menu_pane_hit(card, tx, ty, 0.0f);
+			if (pressUp) pc_menu_hover_press(&sCardUpFeel);
+			else if (pressDown) pc_menu_hover_press(&sCardDownFeel);
+			else if (pressCard) pc_menu_hover_press(&sCardFeel);
+			// The stick scrolls one frame at a time. A click is one sample, so it
+			// moves as far as a short hold of the stick. The arrows are up and down.
+			// The outer quarters of the card do the same, and the middle confirms.
+			int page = pressUp ? 1 : pressDown ? -1 : 0;
+			if (page == 0 && pressCard) {
+				const PcPointerRect rect = pc_pointer_rect(card);
+				int width = 0, height = 0;
+				pc_gfx_get_drawable_size(&width, &height);
+				const float span = rect.x1 - rect.x0;
+				const float px = tx * (float)width;
+				if (rect.valid && span > 0.0f && px < rect.x0 + span * 0.25f) page = 1;
+				else if (rect.valid && span > 0.0f && px > rect.x1 - span * 0.25f) page = -1;
+				else pc_menu_queue_button(Controller::PRESS_A);
+			}
+			if (page != 0 && mMesgScroll) mMesgScroll->scroll((float)page * 20.0f);
+		}
+	}
+#endif
 		u32 press = mInput->getButtonDown();
 		if (press & Controller::PRESS_A) {
 			PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_DECIDE, 0);
 			mExitState = false;
 			return true;
 		}
+		// Mouse Back and Backspace already arrive as B while a menu is up.
 		if (press & Controller::PRESS_B) {
 			PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CANCEL, 0);
 			mExitState = true;
@@ -142,6 +202,12 @@ bool TOmakeCardE::doUpdateStateWait()
 			mState = EnteringZoomed;
 		}
 		mMesgScroll->scroll(mInput->mMStick.mYPos);
+#if PIKI_PC_MENU_TAP
+		// No Up or Down plate on this screen, so the wheel is free to take.
+		// One notch matches the click: a short hold of the stick.
+		const int wheel = pc_window_take_wheel_steps();
+		if (wheel != 0) mMesgScroll->scroll((float)wheel * 20.0f);
+#endif
 		f32 scroll            = mMesgScroll->getPosRate();
 		const int changeAlpha = sys->mDeltaTime * 2550.0f;
 		int alphaArrowUp      = mPaneArrowUp->getAlpha();

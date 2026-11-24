@@ -1,3 +1,7 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#endif
 #include "ebi/Omake.h"
 #ifdef PIKI_PC_PORT
 extern "C" void pc_gfx_p2_extend_shade(float gxY0, float gxY1, float stripW);
@@ -8,6 +12,29 @@ extern "C" void pc_gfx_p2_extend_shade(float gxY0, float gxY1, float stripW);
 #include "PSSystem/PSSystemIF.h"
 
 static const char className[] = "ebiScreenOmake";
+
+#if PIKI_PC_MENU_TAP
+namespace ebi {
+namespace Screen {
+struct TOmake;
+}
+}
+
+static float sOmakeHover[7] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+
+// A bonus row under the pointer, skipping the blank placeholder slots.
+static int pcOmakeRowAt(ebi::Screen::TOmake* self, float nx, float ny)
+{
+	int hit = -1;
+	for (int i = 0; i < 7; i++) {
+		J2DTextBox* msg = self->mPaneListMesg[i];
+		J2DPane* row    = self->mPaneList1[i];
+		if (!msg || !row || !row->isVisible() || msg->getUserInfo() == MC8("4844_00")) continue;
+		if (pc_menu_pane_hit(row, nx, ny, 0.01f)) hit = i;
+	}
+	return hit;
+}
+#endif
 
 namespace ebi {
 namespace Screen {
@@ -230,6 +257,44 @@ bool TOmake::doUpdateStateWait()
 
 	switch (mState2) {
 	case 0: {
+#if PIKI_PC_MENU_TAP
+		pc_menu_claim();
+		{
+			float hx = 0.0f, hy = 0.0f;
+			const int over = pc_menu_hover(&hx, &hy) ? pcOmakeRowAt(this, hx, hy) : -1;
+			if (over >= 0) pc_menu_set_hand(true);
+			float tx = 0.0f, ty = 0.0f;
+			if (!mCursor.mCounter && pc_menu_take_tap(&tx, &ty)) {
+				const int pressed = pcOmakeRowAt(this, tx, ty);
+				if (pressed >= 0 && mPaneList1[pressed]) pc_menu_hover_press(mPaneList1[pressed]);
+				if (pressed == mCurrSel) {
+					pc_menu_queue_button(Controller::PRESS_A);
+				} else if (pressed >= 0) {
+					const int prev = mCurrSel;
+					mCurrSel       = pressed;
+					JGeometry::TBox2f bounds;
+					bounds                 = *mPaneList2[mCurrSel]->getBounds();
+					mCursor.mBounds1       = mCursor.mBounds2;
+					mCursor.mBounds2       = bounds;
+					mCursor.mCounter       = mCursor.mCounterMax;
+					mCursor.mWindowPane    = mPaneList1[mCurrSel];
+					mCursor.mScaleMgr.up(0.1f, 30.0f, 0.6f, 0.0f);
+					mFonts[prev].disable();
+					mFonts[mCurrSel].enable();
+					PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CURSOR, 0);
+				}
+			}
+			for (int i = 0; i < 7; i++) {
+				J2DPane* row = mPaneList1[i];
+				if (!row) continue;
+				const float next = pc_menu_hover_scale(row, i == over, 0.06f, sys->mDeltaTime);
+				float prev       = sOmakeHover[i];
+				if (prev <= 0.0f) prev = 1.0f;
+				row->updateScale(row->getScaleX() / prev * next, row->getScaleY() / prev * next);
+				sOmakeHover[i] = next;
+			}
+		}
+#endif
 		mInput.update();
 		if (mInput.mSelectionChanged) {
 
@@ -266,6 +331,12 @@ bool TOmake::doUpdateStateWait()
 			}
 		}
 		if (!mCursor.mCounter) {
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_B, "B Back");
+	pc_menu_plate(PAD_BUTTON_A, "A OK");
+	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
+	pc_menu_plate(PAD_BUTTON_UP, "Up");
+#endif
 			u32 input = mController->getButtonDown();
 			if (input & Controller::PRESS_A) {
 				PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_DECIDE, 0);

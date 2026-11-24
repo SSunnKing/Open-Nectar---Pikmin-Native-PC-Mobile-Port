@@ -1,3 +1,8 @@
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#include "pc_menu_pointer.h"
+#endif
 #include "Morimura/HiScore.h"
 #ifdef PIKI_PC_PORT
 extern "C" void pc_gfx_p2_black_sides(void);
@@ -6,6 +11,7 @@ extern "C" void pc_gfx_p2_black_sides(void);
 #include "JSystem/JKernel/JKRArchive.h"
 #include "Morimura/mrUtil.h"
 #include "Controller.h"
+#include "System.h"
 #include "PSSystem/PSSystemIF.h"
 #include "Dolphin/rand.h"
 #include "trig.h"
@@ -430,11 +436,56 @@ u64 THiScore::getNameID(int id)
  * @note Address: 0x8037E194
  * @note Size: 0x9F0
  */
+#if PIKI_PC_MENU_TAP
+// Visible score row under the pointer. Hidden wrap-around panes are not rows.
+static int sHiScoreOver = -1;
+static int sHiScorePick = -1;
+static int pcHiScoreRowAt(THiScore* self, float nx, float ny)
+{
+	int hit = -1;
+	if (!self->mIndexPaneList) return hit;
+	for (int i = 0; i < self->mNumActiveRows; i++) {
+		J2DPane* pane = self->mIndexPaneList[i] ? self->mIndexPaneList[i]->getMainPane() : nullptr;
+		if (pane && pane->isVisible() && pc_menu_pane_hit(pane, nx, ny, 0.02f)) hit = i;
+	}
+	return hit;
+}
+#endif
+
 bool THiScore::doUpdate()
 {
+#if PIKI_PC_MENU_TAP
+	sHiScoreOver = -1;
+	if (!mCanInput) sHiScorePick = -1;
+#endif
 	if (mCanInput) {
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_B, "B Back");
+	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
+	pc_menu_plate(PAD_BUTTON_UP, "Up");
+	{
+		float hx = 0.0f;
+		float hy = 0.0f;
+		int over = -1;
+		if (pc_menu_hover(&hx, &hy)) over = pcHiScoreRowAt(this, hx, hy);
+		sHiScoreOver = over;
+		if (over >= 0) pc_menu_set_hand(true);
+		float tx = 0.0f;
+		float ty = 0.0f;
+		if (pc_menu_take_tap(&tx, &ty)) {
+			const int pressed = pcHiScoreRowAt(this, tx, ty);
+			if (pressed >= 0) {
+				pc_menu_hover_press(mIndexPaneList[pressed]->getMainPane());
+				sHiScorePick = mIndexPaneList[pressed]->getIndex();
+			}
+		}
+	}
+#endif
 		Controller* input = mController;
 		if (input->getButtonDown() & Controller::PRESS_B) {
+#if PIKI_PC_MENU_TAP
+			sHiScorePick = -1;
+#endif
 			if (!mIsSection) {
 				P2ASSERTLINE(549, getOwner());
 				getOwner()->endScene(nullptr);
@@ -444,6 +495,9 @@ bool THiScore::doUpdate()
 			}
 			PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_CANCEL, 0);
 		} else if ((input->getButton() & Controller::ANALOG_UP) || (input->getButton() & Controller::PRESS_DPAD_UP)) {
+#if PIKI_PC_MENU_TAP
+			sHiScorePick = -1;
+#endif
 			if (mState != 1) {
 				if (mIndPaneXDirection == 0.0f) {
 					mIndPaneXDirection = 1.0f;
@@ -456,6 +510,9 @@ bool THiScore::doUpdate()
 				}
 			}
 		} else if ((input->getButton() & Controller::ANALOG_DOWN) || (input->getButton() & Controller::PRESS_DPAD_DOWN)) {
+#if PIKI_PC_MENU_TAP
+			sHiScorePick = -1;
+#endif
 			if (mState != 2) {
 				if (mIndPaneXDirection == 0.0f) {
 					mIndPaneXDirection = -1.0f;
@@ -467,6 +524,20 @@ bool THiScore::doUpdate()
 					PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_ERROR, 0);
 				}
 			}
+#if PIKI_PC_MENU_TAP
+		} else if (sHiScorePick >= 0 && mIndexGroup && mIndexGroup->mStateID == TIndexGroup::IDGroup_Idle) {
+			const int step = pc_list_step_toward(mIndexPaneList[mCurrActiveRowSel]->getIndex(), sHiScorePick,
+			                                     mState != 1, mState != 2);
+			if (step > 0) {
+				if (mIndPaneXDirection == 0.0f) mIndPaneXDirection = -1.0f;
+				mIndexGroup->downIndex();
+			} else if (step < 0) {
+				if (mIndPaneXDirection == 0.0f) mIndPaneXDirection = 1.0f;
+				mIndexGroup->upIndex();
+			} else {
+				sHiScorePick = -1;
+			}
+#endif
 		}
 	}
 
@@ -564,7 +635,12 @@ bool THiScore::doUpdate()
 
 	if (mScaleMgrList) {
 		for (int i = 0; i < mNumActiveRows; i++) {
-			mIndexPaneList[i]->mPane->updateScale(mScaleMgrList[i]->calc());
+			f32 scale = mScaleMgrList[i]->calc();
+#if PIKI_PC_MENU_TAP
+			// Hover eases the row. It does not move the selection.
+			scale *= pc_menu_hover_scale(mIndexPaneList[i]->mPane, i == sHiScoreOver, 0.06f, sys->mDeltaTime);
+#endif
+			mIndexPaneList[i]->mPane->updateScale(scale);
 		}
 	} else {
 		for (int i = 0; i < mNumActiveRows; i++) {

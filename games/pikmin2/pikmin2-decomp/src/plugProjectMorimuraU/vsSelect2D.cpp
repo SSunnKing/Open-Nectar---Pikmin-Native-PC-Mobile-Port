@@ -1,4 +1,10 @@
 #ifdef PIKI_PC_PORT
+#include "pc_menu_tap.h"
+#if PIKI_PC_MENU_TAP
+#include "Dolphin/pad.h"
+#include "pc_menu_pointer.h"
+#include "System.h"
+#endif
 #include "pc_p2_captain_preview.h"
 #endif
 #include "Morimura/VsSelect.h"
@@ -1223,8 +1229,39 @@ void TVsSelect::doCreate(JKRArchive* arc)
  * @note Address: 0x8039D1E0
  * @note Size: 0x1244
  */
+#if PIKI_PC_MENU_TAP
+static int sVsCourse = -1;
+static int sVsArrow  = -1;
+static int sVsPick   = -1;
+static int pcVsCourseAt(TVsSelect* self, float nx, float ny)
+{
+	int hit = -1;
+	if (!self->mIndexPaneList) return hit;
+	for (int i = 0; i < self->mNumActiveRows; i++) {
+		J2DPane* pane = self->mIndexPaneList[i] ? self->mIndexPaneList[i]->getMainPane() : nullptr;
+		if (pane && pane->isVisible() && pc_menu_pane_hit(pane, nx, ny, 0.02f)) hit = i;
+	}
+	return hit;
+}
+
+// 0 is the left rules arrow, 1 is the right one. Hidden arrows are not targets.
+static int pcVsRulesArrow(TVsSelect* self, float nx, float ny)
+{
+	for (int i = 0; i < 2; i++) {
+		J2DPane* pane = self->mPaneRulesLR[i];
+		if (pane && pane->isVisible() && pc_menu_pane_hit(pane, nx, ny, 0.04f)) return i;
+	}
+	return -1;
+}
+#endif
+
 bool TVsSelect::doUpdate()
 {
+#if PIKI_PC_MENU_TAP
+	sVsCourse = -1;
+	sVsArrow  = -1;
+	if (!mCanInput) sVsPick = -1;
+#endif
 	if (mIsSection && mDoDebugScores) {
 		mPlayerWinCounts[0] = mDebugWinCounts[0];
 		mPlayerWinCounts[1] = mDebugWinCounts[1];
@@ -1244,6 +1281,57 @@ bool TVsSelect::doUpdate()
 
 	if (mCanInput && mDispMember->mState == Screen::Game2DMgr::CHECK2D_VsSelect_Default
 	    && !static_cast<TVsSelectScene*>(getOwner())->mConfirmEndWindow->mHasDrawn) {
+#if PIKI_PC_MENU_TAP
+	pc_menu_plate(PAD_BUTTON_B, "B Back");
+	pc_menu_plate(PAD_BUTTON_A, "A Select");
+	pc_menu_plate(PAD_TRIGGER_Z, "Z Rules");
+	pc_menu_plate(PAD_TRIGGER_R, "R");
+	pc_menu_plate(PAD_TRIGGER_L, "L");
+	pc_menu_plate(PAD_BUTTON_DOWN, "Down");
+	pc_menu_plate(PAD_BUTTON_UP, "Up");
+	{
+		float hx = 0.0f;
+		float hy = 0.0f;
+		if (pc_menu_hover(&hx, &hy) && mZoomState == 0) {
+			if (rulesinactive) sVsCourse = pcVsCourseAt(this, hx, hy);
+			else sVsArrow = pcVsRulesArrow(this, hx, hy);
+		}
+		if (sVsCourse >= 0 || sVsArrow >= 0) pc_menu_set_hand(true);
+		float tx = 0.0f;
+		float ty = 0.0f;
+		if (pc_menu_take_tap(&tx, &ty) && mZoomState == 0) {
+			if (rulesinactive) {
+				const int row = pcVsCourseAt(this, tx, ty);
+				if (row >= 0) {
+					pc_menu_hover_press(mIndexPaneList[row]->getMainPane());
+					const int id  = mIndexPaneList[row]->getIndex();
+					const int sel = mIndexPaneList[mCurrActiveRowSel]->getIndex();
+					if (id == sel) {
+						sVsPick = -1;
+						if (!mIsSection) {
+							mIsDemoStarted = 1;
+							demoStart();
+						}
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_DECIDE, 0);
+						mRulesWindow->closeWindow();
+					} else {
+						sVsPick = id;
+					}
+				}
+			} else {
+				const int arrow = pcVsRulesArrow(this, tx, ty);
+				if (arrow >= 0) {
+					pc_menu_hover_press(mPaneRulesLR[arrow]);
+					const bool forward = arrow == 1;
+					if (!mDoChangeRulesPage && ((forward && mCurrentRulesPage == 0) || (!forward && mCurrentRulesPage != 0))) {
+						PSSystem::spSysIF->playSystemSe(PSSE_SY_MESSAGE_EXIT, 0);
+						mDoChangeRulesPage = true;
+					}
+				}
+			}
+		}
+	}
+#endif
 		if (mZoomState == 0) {
 			if (rulesinactive) {
 				if (mController->getButtonDown() & Controller::PRESS_R) {
@@ -1314,6 +1402,9 @@ bool TVsSelect::doUpdate()
 					PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_DECIDE, 0);
 					mRulesWindow->closeWindow();
 				} else if (mController->getButton() & (Controller::ANALOG_UP) || mController->getButton() & (Controller::PRESS_DPAD_UP)) {
+#if PIKI_PC_MENU_TAP
+					sVsPick = -1;
+#endif
 					if (mStickAnimState != 1) {
 						mIndexGroup->upIndex();
 					} else if (mIndexGroup->mStateID == TIndexGroup::IDGroup_Idle && !mIsSelectIndexChange) {
@@ -1322,12 +1413,23 @@ bool TVsSelect::doUpdate()
 					}
 				} else if (mController->getButton() & (Controller::ANALOG_DOWN)
 				           || mController->getButton() & (Controller::PRESS_DPAD_DOWN)) {
+#if PIKI_PC_MENU_TAP
+					sVsPick = -1;
+#endif
 					if (mStickAnimState != 2) {
 						mIndexGroup->downIndex();
 					} else if (mIndexGroup->mStateID == TIndexGroup::IDGroup_Idle && !mIsSelectIndexChange) {
 						mIsSelectIndexChange = true;
 						PSSystem::spSysIF->playSystemSe(PSSE_SY_MENU_ERROR, 0);
 					}
+#if PIKI_PC_MENU_TAP
+				} else if (sVsPick >= 0 && mIndexGroup && mIndexGroup->mStateID == TIndexGroup::IDGroup_Idle) {
+					const int step = pc_list_step_toward(mIndexPaneList[mCurrActiveRowSel]->getIndex(), sVsPick,
+					                                     mStickAnimState != 1, mStickAnimState != 2);
+					if (step > 0) mIndexGroup->downIndex();
+					else if (step < 0) mIndexGroup->upIndex();
+					else sVsPick = -1;
+#endif
 				}
 			}
 		} else if (mCanCancel && mController->getButtonDown() & Controller::PRESS_B) {
@@ -1510,6 +1612,11 @@ bool TVsSelect::doUpdate()
 			mPaneRulesLR[0]->show();
 			mPaneRulesLR[1]->hide();
 		}
+#if PIKI_PC_MENU_TAP
+		for (int i = 0; i < 2; i++) {
+			mPaneRulesLR[i]->updateScale(pc_menu_hover_scale(mPaneRulesLR[i], i == sVsArrow, 0.06f, sys->mDeltaTime));
+		}
+#endif
 	}
 	mPaneRulesInfo->setOffset(mRulesPanePos.x + mRulesMoveXPos, mRulesPanePos.y);
 
@@ -1563,9 +1670,13 @@ bool TVsSelect::doUpdate()
 	mPaneStars->setAlpha(mPaneStarAlpha * 255.0f);
 
 	for (int i = 0; i < mNumActiveRows; i++) {
-		mActiveCourseThumbs[i]->updateScale(mWindowScale);
+		f32 rowScale = mWindowScale;
+#if PIKI_PC_MENU_TAP
+		rowScale *= pc_menu_hover_scale(mIndexPaneList[i]->getMainPane(), i == sVsCourse, 0.06f, sys->mDeltaTime);
+#endif
+		mActiveCourseThumbs[i]->updateScale(rowScale);
 		mActiveCourseThumbs[i]->setBasePosition(J2DPOS_Center);
-		mPaneLevelWindows[i]->updateScale(mWindowScale);
+		mPaneLevelWindows[i]->updateScale(rowScale);
 		mPaneLevelWindows[i]->setBasePosition(J2DPOS_Center);
 		if (i != mCurrActiveRowSel) {
 			mIndexPaneList[i]->mPane->setAlpha(mOtherLevelsFadeAlpha * 255.0f);

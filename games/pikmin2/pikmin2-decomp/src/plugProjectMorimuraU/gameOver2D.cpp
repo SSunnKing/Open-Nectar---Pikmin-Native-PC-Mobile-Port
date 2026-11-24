@@ -26,6 +26,8 @@ TGameOverBase::TGameOverBase(char* name)
  */
 bool TGameOverBase::doUpdate()
 {
+	// The fade reads no button. A, B and Start do not advance it, so a click
+	// and mouse Back do nothing here. A movie playing behind it keeps its own skip.
 	if (mGameOverScreen) {
 		mGameOverScreen->update();
 		f32 thing = 1.0f;
