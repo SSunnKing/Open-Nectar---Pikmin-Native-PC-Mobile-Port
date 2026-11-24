@@ -13,7 +13,7 @@ namespace nm {
 // Captain, Ship, StoryOnion y ShipPart son de la misión (solo y coop, sección
 // "story"); Base, Rocket, Gate, BombPile, Onion, Piece y BigPiece, del VS.
 enum class ItemType { Base, Rocket, Gate, BombPile, Onion, Pellet, Piece, BigPiece, Guard, Prop, Wall, Pond, Enemy, Object, Gen,
-	                  Captain, Ship, StoryOnion, ShipPart };
+	                  Captain, Ship, StoryOnion, ShipPart, Block };
 
 struct ItemRef {
 	ItemType type = ItemType::Base;

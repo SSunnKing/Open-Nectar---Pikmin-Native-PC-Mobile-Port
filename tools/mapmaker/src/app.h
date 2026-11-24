@@ -167,6 +167,8 @@ private:
 
 	// ── Terreno ──
 	bool ensureTerrain();
+	/// Agua en un nivel importado: pasa a poner un bloque de agua (true).
+	bool waterOnImportedLevel(Tool t);
 	void applyBrush(const V3& at, float dt);
 	bool applyRamp(const V3& from, const V3& to);
 	void growMap(int dx, int dz);
@@ -362,7 +364,10 @@ private:
 
 	// Materiales
 	bool openMatBrowser_  = false;
-	int matBrowserTarget_ = -1; // -1 añadir a la paleta, -2 paredes del borde, k cambiar el k
+	// -1 añadir a la paleta, -2 paredes del borde, k cambiar el k,
+	// kMatBrowserBlock - i el material del bloque i.
+	static constexpr int kMatBrowserBlock = -10;
+	int matBrowserTarget_ = -1;
 	std::string matBrowserCourse_;
 	std::map<std::string, std::shared_ptr<nectar::Model>> courseModels_;
 	std::map<std::string, unsigned> swatches_;

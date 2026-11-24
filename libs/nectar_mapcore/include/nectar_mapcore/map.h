@@ -124,6 +124,20 @@ struct DocMaterial {
 	double uvScale     = 0; ///< unidades de UV por unidad de mundo; 0 = la del escenario original
 };
 
+/// Bloque de terreno (issue #376): una caja que se coloca, se estira y se
+/// sube a mano, también encima de un nivel importado.
+///  - "ground": se pisa por arriba (plataformas, rampas planas, suelo extra);
+///  - "wall": sólido y alto, corta los caminos;
+///  - "water": agua con la cara de arriba como superficie; lo que se pisa
+///    dentro de la caja y por debajo de ella pasa a ser agua (se ahogan).
+struct DocBlock {
+	std::string kind = "ground";
+	double x = 0, y = 0, z = 0; ///< centro de la base
+	double sx = 400, sy = 60, sz = 400;
+	double ry = 0; ///< grados
+	DocMaterial material;
+};
+
 /// Terreno editable: una cuadrícula de nx x nz celdas desde (minX, minZ).
 /// Todo se guarda por punto ((nx+1) x (nz+1), por filas) y se pinta con
 /// valores de 0 a 255: el compilador corta cada triángulo justo donde el
@@ -297,6 +311,7 @@ struct MapDoc {
 	std::vector<DocWall> walls;
 	std::vector<DocPond> ponds;
 	std::vector<DocProp> props;
+	std::vector<DocBlock> blocks;
 
 	double routeStep = 150, routeMargin = 100;
 	std::vector<double> barrierX;
@@ -401,6 +416,13 @@ struct MapMaterial {
 	float uvScale;
 };
 
+enum MapBlockKind { MAPBLOCK_Ground, MAPBLOCK_Wall, MAPBLOCK_Water };
+struct MapBlock {
+	MapBlockKind kind;
+	float x, y, z, sx, sy, sz, ry; ///< ry en radianes
+	MapMaterial material;
+};
+
 struct MapProp {
 	std::string asset;
 	float x, y, z, rx, ry, rz, scale; ///< rotación en radianes
@@ -492,6 +514,7 @@ struct MapData {
 	std::vector<MapWall> walls;
 	std::vector<MapPond> ponds;
 	std::vector<MapProp> props;
+	std::vector<MapBlock> blocks;
 	float routeStep, routeMargin;
 	std::vector<float> barrierX;
 	std::vector<MapSpot> passes;

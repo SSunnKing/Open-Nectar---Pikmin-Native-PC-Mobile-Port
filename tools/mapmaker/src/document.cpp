@@ -141,6 +141,12 @@ ItemCaps itemCaps(ItemType t)
 	case ItemType::Ship: c.rotateY = true; break;
 	case ItemType::StoryOnion:
 	case ItemType::ShipPart: c.removable = true; break;
+	case ItemType::Block:
+		c.removable = true;
+		c.twinned   = true;
+		c.rotateY   = true;
+		c.height    = true;
+		break;
 	}
 	return c;
 }
@@ -167,6 +173,7 @@ bool itemExists(const MapDoc& d, const ItemRef& r)
 	case ItemType::Ship: return d.story.present;
 	case ItemType::StoryOnion: return r.index >= 0 && std::size_t(r.index) < d.story.onions.size();
 	case ItemType::ShipPart: return r.index >= 0 && std::size_t(r.index) < d.story.parts.size();
+	case ItemType::Block: return r.index >= 0 && std::size_t(r.index) < d.blocks.size();
 	}
 	return false;
 }
@@ -251,6 +258,14 @@ Xform getXform(const MapDoc& d, const ItemRef& r)
 		x.x = d.ponds[std::size_t(r.index)].cx;
 		x.z = d.ponds[std::size_t(r.index)].cz;
 		break;
+	case ItemType::Block: {
+		const DocBlock& b = d.blocks[std::size_t(r.index)];
+		x.x               = b.x;
+		x.y               = b.y;
+		x.z               = b.z;
+		x.ry              = b.ry;
+		break;
+	}
 	case ItemType::Enemy:
 		x.x  = d.enemies[std::size_t(r.index)].x;
 		x.z  = d.enemies[std::size_t(r.index)].z;
@@ -333,6 +348,14 @@ void setXform(MapDoc& d, const ItemRef& r, const Xform& x)
 		d.ponds[std::size_t(r.index)].cx = x.x;
 		d.ponds[std::size_t(r.index)].cz = x.z;
 		break;
+	case ItemType::Block: {
+		DocBlock& b = d.blocks[std::size_t(r.index)];
+		b.x         = x.x;
+		b.y         = x.y;
+		b.z         = x.z;
+		b.ry        = wrapDeg(x.ry);
+		break;
+	}
 	case ItemType::Enemy: {
 		DocEnemy& e = d.enemies[std::size_t(r.index)];
 		e.x         = x.x;
@@ -419,6 +442,11 @@ std::string itemName(const MapDoc& d, const ItemRef& r)
 	case ItemType::Gen: snprintf(buf, sizeof(buf), "%s", d.gens[std::size_t(r.index)].label.c_str()); break;
 	case ItemType::Wall: snprintf(buf, sizeof(buf), "%s", d.walls[std::size_t(r.index)].isArc ? tr("Muro curvo") : tr("Muro")); break;
 	case ItemType::Pond: snprintf(buf, sizeof(buf), "%s", tr("Charca")); break;
+	case ItemType::Block: {
+		const std::string& k = d.blocks[std::size_t(r.index)].kind;
+		snprintf(buf, sizeof(buf), "%s", k == "water" ? tr("Bloque de agua") : k == "wall" ? tr("Bloque de muro") : tr("Bloque de suelo"));
+		break;
+	}
 	case ItemType::Enemy: {
 		const std::string& t = d.enemies[std::size_t(r.index)].type;
 		const char* label    = t.c_str();
@@ -486,6 +514,7 @@ std::vector<ItemRef> allItems(const MapDoc& d)
 	for (std::size_t i = 0; i < d.objects.size(); i++) out.push_back({ ItemType::Object, int(i), 0 });
 	for (std::size_t i = 0; i < d.walls.size(); i++) out.push_back({ ItemType::Wall, int(i), 0 });
 	for (std::size_t i = 0; i < d.ponds.size(); i++) out.push_back({ ItemType::Pond, int(i), 0 });
+	for (std::size_t i = 0; i < d.blocks.size(); i++) out.push_back({ ItemType::Block, int(i), 0 });
 	for (std::size_t i = 0; i < d.props.size(); i++) out.push_back({ ItemType::Prop, int(i), 0 });
 	for (std::size_t i = 0; i < d.gens.size(); i++) out.push_back({ ItemType::Gen, int(i), 0 });
 	return out;
@@ -528,6 +557,23 @@ ItemRef addItem(MapDoc& d, ItemType t, double x, double z, const std::string& as
 		p.cz = z;
 		d.ponds.push_back(p);
 		return { t, int(d.ponds.size()) - 1, 0 };
+	}
+	case ItemType::Block: {
+		// `asset` es el tipo ("ground", "wall" o "water").
+		DocBlock b;
+		b.kind = asset.empty() ? "ground" : asset;
+		b.x    = x;
+		b.z    = z;
+		if (b.kind == "wall") {
+			b.sx       = 300;
+			b.sy       = 200;
+			b.sz       = 60;
+			b.material = { "courses/practice/practice.mod", 0, 1, 0 }; // la roca del contorno
+		} else if (b.kind == "water") {
+			b.sy = 30;
+		}
+		d.blocks.push_back(b);
+		return { t, int(d.blocks.size()) - 1, 0 };
 	}
 	case ItemType::Wall: {
 		DocWall w;
@@ -597,6 +643,7 @@ void removeItems(MapDoc& d, std::vector<ItemRef> items)
 		case ItemType::Prop: d.props.erase(d.props.begin() + long(i)); break;
 		case ItemType::Wall: d.walls.erase(d.walls.begin() + long(i)); break;
 		case ItemType::Pond: d.ponds.erase(d.ponds.begin() + long(i)); break;
+		case ItemType::Block: d.blocks.erase(d.blocks.begin() + long(i)); break;
 		case ItemType::Enemy: d.enemies.erase(d.enemies.begin() + long(i)); break;
 		case ItemType::Object: d.objects.erase(d.objects.begin() + long(i)); break;
 		case ItemType::Gen: d.gens.erase(d.gens.begin() + long(i)); break;
@@ -615,6 +662,7 @@ MapDoc copyItems(const MapDoc& d, const std::vector<ItemRef>& items)
 	clip.pieces.clear();
 	clip.props.clear();
 	clip.ponds.clear();
+	clip.blocks.clear();
 	clip.guards.clear();
 	clip.enemies.clear();
 	clip.objects.clear();
@@ -629,6 +677,7 @@ MapDoc copyItems(const MapDoc& d, const std::vector<ItemRef>& items)
 		case ItemType::Prop: clip.props.push_back(d.props[i]); break;
 		case ItemType::Wall: clip.walls.push_back(d.walls[i]); break;
 		case ItemType::Pond: clip.ponds.push_back(d.ponds[i]); break;
+		case ItemType::Block: clip.blocks.push_back(d.blocks[i]); break;
 		case ItemType::Enemy: clip.enemies.push_back(d.enemies[i]); break;
 		case ItemType::Object: clip.objects.push_back(d.objects[i]); break;
 		case ItemType::Gen: clip.gens.push_back(d.gens[i]); break;
@@ -698,6 +747,12 @@ std::vector<ItemRef> pasteItems(MapDoc& d, const MapDoc& clip, double dx, double
 		p.cz += dz;
 		d.ponds.push_back(p);
 		out.push_back({ ItemType::Pond, int(d.ponds.size()) - 1, 0 });
+	}
+	for (DocBlock b : clip.blocks) {
+		b.x += dx;
+		b.z += dz;
+		d.blocks.push_back(b);
+		out.push_back({ ItemType::Block, int(d.blocks.size()) - 1, 0 });
 	}
 	return out;
 }

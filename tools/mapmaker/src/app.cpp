@@ -1712,6 +1712,9 @@ void App::placeAt(const V3& at)
 				ed_.doc.props.back().ground  = false;
 			}
 		}
+	} else if (place_.type == ItemType::Block) {
+		r                       = addItem(ed_.doc, ItemType::Block, x, z, place_.asset);
+		ed_.doc.blocks.back().y = docHeight(float(x), float(z));
 	} else if (place_.type == ItemType::Gen) {
 		const GameGenChoice* c = findGameGen(cfg_.dataDir(), place_.label);
 		if (!c) return;
@@ -1744,11 +1747,11 @@ std::vector<App::Issue> App::checkMap() const
 		const Xform x = getXform(d, r);
 		if (x.x <= d.minX || x.x >= d.maxX || x.z <= d.minZ || x.z >= d.maxZ) {
 			out.push_back({ true, itemName(d, r) + tr(" está fuera del mapa."), true, r, IssueFix::ClampInside });
-		} else if (r.type != ItemType::Pond && !docSolid(float(x.x), float(x.z))) {
+		} else if (r.type != ItemType::Pond && r.type != ItemType::Block && !docSolid(float(x.x), float(x.z))) {
 			out.push_back({ true, itemName(d, r) + tr(" está sobre un hueco: ponle suelo debajo o muévelo."), true, r, IssueFix::NearestGround });
 		}
 		// Con el mapa espejo, también su gemelo del otro lado.
-		if (d.symmetric && itemCaps(r.type).twinned && r.type != ItemType::Pond && !docSolid(float(-x.x), float(-x.z))
+		if (d.symmetric && itemCaps(r.type).twinned && r.type != ItemType::Pond && r.type != ItemType::Block && !docSolid(float(-x.x), float(-x.z))
 		    && x.x > d.minX && x.x < d.maxX) {
 			out.push_back({ true, tr("La copia de «") + itemName(d, r) + tr("» del lado del Jugador 2 cae sobre un hueco."), true, r, IssueFix::NearestGround });
 		}
@@ -2121,7 +2124,7 @@ M4 App::itemMatrix(const ItemRef& r, bool twin) const
 		x.ry = x.ry + 180.0;
 		if (r.type == ItemType::Prop) x.y += docHeight(float(x.x), float(x.z)) - docHeight(float(-x.x), float(-x.z));
 	}
-	if (r.type != ItemType::Prop && r.type != ItemType::Gen) {
+	if (r.type != ItemType::Prop && r.type != ItemType::Gen && r.type != ItemType::Block) {
 		x.scale = 1;
 		// La puerta con cerradura, al tamaño del juego (DoorItem, kDoorScale).
 		constexpr double kKeyDoorScale = 6.0;
@@ -2505,7 +2508,8 @@ void App::drawToolbox(const Rect& r)
 		else ImGui::SetItemTooltip("%s\n%s", t.label, t.tip);
 		if (pressed) {
 			if (courseMode() && (t.tool == Tool::Walls || t.tool == Tool::Scatter)) notify(1, tr("En los escenarios del juego todavía no se pueden poner muros ni decoración."));
-			else if (!t.terrain || ensureTerrain()) {
+			else if (waterOnImportedLevel(t.tool)) {
+			} else if (!t.terrain || ensureTerrain()) {
 				tool_ = t.tool;
 				if (tool_ != Tool::Ramp) drawingRamp_ = false;
 			}
@@ -2924,6 +2928,16 @@ void App::drawPlaceOptions()
 			ImGui::TextUnformatted(cfg_.pieces[i].first.c_str());
 			ImGui::PopID();
 		}
+	}
+	if (iconHeader(tr("Bloques de terreno"), Icon::More)) {
+		hint(tr("Cajas que se estiran y se suben a mano: plataformas, muros y agua. Sirven también encima de un nivel importado."));
+		const char* kinds[] = { "ground", "wall", "water" };
+		const char* names[] = { tr("Suelo"), tr("Muro"), tr("Agua") };
+		for (int k = 0; k < 3; k++) {
+			if (k) ImGui::SameLine();
+			if (choiceButton(names[k], place_.type == ItemType::Block && place_.asset == kinds[k], ImVec2(90, 32))) place_ = { ItemType::Block, kinds[k], names[k] };
+		}
+		hint(tr("Haz clic en el mapa para ponerlo; su tamaño y altura, en sus propiedades."));
 	}
 	if (iconHeader(tr("Mallas propias (OBJ o DAE)"), Icon::More)) {
 		hint(tr("Partes del nivel hechas en Blender u otro programa (.obj con su .mtl, o .dae, y texturas PNG o JPG): suelos, troncos, cuevas, puentes... Se guardan en la carpeta del mapa y viajan con él."));
@@ -3700,7 +3714,7 @@ void App::drawMinimap(const ImVec2& o, float w, float h, bool& hoveredOut)
 		if (itemHidden(it)) continue;
 		const ItemCaps caps = itemCaps(it.type);
 		// La decoración no: solo lo que importa para jugar (si no, tapa el dibujo).
-		if (it.type == ItemType::Wall || it.type == ItemType::Pond || it.type == ItemType::Prop || it.type == ItemType::Gen) continue;
+		if (it.type == ItemType::Wall || it.type == ItemType::Pond || it.type == ItemType::Block || it.type == ItemType::Prop || it.type == ItemType::Gen) continue;
 		const Xform x = getXform(d, it);
 		ImU32 c       = IM_COL32(235, 235, 235, 255);
 		if (caps.perPlayer) {
@@ -4206,6 +4220,51 @@ void App::drawSelected()
 		hint(tr("Solo los Pikmin azules pueden entrar en el agua."));
 		break;
 	}
+	case ItemType::Block: {
+		nectar::DocBlock& b = d.blocks[i];
+		const char* kinds[] = { "ground", "wall", "water" };
+		const char* names[] = { tr("Suelo"), tr("Muro"), tr("Agua") };
+		for (int k = 0; k < 3; k++) {
+			if (k) ImGui::SameLine();
+			if (choiceButton(names[k], b.kind == kinds[k], ImVec2(90, 0))) {
+				b.kind = kinds[k];
+				ch     = true;
+			}
+		}
+		hint(b.kind == "water" ? tr("La cara de arriba es la superficie: lo que se pisa dentro y por debajo es agua. Solo los Pikmin azules pueden entrar.")
+		     : b.kind == "wall" ? tr("Sólido: los Pikmin no lo atraviesan y corta los caminos.")
+		                        : tr("Se pisa por arriba: plataformas y suelo extra, también encima de un nivel importado."));
+		float sx = float(b.sx), sy = float(b.sy), sz = float(b.sz), y = float(b.y);
+		if (ImGui::DragFloat(tr("Ancho (X)"), &sx, 5.0f, 10.0f, 6000.0f, "%.0f")) {
+			b.sx = std::max(10.0f, sx);
+			ch   = true;
+		}
+		if (ImGui::DragFloat(b.kind == "water" ? tr("Hondura") : tr("Alto (Y)"), &sy, 2.0f, 2.0f, 2000.0f, "%.0f")) {
+			b.sy = std::max(2.0f, sy);
+			ch   = true;
+		}
+		if (ImGui::DragFloat(tr("Largo (Z)"), &sz, 5.0f, 10.0f, 6000.0f, "%.0f")) {
+			b.sz = std::max(10.0f, sz);
+			ch   = true;
+		}
+		if (ImGui::DragFloat(tr("Altura de la base"), &y, 2.0f, -2000.0f, 2000.0f, "%.0f")) {
+			b.y = y;
+			ch  = true;
+		}
+		if (b.kind == "water") {
+			ImGui::TextColored(kDim, tr("Superficie del agua a %.0f"), b.y + b.sy);
+		} else {
+			const unsigned t = swatch(b.material.source, b.material.index);
+			if (t ? ImGui::ImageButton("##blockmat", ImTextureID(std::intptr_t(t)), ImVec2(48, 48)) : ImGui::Button("?", ImVec2(56, 56))) {
+				matBrowserTarget_ = kMatBrowserBlock - int(i);
+				matBrowserCourse_ = b.material.source;
+				openMatBrowser_   = true;
+			}
+			ImGui::SameLine();
+			ImGui::TextWrapped("%s", tr("Material (clic para cambiarlo por otro de los escenarios del juego)"));
+		}
+		break;
+	}
 	}
 
 	nectar::DocReaction* reaction = nullptr;
@@ -4297,11 +4356,17 @@ void App::drawMapPanel()
 		ch       = true;
 	}
 	ImGui::Spacing();
-	// El espejo es cosa del VS (dos jugadores, un lado cada uno).
-	if (d.modes & nectar::MAPMODE_VS) {
+	// El espejo es cosa del VS (dos jugadores, un lado cada uno), pero un mapa
+	// nuevo nace simétrico y la exportación duplica muros y rutas aunque no
+	// haya VS: si está activo, la casilla se enseña siempre para poder
+	// quitarlo (issue #376, "fantasmas" en mapas Solo/Co-op).
+	if ((d.modes & nectar::MAPMODE_VS) || d.symmetric) {
 		ch |= ImGui::Checkbox(tr("Mapa espejo"), &d.symmetric);
-		hint(d.symmetric ? tr("Lo que pongas en un lado aparece igual en el otro, para que sea justo para los dos jugadores.")
-		                 : tr("Cada lado es distinto: tú decides dónde va todo."));
+		if (!(d.modes & nectar::MAPMODE_VS) && d.symmetric)
+			hint(tr("Sin VS no hace falta: muros, rutas y terreno se repiten girados en el lado contrario. Quítalo para un mapa asimétrico."));
+		else
+			hint(d.symmetric ? tr("Lo que pongas en un lado aparece igual en el otro, para que sea justo para los dos jugadores.")
+			                 : tr("Cada lado es distinto: tú decides dónde va todo."));
 		if (d.symmetric) ImGui::Checkbox(tr("Mover a la vez lo de los dos jugadores"), &mirrorEdits_);
 		ImGui::Checkbox(tr("Ver el lado del otro jugador"), &showTwins_);
 	}
@@ -4773,7 +4838,8 @@ void App::drawHierarchy()
 		case ItemType::Guard: return 3;
 		case ItemType::Object: return 4;
 		case ItemType::Wall:
-		case ItemType::Pond: return 5;
+		case ItemType::Pond:
+		case ItemType::Block: return 5;
 		case ItemType::Prop: return 6;
 		case ItemType::Gen: return 7;
 		default: return 7;
@@ -4797,6 +4863,7 @@ void App::drawHierarchy()
 			return x.file == y.file && x.label == y.label && x.model == y.model;
 		}
 		case ItemType::Wall: return d.walls[std::size_t(a.index)].isArc == d.walls[std::size_t(b.index)].isArc;
+		case ItemType::Block: return d.blocks[std::size_t(a.index)].kind == d.blocks[std::size_t(b.index)].kind;
 		default: return true;
 		}
 	};
@@ -4824,7 +4891,7 @@ void App::drawHierarchy()
 			ImGui::PushID(group.id * 100000 + row++);
 			const bool selected = ed_.selected(r);
 			const bool hidden = itemHidden(r), locked = itemLocked(r);
-			const bool canHide = r.type != ItemType::Wall && r.type != ItemType::Pond;
+			const bool canHide = r.type != ItemType::Wall && r.type != ItemType::Pond && r.type != ItemType::Block;
 			ImGui::BeginDisabled(hidden || locked);
 			const float labelW = std::max(40.0f, ImGui::GetContentRegionAvail().x - 58.0f);
 			if (ImGui::Selectable(label.c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(labelW, 0))) {
@@ -5279,7 +5346,8 @@ void App::handleShortcuts()
 			const bool terrain = keys[i] != Tool::Move && keys[i] != Tool::Place && keys[i] != Tool::Walls && keys[i] != Tool::Scatter;
 			if (courseMode() && (keys[i] == Tool::Walls || keys[i] == Tool::Scatter))
 				notify(1, tr("En los escenarios del juego todavía no se pueden poner muros ni decoración."));
-			else if (!terrain || ensureTerrain()) {
+			else if (waterOnImportedLevel(keys[i])) {
+			} else if (!terrain || ensureTerrain()) {
 				tool_ = keys[i];
 				if (tool_ != Tool::Ramp) drawingRamp_ = false;
 			}
@@ -6574,8 +6642,8 @@ void App::drawSlopes()
 
 void App::drawItem(const ItemRef& r, bool ghost)
 {
-	// Muros y charcas ya van en el mapa compilado.
-	if (r.type == ItemType::Wall || r.type == ItemType::Pond) return;
+	// Muros, charcas y bloques ya van en el mapa compilado.
+	if (r.type == ItemType::Wall || r.type == ItemType::Pond || r.type == ItemType::Block) return;
 	const M4 m              = itemMatrix(r, ghost);
 	Rgba tint               = markerTint(r);
 	tint.a                  = ghost ? 0.4f : 1.0f;
@@ -6879,6 +6947,11 @@ void App::drawSelection()
 			}
 			continue;
 		}
+		if (r.type == ItemType::Block) {
+			const nectar::DocBlock& b = d.blocks[std::size_t(r.index)];
+			boxLines(lines, itemMatrix(r, false), V3(float(-b.sx / 2), 0, float(-b.sz / 2)), V3(float(b.sx / 2), float(b.sy), float(b.sz / 2)));
+			continue;
+		}
 		if (r.type == ItemType::Pond) {
 			const nectar::DocPond& p = d.ponds[std::size_t(r.index)];
 			for (int k = 0; k < 48; k++) {
@@ -6953,6 +7026,11 @@ bool App::pick(const Ray& ray, ItemRef& out, float& bestT, int cycle)
 			}
 			continue;
 		}
+		if (r.type == ItemType::Block) {
+			const nectar::DocBlock& b = d.blocks[std::size_t(r.index)];
+			consider(r, rayBox(ray, itemMatrix(r, false), V3(float(-b.sx / 2), 0, float(-b.sz / 2)), V3(float(b.sx / 2), float(b.sy), float(b.sz / 2))));
+			continue;
+		}
 		if (r.type == ItemType::Pond) {
 			const nectar::DocPond& p = d.ponds[std::size_t(r.index)];
 			V3 h;
@@ -6988,6 +7066,18 @@ bool App::pick(const Ray& ray, ItemRef& out, float& bestT, int cycle)
 
 // ── Terreno ─────────────────────────────────────────────────────────────────
 
+bool App::waterOnImportedLevel(Tool t)
+{
+	// En un nivel importado (sin terreno propio), pintar agua pasaba el mapa a
+	// cuadrícula y salía un rectángulo de suelo encima del nivel (issue
+	// #376). Ahí el agua es un bloque que se pone en el hueco.
+	if (t != Tool::Water || ed_.doc.terrain.grid || !ed_.doc.terrain.none) return false;
+	tool_  = Tool::Place;
+	place_ = { ItemType::Block, "water", tr("Agua") };
+	notify(0, tr("En un nivel importado el agua es un bloque: haz clic en el hueco y ajusta su tamaño y su superficie en las propiedades."));
+	return true;
+}
+
 bool App::ensureTerrain()
 {
 	if (courseMode()) {
@@ -7004,6 +7094,9 @@ bool App::hasGroundProps() const
 {
 	for (const nectar::DocProp& p : ed_.doc.props) {
 		if (p.ground) return true;
+	}
+	for (const nectar::DocBlock& b : ed_.doc.blocks) {
+		if (b.kind == "ground") return true;
 	}
 	return false;
 }
@@ -7340,7 +7433,13 @@ void App::drawMaterialBrowser()
 				nm.source             = matBrowserCourse_;
 				nm.index              = e[0];
 				nectar::DocTerrain& g = ed_.doc.terrain;
-				if (matBrowserTarget_ == -2) {
+				if (matBrowserTarget_ <= kMatBrowserBlock) {
+					const std::size_t bi = std::size_t(kMatBrowserBlock - matBrowserTarget_);
+					if (bi < ed_.doc.blocks.size()) {
+						nm.attribute                 = ed_.doc.blocks[bi].material.attribute;
+						ed_.doc.blocks[bi].material = nm;
+					}
+				} else if (matBrowserTarget_ == -2) {
 					nm.attribute = 1; // roca
 					g.border     = nm;
 				} else if (matBrowserTarget_ >= 0 && std::size_t(matBrowserTarget_) < g.palette.size()) {

@@ -159,6 +159,7 @@ f32 groundAt(f32 x, f32 z)
 	// encima del terreno o donde el terreno no tiene).
 	bool ground = false;
 	for (const nectar::MapProp& p : activeMap().props) ground = ground || p.ground;
+	for (const nectar::MapBlock& b : activeMap().blocks) ground = ground || b.kind == nectar::MAPBLOCK_Ground;
 	if (ground && mapMgr) return mapMgr->getMinY(x, z, true);
 	return nectar::terrainHeight(activeMap(), x, z);
 }

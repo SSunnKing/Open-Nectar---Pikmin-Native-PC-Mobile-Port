@@ -10,6 +10,7 @@
 #include <cstring>
 #include <functional>
 #include <map>
+#include <memory>
 #include <set>
 #include <sstream>
 
@@ -819,6 +820,50 @@ bool compileMap(const MapData& map, const GameFileReader& read, const std::strin
 	std::vector<MeshBuild> lakes;
 	constexpr f32 kLakeDepth = 25.0f, kLakeBelow = 4.0f; // fondo y superficie bajo la orilla
 
+	// Material de la paleta o de un bloque -> material del .mod de salida
+	// (copiado si es de otro escenario) con el formato y la escala de su malla
+	// original. Cada material de fuera se copia una sola vez.
+	std::unique_ptr<MaterialImporter> importer;
+	std::map<std::string, Model> courses;
+	auto resolve = [&](const MapMaterial& pm, MaterialUse& use) {
+		if (!loadBase()) return false;
+		if (!importer) {
+			importer.reset(new MaterialImporter { extra, int(baseModel.textures.size()), int(baseModel.texAttrs.size()), int(baseModel.tevInfos.size()),
+			                                      int(baseModel.materials.size()), {} });
+		}
+		const Model* model = &baseModel;
+		if (pm.source != sourceMod) {
+			auto it = courses.find(pm.source);
+			if (it == courses.end()) {
+				std::vector<u8> bytes;
+				Model m;
+				std::string why;
+				if (!read(pm.source, bytes) || bytes.empty()) {
+					error = tr("falta ") + pm.source + tr(" (material del suelo)");
+					return false;
+				}
+				if (!parseMod(bytes.data(), bytes.size(), m, why)) {
+					error = pm.source + ": " + why;
+					return false;
+				}
+				it = courses.emplace(pm.source, std::move(m)).first;
+			}
+			model = &it->second;
+		}
+		if (pm.index < 0 || std::size_t(pm.index) >= model->materials.size()) {
+			error = pm.source + tr(" no tiene el material ") + std::to_string(pm.index);
+			return false;
+		}
+		use          = analyseMaterial(*model, pm.index);
+		use.material = model == &baseModel ? pm.index : importer->material(pm.source, *model, pm.index);
+		use.code     = pm.code;
+		if (pm.uvScale > 0.0f && use.scale[0] > 0.0f) {
+			const f32 k = pm.uvScale / use.scale[0];
+			for (f32& sc : use.scale) sc *= k;
+		}
+		return true;
+	};
+
 	if (!map.grid) {
 		// Suelo en cuadrícula; dentro de las charcas se hunde y es agua.
 		const f32 cell   = map.cell;
@@ -911,44 +956,6 @@ bool compileMap(const MapData& map, const GameFileReader& read, const std::strin
 	} else {
 		// ── Terreno editable ────────────────────────────────────────────────
 		if (!loadBase()) return false;
-		MaterialImporter importer { extra, int(baseModel.textures.size()), int(baseModel.texAttrs.size()), int(baseModel.tevInfos.size()),
-			                        int(baseModel.materials.size()), {} };
-		std::map<std::string, Model> courses;
-		// Material de la paleta -> material del .mod de salida (copiado si es
-		// de otro escenario) con el formato y la escala de su malla original.
-		auto resolve = [&](const MapMaterial& pm, MaterialUse& use) {
-			const Model* model = &baseModel;
-			if (pm.source != sourceMod) {
-				auto it = courses.find(pm.source);
-				if (it == courses.end()) {
-					std::vector<u8> bytes;
-					Model m;
-					std::string why;
-					if (!read(pm.source, bytes) || bytes.empty()) {
-						error = tr("falta ") + pm.source + tr(" (material del suelo)");
-						return false;
-					}
-					if (!parseMod(bytes.data(), bytes.size(), m, why)) {
-						error = pm.source + ": " + why;
-						return false;
-					}
-					it = courses.emplace(pm.source, std::move(m)).first;
-				}
-				model = &it->second;
-			}
-			if (pm.index < 0 || std::size_t(pm.index) >= model->materials.size()) {
-				error = pm.source + tr(" no tiene el material ") + std::to_string(pm.index);
-				return false;
-			}
-			use          = analyseMaterial(*model, pm.index);
-			use.material = model == &baseModel ? pm.index : importer.material(pm.source, *model, pm.index);
-			use.code     = pm.code;
-			if (pm.uvScale > 0.0f && use.scale[0] > 0.0f) {
-				const f32 k = pm.uvScale / use.scale[0];
-				for (f32& sc : use.scale) sc *= k;
-			}
-			return true;
-		};
 		std::vector<MaterialUse> uses(map.palette.size());
 		for (std::size_t i = 0; i < map.palette.size(); i++) {
 			if (!resolve(map.palette[i], uses[i])) return false;
@@ -1524,6 +1531,129 @@ bool compileMap(const MapData& map, const GameFileReader& read, const std::strin
 		result.props = map.props.size();
 	}
 
+	// ── Bloques de terreno (issue #376) ────────────────────────────────────
+	// Cajas giradas en Y. Suelo y muro: cara de arriba y lados con su
+	// material y UV de mundo (arriba en planta, a los lados a lo largo); se
+	// pisa arriba con el código del material y los lados son pared. Agua:
+	// solo su superficie, y lo que se pisa dentro y por debajo pasa a ser agua.
+	std::vector<MeshBuild> blockMeshes;
+	auto blockCorner = [](const MapBlock& b, f32 lx, f32 lz, f32 y) {
+		const f32 c = std::cos(b.ry), sn = std::sin(b.ry);
+		return V3(b.x + lx * c + lz * sn, y, b.z - lx * sn + lz * c);
+	};
+	auto insideBlock = [](const MapBlock& b, const V3& p) {
+		const f32 c = std::cos(b.ry), sn = std::sin(b.ry), dx = p.x - b.x, dz = p.z - b.z;
+		const f32 lx = dx * c - dz * sn, lz = dx * sn + dz * c;
+		return std::fabs(lx) <= b.sx * 0.5f && std::fabs(lz) <= b.sz * 0.5f;
+	};
+	for (const MapBlock& b : map.blocks) {
+		const f32 hx = b.sx * 0.5f, hz = b.sz * 0.5f, y0 = b.y, y1 = b.y + b.sy;
+		if (b.kind == MAPBLOCK_Water) {
+			// Superficie como la de las charcas: transparente en el borde.
+			const f32 fade  = std::min(40.0f, 0.15f * std::min(b.sx, b.sz));
+			const f32 ring[2][2] = { { hx, hz }, { hx - fade, hz - fade } };
+			for (std::size_t l = 0; l < water.size() && l < 3; l++) {
+				MeshBuild& m   = water[l];
+				const int base = int(verts.size()), uvBase = int(uv0.size());
+				for (int r = 0; r < 2; r++) {
+					const f32 sxr = ring[r][0], szr = ring[r][1];
+					for (const V3& v : { blockCorner(b, -sxr, -szr, y1), blockCorner(b, sxr, -szr, y1), blockCorner(b, sxr, szr, y1), blockCorner(b, -sxr, szr, y1) }) {
+						verts.push_back(v);
+						uv0.push_back({ v.x * kWaterLayers[l].uv, v.z * kWaterLayers[l].uv });
+					}
+				}
+				auto quad = [&](int a, int bb, int cc, int d, int alphaA, int alphaB, int alphaC, int alphaD) {
+					for (const std::array<int, 3>& t : { std::array<int, 3> { a, d, bb }, std::array<int, 3> { bb, d, cc } }) {
+						Tri tri = makeTri(base + t[0], base + t[1], base + t[2], 0, 0);
+						const int alpha[4] = { alphaA, alphaB, alphaC, alphaD };
+						for (int k = 0; k < 3; k++) {
+							const int corner = t[k] == a ? 0 : t[k] == bb ? 1 : t[k] == cc ? 2 : 3;
+							tri.col[k]       = alpha[corner];
+						}
+						// Normal hacia arriba, como el suelo (si no, se descarta).
+						if (triNormal(verts, tri).y < 0.0f) {
+							std::swap(tri.v[1], tri.v[2]);
+							std::swap(tri.col[1], tri.col[2]);
+						}
+						const auto uvOf = [&](int vi) { return uvBase + (vi - base); };
+						m.tris.push_back(tri);
+						m.uv[0].push_back({ uvOf(tri.v[0]), uvOf(tri.v[1]), uvOf(tri.v[2]) });
+					}
+				};
+				quad(4, 5, 6, 7, 0, 0, 0, 0); // dentro, opaca
+				for (int k = 0; k < 4; k++) {
+					const int k2 = (k + 1) % 4;
+					quad(k, k2, 4 + k2, 4 + k, 1, 1, 0, 0); // orilla, de transparente a opaca
+				}
+			}
+			continue;
+		}
+		MaterialUse use;
+		if (!resolve(b.material, use)) return false;
+		MeshBuild m { use.material, use.flags, {}, {} };
+		const std::size_t collStart = coll.size();
+		const u32 topCode           = b.kind == MAPBLOCK_Ground ? use.code : kWallCode;
+		const V3 lo[4] = { blockCorner(b, -hx, -hz, y0), blockCorner(b, hx, -hz, y0), blockCorner(b, hx, hz, y0), blockCorner(b, -hx, hz, y0) };
+		const V3 mid(b.x, y0, b.z);
+		auto face = [&](const V3& p0, const V3& p1, const V3& p2, const V3& p3, const V3& facing, u32 code, bool top) {
+			const int vb = int(verts.size());
+			for (const V3& v : { p0, p1, p2, p3 }) verts.push_back(v);
+			const f32 len = (p1 - p0).length(), hh = (p3 - p0).length();
+			Tri t1 = makeTri(vb, vb + 1, vb + 3, 0, code), t2 = makeTri(vb + 1, vb + 2, vb + 3, 0, code);
+			const bool flip = triNormal(verts, t1).DP(facing) < 0.0f;
+			if (flip) {
+				std::swap(t1.v[1], t1.v[2]);
+				std::swap(t2.v[1], t2.v[2]);
+			}
+			const int ni = int(normals.size());
+			for (int k = 0; k < 3; k++) t1.n[k] = t2.n[k] = ni;
+			normals.push_back(triNormal(verts, t1));
+			for (int ch = 0; ch < 8; ch++) {
+				if (!(m.flags & (1u << (3 + ch)))) continue;
+				const int uu = int(uvs[ch].size());
+				const f32 sc = use.scale[ch];
+				if (top) {
+					for (const V3& v : { p0, p1, p2, p3 }) uvs[ch].push_back({ v.x * sc, v.z * sc });
+				} else {
+					uvs[ch].push_back({ 0.0f, 0.0f });
+					uvs[ch].push_back({ len * sc, 0.0f });
+					uvs[ch].push_back({ len * sc, hh * sc });
+					uvs[ch].push_back({ 0.0f, hh * sc });
+				}
+				std::array<int, 3> c1 { uu, uu + 1, uu + 3 }, c2 { uu + 1, uu + 2, uu + 3 };
+				if (flip) {
+					std::swap(c1[1], c1[2]);
+					std::swap(c2[1], c2[2]);
+				}
+				m.uv[ch].push_back(c1);
+				m.uv[ch].push_back(c2);
+			}
+			m.tris.push_back(t1);
+			m.tris.push_back(t2);
+			coll.push_back(t1);
+			coll.push_back(t2);
+		};
+		face(up(lo[0], y1), up(lo[1], y1), up(lo[2], y1), up(lo[3], y1), V3(0.0f, 1.0f, 0.0f), topCode, true);
+		for (int k = 0; k < 4; k++) {
+			const V3& a = lo[k];
+			const V3& c = lo[(k + 1) % 4];
+			face(a, c, up(c, y1), up(a, y1), (a + c) * 0.5f - mid, kWallCode, false);
+		}
+		blockMeshes.push_back(std::move(m));
+		// Los de suelo se pisan: no cortan caminos (como los props de suelo).
+		if (b.kind == MAPBLOCK_Ground) groundRanges.push_back({ collStart, coll.size() });
+	}
+	for (const MapBlock& b : map.blocks) {
+		if (b.kind != MAPBLOCK_Water) continue;
+		const f32 y0 = b.y - 1.0f, y1 = b.y + b.sy + 1.0f;
+		for (Tri& t : coll) {
+			const V3 c = (verts[std::size_t(t.v[0])] + verts[std::size_t(t.v[1])] + verts[std::size_t(t.v[2])]) * (1.0f / 3.0f);
+			if (c.y < y0 || c.y > y1 || !insideBlock(b, c)) continue;
+			if (triNormal(verts, t).y < 0.5f) continue; // solo lo que se pisa
+			t.code = kWaterCode;
+		}
+	}
+
 	// Orden de las translúcidas como en practice.mod (16, 15, 24, 23): el juego
 	// las pinta de la última a la primera, así que el fondo (23) va primero y
 	// el agua encima. Con el fondo al final, tapaba el agua.
@@ -1541,11 +1671,12 @@ bool compileMap(const MapData& map, const GameFileReader& read, const std::strin
 		}
 	}
 	for (const MeshBuild& m : propMeshes) meshes.push_back(&m);
+	for (const MeshBuild& m : blockMeshes) meshes.push_back(&m);
 
 	f32 top = wallH;
 	for (const Obstacle& o : obstacles) top = std::max(top, o.height);
 	V3 bmin(map.minX, -deepest, map.minZ), bmax(map.maxX, top, map.maxZ);
-	if (!propMeshes.empty() || map.grid) {
+	if (!propMeshes.empty() || map.grid || !map.blocks.empty()) {
 		for (const V3& v : verts) {
 			bmin = V3(std::min(bmin.x, v.x), std::min(bmin.y, v.y), std::min(bmin.z, v.z));
 			bmax = V3(std::max(bmax.x, v.x), std::max(bmax.y, v.y), std::max(bmax.z, v.z));
@@ -1867,7 +1998,7 @@ bool compileMap(const MapData& map, const GameFileReader& read, const std::strin
 		f32 x0, z0, x1, z1;
 	};
 	std::vector<Box> propBoxes;
-	if (!propMeshes.empty()) {
+	if (coll.size() > firstPropColl) {
 		// La caja en planta de cada triángulo de colisión de los props que
 		// sobresale del suelo (lo bajo se pisa, no corta el camino).
 		for (std::size_t ti = firstPropColl; ti < coll.size(); ti++) {

@@ -210,6 +210,13 @@ std::vector<std::uint8_t> fromBase64(const std::string& in)
 	return out;
 }
 
+MapMaterial mapMaterial(const DocMaterial& dm, bool floor)
+{
+	const std::uint32_t attr = std::uint32_t(dm.attribute) << 29;
+	// Suelos con el bit 25 como la hierba de practice.mod; paredes sin él.
+	return MapMaterial { dm.source, dm.index, floor ? attr | 0x02000000u : attr, float(dm.uvScale) };
+}
+
 DocMaterial parseMaterial(const json& j)
 {
 	DocMaterial m;
@@ -370,6 +377,23 @@ void parseDoc(const json& root, MapDoc& m)
 		d.depth   = p.at("depth").get<double>();
 		d.surface = p.at("surface").get<double>();
 		m.ponds.push_back(d);
+	}
+	for (const json& b : root.value("blocks", json::array())) {
+		DocBlock d;
+		d.kind = b.value("kind", std::string("ground"));
+		if (d.kind != "ground" && d.kind != "wall" && d.kind != "water") throw std::runtime_error(tr("bloque de tipo desconocido: ") + d.kind);
+		const json& o = b.at("pos");
+		d.x           = o.at(0).get<double>();
+		d.y           = o.at(1).get<double>();
+		d.z           = o.at(2).get<double>();
+		const json& z = b.at("size");
+		d.sx          = z.at(0).get<double>();
+		d.sy          = z.at(1).get<double>();
+		d.sz          = z.at(2).get<double>();
+		d.ry          = b.value("rotY", 0.0);
+		if (b.contains("material")) d.material = parseMaterial(b.at("material"));
+		if (d.sx <= 0 || d.sy <= 0 || d.sz <= 0) throw std::runtime_error(tr("bloque con un lado de tamaño cero"));
+		m.blocks.push_back(d);
 	}
 	m.course = root.value("course", std::string());
 	for (const json& gj : root.value("gens", json::array())) {
@@ -924,13 +948,8 @@ bool expandMap(const MapDoc& d, MapData& m, std::string& error, bool validate)
 			m.floor  = g.floor;
 			m.water  = g.water;
 			m.layers = g.layers;
-			auto mat = [](const DocMaterial& dm, bool floor) {
-				const std::uint32_t attr = std::uint32_t(dm.attribute) << 29;
-				// Suelos con el bit 25 como la hierba de practice.mod; paredes sin él.
-				return MapMaterial { dm.source, dm.index, floor ? attr | 0x02000000u : attr, float(dm.uvScale) };
-			};
-			for (const DocMaterial& dm : g.palette) m.palette.push_back(mat(dm, true));
-			m.border = mat(g.border, false);
+			for (const DocMaterial& dm : g.palette) m.palette.push_back(mapMaterial(dm, true));
+			m.border = mapMaterial(g.border, false);
 		}
 		for (int i = 0; i < 3; i++) m.sunDir[i] = float(d.sun[i]);
 		const bool twin = d.symmetric;
@@ -962,6 +981,18 @@ bool expandMap(const MapDoc& d, MapData& m, std::string& error, bool validate)
 				pond.cx = -pond.cx;
 				pond.cz = -pond.cz;
 				m.ponds.push_back(pond);
+			}
+		}
+		for (const DocBlock& b : d.blocks) {
+			const MapBlockKind kind = b.kind == "wall" ? MAPBLOCK_Wall : b.kind == "water" ? MAPBLOCK_Water : MAPBLOCK_Ground;
+			MapBlock block { kind, float(b.x), float(b.y), float(b.z), float(b.sx), float(b.sy), float(b.sz), deg(float(b.ry)),
+				             mapMaterial(b.material, kind == MAPBLOCK_Ground) };
+			m.blocks.push_back(block);
+			if (twin) {
+				block.x = -block.x;
+				block.z = -block.z;
+				block.ry += 3.14159265f;
+				m.blocks.push_back(block);
 			}
 		}
 		for (const DocProp& p : d.props) {
@@ -1152,6 +1183,14 @@ std::string writeMapDoc(const MapDoc& d)
 	for (const DocPond& p : d.ponds) {
 		ponds.push_back({ { "center", { p.cx, p.cz } }, { "radius", { p.rx, p.rz } }, { "island", p.island }, { "depth", p.depth }, { "surface", p.surface } });
 	}
+	json blocks = json::array();
+	for (const DocBlock& b : d.blocks) {
+		blocks.push_back({ { "kind", b.kind },
+		                   { "pos", { b.x, b.y, b.z } },
+		                   { "size", { b.sx, b.sy, b.sz } },
+		                   { "rotY", b.ry },
+		                   { "material", materialJson(b.material) } });
+	}
 	json props = json::array();
 	for (const DocProp& p : d.props) {
 	{
@@ -1249,6 +1288,7 @@ std::string writeMapDoc(const MapDoc& d)
 	}
 	root["walls"]       = walls;
 	root["ponds"]       = ponds;
+	if (!blocks.empty()) root["blocks"] = blocks;
 	root["props"]       = props;
 	root["routes"]      = { { "auto", true }, { "step", d.routeStep }, { "margin", d.routeMargin }, { "barrierX", d.barrierX }, { "passes", passes } };
 	if (!d.routeLinks.empty()) {
