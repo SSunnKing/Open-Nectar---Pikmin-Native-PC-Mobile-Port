@@ -94,4 +94,9 @@ float pc_result_page_top(int page, int current, int direction, float scrollY, fl
 int pc_result_page_at(float pointerY, int pageCount, int current, int direction, float scrollY,
                       float pageHeight, float windowHeight);
 int pc_pointer_frame();
+
+// A button hint in a footer line ("A: select"), in the screen's own pixels.
+struct PcHelpHint { char letter; float x0, y0, x1, y1; };
+// The letter of the hint holding (x, y), or 0. Hints are in the same space as the point.
+char pc_help_hint_at(const PcHelpHint* hints, int count, float x, float y);
 #endif
