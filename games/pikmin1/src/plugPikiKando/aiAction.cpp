@@ -60,6 +60,9 @@ void pc_trace_emotion_transit(const char* site, int emotion, int mode, int actio
 //  - Formation / Crowd: son la propia conducta de "estar con Olimar". Sacarlos
 //    de ahí haría que abandonasen el pelotón solos.
 //  - Rope: dejar una cuerda a medias no lleva a ningún sitio bueno.
+//  - PutBomb: tras soltar la bomba ya no lleva nada en las manos y se ponía a
+//    golpear el muro junto a la bomba encendida (issue #374). Tiene que huir
+//    de vuelta al pelotón, como en el original.
 bool pc_chain_actions_allows(int actionIdx)
 {
 	switch (actionIdx) {
@@ -68,6 +71,7 @@ bool pc_chain_actions_allows(int actionIdx)
 	case PikiAction::Formation:
 	case PikiAction::Crowd:
 	case PikiAction::Rope:
+	case PikiAction::PutBomb:
 		return false;
 	default:
 		return true;
