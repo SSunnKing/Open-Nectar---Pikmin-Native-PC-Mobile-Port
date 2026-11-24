@@ -114,6 +114,12 @@ struct DocProp {
 	double scale    = 1;
 	bool collide    = true;
 	bool ground     = false; ///< se pisa: su colisión es suelo y no corta caminos
+	/// Se dibuja. false = solo colisión (la malla de colisión de un nivel
+	/// que trae aparte su malla visual, issue #376).
+	bool visible = true;
+	/// Escala con la que se importó la malla (0 = no se sabe). Las mallas del
+	/// mismo nivel se importan con la misma para que encajen.
+	double importScale = 0;
 };
 
 /// Material del suelo: uno de los de un .mod de escenario del juego.
@@ -427,7 +433,8 @@ struct MapProp {
 	std::string asset;
 	float x, y, z, rx, ry, rz, scale; ///< rotación en radianes
 	bool collide;
-	bool ground = false;
+	bool ground  = false;
+	bool visible = true;
 };
 
 enum MapObjective { MAPGOAL_Parts, MAPGOAL_Pellets, MAPGOAL_Pikmin, MAPGOAL_Boss, MAPGOAL_Survive, MAPGOAL_Waves };

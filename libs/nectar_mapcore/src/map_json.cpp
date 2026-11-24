@@ -424,6 +424,8 @@ void parseDoc(const json& root, MapDoc& m)
 		d.scale   = p.value("scale", 1.0);
 		d.collide = p.value("collide", true);
 		d.ground  = p.value("ground", false);
+		d.visible = p.value("visible", true);
+		d.importScale = p.value("importScale", 0.0);
 		m.props.push_back(d);
 	}
 
@@ -996,7 +998,7 @@ bool expandMap(const MapDoc& d, MapData& m, std::string& error, bool validate)
 			}
 		}
 		for (const DocProp& p : d.props) {
-			MapProp prop { p.asset, float(p.x), float(p.y), float(p.z), deg(float(p.rx)), deg(float(p.ry)), deg(float(p.rz)), float(p.scale), p.collide, p.ground };
+			MapProp prop { p.asset, float(p.x), float(p.y), float(p.z), deg(float(p.rx)), deg(float(p.ry)), deg(float(p.rz)), float(p.scale), p.collide, p.ground, p.visible };
 			m.props.push_back(prop);
 			if (twin) {
 				prop.x  = -prop.x;
@@ -1196,6 +1198,8 @@ std::string writeMapDoc(const MapDoc& d)
 	{
 		json pj = { { "asset", p.asset }, { "pos", { p.x, p.y, p.z } }, { "rot", { p.rx, p.ry, p.rz } }, { "scale", p.scale }, { "collide", p.collide } };
 		if (p.ground) pj["ground"] = true;
+		if (!p.visible) pj["visible"] = false;
+		if (p.importScale > 0) pj["importScale"] = p.importScale;
 		props.push_back(pj);
 	}
 	}

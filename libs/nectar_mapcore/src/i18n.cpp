@@ -1491,6 +1491,21 @@ const Pair kTable[] = {
 	{ "En un nivel importado el agua es un bloque: haz clic en el hueco y ajusta su tamaño y su superficie en las propiedades.", "On an imported level, water is a block: click in the dip and set its size and surface in the properties." },
 	{ "bloque de tipo desconocido: ", "unknown block kind: " },
 	{ "bloque con un lado de tamaño cero", "block with a zero-size side" },
+	{ "Se ve en el juego", "Visible in the game" },
+	{ "Solo colisión: la malla no se dibuja (la que se ve es otra). En el editor sale transparente.", "Collision only: the mesh isn't drawn (another one is what you see). The editor shows it see-through." },
+	{ "Qué es", "What it is" },
+	{ "Solo colisión", "Collision only" },
+	{ "Solo visual", "Visual only" },
+	{ "Objeto sólido", "Solid object" },
+	{ "Se ve y se pisa (lo normal para un trozo de nivel).", "Visible and walkable (the usual for a piece of a level)." },
+	{ "No se ve: es la colisión de un nivel que trae aparte la malla que se ve.", "Not visible: the collision of a level that brings its visible mesh separately." },
+	{ "Se ve pero no choca: detalles, hierba, el aspecto de un nivel con colisión aparte.", "Visible but not solid: details, grass, the look of a level with separate collision." },
+	{ "Se ve y choca, pero no se pisa: rocas, troncos, muebles.", "Visible and solid, but not walkable: rocks, logs, furniture." },
+	{ "Alinear con el nivel importado", "Align with the imported level" },
+	{ "Para archivos de la misma escena de Blender: misma escala y mismo sitio que el nivel, sin hacer clic.", "For files from the same Blender scene: same scale and place as the level, no click needed." },
+	{ "Se importa con la escala de abajo y se pone con un clic.", "It is imported with the scale below and placed with a click." },
+	{ "Malla importada y alineada con el nivel: %zu triángulos.", "Mesh imported and aligned with the level: %zu triangles." },
+	{ "Repite para cada archivo: la colisión, lo que se ve y los objetos pueden ir por separado.", "Repeat for each file: the collision, the visible part and the objects can be separate." },
 };
 
 const std::unordered_map<std::string_view, const char*>& englishTable()

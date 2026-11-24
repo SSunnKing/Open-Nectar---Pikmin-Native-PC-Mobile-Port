@@ -1189,8 +1189,9 @@ void App::newMapFromModel()
 	level.asset   = asset;
 	level.x       = -cx;
 	level.z       = -cz;
-	level.collide = true;
-	level.ground  = true;
+	level.collide     = true;
+	level.ground      = true;
+	level.importScale = scale;
 	d.props.push_back(level);
 	ed_.reset(d, path); // con la ruta ya puesta, la malla "map:" se encuentra al compilar
 	if (!saveMap(path)) return;
@@ -1705,7 +1706,11 @@ void App::placeAt(const V3& at)
 		r                      = addItem(ed_.doc, ItemType::Prop, x, z, place_.asset);
 		ed_.doc.props.back().y = docHeight(float(x), float(z));
 		// Mallas propias: partes del nivel, se pisan.
-		if (place_.asset.rfind("map:", 0) == 0 || place_.asset.rfind("cut:", 0) == 0) ed_.doc.props.back().collide = ed_.doc.props.back().ground = true;
+		if (place_.asset.rfind("map:", 0) == 0 || place_.asset.rfind("cut:", 0) == 0) {
+			nectar::DocProp& p = ed_.doc.props.back();
+			applyMeshRole(p, place_.asset.rfind("map:", 0) == 0 ? meshRole_ : 0);
+			if (place_.asset.rfind("map:", 0) == 0) p.importScale = meshImportScale_;
+		}
 		if (const OfficialPiece* piece = findOfficialPiece(place_.label)) {
 			if (place_.asset == piece->asset()) {
 				ed_.doc.props.back().collide = piece->collide;
@@ -2945,25 +2950,71 @@ void App::drawPlaceOptions()
 			hint(tr("Guarda el mapa primero: las mallas van en su carpeta."));
 		} else {
 			static float importScale = 1.0f;
-			ImGui::SetNextItemWidth(160);
-			ImGui::DragFloat(tr("Escala al importar"), &importScale, 0.1f, 0.01f, 1000.0f, "%.2f");
+			// Qué es la malla: un nivel puede traer la colisión, lo que se ve y
+			// los objetos en archivos aparte (issue #376).
+			ImGui::TextColored(kDim, "%s", tr("Qué es"));
+			const char* roles[] = { tr("Suelo"), tr("Solo colisión"), tr("Solo visual"), tr("Objeto sólido") };
+			const char* roleTips[] = { tr("Se ve y se pisa (lo normal para un trozo de nivel)."),
+				                       tr("No se ve: es la colisión de un nivel que trae aparte la malla que se ve."),
+				                       tr("Se ve pero no choca: detalles, hierba, el aspecto de un nivel con colisión aparte."),
+				                       tr("Se ve y choca, pero no se pisa: rocas, troncos, muebles.") };
+			for (int k = 0; k < 4; k++) {
+				if (k % 2) ImGui::SameLine();
+				if (choiceButton(roles[k], meshRole_ == k, ImVec2(130, 0))) meshRole_ = k;
+			}
+			hint(roleTips[meshRole_]);
+			// El nivel importado con «Importar un modelo»: las demás mallas de
+			// la misma escena encajan con su escala y su sitio.
+			const nectar::DocProp* level = nullptr;
+			for (const nectar::DocProp& p : ed_.doc.props) {
+				if (p.asset.rfind("map:", 0) == 0 && p.importScale > 0) {
+					level = &p;
+					break;
+				}
+			}
+			static bool alignToLevel = true;
+			if (level) {
+				ImGui::Checkbox(tr("Alinear con el nivel importado"), &alignToLevel);
+				hint(alignToLevel ? tr("Para archivos de la misma escena de Blender: misma escala y mismo sitio que el nivel, sin hacer clic.")
+				                  : tr("Se importa con la escala de abajo y se pone con un clic."));
+			}
+			const bool aligned = level && alignToLevel;
+			if (!aligned) {
+				ImGui::SetNextItemWidth(160);
+				ImGui::DragFloat(tr("Escala al importar"), &importScale, 0.1f, 0.01f, 1000.0f, "%.2f");
+			}
 			if (ImGui::Button(tr("Importar OBJ o DAE..."))) {
 				const fs::path p = pikmin::launcher::platform::askForFile(tr("Elige la malla"), tr("Malla OBJ o DAE"), "*.obj *.OBJ *.dae *.DAE");
 				if (!p.empty()) {
 					std::string asset, err;
 					ObjInfo info;
-					if (importObj(p.string(), mapDir(), importScale, asset, info, err)) {
+					const float scale = aligned ? float(level->importScale) : importScale;
+					if (importObj(p.string(), mapDir(), scale, asset, info, err)) {
 						models_.erase(assetFile(asset));
 						char buf[256];
-						std::snprintf(buf, sizeof(buf), tr("Malla importada: %zu triángulos, mide %.0f × %.0f × %.0f. Haz clic en el mapa para ponerla."), info.triangles,
-						              info.max.x - info.min.x, info.max.y - info.min.y, info.max.z - info.min.z);
+						if (aligned) {
+							// Copia de la pose del nivel: el mismo origen de Blender.
+							nectar::DocProp prop = *level;
+							prop.asset           = asset;
+							prop.importScale     = scale;
+							applyMeshRole(prop, meshRole_);
+							ed_.doc.props.push_back(prop);
+							ed_.selection = { { ItemType::Prop, int(ed_.doc.props.size()) - 1, 0 } };
+							ed_.touch();
+							std::snprintf(buf, sizeof(buf), tr("Malla importada y alineada con el nivel: %zu triángulos."), info.triangles);
+						} else {
+							meshImportScale_ = scale;
+							place_           = { ItemType::Prop, asset, asset };
+							std::snprintf(buf, sizeof(buf), tr("Malla importada: %zu triángulos, mide %.0f × %.0f × %.0f. Haz clic en el mapa para ponerla."), info.triangles,
+							              info.max.x - info.min.x, info.max.y - info.min.y, info.max.z - info.min.z);
+						}
 						notify(info.warnings.empty() ? 0 : 1, std::string(buf) + (info.warnings.empty() ? "" : "\n" + info.warnings));
-						place_ = { ItemType::Prop, asset, asset };
 					} else {
 						notify(2, tr("No se pudo importar: ") + err);
 					}
 				}
 			}
+			hint(tr("Repite para cada archivo: la colisión, lo que se ve y los objetos pueden ir por separado."));
 			std::error_code ec;
 			for (const auto& e : fs::directory_iterator(fs::path(mapDir()) / "meshes", ec)) {
 				if (e.path().extension() != ".mod") continue;
@@ -4158,6 +4209,11 @@ void App::drawSelected()
 		if (p.collide) {
 			ch |= ImGui::Checkbox(tr("Se puede pisar (es suelo)"), &p.ground);
 			hint(tr("Para mallas que son parte del nivel (troncos, puentes, rampas, salas): los Pikmin andan por encima y no cortan los caminos."));
+			ch |= ImGui::Checkbox(tr("Se ve en el juego"), &p.visible);
+			if (!p.visible) hint(tr("Solo colisión: la malla no se dibuja (la que se ve es otra). En el editor sale transparente."));
+		} else if (!p.visible) {
+			p.visible = true; // sin colisión ni dibujo no haría nada
+			ch        = true;
 		}
 		break;
 	}
@@ -6647,6 +6703,8 @@ void App::drawItem(const ItemRef& r, bool ghost)
 	const M4 m              = itemMatrix(r, ghost);
 	Rgba tint               = markerTint(r);
 	tint.a                  = ghost ? 0.4f : 1.0f;
+	// Solo colisión: transparente, para verla y poder elegirla.
+	if (r.type == ItemType::Prop && !ed_.doc.props[std::size_t(r.index)].visible) tint.a = 0.3f;
 	const std::string asset = markerAsset(r);
 	std::shared_ptr<GpuModel> gm = asset.empty() ? nullptr : model(asset);
 	if (gm) renderer_.drawModel(*gm, m, tint);
@@ -7065,6 +7123,14 @@ bool App::pick(const Ray& ray, ItemRef& out, float& bestT, int cycle)
 }
 
 // ── Terreno ─────────────────────────────────────────────────────────────────
+
+void App::applyMeshRole(nectar::DocProp& p, int role)
+{
+	// 0 suelo, 1 solo colisión, 2 solo visual, 3 objeto sólido.
+	p.collide = role != 2;
+	p.ground  = role == 0 || role == 1;
+	p.visible = role != 1;
+}
 
 bool App::waterOnImportedLevel(Tool t)
 {

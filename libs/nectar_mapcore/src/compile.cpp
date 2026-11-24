@@ -494,7 +494,8 @@ bool addProp(const MapProp& prop, const Model& model, PropContext& ctx, std::str
 				}
 			}
 		}
-		if (!out.tris.empty()) ctx.meshes.push_back(std::move(out));
+		// Solo colisión: la malla no se dibuja (la visual va en otro prop).
+		if (!out.tris.empty() && prop.visible) ctx.meshes.push_back(std::move(out));
 	}
 	// Con colisión propia (recortes de escenarios): esa, con sus códigos (el
 	// agua sigue siendo agua), en vez de los triángulos que se dibujan.

@@ -44,6 +44,13 @@ int main()
 	wall.material.attribute = 1;
 	doc.blocks             = { water, wall };
 
+	DocProp collision;
+	collision.asset       = "map:meshes/level_col.mod";
+	collision.ground      = true;
+	collision.visible     = false;
+	collision.importScale = 2.5;
+	doc.props.push_back(collision);
+
 	MapDoc back;
 	std::string error;
 	check(parseMapDoc(writeMapDoc(doc), back, error), "the map with blocks parses back");
@@ -56,8 +63,12 @@ int main()
 		      "wall block keeps its material");
 	}
 
+	check(!back.props.empty() && !back.props.back().visible && near(back.props.back().importScale, 2.5),
+	      "a collision-only mesh keeps visible = false and its import scale");
+
 	MapData map;
 	check(expandMap(back, map, error, false), "the map with blocks expands");
+	check(!map.props.empty() && !map.props.back().visible, "visible = false reaches the expanded prop");
 	check(map.blocks.size() == 2, "one expanded block per block without symmetry");
 	if (map.blocks.size() == 2) {
 		check(map.blocks[0].kind == MAPBLOCK_Water && map.blocks[1].kind == MAPBLOCK_Wall, "block kinds expand");

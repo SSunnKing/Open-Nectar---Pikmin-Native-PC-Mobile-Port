@@ -169,6 +169,10 @@ private:
 	bool ensureTerrain();
 	/// Agua en un nivel importado: pasa a poner un bloque de agua (true).
 	bool waterOnImportedLevel(Tool t);
+	/// Papel de una malla importada (0 suelo, 1 solo colisión, 2 solo visual, 3 objeto sólido).
+	static void applyMeshRole(nectar::DocProp& p, int role);
+	int meshRole_           = 0;
+	float meshImportScale_ = 1.0f; ///< con la que se importó la malla que se va a poner
 	void applyBrush(const V3& at, float dt);
 	bool applyRamp(const V3& from, const V3& to);
 	void growMap(int dx, int dz);
