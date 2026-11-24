@@ -3757,6 +3757,8 @@ static void perf_gpu_scene_begin() {
 #endif
 }
 
+unsigned pc_gfx_frame_serial(void) { return (unsigned)sFrameSerial; }
+
 void pc_gfx_begin_frame(void) {
     sUi43 = false;
     sHudWide = false;

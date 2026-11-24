@@ -220,6 +220,8 @@ include_directories(
     ${PIKMIN2_DECOMP_DIR}/include/Dolphin/OS
     ${PIKMIN2_DECOMP_DIR}/include/Dolphin/GC
     ${PIKMIN2_DECOMP_DIR}/include/Game
+    # Personajes del creador de modelos (nectar_assets/nhm.h), como en Pikmin 1.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libs/nectar_assets/include
 )
 
 ###############################################################################
@@ -374,6 +376,7 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
         ${PC_PORT_DIR}/pc_icon.cpp
         ${PC_PORT_DIR}/pc_file_dialog.cpp
         ${PC_PORT_DIR}/mods/pc_hd_model_convert.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../libs/nectar_assets/src/nhm.cpp
         ${PC_PORT_DIR}/pc_pad_axis.cpp
         ${PC_PORT_DIR}/pc_menu_pad.cpp
         ${PC_PORT_DIR}/pc_menu_pointer.cpp

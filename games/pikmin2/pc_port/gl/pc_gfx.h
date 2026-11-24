@@ -163,6 +163,8 @@ void pc_gfx_clear_mat_color_tint(void);
 // (tinte del HUD de J2 en coop). (1,1,1) lo quita.
 void pc_gfx_set_out_tint(float r, float g, float b);
 void pc_gfx_clear_out_tint(void);
+// Número del fotograma en curso (sube en cada presentación).
+unsigned pc_gfx_frame_serial(void);
 // Vacía la profundidad del destino actual (3D sobre un frame ya terminado).
 void pc_gfx_clear_depth(void);
 void pc_gfx_set_chan_amb_color(GXChannelID chan, GXColor color);

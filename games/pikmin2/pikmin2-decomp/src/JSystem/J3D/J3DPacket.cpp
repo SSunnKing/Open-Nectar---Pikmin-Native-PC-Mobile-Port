@@ -314,6 +314,7 @@ extern "C" int pc_gfx_trace_j3d(void);
 extern "C" void pc_gfx_set_out_tint(float r, float g, float b);
 extern "C" void pc_gfx_clear_out_tint(void);
 bool pc_p2_captain_tint_for_model(const void* j3dModel, float rgb[3]);
+bool pc_p2_custom_draw_packet(J3DMatPacket* packet);
 
 // Selector de capitanes: el capitán 2 repetido se tiñe en sus propios paquetes.
 struct PcCaptainTintScope {
@@ -342,6 +343,8 @@ void J3DMatPacket::draw()
 		       mDiffFlag, (void*)mDisplayList, (void*)mDisplayList->mDisplayList[0], (void*)mDisplayList->mDisplayList[1],
 		       mDisplayList->mSize, (void*)getShapePacket()->mShape, (void*)mTexture);
 	PcCaptainTintScope captainTint(getShapePacket()->getModel());
+	// Personajes del creador de modelos: el pack en vez de las formas.
+	if (pc_p2_custom_draw_packet(this)) return;
 #endif
 	mMaterial->load();
 	mDisplayList->callDL();
