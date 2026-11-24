@@ -20,6 +20,7 @@ add_library(nectar_assets STATIC
     src/catalog.cpp
     src/mesh_mod.cpp
     src/charpack.cpp
+    src/nhm.cpp
     # Decodificador de texturas del launcher, reutilizado tal cual.
     ${NECTAR_P1_DIR}/pc_port/launcher/bti_decode.cpp
 )
@@ -49,4 +50,10 @@ elseif(PIKMIN_BUILD_TESTS AND NOT ANDROID)
     add_executable(nectar_assets_test tests/nectar_assets_test.cpp)
     target_link_libraries(nectar_assets_test PRIVATE nectar_assets)
     add_test(NAME nectar_assets_catalog_utf8_test COMMAND nectar_assets_test --catalog-utf8)
+endif()
+# Lector NHM y piel (personajes propios en los dos juegos).
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR OR (PIKMIN_BUILD_TESTS AND NOT ANDROID))
+    add_executable(nectar_nhm_test tests/nhm_test.cpp)
+    target_link_libraries(nectar_nhm_test PRIVATE nectar_assets)
+    add_test(NAME nectar_nhm_test COMMAND nectar_nhm_test)
 endif()
