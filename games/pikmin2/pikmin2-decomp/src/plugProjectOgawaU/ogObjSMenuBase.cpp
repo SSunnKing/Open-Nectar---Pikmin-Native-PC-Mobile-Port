@@ -141,8 +141,11 @@ void ObjSMenuBase::commonUpdateBase()
 			overHover |= byHover;
 			if (byClick) {
 				pc_menu_drop_tap();
+				pc_menu_hover_press(arrows[i]);
 				sPcArrow = i + 1;
 			}
+			// The arrow grows under the pointer, as the other clickable panes do.
+			arrows[i]->updateScale(pc_menu_hover_scale(arrows[i], byHover, 0.1f, sys->mDeltaTime));
 		}
 		pc_menu_set_hand(overHover);
 	}

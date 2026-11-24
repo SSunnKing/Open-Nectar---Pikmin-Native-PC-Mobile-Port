@@ -202,4 +202,13 @@ int main() {
     CHECK(pc_result_page_at(10.0f, 8, 3, -1, 20.0f, 40.0f, 40.0f) == 3);
     CHECK(pc_result_page_at(30.0f, 8, 3, -1, 20.0f, 40.0f, 40.0f) == 4);
     CHECK(pc_result_page_at(10.0f, 8, 3, 0, 0.0f, 0.0f, 40.0f) == -1);
+
+    // Footer hints: the letter of the hint under the point, 0 elsewhere.
+    const PcHelpHint hints[] = { { 'A', 100, 400, 180, 426 }, { 'B', 200, 400, 260, 426 } };
+    CHECK(pc_help_hint_at(hints, 2, 140, 410) == 'A');
+    CHECK(pc_help_hint_at(hints, 2, 200, 400) == 'B');
+    CHECK(pc_help_hint_at(hints, 2, 190, 410) == 0);
+    CHECK(pc_help_hint_at(hints, 2, 140, 430) == 0);
+    CHECK(pc_help_hint_at(hints, 0, 140, 410) == 0);
+    CHECK(pc_help_hint_at(nullptr, 2, 140, 410) == 0);
 }

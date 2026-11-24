@@ -3406,7 +3406,8 @@ void drawTextOutline(int x, int y, const char* fmt, Colour main, Colour shadow, 
 // Línea de ayuda centrada en cx. Con el marco P2D, cada letra de botón suelta
 // (A, B, X, Y, Z seguida de espacio, "/" o ":") se dibuja con el icono del
 // botón del juego; el resto del texto no cambia.
-void drawHelpLine(int cx, int y, const char* text, Colour c, int maxWidth = 570) {
+void drawHelpLine(int cx, int y, const char* text, Colour c, int maxWidth = 570, PcHelpHint* hints = nullptr, int* hintCount = nullptr, int hintMax = 0) {
+    if (hintCount) *hintCount = 0;
     if (!pc_settings_p2d_active()) {
         drawTextOutline(cx - menuTextWidth(text) / 2, y, "%s", c, Colour(8, 12, 28, 255), text);
         return;
@@ -3446,15 +3447,30 @@ void drawHelpLine(int cx, int y, const char* text, Colour c, int maxWidth = 570)
     }
     int x = cx - total / 2;
     n = 0;
+    // Each button glyph and the label after it is one hint that a click can press.
+    int hintAt = -1;
+    auto closeHint = [&](int endX) {
+        if (hintAt >= 0) hints[hintAt].x1 = float(endX) + 4.0f;
+    };
     for (const char* p = text;; ++p) {
         if (*p == '\0' || isButton(p)) {
             chunk[n] = '\0';
             if (n) {
                 pc_settings_p2d_text_styled(x, y, chunk, c, c, fw, fh, false);
+                int shown = n;
+                while (shown > 0 && chunk[shown - 1] == ' ') --shown;
+                char trimmed[256];
+                std::snprintf(trimmed, sizeof(trimmed), "%.*s", shown, chunk);
+                closeHint(x + pc_settings_p2d_text_width(trimmed, fw));
                 x += pc_settings_p2d_text_width(chunk, fw);
             }
             n = 0;
             if (*p == '\0') break;
+            hintAt = -1;
+            if (hints && hintCount && *hintCount < hintMax) {
+                hintAt = (*hintCount)++;
+                hints[hintAt] = { *p, float(x) - 4.0f, float(y) - 4.0f, float(x + icon) + 4.0f, float(y + fh) + 4.0f };
+            }
             if (!pc_settings_p2d_button(x, y + (fh - icon) / 2 - 1, icon, *p)) {
                 const char letter[2] = { *p, '\0' };
                 pc_settings_p2d_text(x + (icon - pc_settings_p2d_text_width(letter, fw)) / 2, y, letter, c, fw, fh);
@@ -4925,6 +4941,9 @@ const int kNgBoxW     = 220;
 const int kNgBoxH     = 40;
 const int kNgRowCount = 2;
 const int kNgStartRow = kNgRowCount;
+// Footer hints ("A: select", "B: back") from the last draw, in screen pixels.
+PcHelpHint sNgHints[4];
+int        sNgHintCount = 0;
 int ngRowY(int panelY, int row) { return panelY + 84 + row * 80; }
 int ngBoxX(int panelX, int i) { return panelX + 50 + i * (kNgBoxW + 20); }
 int ngStartX(int panelX) { return panelX + kNgPanelW / 2 - kNgBoxW / 2; }
@@ -5463,9 +5482,13 @@ void pcNewGamePromptInput()
     ngScreen(&sw, &sh);
     if (sTouchTapPending) {
         sTouchTapPending = false;
+        // A tap on a footer hint presses that button.
+        const char hint = pc_help_hint_at(sNgHints, sNgHintCount, sTouchTapX * sw, sTouchTapY * sh);
+        if (hint == 'A') accept = true;
+        else if (hint == 'B') cancel = true;
         // Un toque elige la opción; el de Start empieza.
         int row = 0, col = 0;
-        if (ngHit(sTouchTapX * sw, sTouchTapY * sh, &row, &col)) {
+        if (hint == 0 && ngHit(sTouchTapX * sw, sTouchTapY * sh, &row, &col)) {
             sNewGamePromptRow = row;
             if (row == kNgStartRow) {
                 accept = true;
@@ -5480,8 +5503,10 @@ void pcNewGamePromptInput()
         // Mouse hover: the cursor follows the pointer and the hand shows over a box.
         float hx = 0.0f, hy = 0.0f;
         int row = 0, col = 0;
-        const bool over = pc_menu_hover(&hx, &hy) && ngHit(hx * sw, hy * sh, &row, &col);
-        pc_menu_set_hand(over);
+        const bool hasPointer = pc_menu_hover(&hx, &hy);
+        const bool overHint   = hasPointer && pc_help_hint_at(sNgHints, sNgHintCount, hx * sw, hy * sh) != 0;
+        const bool over       = hasPointer && ngHit(hx * sw, hy * sh, &row, &col);
+        pc_menu_set_hand(over || overHint);
         if (over && (row != sNewGamePromptRow || col != sNewGamePromptCol)) {
             sNewGamePromptRow = row;
             sNewGamePromptCol = col;
@@ -5672,7 +5697,8 @@ void pc_newgame_prompt_draw(void)
         p = end ? end + 1 : p + std::strlen(p);
     }
 
-    drawHelpLine(panelX + panelW / 2, panelY + panelH - 46, "Arrows: move    A: select    B: back", dim, panelW - 60);
+    drawHelpLine(panelX + panelW / 2, panelY + panelH - 46, "Arrows: move    A: select    B: back", dim, panelW - 60,
+                 sNgHints, &sNgHintCount, int(sizeof(sNgHints) / sizeof(sNgHints[0])));
 }
 
 // ─── Randomizer: código de la partida en la pausa (PLAN_RANDOMIZER.md §11.4) ───

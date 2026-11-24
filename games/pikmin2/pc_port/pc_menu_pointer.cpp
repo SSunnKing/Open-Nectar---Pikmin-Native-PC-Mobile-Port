@@ -289,6 +289,11 @@ bool pc_plate_click(float nx, float ny) {
     return true;
 }
 bool pc_plate_hover(float nx, float ny) { return plateAt(nx, ny) >= 0; }
+char pc_help_hint_at(const PcHelpHint* hints, int count, float x, float y) {
+    for (int i = 0; hints && i < count; ++i)
+        if (x >= hints[i].x0 && x <= hints[i].x1 && y >= hints[i].y0 && y <= hints[i].y1) return hints[i].letter;
+    return 0;
+}
 void pc_pointer_reset() {
     mouseActive = false;
     dragX = dragY = 0;
