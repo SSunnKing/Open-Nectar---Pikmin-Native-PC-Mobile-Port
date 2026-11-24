@@ -64,6 +64,63 @@ bool notAGci(std::string& error)
 
 bool isIdChar(std::uint8_t c) { return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'); }
 
+// MemoryCardMgr::calcCheckSum (pikmin2 sysGCU/memoryCard.cpp): u16 sum and
+// inverted sum, read big-endian on GameCube and little-endian on PC.
+std::uint32_t pikmin2Checksum(const std::uint8_t* data, std::size_t length, bool bigEndian)
+{
+    std::uint16_t sum = 0;
+    std::uint16_t inv = 0;
+    for (std::size_t i = 0; i + 1 < length; i += 2) {
+        const std::uint16_t v = bigEndian ? static_cast<std::uint16_t>((data[i] << 8) | data[i + 1])
+                                          : static_cast<std::uint16_t>((data[i + 1] << 8) | data[i]);
+        sum = static_cast<std::uint16_t>(sum + v);
+        inv = static_cast<std::uint16_t>(inv + static_cast<std::uint16_t>(~v));
+    }
+    return (std::uint32_t(sum) << 16) | inv;
+}
+
+struct SwapField {
+    std::size_t offset;
+    std::size_t width;
+};
+
+// Flip one option/player block to host order when it holds a valid GameCube
+// (big-endian) block. Empty, broken or already-native blocks are left alone.
+void pikmin2BlockToHost(std::vector<std::uint8_t>& b, std::size_t o, std::size_t size, const char* magic,
+                        const SwapField* fields, std::size_t fieldCount)
+{
+    if (o + size > b.size() || std::memcmp(&b[o], magic, 4) != 0) return;
+    const std::uint8_t* sumAt = &b[o + size - 4];
+    const std::uint32_t stored = (std::uint32_t(sumAt[0]) << 24) | (std::uint32_t(sumAt[1]) << 16)
+                               | (std::uint32_t(sumAt[2]) << 8) | std::uint32_t(sumAt[3]);
+    if (stored != pikmin2Checksum(&b[o], size - 4, true)) return;
+    for (std::size_t i = 0; i < fieldCount; ++i)
+        std::reverse(b.begin() + static_cast<std::ptrdiff_t>(o + fields[i].offset),
+                     b.begin() + static_cast<std::ptrdiff_t>(o + fields[i].offset + fields[i].width));
+    const std::uint32_t sum = pikmin2Checksum(&b[o], size - 4, false);
+    for (int i = 0; i < 4; ++i) b[o + size - 4 + i] = static_cast<std::uint8_t>(sum >> (8 * i));
+}
+
+// Pikmin 2 on PC stores the OptionInfo/PlayerInfo headers (Game/MemoryCard/Mgr.h)
+// and their checksums in host order; the bodies go through Stream and stay
+// big-endian. A GameCube .gci has everything big-endian, so copying it as-is
+// left the game unable to read it (issue #363).
+void pikmin2SaveToHost(std::vector<std::uint8_t>& b)
+{
+    if (b.size() != kPikmin2SaveFileSize) return;
+    // OptionInfo: mMagic, mVersionType, mSaveSlotIndex.
+    static const SwapField option[] = { { 0x0, 4 }, { 0x4, 4 }, { 0x8, 4 } };
+    // PlayerInfoHeader: mMagic, mVersionType, (s8 slot), Player::_02, then the
+    // twelve u32 of Player from mSaveCount to mPlayTime.
+    static const SwapField player[] = { { 0x00, 4 }, { 0x04, 4 }, { 0x0E, 2 }, { 0x10, 4 }, { 0x14, 4 },
+                                        { 0x18, 4 }, { 0x1C, 4 }, { 0x20, 4 }, { 0x24, 4 }, { 0x28, 4 },
+                                        { 0x2C, 4 }, { 0x30, 4 }, { 0x34, 4 }, { 0x38, 4 }, { 0x3C, 4 } };
+    for (std::size_t o : { 0x2000, 0x4000 })
+        pikmin2BlockToHost(b, o, 0x2000, "OpVa", option, sizeof(option) / sizeof(option[0]));
+    for (std::size_t i = 0; i < 4; ++i)
+        pikmin2BlockToHost(b, 0x6000 + i * 0xC000, 0xC000, "PlVa", player, sizeof(player) / sizeof(player[0]));
+}
+
 bool parseGci(const std::vector<std::uint8_t>& bytes, ParsedGci& out, std::string& error)
 {
     // A .gci is a 64-byte directory entry (game id, file name, block count)
@@ -102,6 +159,7 @@ bool parseGci(const std::vector<std::uint8_t>& bytes, ParsedGci& out, std::strin
         return false;
     }
     out.gameId = gameIdFromGciDir(out.dir);
+    if (out.gameId.rfind("GPV", 0) == 0) pikmin2SaveToHost(out.payload);
     return true;
 }
 
