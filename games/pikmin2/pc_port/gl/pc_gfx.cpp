@@ -600,6 +600,9 @@ static uint32_t sTexPaletteGen = 0;
 // Generaciones (0-3) cuya coordenada con fuente NRM ya calculó el decodificador
 // de listas de display en la CPU (ver bake_nrm_texgen): el shader la usa tal cual.
 static int sTexBakedMask = 0;
+// Generaciones (0-3) que leen su atributo TEXn sin tocar desde su propia ranura
+// de v.tex, porque otra generación horneada pisó la ranura de ese atributo.
+static int sTexOwnAttrMask = 0;
 // Matrix contents change far less often than they are drawn with, so the batch
 // key hashes a revision number per slot rather than the floats themselves.
 // That removes ~600 of the ~2 KB the key used to walk on every primitive.
@@ -7613,6 +7616,7 @@ static void bp_resolve_textures();
 void pc_gfx_begin(GXPrimitive type, GXVtxFmt vtxfmt, u16 nverts) {
     sNativeWrittenThisFrame = true;
     sTexBakedMask = 0;
+    sTexOwnAttrMask = 0;
     if (sInPrimitive) {
         pc_gfx_end();
     }
@@ -8733,6 +8737,7 @@ static uint64_t compute_batch_state_key_full() {
     }
     h = hash_bytes(h, &sPostMtxGen, sizeof(sPostMtxGen));
     h = hash_bytes(h, &sTexBakedMask, sizeof(sTexBakedMask));
+    h = hash_bytes(h, &sTexOwnAttrMask, sizeof(sTexOwnAttrMask));
     h = hash_bytes(h, &sTexPaletteGen, sizeof(sTexPaletteGen));
     h = hash_bytes(h, sActiveGLTextures, sizeof(sActiveGLTextures));
     h = hash_bytes(h, sHasActiveTextures, sizeof(sHasActiveTextures));
@@ -9947,6 +9952,8 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
                 mode = (type >= 2 && type <= 9) ? 11 + int(src - GX_TG_TEXCOORD0) : 3;
             }
         }
+        if (slot < 4 && (sTexOwnAttrMask & (1 << slot)))
+            mode = 3 + slot;
         if (slot < 4 && (sTexBakedMask & (1 << slot)))
             mode = sTexCoordGen[slot].src == GX_TG_POS ? 15 : 0;
         if (sLoc.tcMode[slot] >= 0) glUniform1i_ptr(sLoc.tcMode[slot], mode);
@@ -11367,6 +11374,7 @@ static void draw_resident_mesh(ResidentMesh& mesh) {
 void pc_gfx_call_display_list(const void* list, u32 nbytes) {
     sNativeWrittenThisFrame = true;
     sTexBakedMask = 0;
+    sTexOwnAttrMask = 0;
     if (sInPrimitive) pc_gfx_end(); // an immediate primitive left open without GXEnd
     // Two clock reads per display list (~1000 a frame): cheap enough, and it
     // is the one cost of renderall that nothing else was attributing.
@@ -11843,6 +11851,9 @@ static void pc_gfx_call_display_list_impl(const void* list, u32 nbytes) {
                 // this normalized pair before perspective interpolation. Other
                 // POS texgens remain in the shader because their Q need not
                 // have that property.
+                float rawTex[4][2];
+                memcpy(rawTex, v.tex, sizeof(rawTex));
+                int bakedHere = 0;
                 for (int slot = 0; slot < 4; ++slot) {
                     const TexCoordGen& tg = sTexCoordGen[slot];
                     if (!tg.active || tg.src != GX_TG_POS || tg.type != GX_TG_MTX2X4
@@ -11862,6 +11873,7 @@ static void pc_gfx_call_display_list_impl(const void* list, u32 nbytes) {
                     v.tex[slot][0] = r[0] / q;
                     v.tex[slot][1] = r[1] / q;
                     sTexBakedMask |= 1 << slot;
+                    bakedHere |= 1 << slot;
                 }
                 // Reflejos (fuente NRM): en la consola la generación recibe la
                 // normal original y la multiplica una vez por su matriz de
@@ -11892,6 +11904,28 @@ static void pc_gfx_call_display_list_impl(const void* list, u32 nbytes) {
                     v.tex[slot][0] = out[0];
                     v.tex[slot][1] = out[1];
                     sTexBakedMask |= 1 << slot;
+                    bakedHere |= 1 << slot;
+                }
+                // A baked result lands in v.tex[slot], which is also where the
+                // vertex keeps its TEXn attribute, and other generations may
+                // still read that attribute. JPA's indirect water ripple bakes
+                // its screen projection into slot 0 while its distortion map
+                // and ring mask read TEX0: both then sampled one point, so the
+                // mask's alpha covered the whole quad and the copied scene
+                // showed as a grey square around anything wading. Each such
+                // generation gets its untouched attribute in its own slot.
+                if (bakedHere) {
+                    for (int slot = 0; slot < 4; ++slot) {
+                        const TexCoordGen& tg = sTexCoordGen[slot];
+                        if (!tg.active || (bakedHere & (1 << slot)) || tg.type >= GX_TG_BUMP0) continue;
+                        int attr = -1;
+                        if (tg.src >= GX_TG_TEX0 && tg.src <= GX_TG_TEX3) attr = int(tg.src - GX_TG_TEX0);
+                        else if (tg.src >= GX_TG_TEXCOORD0 && tg.src <= GX_TG_TEXCOORD6) attr = 0; // reads TEX0, see texgen modes
+                        if (attr < 0) continue;
+                        v.tex[slot][0] = rawTex[attr][0];
+                        v.tex[slot][1] = rawTex[attr][1];
+                        sTexOwnAttrMask |= 1 << slot;
+                    }
                 }
                 float nx, ny, nz;
                 transform_normal(matrixId, v.nx, v.ny, v.nz, nx, ny, nz);
