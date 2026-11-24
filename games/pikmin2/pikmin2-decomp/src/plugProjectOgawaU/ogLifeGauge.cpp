@@ -230,6 +230,7 @@ const ResTIMG* CallBack_LifeGauge::sPcPresidentTex = nullptr;
 // su color.
 void CallBack_LifeGauge::pcSetCharacter(int character, int naviIndex)
 {
+	character = pc_p2_character_base(character); // los propios llevan el retrato de Olimar
 	if (character == mPcCharacter || !mPcOwn.mValid) {
 		return;
 	}

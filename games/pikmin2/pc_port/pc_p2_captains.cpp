@@ -1,5 +1,11 @@
 #include "pc_p2_captains.h"
 
+#include "nectar_assets/charpack.h"
+
+#include <filesystem>
+#include <string>
+#include <vector>
+
 #include <stdlib.h>
 #include <ctype.h>
 
@@ -55,10 +61,29 @@ int envCharacter(int naviIndex)
 			return i;
 		}
 	}
-	return -1;
+	return pc_p2_custom_character_find(value); // o la carpeta de un personaje propio
 }
 
-bool validCharacter(int character) { return character >= 0 && character < PC_P2_CHAR_COUNT; }
+struct Custom {
+	std::string id, name, model, portrait;
+};
+std::vector<Custom> sCustom;
+bool sCustomScanned = false;
+
+const Custom* custom(int character)
+{
+	if (!sCustomScanned) pc_p2_custom_characters_scan();
+	const int i = character - PC_P2_CHAR_CUSTOM_FIRST;
+	return i >= 0 && i < int(sCustom.size()) ? &sCustom[std::size_t(i)] : nullptr;
+}
+
+bool validCharacter(int character) { return (character >= 0 && character < PC_P2_CHAR_COUNT) || custom(character); }
+
+// Los datos de serie de un personaje (los propios, los de Olimar).
+const CharacterInfo& info(int character)
+{
+	return kCharacters[character >= 0 && character < PC_P2_CHAR_COUNT ? character : PC_P2_CHAR_OLIMAR];
+}
 
 } // namespace
 
@@ -93,22 +118,95 @@ void pc_p2_captain_set_loaded_character(int naviIndex, int character)
 	}
 }
 
-const char* pc_p2_character_model_path(int character)
-{
-	return kCharacters[validCharacter(character) ? character : PC_P2_CHAR_OLIMAR].model;
-}
+const char* pc_p2_character_model_path(int character) { return info(character).model; }
 
-float pc_p2_character_scale(int character) { return kCharacters[validCharacter(character) ? character : PC_P2_CHAR_OLIMAR].scale; }
+float pc_p2_character_scale(int character) { return info(character).scale; }
 
 void pc_p2_character_color(int character, unsigned char rgb[3])
 {
-	const CharacterInfo& info = kCharacters[validCharacter(character) ? character : PC_P2_CHAR_OLIMAR];
 	for (int c = 0; c < 3; c++) {
-		rgb[c] = info.color[c];
+		rgb[c] = info(character).color[c];
 	}
 }
 
-bool pc_p2_character_is_pikmin(int character) { return validCharacter(character) && kCharacters[character].pikmin; }
+bool pc_p2_character_is_pikmin(int character) { return character >= 0 && character < PC_P2_CHAR_COUNT && kCharacters[character].pikmin; }
+
+void pc_p2_custom_characters_scan(void)
+{
+	sCustomScanned = true;
+	sCustom.clear();
+	// El juego corre en su carpeta (ahí están assets/ y Load/), como en Pikmin 1.
+	for (const nectar::CharacterInfo& c : nectar::listCharacters(".")) {
+		if (int(sCustom.size()) >= PC_P2_CHAR_CUSTOM_MAX) break;
+		Custom x;
+		x.id    = c.id;
+		x.name  = c.name.empty() ? c.id : c.name;
+		x.model = (std::filesystem::u8path(c.dir) / "model.nhm").u8string();
+		std::error_code ec;
+		const std::filesystem::path portrait = std::filesystem::u8path(c.dir) / "portrait.png";
+		if (std::filesystem::is_regular_file(portrait, ec)) x.portrait = portrait.u8string();
+		sCustom.push_back(x);
+	}
+}
+
+int pc_p2_custom_character_count(void)
+{
+	if (!sCustomScanned) pc_p2_custom_characters_scan();
+	return int(sCustom.size());
+}
+
+bool pc_p2_character_is_custom(int character) { return custom(character) != nullptr; }
+
+int pc_p2_character_base(int character)
+{
+	return character >= 0 && character < PC_P2_CHAR_COUNT ? character : PC_P2_CHAR_OLIMAR;
+}
+
+const char* pc_p2_character_name(int character)
+{
+	static const char* const kNames[PC_P2_CHAR_COUNT] = { "Olimar", "Louie", "President", "Red Pikmin", "Yellow Pikmin",
+		                                                  "Blue Pikmin", "Purple Pikmin", "White Pikmin", "Bulbmin" };
+	if (const Custom* c = custom(character)) return c->name.c_str();
+	return kNames[pc_p2_character_base(character)];
+}
+
+const char* pc_p2_custom_character_id(int character)
+{
+	const Custom* c = custom(character);
+	return c ? c->id.c_str() : "";
+}
+
+const char* pc_p2_custom_character_model(int character)
+{
+	const Custom* c = custom(character);
+	return c ? c->model.c_str() : "";
+}
+
+const char* pc_p2_custom_character_portrait(int character)
+{
+	const Custom* c = custom(character);
+	return c ? c->portrait.c_str() : "";
+}
+
+int pc_p2_custom_character_find(const char* id)
+{
+	if (!id || !*id) return -1;
+	if (!sCustomScanned) pc_p2_custom_characters_scan();
+	for (std::size_t i = 0; i < sCustom.size(); i++) {
+		if (sCustom[i].id == id) return PC_P2_CHAR_CUSTOM_FIRST + int(i);
+	}
+	return -1;
+}
+
+int pc_p2_selector_count(void) { return PC_P2_CHAR_COUNT + pc_p2_custom_character_count(); }
+
+int pc_p2_selector_character(int card) { return card < PC_P2_CHAR_COUNT ? card : PC_P2_CHAR_CUSTOM_FIRST + (card - PC_P2_CHAR_COUNT); }
+
+int pc_p2_selector_card(int character)
+{
+	if (custom(character)) return PC_P2_CHAR_COUNT + (character - PC_P2_CHAR_CUSTOM_FIRST);
+	return pc_p2_character_base(character);
+}
 
 // Capitán 2 con el mismo personaje que el 1. Dos Pikmin del mismo color se
 // dejan con su color natural.
@@ -147,7 +245,7 @@ void pc_p2_captain_clear_models(void)
 
 int pc_p2_captain_light_type(int naviIndex)
 {
-	int light = kCharacters[pc_p2_captain_loaded_character(naviIndex)].light;
+	int light = info(pc_p2_captain_loaded_character(naviIndex)).light;
 	if (repeatedCaptain2(naviIndex)) {
 		light = 1 - light;
 	}
@@ -170,7 +268,7 @@ void pc_p2_captain_cursor_colour(int naviIndex, unsigned char rgb[3])
 		}
 	} else if (pc_p2_character_is_pikmin(character)) {
 		for (int c = 0; c < 3; c++) {
-			rgb[c] = (unsigned char)kCharacters[character].color[c];
+			rgb[c] = (unsigned char)info(character).color[c];
 		}
 	} else if (pc_p2_captain_cursor_anim(naviIndex) == 1) {
 		rgb[0] = 60, rgb[1] = 130, rgb[2] = 255; // Louie y el presidente
@@ -200,7 +298,7 @@ bool pc_p2_captain_tint_for_model(const void* j3dModel, float rgb[3])
 					return false;
 				}
 				for (int c = 0; c < 3; c++) {
-					rgb[c] = kCharacters[character].color[c] / 255.0f;
+					rgb[c] = info(character).color[c] / 255.0f;
 				}
 			}
 			// El cursor es oscuro en gris: se aclara para que el color se vea.
@@ -215,7 +313,7 @@ bool pc_p2_captain_tint_for_model(const void* j3dModel, float rgb[3])
 
 int pc_p2_captain_down_title(int naviIndex)
 {
-	switch (pc_p2_captain_loaded_character(naviIndex)) {
+	switch (pc_p2_character_base(pc_p2_captain_loaded_character(naviIndex))) {
 	case PC_P2_CHAR_OLIMAR: return 1;
 	case PC_P2_CHAR_LOUIE: return 2;
 	case PC_P2_CHAR_PRESIDENT: return 3;

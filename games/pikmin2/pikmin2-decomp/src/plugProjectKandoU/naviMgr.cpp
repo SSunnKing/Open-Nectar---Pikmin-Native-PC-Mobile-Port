@@ -7,6 +7,7 @@
 #include "JSystem/J3D/J3DModelLoader.h"
 #include "Game/PikiMgr.h"
 #include "pc_p2_captains.h"
+#include "pc_p2_custom_characters.h"
 #include "Game/pcCoop.h"
 
 extern "C" void pc_gfx_set_out_tint(float r, float g, float b);
@@ -124,6 +125,8 @@ void NaviMgr::setupNavi(Navi* navi)
 
 	pc_p2_captain_set_models(navi->mNaviIndex, navi->mModel->mJ3dModel, navi->mCursorModel->mJ3dModel,
 	                         navi->mMarkerModel->mJ3dModel);
+	// Personaje del creador de modelos: el esqueleto de Olimar con su pack.
+	pc_p2_custom_bind_model(navi->mModel->mJ3dModel, pc_p2_custom_character_model(pc_p2_captain_loaded_character(navi->mNaviIndex)));
 }
 
 /**
@@ -259,7 +262,8 @@ static int sPcCaptain1Character       = PC_P2_CHAR_OLIMAR;
 static J3DModelData* loadCaptainModel(JKRArchive* arc, int naviIndex, int character, J3DModelData* loaded)
 {
 	pc_p2_captain_set_loaded_character(naviIndex, character);
-	if (loaded && character == PC_P2_CHAR_OLIMAR) {
+	// Los personajes propios van sobre el modelo de Olimar.
+	if (loaded && pc_p2_character_base(character) == PC_P2_CHAR_OLIMAR && !pc_p2_character_is_pikmin(character)) {
 		return loaded;
 	}
 

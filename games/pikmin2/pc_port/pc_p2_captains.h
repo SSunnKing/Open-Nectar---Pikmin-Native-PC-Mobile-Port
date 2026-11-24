@@ -25,6 +25,31 @@ enum PcP2Character {
 	PC_P2_CHAR_COUNT
 };
 
+/// Personajes del creador de modelos (Load/Characters/<id>, ver
+/// pc_p2_custom_characters.h): ids desde PC_P2_CHAR_CUSTOM_FIRST, en el orden
+/// de la carpeta. Para el juego son Olimar (esqueleto, voz, luz, cursor); solo
+/// se ven distintos.
+#define PC_P2_CHAR_CUSTOM_FIRST 64
+#define PC_P2_CHAR_CUSTOM_MAX 60
+/// Vuelve a leer Load/Characters (al arrancar y al abrir el selector).
+void pc_p2_custom_characters_scan(void);
+int pc_p2_custom_character_count(void);
+bool pc_p2_character_is_custom(int character);
+/// Personaje de serie en que se apoya (el mismo para los de serie).
+int pc_p2_character_base(int character);
+/// Nombre para mostrar (inglés para los de serie, el del pack para los propios).
+const char* pc_p2_character_name(int character);
+/// Carpeta (id), model.nhm y portrait.png de un personaje propio; "" si no lo es.
+const char* pc_p2_custom_character_id(int character);
+const char* pc_p2_custom_character_model(int character);
+const char* pc_p2_custom_character_portrait(int character);
+/// Personaje propio con esa carpeta, o -1.
+int pc_p2_custom_character_find(const char* id);
+/// Tarjetas del selector: las 9 de serie y después las propias.
+int pc_p2_selector_count(void);
+int pc_p2_selector_character(int card);
+int pc_p2_selector_card(int character);
+
 /// Elección guardada (selector, pikmin_settings.conf). -1 es el original del
 /// capitán (Olimar; Louie o el Presidente). Las variables de entorno mandan.
 void pc_p2_captain_set_choice(int naviIndex, int character);

@@ -416,8 +416,8 @@ void pc_p2_captain_icons_apply(J2DPane* root)
 		return;
 	}
 	// Fuera de la historia no hay deuda: el original del capitán 2 es Louie.
-	const ResTIMG* icon1 = sIcons[pc_p2_captain_character(0, false)];
-	const ResTIMG* icon2 = sIcons[pc_p2_captain_character(1, false)];
+	const ResTIMG* icon1 = sIcons[pc_p2_character_base(pc_p2_captain_character(0, false))];
+	const ResTIMG* icon2 = sIcons[pc_p2_character_base(pc_p2_captain_character(1, false))];
 	applyIcons(root, icon1, icon2);
 }
 
