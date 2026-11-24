@@ -545,7 +545,12 @@ void test_mod_bubbles(const Screen& s)
 	down(3, gyro.x, gyro.y);
 	up(3, gyro.x, gyro.y);
 	frame();
+#if PIKI_P2_HOST
+	// Pikmin 2 never shows the charge bubble: it duplicates the swarm tap.
+	CHECK_EQ(h.chargePresses, 0);
+#else
 	CHECK_EQ(h.chargePresses, 1);
+#endif
 	CHECK_EQ(h.firstPersonPresses, 1);
 	CHECK_EQ(h.gyroRecenters, 1);
 	h.charge = h.firstPerson = h.gyro = 0;
