@@ -26,9 +26,13 @@
 #include <chrono>
 #include <math.h>
 
+#include "pc_p2_captain_preview_layout.h"
+
 extern "C" void pc_gfx_set_view_subrect(float x0, float y0, float x1, float y1);
 extern "C" void pc_gfx_clear_view_subrect(void);
 extern "C" void pc_gfx_set_view_aspect_override(float aspect);
+extern "C" void pc_gfx_set_hud_wide(int enabled);
+extern "C" void pc_gfx_set_hud_virtual_size(int w, int h);
 extern "C" void pc_gfx_set_out_tint(float r, float g, float b);
 extern "C" void pc_gfx_clear_out_tint(void);
 extern "C" void pc_gfx_clear_depth(void);
@@ -215,33 +219,30 @@ void pc_p2_captain_preview_draw(int character, int x, int y, int w, int h, int s
 		return;
 	}
 
-	// El espacio GX (640x480, 4:3) se mapea en una caja 4:3 que envuelve el
-	// recuadro y la tijera recorta al recuadro: así el modelo no se deforma ni
-	// se corta por una franja 4:3 dentro de un recuadro alto o ancho. El menú
-	// ocupa un 4:3 centrado en la ventana (bandas a los lados si es más ancha).
-	const f32 aspect = (f32)w / (f32)h;
-	f32 boxW = (f32)w, boxH = (f32)h;
-	if (aspect < 4.0f / 3.0f) {
-		boxW = boxH * 4.0f / 3.0f;
-	} else {
-		boxH = boxW * 3.0f / 4.0f;
-	}
-	const f32 boxX    = x + w / 2.0f - boxW / 2.0f;
-	const f32 boxY    = y + h / 2.0f - boxH / 2.0f;
-	const f32 window  = pc_gfx_get_window_aspect_ratio();
-	const f32 uiWidth = (window > 4.0f / 3.0f) ? (4.0f / 3.0f) / window : 1.0f;
-	const f32 uiLeft  = 0.5f - uiWidth / 2.0f;
-	pc_gfx_set_view_subrect(uiLeft + uiWidth * boxX / screenW, 1.0f - (boxY + boxH) / screenH, uiLeft + uiWidth * (boxX + boxW) / screenW,
-	                        1.0f - boxY / screenH);
+	// Caja 4:3 alrededor de la tarjeta (la tijera vuelve a la tarjeta). El menú
+	// 2D es screenW x screenH a escala uniforme. La perspectiva de abajo apaga
+	// el mapa 4:3 de la UI (p2_update_ui43) y, sin HUD wide, el viewport se
+	// estira con el aspecto de la ventana: en 16:9 el modelo sale ancho. El
+	// override de aspecto no entra en ese mapa. HUD wide del viewport 640x480
+	// es el mismo encaje uniforme (como el HUD de ogObjGround). Viewport y
+	// tijera van después de la proyección: si no, p2_update_ui43 los reescribe.
+	const f32 aspect           = (f32)w / (f32)h;
+	const PcP2CaptainBox box   = pc_p2_captain_box43((f32)x, (f32)y, (f32)w, (f32)h);
+	const PcP2CaptainSubrect sub = pc_p2_captain_subrect_for_aspect(pc_gfx_get_window_aspect_ratio(), (f32)screenW, (f32)screenH, box.x,
+	                                                                box.y, box.w, box.h);
+	pc_gfx_set_view_subrect(sub.x0, sub.y0, sub.x1, sub.y1);
 	pc_gfx_set_view_aspect_override(0.0f);
-	GXSetViewport(0.0f, 0.0f, 640.0f, 480.0f, 0.0f, 1.0f);
-	GXSetScissor((u32)((x - boxX) / boxW * 640.0f), (u32)((y - boxY) / boxH * 480.0f), (u32)(w / boxW * 640.0f), (u32)(h / boxH * 480.0f));
 
 	// Cámara fija a media altura; el modelo se escala a la de Olimar.
 	Mtx44 proj;
 	// Proyección de 640x480: la caja es 4:3, no hay aspecto que corregir.
 	C_MTXPerspective(proj, 30.0f, 4.0f / 3.0f, 5.0f, 2000.0f);
 	GXSetProjection(proj, GX_PERSPECTIVE);
+	pc_gfx_set_hud_virtual_size(kPcP2CaptainGxW, kPcP2CaptainGxH);
+	pc_gfx_set_hud_wide(1);
+	GXSetViewport(0.0f, 0.0f, (f32)kPcP2CaptainGxW, (f32)kPcP2CaptainGxH, 0.0f, 1.0f);
+	GXSetScissor((u32)((x - box.x) / box.w * kPcP2CaptainGxW), (u32)((y - box.y) / box.h * kPcP2CaptainGxH),
+	             (u32)(w / box.w * kPcP2CaptainGxW), (u32)(h / box.h * kPcP2CaptainGxH));
 	// Encuadre centrado en el modelo: los Pikmin van de los pies (y 0) a la
 	// hoja (y 25); los capitanes son más bajos.
 	// El modelo en tres cuartos queda algo a la derecha de su origen: la
@@ -422,6 +423,10 @@ void pc_p2_captain_icons_apply(J2DPane* root)
 
 void pc_p2_captain_preview_end(void)
 {
+	// El mundo del frame siguiente no usa este mapa. Si se queda puesto, su
+	// viewport 608x448 se encaja como un 640x480.
+	pc_gfx_set_hud_wide(0);
+	pc_gfx_set_hud_virtual_size(0, 0);
 	pc_gfx_clear_view_subrect();
 	pc_gfx_set_view_aspect_override(0.0f);
 	GXSetViewport(0.0f, 0.0f, 640.0f, 480.0f, 0.0f, 1.0f);
