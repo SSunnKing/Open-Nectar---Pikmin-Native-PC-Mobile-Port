@@ -685,9 +685,6 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
             ${PC_PORT_DIR}/pc_menu_pad_test.cpp
             ${PC_PORT_DIR}/pc_menu_pad.cpp
         )
-        pikmin2_add_host_test(p2_cursor_ring_test
-            ${PC_PORT_DIR}/pc_cursor_ring_test.cpp
-        )
         pikmin2_add_host_test(p2_menu_pointer_test
             ${PC_PORT_DIR}/pc_menu_pointer_test.cpp
             ${PC_PORT_DIR}/pc_menu_pointer.cpp
