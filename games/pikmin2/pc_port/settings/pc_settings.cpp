@@ -2153,9 +2153,10 @@ void pollMenuInput() {
         sResolutionIdx = idx >= 0 ? idx : defaultResolutionIndex();
     };
 
-    // F1 always toggles. Select/View can open the menu while it is closed;
-    // closing is handled after video confirmation has had first refusal.
-    if (keyWentDown(SDL_SCANCODE_F1) || toggleRequested) {
+    // F1 or the backtick key (top left on a Mac keyboard, no Fn needed) always
+    // toggles. Select/View can open the menu while it is closed; closing is
+    // handled after video confirmation has had first refusal.
+    if (keyWentDown(SDL_SCANCODE_F1) || keyWentDown(SDL_SCANCODE_GRAVE) || toggleRequested) {
         if (sMenuOpen) closeMenu();
         else {
             sMenuPlayer = 0;

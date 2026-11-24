@@ -105,7 +105,7 @@ so you can correct the image, converter or destination. Temporary file locks
 at the final extraction step are retried for up to 2.5 seconds; persistent
 failures show the preserved extraction path instead of silently starting over.
 
-Once the game starts, **F1** opens graphics, controls and gameplay settings.
+Once the game starts, **F1** or **`** (backtick) opens graphics, controls and gameplay settings.
 
 **Playing afterwards**
 
@@ -381,7 +381,7 @@ This port includes significant improvements over the original GameCube game, des
 | L — rotate camera left | Q |
 | R — rotate camera right | E |
 | Start — pause | Enter |
-| Port settings menu | F1 |
+| Port settings menu | F1 or ` (backtick) |
 | Switch control mode | F2 |
 | Photo mode | F3 |
 
