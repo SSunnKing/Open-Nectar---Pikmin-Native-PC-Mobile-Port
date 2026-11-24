@@ -1,5 +1,4 @@
 #include "pc_p2_captains.h"
-#include "pc_cursor_ring.h"
 #include "Game/pcCoop.h"
 #include <chrono>
 #include <cmath>
@@ -614,92 +613,6 @@ void pcDrawLockOnRing(Graphics& gfx, Viewport* port)
 {
 	for (int slot = 0; slot < 2; slot++) {
 		pcDrawLockOnRingFor(gfx, port, slot);
-	}
-}
-
-// One dashed ground ring. GX colour and blend are already set by the caller.
-static void pcDrawDashedRing(const Vector3f& centre, f32 radius, f32 spin, u8 r, u8 g, u8 b)
-{
-	static const int kDashes     = 8;
-	static const int kDashSegs   = 5;
-	static const f32 kDashFill   = 0.7f;
-	static const f32 kHalfStroke = 1.4f;
-	const f32 dashArc = TAU / kDashes;
-	for (int d = 0; d < kDashes; d++) {
-		const f32 start = spin + d * dashArc;
-		const f32 step  = dashArc * kDashFill / kDashSegs;
-		for (int k = 0; k < kDashSegs; k++) {
-			const f32 a0     = start + k * step;
-			const f32 a1     = a0 + step;
-			const f32 rad[4] = { radius - kHalfStroke, radius + kHalfStroke, radius + kHalfStroke, radius - kHalfStroke };
-			const f32 ang[4] = { a0, a0, a1, a1 };
-			GXBegin(GX_QUADS, GX_VTXFMT0, 4);
-			for (int v = 0; v < 4; v++) {
-				Vector3f p(centre.x + rad[v] * sinf(ang[v]), 0.0f, centre.z + rad[v] * cosf(ang[v]));
-				f32 ground = mapMgr->getMinY(p);
-				ground     = ground > centre.y + 8.0f ? centre.y + 8.0f : (ground < centre.y - 20.0f ? centre.y - 20.0f : ground);
-				p.y        = ground + 1.5f;
-				GXPosition3f32(p.x, p.y, p.z);
-				GXColor4u8(r, g, b, 230);
-			}
-			GXEnd();
-		}
-	}
-}
-
-/**
- * @brief Aim ring and whistle circle for mouse-cursor mode.
- *
- * The disc cursor mesh is still entered. This ring is the one Pikmin 1's
- * cursor shape makes obvious: where the whistle will land, and how wide it
- * is while it is blowing. Classic mode draws neither.
- */
-void pcDrawCursorRings(Graphics& gfx, Viewport* port)
-{
-	if (!mapMgr || !naviMgr || !port)
-		return;
-	static f32 spin = 0.0f;
-	spin += sys->mDeltaTime * 0.8f;
-	if (spin > TAU)
-		spin -= TAU;
-
-	bool prepared = false;
-	for (int i = 0; i < 2; i++) {
-		Game::Navi* navi = naviMgr->getAt(i);
-		if (!navi || !navi->mWhistle)
-			continue;
-		const bool inMovie = navi->isControlFlag(NAVICTRL_InMovie)
-		                     || (moviePlayer && moviePlayer->isFlag(MVP_IsActive));
-		const PcCursorRing want = pc_cursor_ring(pc_window_get_control_mode(), pcLockOf(navi).mTarget != nullptr,
-		                                         inMovie, navi->mWhistle->mState);
-		if (!want.aim && !want.whistle)
-			continue;
-		if (!prepared) {
-			gfx.initPrimDraw(port->getMatrix(true));
-			GXSetNumTexGens(0);
-			GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
-			GXSetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
-			GXSetNumIndStages(0);
-			GXSetTevDirect(GX_TEVSTAGE0);
-			GXSetChanCtrl(GX_COLOR0A0, GX_FALSE, GX_SRC_VTX, GX_SRC_VTX, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-			GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
-			GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
-			GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
-			GXSetZMode(GX_TRUE, GX_LEQUAL, GX_FALSE);
-			GXSetCullMode(GX_CULL_NONE);
-			prepared = true;
-		}
-		u8 rgb[3];
-		pc_p2_captain_cursor_colour(navi->mNaviIndex, rgb);
-		const Vector3f centre = navi->mWhistle->mPosition;
-		if (want.aim)
-			pcDrawDashedRing(centre, 18.0f, spin, rgb[0], rgb[1], rgb[2]);
-		if (want.whistle)
-			pcDrawDashedRing(centre, navi->mWhistle->mRadius, spin, rgb[0], rgb[1], rgb[2]);
-	}
-	if (prepared) {
-		GXSetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
-		GXSetBlendMode(GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, GX_LO_CLEAR);
 	}
 }
 
