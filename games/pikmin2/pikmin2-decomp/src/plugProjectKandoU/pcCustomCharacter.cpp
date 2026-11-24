@@ -51,6 +51,7 @@ struct Skeleton {
 struct Binding {
 	std::string path;
 	J3DModelData* data = nullptr; // para no confundir un puntero reutilizado
+	GXColor tint       = { 255, 255, 255, 255 };
 };
 
 std::map<std::string, Pack> sPacks;
@@ -154,7 +155,7 @@ nectar::Affine34 affine(const Mtx m)
 	return a;
 }
 
-void drawPack(J3DModel* model, const Pack& p, const Skeleton& s)
+void drawPack(J3DModel* model, const Pack& p, const Skeleton& s, GXColor tint)
 {
 	// Matrices de los huesos en espacio de la cámara: los vértices llegan ya
 	// colocados y las de posición y normal son la identidad.
@@ -187,7 +188,6 @@ void drawPack(J3DModel* model, const Pack& p, const Skeleton& s)
 	GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
 	GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_COPY);
 	static const GXColor kWhite = { 255, 255, 255, 255 };
-	GXSetChanMatColor(GX_COLOR0A0, kWhite);
 	// Lo opaco primero; lo translúcido (el visor) después, sin escribir
 	// profundidad, o el cristal tapaba la cabeza.
 	for (int pass = 0; pass < 2; pass++) {
@@ -196,6 +196,7 @@ void drawPack(J3DModel* model, const Pack& p, const Skeleton& s)
 			const nectar::NhmPart& part = p.model.parts[i];
 			if (part.translucent() != (pass == 1)) continue;
 			GXLoadTexObj(const_cast<GXTexObj*>(&p.tex[i]), GX_TEXMAP0);
+			GXSetChanMatColor(GX_COLOR0A0, (part.flags & nectar::kNhmPartNoTint) ? kWhite : tint);
 			// Los triángulos del pack van al revés que los de GX (como en Pikmin 1).
 			GXSetCullMode((part.flags & nectar::kNhmPartNoCull) ? GX_CULL_NONE : GX_CULL_FRONT);
 			pc_gfx_begin(GX_TRIANGLES, GX_VTXFMT0, u16(part.vertices.size()));
@@ -235,7 +236,7 @@ void pc_p2_custom_bind_model(J3DModel* model, const char* nhmPath)
 	sModels[model] = b;
 }
 
-void pc_p2_custom_bind_model_data(J3DModelData* data, const char* nhmPath)
+void pc_p2_custom_bind_model_data(J3DModelData* data, const char* nhmPath, const unsigned char* rgb)
 {
 	if (!data) return;
 	if (!nhmPath || !*nhmPath) {
@@ -243,9 +244,35 @@ void pc_p2_custom_bind_model_data(J3DModelData* data, const char* nhmPath)
 		return;
 	}
 	Binding b;
-	b.path      = nhmPath;
-	b.data      = data;
+	b.path = nhmPath;
+	b.data = data;
+	if (rgb) b.tint = { rgb[0], rgb[1], rgb[2], 255 };
 	sData[data] = b;
+}
+
+const float (*pc_p2_custom_joint_mtx(J3DModel* model, int joint))[4]
+{
+	if (!model || joint < 0) return nullptr;
+	Binding* b = bindingOf(model);
+	Pack* p    = b ? pack(b->path) : nullptr;
+	if (!p || !(p->model.flags & nectar::kNhmModelRetarget)) return nullptr;
+	const Skeleton* s = skeleton(model->getModelData(), b->path, *p);
+	if (!s || std::size_t(joint) >= s->parent.size()) return nullptr;
+	// Una vez por modelo y fotograma: en el espacio del mundo (getAnmMtx).
+	struct Cached {
+		unsigned frame = ~0u;
+		std::vector<nectar::Affine34> anim;
+	};
+	static std::map<J3DModel*, Cached> cache;
+	Cached& c = cache[model];
+	if (c.frame != pc_gfx_frame_serial() || c.anim.size() != s->parent.size()) {
+		std::vector<nectar::Affine34> world(s->parent.size());
+		for (std::size_t j = 0; j < world.size(); j++) world[j] = affine(model->getAnmMtx(int(j)));
+		std::vector<float> skin;
+		nectar::nhmSkinMatrices(p->model, s->boneJoint, world, s->bind, s->parent, skin, &c.anim);
+		c.frame = pc_gfx_frame_serial();
+	}
+	return c.anim[std::size_t(joint)].m;
 }
 
 void pc_p2_custom_unbind_all(void)
@@ -281,7 +308,7 @@ bool pc_p2_custom_draw_packet(J3DMatPacket* packet)
 	// El material del cuerpo deja puestas las luces y el canal de color.
 	packet->mMaterial->load();
 	packet->mDisplayList->callDL();
-	drawPack(model, *p, *s);
+	drawPack(model, *p, *s, b->tint);
 	J3DShape::resetVcdVatCache();
 	return true;
 }

@@ -112,7 +112,7 @@ vista previa sobre el esqueleto de P2 en el creador (fase 7).
 - [x] 2. Esqueletos de P2
 - [x] 3. Dibujo en P2
 - [x] 4. Ranuras de capitán (la vista previa 3D de sus tarjetas, en la fase 6)
-- [ ] 5. Pikmin
+- [x] 5. Pikmin
 - [ ] 6. Selector y vista previa
 - [ ] 7. Creador de modelos y launcher
 - [ ] 8. Android y tests

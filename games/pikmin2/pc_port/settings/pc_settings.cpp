@@ -61,6 +61,7 @@
 #include "pc_speedrun.h"
 #if PIKI_P2_HOST
 #include "pc_p2_captains.h"
+#include "mods/pc_p2_pikmin_models.h"
 #include "pc_p2_coop.h"
 #include "pc_p2_captain_preview.h"
 #include "randomizer/pc_randomizer.h"
@@ -250,6 +251,8 @@ struct PcConfig {
     // vacío = el de p2Captain1/2. Por carpeta y no por número: el orden cambia
     // al instalar o quitar personajes.
     std::string p2Captain1Id, p2Captain2Id;
+    // Modelo de Pikmin del creador de modelos por color (EPikiKind 0-4), por id.
+    std::string pikminModel[PC_P2_PIKMIN_MODEL_COLOURS];
     // Última elección del selector 1P/2P, solo para preseleccionarla. La
     // partida en sí no la guarda (PLAN_COOP).
     int coopPlayers = 1;
@@ -370,6 +373,7 @@ struct PcConfig {
         p2Captain2 = -1;
         p2Captain1Id.clear();
         p2Captain2Id.clear();
+        for (std::string& m : pikminModel) m.clear();
         coopPlayers = 1;
 #if PIKI_PC_TOUCH
         coopSplit = 1;
@@ -1196,6 +1200,11 @@ unsigned char pc_settings_startup_language(void) {
     return language;
 }
 
+const char* pc_settings_get_pikmin_model(int color)
+{
+    return color >= 0 && color < PC_P2_PIKMIN_MODEL_COLOURS ? sConfig.pikminModel[color].c_str() : "";
+}
+
 unsigned char pc_settings_get_language(void) {
     if (sLanguage == 0xFF) pc_settings_startup_language();
     return sLanguage;
@@ -1285,6 +1294,10 @@ void saveConfig() {
     out << "p2Captain2 = " << sConfig.p2Captain2 << "\n";
     out << "p2Captain1Id = " << sConfig.p2Captain1Id << "\n";
     out << "p2Captain2Id = " << sConfig.p2Captain2Id << "\n";
+    {
+        static const char* const kKeys[PC_P2_PIKMIN_MODEL_COLOURS] = { "Blue", "Red", "Yellow", "Purple", "White" };
+        for (int c = 0; c < PC_P2_PIKMIN_MODEL_COLOURS; c++) out << "pikminModel" << kKeys[c] << " = " << sConfig.pikminModel[c] << "\n";
+    }
 #endif
     out << "coopPlayers = " << sConfig.coopPlayers << "\n";
     out << "coopSplit = " << sConfig.coopSplit << "\n";
@@ -1588,6 +1601,11 @@ void loadConfig() {
             if (sConfig.p2Captain1 < 0 || sConfig.p2Captain1 >= PC_P2_CHAR_COUNT) sConfig.p2Captain1 = 0;
         }
         else if (key == "p2Captain1Id") sConfig.p2Captain1Id = val;
+        else if (key == "pikminModelBlue") sConfig.pikminModel[0] = val;
+        else if (key == "pikminModelRed") sConfig.pikminModel[1] = val;
+        else if (key == "pikminModelYellow") sConfig.pikminModel[2] = val;
+        else if (key == "pikminModelPurple") sConfig.pikminModel[3] = val;
+        else if (key == "pikminModelWhite") sConfig.pikminModel[4] = val;
         else if (key == "p2Captain2Id") sConfig.p2Captain2Id = val;
         else if (key == "p2Captain2") {
             sConfig.p2Captain2 = atoi(val.c_str());
@@ -2813,6 +2831,23 @@ void advancedRowChange(int row, bool left, bool right) {
 }
 
 void graphicsRowChange(int row, bool left, bool right, bool ok) {
+    // Modelos de Pikmin: el del juego y los de Load/Pikmin para ese color. Se
+    // aplican al cargar los Pikmin (la próxima zona o cueva).
+    if (row >= 14 && row <= 18) {
+        static const int kColour[5] = { 1, 2, 0, 3, 4 }; // rojo, amarillo, azul, morado, blanco
+        const int color = kColour[row - 14];
+        if (row == 14) pc_p2_pikmin_models_refresh(); // instalados con el juego abierto
+        const int count = pc_p2_pikmin_models_count(color);
+        int at          = -1; // -1 = el del juego
+        for (int k = 0; k < count; k++)
+            if (sPending.pikminModel[color] == pc_p2_pikmin_models_id(color, k)) at = k;
+        at = left ? (at + 1 + count) % (count + 1) - 1 : (at + 2) % (count + 1) - 1;
+        sPending.pikminModel[color] = at < 0 ? std::string() : std::string(pc_p2_pikmin_models_id(color, at));
+        if (!sProbing) sConfig.pikminModel[color] = sPending.pikminModel[color];
+        (void)right;
+        (void)ok;
+        return;
+    }
     // Texture packs lives in the Graphics page: it is a rendering choice,
     // it needs restarting to take effect, and it is opened rather than
     // cycled so the install entry has room next to the pack list.
@@ -8611,6 +8646,16 @@ void graphicsRowValue(int i, char* value, size_t n) {
         break;
     }
     case 12: snprintf(value, n, "%s", sPending.perPixelLighting ? "Smooth" : "Original"); break;
+    case 14:
+    case 15:
+    case 16:
+    case 17:
+    case 18: {
+        static const int kColour[5] = { 1, 2, 0, 3, 4 };
+        const char* name = pc_p2_pikmin_models_name_of(kColour[i - 14], sPending.pikminModel[kColour[i - 14]].c_str());
+        snprintf(value, n, "%s", *name ? name : "Game");
+        break;
+    }
     case 13: {
         const char* names[4] = { "Original", "Soft", "Normal", "Strong" };
         snprintf(value, n, "%s", names[(sPending.shadows >= 0 && sPending.shadows <= 3) ? sPending.shadows : 0]);
@@ -8788,6 +8833,13 @@ const GroupRow kGraphicsRows[] = {
     { SRC_GFX, 10, "Texture Packs", "Replacement textures made by the community. Install one from its zip or switch between them. Changes need a restart." },
 #if !PIKI_P2_HOST // los modelos HD son de Pikmin 1
     { SRC_GFX, 11, "HD Models", "High-detail character models. Install each one from its zip, then turn it On or Off." },
+#endif
+#if PIKI_P2_HOST // modelos del creador de modelos (Load/Pikmin)
+    { SRC_GFX, 14, "Red Pikmin Model", "Game: the original Red Pikmin. Or a model made with the model maker and installed for this game. Applies from the next area." },
+    { SRC_GFX, 15, "Yellow Pikmin Model", "Game: the original Yellow Pikmin. Or a model made with the model maker and installed for this game. Applies from the next area." },
+    { SRC_GFX, 16, "Blue Pikmin Model", "Game: the original Blue Pikmin. Or a model made with the model maker and installed for this game. Applies from the next area." },
+    { SRC_GFX, 17, "Purple Pikmin Model", "Game: the original Purple Pikmin. Or a model made with the model maker and installed for this game. Applies from the next area." },
+    { SRC_GFX, 18, "White Pikmin Model", "Game: the original White Pikmin. Or a model made with the model maker and installed for this game. Applies from the next area." },
 #endif
 };
 

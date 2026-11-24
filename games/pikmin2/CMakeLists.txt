@@ -378,6 +378,7 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
         ${PC_PORT_DIR}/mods/pc_hd_model_convert.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/../../libs/nectar_assets/src/nhm.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/../../libs/nectar_assets/src/charpack.cpp
+        ${PC_PORT_DIR}/mods/pc_p2_pikmin_models.cpp
         ${PC_PORT_DIR}/pc_pad_axis.cpp
         ${PC_PORT_DIR}/pc_menu_pad.cpp
         ${PC_PORT_DIR}/pc_menu_pointer.cpp

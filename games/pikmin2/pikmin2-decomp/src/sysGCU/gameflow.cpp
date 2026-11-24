@@ -1,5 +1,6 @@
 #ifdef PIKI_PC_PORT
 #include "pc_p2_captain_preview.h"
+#include "pc_p2_custom_characters.h"
 #endif
 #include "types.h"
 #ifdef PIKI_PC_PORT
@@ -171,6 +172,8 @@ ISection* GameFlow::createSection(JKRHeap* heap)
 	// Postproceso solo en partida (no en arranque, titulo ni menus).
 	pc_gfx_set_post_allowed(mActiveSectionFlag == SN_SingleGame || mActiveSectionFlag == SN_ChallengeGame
 	                        || mActiveSectionFlag == SN_VSGame);
+	// Los modelos de la sección anterior ya no existen (personajes propios).
+	pc_p2_custom_unbind_all();
 #endif
 	switch (mActiveSectionFlag) {
 	case SN_Demo:

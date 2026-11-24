@@ -18,10 +18,16 @@ struct J3DMatPacket;
 /// Dibuja `model` con el pack de `nhmPath` (UTF-8) en vez de sus formas.
 /// nullptr o "" lo quita.
 void pc_p2_custom_bind_model(J3DModel* model, const char* nhmPath);
-/// Lo mismo para todos los modelos de `data` (los Pikmin de un color).
-void pc_p2_custom_bind_model_data(J3DModelData* data, const char* nhmPath);
+/// Lo mismo para todos los modelos de `data` (los Pikmin de un color), con
+/// el tinte `rgb` (nullptr = blanco, sin teñir).
+void pc_p2_custom_bind_model_data(J3DModelData* data, const char* nhmPath, const unsigned char* rgb);
 /// Quita todos los modelos (al cambiar de sección se crean de nuevo).
 void pc_p2_custom_unbind_all(void);
+
+/// Matriz del hueso `joint` de un modelo propio con las posiciones de su
+/// pack (para colgar de él la hoja de un Pikmin más alto o más bajo). nullptr
+/// si el modelo no es propio o el pack usa los huesos del juego.
+const float (*pc_p2_custom_joint_mtx(J3DModel* model, int joint))[4];
 
 /// Desde J3DMatPacket::draw: true si el paquete es de un modelo propio. Su
 /// primer paquete de cada pasada dibuja el pack; los demás no dibujan nada.

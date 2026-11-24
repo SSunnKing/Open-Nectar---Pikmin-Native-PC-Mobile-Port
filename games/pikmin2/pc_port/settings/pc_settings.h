@@ -298,6 +298,8 @@ unsigned char pc_settings_startup_language(void);
 /// The language shown and changed in the F1 menu. Takes effect on the next
 /// start: the screens the game has already loaded belong to the old one.
 unsigned char pc_settings_get_language(void);
+// Modelo de Pikmin propio elegido para el color (EPikiKind 0-4), por id; "" el del juego.
+const char* pc_settings_get_pikmin_model(int color);
 void pc_settings_set_language(unsigned char language);
 
 /**

@@ -115,7 +115,7 @@ bool parseInfo(const std::string& text, CharacterInfo& info, std::string& error)
 		return false;
 	}
 	const bool pikmin = info.target == kTargetPikminRed || info.target == kTargetPikminYellow || info.target == kTargetPikminBlue
-	                 || info.target == kTargetPikminAll;
+	                 || info.target == kTargetPikminPurple || info.target == kTargetPikminWhite || info.target == kTargetPikminAll;
 	if (info.target != kTargetCaptain && !pikmin) {
 		error = "character.json: unknown target '" + info.target + "'";
 		return false;

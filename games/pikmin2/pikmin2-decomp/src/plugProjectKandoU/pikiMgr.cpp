@@ -16,6 +16,10 @@ extern "C" int pc_settings_get_no_day_advance(void);
 #include "Game/Entities/ItemOnyon.h"
 #include "PikiAI.h"
 #include "nans.h"
+#ifdef PIKI_PC_PORT
+#include "pc_p2_custom_characters.h"
+#include "mods/pc_p2_pikmin_models.h"
+#endif
 
 namespace Game {
 
@@ -246,6 +250,18 @@ void PikiMgr::loadBmd(int id, char* name)
 	}
 
 	(&mBluPikiModel)[id] = data;
+#ifdef PIKI_PC_PORT
+	// Modelo del creador de modelos elegido para este color (Opciones > Gráficos).
+	// El modelo anterior de este color (otro subnivel) ya no existe.
+	static J3DModelData* sPcPrevious[PikiColorCount];
+	if (id >= 0 && id < PikiColorCount) {
+		pc_p2_custom_bind_model_data(sPcPrevious[id], nullptr, nullptr);
+		sPcPrevious[id] = data;
+	}
+	unsigned char rgb[3] = { 255, 255, 255 };
+	const char* custom   = id < PC_P2_PIKMIN_MODEL_COLOURS ? pc_p2_pikmin_model_path(id, rgb) : nullptr;
+	pc_p2_custom_bind_model_data(data, custom, rgb);
+#endif
 }
 
 /**
@@ -364,6 +380,14 @@ void PikiMgr::doSimpleDraw(Viewport* vp)
 				if (id == i) {
 					Mtx test;
 					Matrixf* mtx = piki->mLeafStemJoint->getWorldMatrix();
+#ifdef PIKI_PC_PORT
+					// Pikmin propio: la hoja, en la punta del tallo de su pack.
+					typedef const float(*Rows)[4];
+					const Rows custom = pc_p2_custom_joint_mtx(piki->mModel->mJ3dModel, piki->mLeafStemJoint->mJointIndex);
+					if (custom) {
+						PSMTXConcat(vp->getMatrix(true)->mMatrix.mtxView, const_cast<float(*)[4]>(custom), test);
+					} else
+#endif
 					PSMTXConcat(vp->getMatrix(true)->mMatrix.mtxView, mtx->mMatrix.mtxView, test);
 					GXLoadPosMtxImm(test, 0);
 					GXLoadNrmMtxImm(test, 0);
