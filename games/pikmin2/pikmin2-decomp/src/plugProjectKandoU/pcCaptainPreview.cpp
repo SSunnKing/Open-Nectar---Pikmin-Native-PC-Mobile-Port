@@ -5,6 +5,7 @@
 // draw buffers propios.
 #include "pc_p2_captain_preview.h"
 #include "pc_p2_captains.h"
+#include "pc_p2_custom_characters.h"
 
 #include "JSystem/J3D/J3DAnmLoader.h"
 #include "JSystem/J3D/J3DDrawBuffer.h"
@@ -23,6 +24,7 @@
 #include "p2_host_restimg.h"
 
 #include <algorithm>
+#include <map>
 #include <chrono>
 #include <math.h>
 
@@ -134,6 +136,29 @@ J3DModel* loadCharacter(int character)
 	return sModel[character];
 }
 
+// Personajes del creador de modelos: un J3DModel propio sobre el modelo de
+// Olimar, dibujado con su pack (pcCustomCharacter).
+std::map<int, J3DModel*> sCustomModel;
+
+J3DModel* loadCustom(int character)
+{
+	auto it = sCustomModel.find(character);
+	if (it != sCustomModel.end()) {
+		pc_p2_custom_bind_model(it->second, pc_p2_custom_character_model(character)); // la sección pudo borrar el enlace
+		return it->second;
+	}
+	if (!loadCharacter(PC_P2_CHAR_OLIMAR)) {
+		return nullptr;
+	}
+	JKRHeap* prev = JKRGetCurrentHeap();
+	sHeap->becomeCurrentHeap();
+	J3DModel* model = new J3DModel(sData[PC_P2_CHAR_OLIMAR], 0, 1);
+	prev->becomeCurrentHeap();
+	sCustomModel[character] = model;
+	pc_p2_custom_bind_model(model, pc_p2_custom_character_model(character));
+	return model;
+}
+
 f32 nowSeconds()
 {
 	return (f32)(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()
@@ -211,10 +236,13 @@ void pc_p2_captain_preview_draw(int character, int x, int y, int w, int h, int s
 	if (character < 0) {
 		character = PC_P2_CHAR_LOUIE;
 	}
-	if (character >= PC_P2_CHAR_COUNT) {
+	const bool custom = pc_p2_character_is_custom(character);
+	if (character >= PC_P2_CHAR_COUNT && !custom) {
 		return;
 	}
-	J3DModel* model = loadCharacter(character);
+	J3DModel* model = custom ? loadCustom(character) : loadCharacter(character);
+	// Animación y hoja: las del personaje de serie en que se apoya.
+	const int baseChar = pc_p2_character_base(character);
 	if (!model) {
 		return;
 	}
@@ -284,9 +312,9 @@ void pc_p2_captain_preview_draw(int character, int x, int y, int w, int h, int s
 	PSMTXConcat(base, scaleMtx, base);
 	model->i_setBaseTRMtx(base);
 
-	if (sWait && sWaitCalc[character]) {
+	if (sWait && sWaitCalc[baseChar]) {
 		sWait->mCurrentFrame = fmodf(secs * 30.0f, (f32)sWait->mTotalFrameCount);
-		model->mModelData->mJointTree.mJoints[0]->mMtxCalc = sWaitCalc[character];
+		model->mModelData->mJointTree.mJoints[0]->mMtxCalc = sWaitCalc[baseChar];
 	}
 
 	J3DDrawBuffer* prevOpa = j3dSys.getDrawBuffer(J3DSys::SYSDRAW_Opa);
@@ -301,11 +329,11 @@ void pc_p2_captain_preview_draw(int character, int x, int y, int w, int h, int s
 	model->viewCalc();
 
 	// Los Pikmin llevan la hoja en happajnt3, como en partida.
-	if (pc_p2_character_is_pikmin(character) && sLeaf && sLeafJoint[character] >= 0) {
+	if (pc_p2_character_is_pikmin(character) && sLeaf && sLeafJoint[baseChar] >= 0) {
 		// Como PikiMgr::doSimpleDraw, la forma de la hoja va tal cual sobre la
 		// matriz de happajnt3: sin la transformación de la articulación raíz de
 		// leaf.bmd, que la apartaba de la punta de la antena.
-		MtxP stem = model->mMtxBuffer->mWorldMatrices[sLeafJoint[character]];
+		MtxP stem = model->mMtxBuffer->mWorldMatrices[sLeafJoint[baseChar]];
 		sLeaf->i_setBaseTRMtx(stem);
 		sLeaf->calc();
 		for (u16 j = 0; j < sLeafData->getJointNum(); j++) {
