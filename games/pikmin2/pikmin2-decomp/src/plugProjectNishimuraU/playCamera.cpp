@@ -766,8 +766,17 @@ void PlayCamera::updateParms(int flag)
 	if (pcFirstPersonFor(mTargetObj)) {
 		mProjectionNear = 3.0f; // con el ojo en la cabeza, el plano normal recorta lo cercano
 	}
-#endif
+	// Mouse Wheel zoom moves the camera up to 2.5x further back, but the far
+	// planes in the camera parms (1500-2800 above ground) were tuned for the
+	// original distances (600-1200). Push the far plane back by the extra
+	// distance so the view keeps the original depth past the captain;
+	// otherwise objects on screen fall behind it and are culled.
+	const f32 pcZoom = sPcZoomMul[pcCamPlayer(mTargetObj)];
+	const f32 pcFarZ = mFarZPlane + (pcZoom > 1.0f ? mGoalTargetDistance * (pcZoom - 1.0f) : 0.0f);
+	mProjectionFar   = (mProjectionFar * invrate) + (pcFarZ * rate);
+#else
 	mProjectionFar      = (mProjectionFar * invrate) + (mFarZPlane * rate);
+#endif
 	if (flag & CAMFLAGS_InZoomCam) {
 		rate    = PC_LERP(0.175f);
 		invrate = 1.0f - rate;
