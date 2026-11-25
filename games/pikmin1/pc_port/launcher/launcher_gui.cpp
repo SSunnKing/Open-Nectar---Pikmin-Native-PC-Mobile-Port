@@ -1536,19 +1536,13 @@ struct Hub {
                     ImGui::SetCursorScreenPos(ImVec2(left, below + buttonsGap + 44.0f + 10.0f));
                     if (glassButton("Content", role::kGameTool, 44.0f)) choose(HubAction::InstallCharacter, HubGame(i));
                 } else {
-#ifdef __ANDROID__
-                    // Android: sin selector de archivos nativo; los mapas se
-                    // importan solos desde user/import.
-                    ImGui::SetCursorScreenPos(ImVec2(centre - wideW * 0.5f, below + buttonsGap));
-                    if (glassButton("HD textures", role::kGameWide, 44.0f)) choose(HubAction::TexturePack, HubGame(i));
-#else
                     // HD textures y Content (mapas, campañas y personajes del
-                    // jugador; en Pikmin 2, solo personajes).
+                    // jugador; en Pikmin 2, solo personajes). En Android, con el
+                    // selector de archivos del sistema.
                     ImGui::SetCursorScreenPos(ImVec2(left, below + buttonsGap));
                     if (glassButton("HD textures", role::kGameTool, 44.0f)) choose(HubAction::TexturePack, HubGame(i));
                     ImGui::SetCursorScreenPos(ImVec2(right, below + buttonsGap));
                     if (glassButton("Content", role::kGameTool, 44.0f)) choose(HubAction::InstallCharacter, HubGame(i));
-#endif
                 }
             }
 #if PIKMIN_LAUNCHER_NETPLAY

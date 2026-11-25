@@ -19,6 +19,7 @@
 #include "launcher_gui.h"
 #include "launcher_platform.h"
 #include "crash_report.h"
+#include "content_dialog.h"
 #include "texture_pack_download.h"
 
 #include <SDL2/SDL.h>
@@ -301,6 +302,74 @@ std::string activityString(const char* name, const char* signature)
     return out;
 }
 
+// Botón Content, Export: guarda `src` donde elija el usuario
+// (LauncherActivity.saveContentBlocking). 1 guardado, 0 cancelado, -1 error.
+int saveContentFile(const fs::path& src, const std::string& name, std::string& error)
+{
+    JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
+    jobject activity = (jobject)SDL_AndroidGetActivity();
+    if (!env || !activity) {
+        error = "no activity";
+        return -1;
+    }
+    jclass cls = env->GetObjectClass(activity);
+    jmethodID method = env->GetMethodID(cls, "saveContentBlocking", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
+    int result = -1;
+    if (method) {
+        jstring jSrc = env->NewStringUTF(src.c_str());
+        jstring jName = env->NewStringUTF(name.c_str());
+        jstring jResult = (jstring)env->CallObjectMethod(activity, method, jSrc, jName);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            error = "export failed";
+        } else if (!jResult) {
+            result = 0;
+        } else {
+            error  = jniString(env, jResult);
+            result = error.empty() ? 1 : -1;
+        }
+        if (jResult) env->DeleteLocalRef(jResult);
+        env->DeleteLocalRef(jSrc);
+        env->DeleteLocalRef(jName);
+    } else {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        error = "this version cannot export";
+    }
+    env->DeleteLocalRef(cls);
+    env->DeleteLocalRef(activity);
+    return result;
+}
+
+// Botón Content en Android: el selector del sistema para importar (el archivo
+// llega copiado a la caché) y "Guardar como" para exportar.
+void runAndroidContent(HubWindow& hub, bool pikmin2, const fs::path& gameDir)
+{
+    ContentIo io;
+    io.pickImport = [&hub](bool) {
+        return fs::u8path(hub.runDialog([] { return activityString("pickContentBlocking", "()Ljava/lang/String;"); }, "file picker"));
+    };
+    io.importDone = [](const fs::path& file) {
+        std::error_code ec;
+        fs::remove(file, ec);
+    };
+    io.exportEntry = [&hub, gameDir](const ContentEntry& entry, std::string& where, std::string& error) {
+        // Primero en la carpeta del juego (cache/), luego donde elija el usuario.
+        std::error_code ec;
+        const fs::path staging = gameDir / "cache" / "content-export";
+        fs::create_directories(staging, ec);
+        const std::string name = contentExportName(entry);
+        const fs::path temp    = staging / name;
+        if (!exportContent(entry, temp, error)) return false;
+        int saved = 0;
+        hub.runDialog([&] { saved = saveContentFile(temp, name, error); return std::string(); }, "save picker");
+        fs::remove(temp, ec);
+        where = name;
+        if (saved == 0) error.clear(); // cancelado
+        return saved == 1;
+    };
+    runContentManager(hub, pikmin2, gameDir, io);
+}
+
 // True when a shortcut intent arrived (cold start, or onNewIntent). The two
 // strings are the extra and the data URI; both empty is a normal open.
 bool takeLaunchChoice(std::string& extra, std::string& data)
@@ -467,6 +536,12 @@ int main(int argc, char** argv)
             if (!state.games[index].installed) continue;
             startGame(state.games[index].executable, state.games[index].directory);
             return 0;
+        }
+        if (choice.action == HubAction::InstallCharacter) {
+            // Botón Content: mapas y campañas (Pikmin 1), capitanes y Pikmin.
+            if (!state.games[index].installed) continue;
+            runAndroidContent(hub, choice.game == HubGame::Pikmin2, fs::u8path(state.games[index].directory));
+            continue;
         }
         if (choice.action == HubAction::TexturePack) {
             if (!state.games[index].installed) continue;

@@ -1097,6 +1097,18 @@ if(ANDROID AND NOT TARGET nectar_launcher)
     add_library(nectar_launcher SHARED
         pc_port/launcher/launcher_android_main.cpp
         pc_port/launcher/launcher_gui.cpp
+        # Botón Content (mapas, campañas y personajes), como en escritorio.
+        pc_port/launcher/content_manager.cpp
+        pc_port/launcher/content_dialog.cpp
+        ${NECTAR_LIBS_DIR}/nectar_mapcore/src/map_json.cpp
+        ${NECTAR_LIBS_DIR}/nectar_mapcore/src/i18n.cpp
+        ${NECTAR_LIBS_DIR}/nectar_mapcore/src/campaign.cpp
+        ${NECTAR_LIBS_DIR}/nectar_mapcore/src/pack.cpp
+        ${NECTAR_LIBS_DIR}/nectar_assets/src/charpack.cpp
+        ${NECTAR_LIBS_DIR}/nectar_assets/src/mod.cpp
+        ${NECTAR_LIBS_DIR}/nectar_assets/src/gen.cpp
+        ${NECTAR_LIBS_DIR}/nectar_assets/src/image.cpp
+        ${NECTAR_LIBS_DIR}/nectar_assets/src/mesh_mod.cpp
         pc_port/launcher/version_label.cpp
         pc_port/launcher/install_directory.cpp
         pc_port/launcher/install_note_layout.cpp
@@ -1121,7 +1133,9 @@ if(ANDROID AND NOT TARGET nectar_launcher)
         ${PC_PORT_DIR}
         "${LAUNCHER_EMBED_DIR}"
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb
-        ${SDL2_INCLUDE_DIRS})
+        ${SDL2_INCLUDE_DIRS}
+        ${NECTAR_LIBS_DIR}/nectar_assets/include ${NECTAR_LIBS_DIR}/nectar_assets/src
+        ${NECTAR_LIBS_DIR}/nectar_mapcore/include ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann/include)
     set(OPEN_NECTAR_VERSION "1.3" CACHE STRING "Open Nectar version of this build (GitHub release tag)")
     target_compile_definitions(nectar_launcher PRIVATE OPEN_NECTAR_VERSION="${OPEN_NECTAR_VERSION}")
     target_compile_options(nectar_launcher PRIVATE ${NATIVE_COMPILE_OPTIONS})
@@ -1179,6 +1193,7 @@ if(PIKMIN_BUILD_LAUNCHER)
         pc_port/launcher/launcher_gui.cpp
         # Botón Content: mapas, campañas y personajes de cada juego.
         pc_port/launcher/content_manager.cpp
+        pc_port/launcher/content_dialog.cpp
         ${NECTAR_LIBS_DIR}/nectar_mapcore/src/map_json.cpp
         ${NECTAR_LIBS_DIR}/nectar_mapcore/src/i18n.cpp
         ${NECTAR_LIBS_DIR}/nectar_mapcore/src/campaign.cpp

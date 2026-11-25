@@ -18,7 +18,7 @@
 #include "crash_report.h"
 #include "launcher_platform.h"
 #include "nectar_paths/paths.h"
-#include "content_manager.h"
+#include "content_dialog.h"
 #include "release_update.h"
 #include "texture_pack_download.h"
 #include "nectar_assets/charpack.h"
@@ -744,65 +744,29 @@ fs::path pikmin2GameDirectory(const fs::path& installDirectory) { return install
 // sitio y para que Pikmin 1 use su Louie (pc_pikmin2_dir_file, misma ruta).
 fs::path pikmin2DirFile() { return nectar::paths::configFile("pikmin2_dir"); }
 
-// Botón Content (content_manager.h): la lista de lo instalado en un juego
-// hasta que se cierra. Los diálogos nativos van por runDialog (la ventana
-// sigue dibujándose).
-void runContentManager(pikmin::launcher::HubWindow& home, bool pikmin2, const fs::path& gameDir)
+// Botón Content en escritorio: los diálogos nativos van por runDialog (la
+// ventana sigue dibujándose) y lo exportado, a la carpeta que se elija.
+void runDesktopContent(pikmin::launcher::HubWindow& home, bool pikmin2, const fs::path& gameDir)
 {
     using namespace pikmin::launcher;
-    const std::string gameName = pikmin2 ? "Pikmin 2" : "Pikmin";
-    const char* sections[] = { "Maps", "Campaigns", "Captains", "Pikmin" };
-    for (;;) {
-        const std::vector<ContentEntry> entries = listContent(gameDir, !pikmin2);
-        std::vector<ContentRow> rows;
-        std::vector<int> rowEntry; // -1 para los títulos
-        int lastKind = -1;
-        for (std::size_t i = 0; i < entries.size(); ++i) {
-            if (int(entries[i].kind) != lastKind) {
-                lastKind = int(entries[i].kind);
-                rows.push_back({ sections[lastKind], "", true });
-                rowEntry.push_back(-1);
-            }
-            rows.push_back({ entries[i].name, entries[i].detail, false });
-            rowEntry.push_back(int(i));
-        }
-        const std::string note = pikmin2 ? "Captains and Pikmin from the model maker (.nectarchar)."
-                                         : "Maps, campaigns (.nectarpack) and characters from the model maker (.nectarchar).";
-        const ContentPick pick = home.pickContent(gameName + " content", note, rows);
-        if (pick.action == ContentPick::Close) return;
-        std::string error, name;
-        if (pick.action == ContentPick::Import) {
-            const std::string patterns = pikmin2 ? "*.nectarchar" : "*.nectarpack *.zip *.nectarchar";
-            const fs::path file = fs::u8path(home.runDialog([&] {
-                return platform::askForFile("Import into " + gameName, pikmin2 ? "Character" : "Map pack or character", patterns).u8string();
-            }, "file picker"));
-            if (file.empty()) continue;
-            if (importContent(file, gameDir, !pikmin2, name, error))
-                home.ask("Imported", "\"" + name + "\" is installed in " + gameName + ".", "OK");
-            else
-                home.ask("Could not import", error, "OK", "", true);
-            continue;
-        }
-        if (pick.row < 0 || pick.row >= int(rowEntry.size()) || rowEntry[std::size_t(pick.row)] < 0) continue;
-        const ContentEntry& entry = entries[std::size_t(rowEntry[std::size_t(pick.row)])];
-        if (pick.action == ContentPick::Export) {
-            const fs::path folder = fs::u8path(home.runDialog([&] {
-                return platform::askForInstallDirectory("Folder to export \"" + entry.name + "\" to").u8string();
-            }, "folder picker"));
-            if (folder.empty()) continue;
-            const fs::path file = folder / contentExportName(entry);
-            if (exportContent(entry, file, error))
-                home.ask("Exported", "Saved as " + file.u8string() + ".", "OK");
-            else
-                home.ask("Could not export", error, "OK", "", true);
-        } else if (pick.action == ContentPick::Remove) {
-            if (home.ask("Remove \"" + entry.name + "\"?",
-                         "It is deleted from " + gameName + ". Export it first if you want to keep a copy.", "Remove", "", false, "Cancel")
-                != 0)
-                continue;
-            if (!removeContent(gameDir, entry, error)) home.ask("Could not remove", error, "OK", "", true);
-        }
-    }
+    ContentIo io;
+    io.pickImport = [&home](bool p2) {
+        const std::string patterns = p2 ? "*.nectarchar" : "*.nectarpack *.zip *.nectarchar";
+        return fs::u8path(home.runDialog([&] {
+            return platform::askForFile(std::string("Import into ") + (p2 ? "Pikmin 2" : "Pikmin"),
+                                        p2 ? "Character" : "Map pack or character", patterns).u8string();
+        }, "file picker"));
+    };
+    io.exportEntry = [&home](const ContentEntry& entry, std::string& where, std::string& error) {
+        const fs::path folder = fs::u8path(home.runDialog([&] {
+            return platform::askForInstallDirectory("Folder to export \"" + entry.name + "\" to").u8string();
+        }, "folder picker"));
+        if (folder.empty()) return false;
+        const fs::path file = folder / contentExportName(entry);
+        where               = file.u8string();
+        return exportContent(entry, file, error);
+    };
+    runContentManager(home, pikmin2, gameDir, io);
 }
 
 fs::path rememberedPikmin2Directory() { return nectar::paths::readStoredPath(pikmin2DirFile()); }
@@ -1651,7 +1615,7 @@ int main(int argc, char** argv)
                         // Botón Content: mapas y campañas (Pikmin 1), capitanes y
                         // Pikmin del creador de modelos de ese juego. Importar,
                         // exportar y quitar (content_manager.h).
-                        runContentManager(*home, choice.game == pikmin::launcher::HubGame::Pikmin2,
+                        runDesktopContent(*home, choice.game == pikmin::launcher::HubGame::Pikmin2,
                                           fs::u8path(hubState.games[choice.game == pikmin::launcher::HubGame::Pikmin2 ? 1 : 0].directory));
                         continue;
                     }

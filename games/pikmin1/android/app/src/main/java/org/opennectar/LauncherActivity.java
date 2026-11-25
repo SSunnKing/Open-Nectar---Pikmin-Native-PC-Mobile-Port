@@ -1,6 +1,7 @@
 package org.opennectar;
 
 import android.content.Intent;
+import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -10,6 +11,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
+import android.provider.OpenableColumns;
 import android.view.WindowManager;
 
 import androidx.core.content.pm.ShortcutInfoCompat;
@@ -19,6 +21,7 @@ import androidx.core.graphics.drawable.IconCompat;
 import org.libsdl.app.SDLActivity;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -41,6 +44,12 @@ import java.util.concurrent.CountDownLatch;
  */
 public class LauncherActivity extends SDLActivity {
     private static final int PICK_IMAGE = 1;
+    // Botón Content: importar (abrir) y exportar (guardar como) con el selector del sistema.
+    private static final int PICK_CONTENT = 2;
+    private static final int SAVE_CONTENT = 3;
+    private final Object contentLock = new Object();
+    private boolean contentDone;
+    private Uri contentUri;
 
     private final Object pickLock = new Object();
     private boolean pickDone;
@@ -220,9 +229,88 @@ public class LauncherActivity extends SDLActivity {
         }
     }
 
+    /** Espera el resultado de PICK_CONTENT o SAVE_CONTENT (hilo de SDL). */
+    private Uri waitContent(Intent intent, int request) {
+        synchronized (contentLock) {
+            contentDone = false;
+            contentUri = null;
+        }
+        runOnUiThread(() -> startActivityForResult(intent, request));
+        synchronized (contentLock) {
+            while (!contentDone) {
+                try {
+                    contentLock.wait();
+                } catch (InterruptedException e) {
+                    return null;
+                }
+            }
+            return contentUri;
+        }
+    }
+
+    /**
+     * Botón Content, Import: el archivo elegido, copiado a la caché con su
+     * nombre (el lado nativo mira la extensión y lo borra después). null si
+     * se cancela o no se puede leer. Bloquea.
+     */
+    public String pickContentBlocking() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        Uri uri = waitContent(intent, PICK_CONTENT);
+        if (uri == null) return null;
+        String name = "import.bin";
+        try (Cursor c = getContentResolver().query(uri, new String[] { OpenableColumns.DISPLAY_NAME }, null, null, null)) {
+            if (c != null && c.moveToFirst() && c.getString(0) != null) name = new File(c.getString(0)).getName();
+        } catch (Exception ignored) {
+        }
+        File dir = new File(getCacheDir(), "content-import");
+        dir.mkdirs();
+        File target = new File(dir, name);
+        try (InputStream in = getContentResolver().openInputStream(uri); OutputStream out = new FileOutputStream(target)) {
+            if (in == null) return null;
+            byte[] buffer = new byte[64 * 1024];
+            for (int n; (n = in.read(buffer)) > 0;) out.write(buffer, 0, n);
+            return target.getAbsolutePath();
+        } catch (Exception e) {
+            target.delete();
+            return null;
+        }
+    }
+
+    /**
+     * Botón Content, Export: guarda `srcPath` donde elija el usuario (con
+     * `name` de nombre propuesto). "" si se guarda, null si se cancela, o el
+     * error. Bloquea.
+     */
+    public String saveContentBlocking(String srcPath, String name) {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/octet-stream");
+        intent.putExtra(Intent.EXTRA_TITLE, name);
+        Uri uri = waitContent(intent, SAVE_CONTENT);
+        if (uri == null) return null;
+        try (InputStream in = new FileInputStream(srcPath); OutputStream out = getContentResolver().openOutputStream(uri)) {
+            if (out == null) return "could not open the destination";
+            byte[] buffer = new byte[64 * 1024];
+            for (int n; (n = in.read(buffer)) > 0;) out.write(buffer, 0, n);
+            return "";
+        } catch (Exception e) {
+            return e.getMessage() == null ? e.toString() : e.getMessage();
+        }
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == PICK_CONTENT || requestCode == SAVE_CONTENT) {
+            synchronized (contentLock) {
+                contentUri = resultCode == RESULT_OK && data != null ? data.getData() : null;
+                contentDone = true;
+                contentLock.notifyAll();
+            }
+            return;
+        }
         if (requestCode != PICK_IMAGE) return;
         int fd = -1;
         if (resultCode == RESULT_OK && data != null && data.getData() != null) {
