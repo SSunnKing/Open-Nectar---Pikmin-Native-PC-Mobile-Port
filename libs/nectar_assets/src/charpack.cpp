@@ -384,6 +384,26 @@ bool installCharacterPack(const std::string& gameDir, const std::string& packPat
 	return true;
 }
 
+bool readInstalledCharacter(const std::string& characterDir, CharacterFiles& files, std::string& error)
+{
+	files               = CharacterFiles();
+	const fs::path dir  = fs::u8path(characterDir);
+	std::vector<std::uint8_t> meta;
+	if (!readFile(dir / "character.json", meta)) {
+		error = "character.json is missing";
+		return false;
+	}
+	if (!parseInfo(std::string(meta.begin(), meta.end()), files.info, error)) return false;
+	files.info.id = dir.filename().u8string();
+	if (!readFile(dir / "model.nhm", files.nhm) || !validNhm(files.nhm, error)) {
+		if (error.empty()) error = "model.nhm is missing";
+		return false;
+	}
+	readFile(dir / "portrait.png", files.portrait); // puede no tener
+	readProjectFolder(characterDir, files.project);
+	return true;
+}
+
 namespace {
 
 std::vector<CharacterInfo> listIn(const std::string& root, bool pikmin)

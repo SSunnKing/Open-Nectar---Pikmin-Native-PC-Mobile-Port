@@ -72,6 +72,18 @@ struct HubState {
     std::function<bool(bool keep, std::string& message)> setKeepSettingsInGameFolder;
 };
 
+// Botón Content: una fila de la lista (o el título de una sección).
+struct ContentRow {
+    std::string name, detail;
+    bool header = false;
+};
+// Lo que se pulsó en el modal de contenido.
+struct ContentPick {
+    enum Action { Close, Import, Export, Remove };
+    Action action = Close;
+    int row       = -1; ///< fila de Export y Remove
+};
+
 struct HubResult {
     HubAction action = HubAction::Quit;
     HubGame game = HubGame::Pikmin1;
@@ -124,6 +136,9 @@ public:
     int ask(const std::string& title, const std::string& text, const std::string& primary,
             const std::string& secondary = std::string(), bool isError = false,
             const std::string& cancel = std::string());
+    // Modal del botón Content: la lista de lo instalado (con Export y Remove
+    // en cada fila), Import y Close. Vuelve en cuanto se pulsa algo.
+    ContentPick pickContent(const std::string& title, const std::string& note, const std::vector<ContentRow>& rows);
 
     bool choosePaths(const std::function<std::string()>& chooseRom,
                      const std::function<std::string(const std::string& currentInstallDirectory)>&

@@ -1177,6 +1177,16 @@ if(PIKMIN_BUILD_LAUNCHER)
     add_executable(pikmin_launcher
         pc_port/launcher/launcher_main.cpp
         pc_port/launcher/launcher_gui.cpp
+        # Botón Content: mapas, campañas y personajes de cada juego.
+        pc_port/launcher/content_manager.cpp
+        ${NECTAR_LIBS_DIR}/nectar_mapcore/src/map_json.cpp
+        ${NECTAR_LIBS_DIR}/nectar_mapcore/src/i18n.cpp
+        ${NECTAR_LIBS_DIR}/nectar_mapcore/src/campaign.cpp
+        ${NECTAR_LIBS_DIR}/nectar_mapcore/src/pack.cpp
+        ${NECTAR_LIBS_DIR}/nectar_assets/src/mod.cpp
+        ${NECTAR_LIBS_DIR}/nectar_assets/src/gen.cpp
+        ${NECTAR_LIBS_DIR}/nectar_assets/src/image.cpp
+        ${NECTAR_LIBS_DIR}/nectar_assets/src/mesh_mod.cpp
         pc_port/launcher/version_label.cpp
         pc_port/launcher/hd_model_downloads.cpp
         pc_port/launcher/install_directory.cpp
@@ -1206,7 +1216,8 @@ if(PIKMIN_BUILD_LAUNCHER)
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
     target_link_libraries(pikmin_launcher PRIVATE launcher_imgui)
     # Instalar personajes (.nectarchar) con charpack, como el juego y el creador.
-    target_include_directories(pikmin_launcher PRIVATE ${NECTAR_LIBS_DIR}/nectar_assets/include)
+    target_include_directories(pikmin_launcher PRIVATE ${NECTAR_LIBS_DIR}/nectar_assets/include ${NECTAR_LIBS_DIR}/nectar_assets/src
+        ${NECTAR_LIBS_DIR}/nectar_mapcore/include ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann/include)
     set_source_files_properties(${NECTAR_LIBS_DIR}/nectar_assets/src/charpack.cpp PROPERTIES
         INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann/include;${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb")
     # Versión que el launcher compara con el último release de GitHub para
@@ -1274,6 +1285,27 @@ if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
     target_include_directories(install_directory_test PRIVATE pc_port/launcher ${PC_PORT_DIR})
     target_compile_options(install_directory_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME install_directory_test COMMAND install_directory_test)
+
+    # Botón Content del launcher (mapas, campañas y personajes).
+    add_executable(content_manager_test pc_port/launcher/content_manager_test.cpp
+        pc_port/launcher/content_manager.cpp
+        ${NECTAR_LIBS_DIR}/nectar_mapcore/src/map_json.cpp
+        ${NECTAR_LIBS_DIR}/nectar_mapcore/src/i18n.cpp
+        ${NECTAR_LIBS_DIR}/nectar_mapcore/src/campaign.cpp
+        ${NECTAR_LIBS_DIR}/nectar_mapcore/src/pack.cpp
+        ${NECTAR_LIBS_DIR}/nectar_assets/src/charpack.cpp
+        ${NECTAR_LIBS_DIR}/nectar_assets/src/mod.cpp
+        ${NECTAR_LIBS_DIR}/nectar_assets/src/gen.cpp
+        ${NECTAR_LIBS_DIR}/nectar_assets/src/image.cpp
+        ${NECTAR_LIBS_DIR}/nectar_assets/src/mesh_mod.cpp
+        pc_port/launcher/bti_decode.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/pc_port/launcher/content_manager_stb.cpp)
+    set_property(TARGET content_manager_test PROPERTY INCLUDE_DIRECTORIES "")
+    target_include_directories(content_manager_test PRIVATE pc_port/launcher ${NECTAR_LIBS_DIR}/nectar_assets/include
+        ${NECTAR_LIBS_DIR}/nectar_assets/src
+        ${NECTAR_LIBS_DIR}/nectar_mapcore/include ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
+    add_test(NAME content_manager_test COMMAND content_manager_test)
 
     add_executable(install_note_layout_test pc_port/launcher/install_note_layout_test.cpp
         pc_port/launcher/install_note_layout.cpp)

@@ -71,6 +71,9 @@ std::string pikminModelsDir(const std::string& gameDir);
 /// Instala (o reemplaza el del mismo id). En `installedDir`, su carpeta.
 bool installCharacter(const std::string& gameDir, const CharacterFiles& files, std::string& installedDir, std::string& error);
 bool installCharacterPack(const std::string& gameDir, const std::string& packPath, CharacterInfo& info, std::string& error);
+/// Lee un personaje instalado (su carpeta: character.json, model.nhm,
+/// portrait.png y project/) para volver a empaquetarlo con writeCharacterPack.
+bool readInstalledCharacter(const std::string& characterDir, CharacterFiles& files, std::string& error);
 /// Los capitanes instalados y válidos, por nombre.
 std::vector<CharacterInfo> listCharacters(const std::string& gameDir);
 /// Los Pikmin instalados y válidos, por nombre.

@@ -1420,7 +1420,8 @@ struct Hub {
     // o dos con los dos editores (HD textures baja a la segunda).
     float editorRows() const
     {
-        return (!state.mapEditor.empty() && !state.modelMaker.empty()) ? 2.0f : 1.0f;
+        // Con algún editor, Content va en una segunda fila.
+        return (!state.mapEditor.empty() || !state.modelMaker.empty()) ? 2.0f : 1.0f;
     }
 
     // Borde inferior de las páginas Games y Move Install.
@@ -1525,23 +1526,29 @@ struct Hub {
                     ImGui::SetCursorScreenPos(ImVec2(left, below + buttonsGap + 44.0f + 10.0f));
                     if (glassButton("HD textures", role::kGameTool, 44.0f)) choose(HubAction::TexturePack, HubGame(i));
                     ImGui::SetCursorScreenPos(ImVec2(right, below + buttonsGap + 44.0f + 10.0f));
-                    if (glassButton("Characters", role::kGameTool, 44.0f)) choose(HubAction::InstallCharacter, HubGame(i));
+                    if (glassButton("Content", role::kGameTool, 44.0f)) choose(HubAction::InstallCharacter, HubGame(i));
                 } else if (editor || models) {
                     ImGui::SetCursorScreenPos(ImVec2(left, below + buttonsGap));
                     if (editor && glassButton("Map editor", role::kGameTool, 44.0f)) choose(HubAction::MapEditor, HubGame(i));
                     if (models && glassButton("Model maker", role::kGameTool, 44.0f)) choose(HubAction::ModelMaker, HubGame(i));
                     ImGui::SetCursorScreenPos(ImVec2(right, below + buttonsGap));
                     if (glassButton("HD textures", role::kGameTool, 44.0f)) choose(HubAction::TexturePack, HubGame(i));
-                } else if (isPikmin2) {
-                    // Pikmin 2: HD textures y Characters (capitanes y Pikmin del
-                    // creador de modelos, en su propia carpeta Load/).
+                    ImGui::SetCursorScreenPos(ImVec2(left, below + buttonsGap + 44.0f + 10.0f));
+                    if (glassButton("Content", role::kGameTool, 44.0f)) choose(HubAction::InstallCharacter, HubGame(i));
+                } else {
+#ifdef __ANDROID__
+                    // Android: sin selector de archivos nativo; los mapas se
+                    // importan solos desde user/import.
+                    ImGui::SetCursorScreenPos(ImVec2(centre - wideW * 0.5f, below + buttonsGap));
+                    if (glassButton("HD textures", role::kGameWide, 44.0f)) choose(HubAction::TexturePack, HubGame(i));
+#else
+                    // HD textures y Content (mapas, campañas y personajes del
+                    // jugador; en Pikmin 2, solo personajes).
                     ImGui::SetCursorScreenPos(ImVec2(left, below + buttonsGap));
                     if (glassButton("HD textures", role::kGameTool, 44.0f)) choose(HubAction::TexturePack, HubGame(i));
                     ImGui::SetCursorScreenPos(ImVec2(right, below + buttonsGap));
-                    if (glassButton("Characters", role::kGameTool, 44.0f)) choose(HubAction::InstallCharacter, HubGame(i));
-                } else {
-                    ImGui::SetCursorScreenPos(ImVec2(centre - wideW * 0.5f, below + buttonsGap));
-                    if (glassButton("HD textures", role::kGameWide, 44.0f)) choose(HubAction::TexturePack, HubGame(i));
+                    if (glassButton("Content", role::kGameTool, 44.0f)) choose(HubAction::InstallCharacter, HubGame(i));
+#endif
                 }
             }
 #if PIKMIN_LAUNCHER_NETPLAY
@@ -3468,7 +3475,7 @@ struct HubWindow::Impl {
     std::function<HubResult()> homeLoop;   // ver setHomeLoop
     std::function<bool(HubGame& game)> pendingLaunch; // Android shortcut while the home screen is up
 
-    enum class Modal { None, Paths, Progress, Message };
+    enum class Modal { None, Paths, Progress, Message, Content };
     Modal modal = Modal::None;
     // Rutas
     std::string rom, installDirectory;
@@ -3481,6 +3488,11 @@ struct HubWindow::Impl {
     std::string messageTitle, messageText, primaryLabel, secondaryLabel, cancelLabel;
     bool messageIsError = false;
     int answer = -1; // 0 principal, 1 secundario
+    // Contenido (botón Content)
+    std::string contentTitle, contentNote;
+    std::vector<ContentRow> contentRows;
+    ContentPick contentPick;
+    bool contentAnswered = false;
     // Non-empty while waitForDialog() has a native dialog open: names it for
     // the "Waiting for the ..." veil, and the window takes no input.
     std::string dialogWaiting;
@@ -3643,6 +3655,82 @@ struct HubWindow::Impl {
         endModal();
     }
 
+    void drawContent(ImVec2 size)
+    {
+        const float width = std::min(size.x - 80.0f, 760.0f) - 68.0f;
+        const float listH = std::max(160.0f, std::min(size.y - 300.0f, 440.0f));
+        const ImVec2 panel(width + 68.0f, listH + 200.0f);
+        const ImVec2 at = beginModal(size, panel);
+        title(at, contentTitle.c_str());
+        ImGui::GetWindowDrawList()->AddText(hub->fonts.body, 18.0f, ImVec2(at.x, at.y + 48.0f), col(ImVec4(1.0f, 0.93f, 0.80f, 0.85f)),
+                                            contentNote.c_str(), nullptr, width);
+        ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + 82.0f));
+        ImGui::BeginChild("##content", ImVec2(width, listH), false);
+        const float rowH = 46.0f, buttonW = 112.0f;
+        if (contentRows.empty()) {
+            ImGui::GetWindowDrawList()->AddText(hub->fonts.body, 20.0f, ImGui::GetCursorScreenPos(), col(ImVec4(1, 1, 1, 0.6f)),
+                                                "Nothing installed yet. Import a map pack or a character.");
+        }
+        for (std::size_t i = 0; i < contentRows.size(); ++i) {
+            const ContentRow& r = contentRows[i];
+            ImGui::PushID(int(i));
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            if (r.header) {
+                dl->AddText(hub->fonts.title, 22.0f, ImVec2(p.x, p.y + 10.0f), col(kOrange), r.name.c_str());
+                ImGui::Dummy(ImVec2(width - 16.0f, 40.0f));
+                ImGui::PopID();
+                continue;
+            }
+            dl->AddRectFilled(p, ImVec2(p.x + width - 16.0f, p.y + rowH - 4.0f), IM_COL32(255, 255, 255, 14), 10.0f);
+            const float textW = width - 16.0f - 2.0f * buttonW - 36.0f;
+            dl->PushClipRect(p, ImVec2(p.x + textW + 12.0f, p.y + rowH), true);
+            dl->AddText(hub->fonts.body, 19.0f, ImVec2(p.x + 12.0f, p.y + 4.0f), col(ImVec4(1, 1, 1, 1)), r.name.c_str());
+            dl->AddText(hub->fonts.body, 15.0f, ImVec2(p.x + 12.0f, p.y + 24.0f), col(ImVec4(1.0f, 0.93f, 0.80f, 0.7f)), r.detail.c_str());
+            dl->PopClipRect();
+            ImGui::SetCursorScreenPos(ImVec2(p.x + width - 16.0f - 2.0f * buttonW - 12.0f, p.y + 3.0f));
+            if (hub->glassButton("Export", ImVec2(buttonW, rowH - 10.0f))) {
+                contentPick     = { ContentPick::Export, int(i) };
+                contentAnswered = true;
+            }
+            ImGui::SameLine(0.0f, 6.0f);
+            if (hub->glassButton("Remove", ImVec2(buttonW, rowH - 10.0f))) {
+                contentPick     = { ContentPick::Remove, int(i) };
+                contentAnswered = true;
+            }
+            ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + rowH));
+            ImGui::Dummy(ImVec2(1.0f, 0.0f));
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
+        const float buttonsY = at.y + panel.y - 96.0f;
+        const float bigW     = 200.0f;
+        ImGui::SetCursorScreenPos(ImVec2(at.x + width - bigW, buttonsY));
+        if (hub->glassButton("Import...", ImVec2(bigW, 50.0f), true)) {
+            contentPick     = { ContentPick::Import, -1 };
+            contentAnswered = true;
+        }
+        ImGui::SetCursorScreenPos(ImVec2(at.x, buttonsY));
+        if (hub->glassButton("Close", ImVec2(bigW, 50.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape) || gamepadBackPressed()) {
+            contentPick     = { ContentPick::Close, -1 };
+            contentAnswered = true;
+        }
+        endModal();
+    }
+
+    ContentPick content(const std::string& heading, const std::string& note, const std::vector<ContentRow>& rows)
+    {
+        modal           = Modal::Content;
+        contentTitle    = heading;
+        contentNote     = note;
+        contentRows     = rows;
+        contentPick     = ContentPick();
+        contentAnswered = false;
+        while (!contentAnswered && !quitRequested) frame();
+        modal = Modal::None;
+        return contentPick;
+    }
+
     void drawMessage(ImVec2 size)
     {
         const float width = std::min(size.x - 80.0f, 640.0f) - 68.0f;
@@ -3796,6 +3884,7 @@ struct HubWindow::Impl {
         case Modal::Paths: drawPaths(size); break;
         case Modal::Progress: drawProgress(size, t); break;
         case Modal::Message: drawMessage(size); break;
+        case Modal::Content: drawContent(size); break;
         }
         ImGui::EndDisabled();
         if (waiting) drawDialogVeil(size);
@@ -4109,6 +4198,11 @@ int HubWindow::ask(const std::string& title, const std::string& text, const std:
 {
     Impl& m = *mImpl;
     return m.message(title, text, primary, secondary, isError, cancel);
+}
+
+ContentPick HubWindow::pickContent(const std::string& title, const std::string& note, const std::vector<ContentRow>& rows)
+{
+    return mImpl->content(title, note, rows);
 }
 
 bool HubWindow::choosePaths(const std::function<std::string()>& chooseRom,
