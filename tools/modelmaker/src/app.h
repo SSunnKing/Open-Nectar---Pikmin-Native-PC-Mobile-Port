@@ -82,7 +82,8 @@ private:
 
 	// A quién reemplaza el modelo: un capitán (Olimar o un personaje propio)
 	// o los Pikmin de un color (o los tres, teñidos por el juego).
-	enum Target { T_CAPTAIN, T_RED, T_YELLOW, T_BLUE, T_ALL };
+	// Morado y blanco solo existen en Pikmin 2.
+	enum Target { T_CAPTAIN, T_RED, T_YELLOW, T_BLUE, T_ALL, T_PURPLE, T_WHITE, T_COUNT };
 	int target_ = T_CAPTAIN;
 	LeafModel leaves_[3]; ///< hoja, capullo, flor (los pone el juego en la punta del tallo)
 	std::vector<GLuint> leafTex_[3];
@@ -150,6 +151,12 @@ private:
 	bool characterFiles(nectar::CharacterFiles& files, std::string& error);
 	bool renderPortrait(std::vector<std::uint8_t>& png);
 	void installAsCharacter();
+	/// Dónde se instala (docs/PLAN_P2_CAPITANES_PROPIOS.md): 0 Pikmin, 1 Pikmin 2, 2 los dos.
+	int installGame_ = 0;
+	/// Carpeta de Pikmin 2 (la que recuerda el launcher, o ../pikmin2); "" si no se encuentra.
+	std::string pikmin2Dir() const;
+	/// Carpetas de los juegos en que se instala ahora (morado y blanco, solo Pikmin 2).
+	std::vector<std::string> installDirs(bool p2Only) const;
 	void exportCharacter();
 	void installPack(const std::string& path);
 	void refreshInstalled();
