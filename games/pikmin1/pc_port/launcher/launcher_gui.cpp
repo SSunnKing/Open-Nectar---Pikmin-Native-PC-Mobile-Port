@@ -1532,6 +1532,13 @@ struct Hub {
                     if (models && glassButton("Model maker", role::kGameTool, 44.0f)) choose(HubAction::ModelMaker, HubGame(i));
                     ImGui::SetCursorScreenPos(ImVec2(right, below + buttonsGap));
                     if (glassButton("HD textures", role::kGameTool, 44.0f)) choose(HubAction::TexturePack, HubGame(i));
+                } else if (isPikmin2) {
+                    // Pikmin 2: HD textures y Characters (capitanes y Pikmin del
+                    // creador de modelos, en su propia carpeta Load/).
+                    ImGui::SetCursorScreenPos(ImVec2(left, below + buttonsGap));
+                    if (glassButton("HD textures", role::kGameTool, 44.0f)) choose(HubAction::TexturePack, HubGame(i));
+                    ImGui::SetCursorScreenPos(ImVec2(right, below + buttonsGap));
+                    if (glassButton("Characters", role::kGameTool, 44.0f)) choose(HubAction::InstallCharacter, HubGame(i));
                 } else {
                     ImGui::SetCursorScreenPos(ImVec2(centre - wideW * 0.5f, below + buttonsGap));
                     if (glassButton("HD textures", role::kGameWide, 44.0f)) choose(HubAction::TexturePack, HubGame(i));

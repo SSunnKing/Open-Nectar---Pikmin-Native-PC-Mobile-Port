@@ -114,5 +114,5 @@ vista previa sobre el esqueleto de P2 en el creador (fase 7).
 - [x] 4. Ranuras de capitán (la vista previa 3D de sus tarjetas, en la fase 6)
 - [x] 5. Pikmin
 - [x] 6. Selector y vista previa (en las pantallas de Desafío y VS, de momento el icono de Olimar)
-- [ ] 7. Creador de modelos y launcher
+- [x] 7. Creador de modelos y launcher
 - [ ] 8. Android y tests

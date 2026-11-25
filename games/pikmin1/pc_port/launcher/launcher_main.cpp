@@ -1586,8 +1586,8 @@ int main(int argc, char** argv)
                         continue;
                     }
                     if (choice.action == pikmin::launcher::HubAction::InstallCharacter) {
-                        // Un personaje del creador de modelos: a Load/Characters de
-                        // Pikmin 1; sale en el selector de capitán.
+                        // Un personaje del creador de modelos: a Load/Characters (o
+                        // Load/Pikmin) del juego de esa tarjeta; cada juego tiene la suya.
                         // The picker and the native result message run off the
                         // render thread so the window keeps drawing.
                         const fs::path pack = fs::u8path(home->runDialog([] {
@@ -1596,14 +1596,17 @@ int main(int argc, char** argv)
                         if (!pack.empty()) {
                             nectar::CharacterInfo info;
                             std::string error;
+                            const bool pikmin2 = choice.game == pikmin::launcher::HubGame::Pikmin2;
                             const bool installed =
-                                nectar::installCharacterPack(hubState.games[0].directory, pack.u8string(), info, error);
+                                nectar::installCharacterPack(hubState.games[pikmin2 ? 1 : 0].directory, pack.u8string(), info, error);
                             home->runDialog([&] {
                                 if (installed)
                                     platform::showMessage(info.isPikmin() ? "Pikmin model installed" : "Character installed",
                                                           info.isPikmin()
-                                                              ? "\"" + info.name + "\" is installed. Pick it in Settings > HD Models > Pikmin models, or in the game's Options > Graphics."
-                                                              : "\"" + info.name + "\" is in the captain selector of Pikmin.",
+                                                              ? (pikmin2 ? "\"" + info.name + "\" is installed in Pikmin 2. Pick it in the game's Options > Graphics (each Pikmin's model)."
+                                                                         : "\"" + info.name + "\" is installed. Pick it in Settings > HD Models > Pikmin models, or in the game's Options > Graphics.")
+                                                              : (pikmin2 ? "\"" + info.name + "\" is in the Captains screen of Pikmin 2."
+                                                                         : "\"" + info.name + "\" is in the captain selector of Pikmin."),
                                                           false);
                                 else
                                     platform::showMessage("Could not install the character", error, true);
