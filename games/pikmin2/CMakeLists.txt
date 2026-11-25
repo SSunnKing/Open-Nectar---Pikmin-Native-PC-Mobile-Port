@@ -668,6 +668,15 @@ if(PIKMIN2_ENABLE_PORT_LAYER)
         pikmin2_add_host_test(p2_captain_preview_layout_test
             ${PC_PORT_DIR}/pc_p2_captain_preview_layout_test.cpp
         )
+        # Ranuras de los personajes del creador de modelos (Load/Characters).
+        pikmin2_add_host_test(p2_custom_characters_test
+            ${PC_PORT_DIR}/pc_p2_custom_characters_test.cpp
+            ${PC_PORT_DIR}/pc_p2_captains.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../libs/nectar_assets/src/charpack.cpp
+        )
+        target_include_directories(p2_custom_characters_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../libs/nectar_assets/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
         pikmin2_add_host_test(p2_tev_shader_test
             ${PC_PORT_DIR}/gl/pc_tev_shader_test.cpp
             ${PC_PORT_DIR}/gl/pc_tev_shader.cpp

@@ -115,4 +115,4 @@ vista previa sobre el esqueleto de P2 en el creador (fase 7).
 - [x] 5. Pikmin
 - [x] 6. Selector y vista previa (en las pantallas de Desafío y VS, de momento el icono de Olimar)
 - [x] 7. Creador de modelos y launcher
-- [ ] 8. Android y tests
+- [x] 8. Android y tests (P2 en Android hace chdir a su carpeta, así que Load/ vale tal cual; el APK no se ha compilado aquí: Gradle compila lo nativo sin límite de trabajos)
