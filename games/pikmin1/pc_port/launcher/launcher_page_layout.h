@@ -64,10 +64,13 @@ struct GamesLayout {
 };
 
 // Alto fijo debajo de las portadas: nombre, filas de botones y Update.
-inline float gamesBelowCovers(const GamesSpacing& s, float rows, bool update, const GamesMetrics& m = {})
+// `update`: hay botones centrados bajo los dos juegos (Model maker, Update),
+// `centred` filas de ellos.
+inline float gamesBelowCovers(const GamesSpacing& s, float rows, bool update, const GamesMetrics& m = {}, float centred = 1.0f)
 {
     const float rowsH = rows * m.buttonH + std::max(0.0f, rows - 1.0f) * m.rowGap;
-    return s.name + s.buttons + rowsH + (update ? s.update + m.buttonH : 0.0f);
+    const float centreH = centred * m.buttonH + std::max(0.0f, centred - 1.0f) * m.rowGap;
+    return s.name + s.buttons + rowsH + (update ? s.update + centreH : 0.0f);
 }
 
 // Las portadas se quedan a su tamaño mientras caben; después encogen hasta un
@@ -75,7 +78,7 @@ inline float gamesBelowCovers(const GamesSpacing& s, float rows, bool update, co
 // solo entonces la página pasa a tener scroll. Los botones mantienen el ancho
 // de su columna aunque la portada encoja. Cada paso continúa el anterior, así
 // que al cambiar el alto de la ventana nada salta.
-inline GamesLayout fitGames(float windowW, float available, float rows, bool update, GamesMetrics m = {})
+inline GamesLayout fitGames(float windowW, float available, float rows, bool update, GamesMetrics m = {}, float centred = 1.0f)
 {
     GamesLayout out;
     out.columnW = std::clamp(windowW * 0.19f, 190.0f, 280.0f);
@@ -83,7 +86,7 @@ inline GamesLayout fitGames(float windowW, float available, float rows, bool upd
     const float preferredH = out.columnW * m.aspect;
     available = std::max(0.0f, available);
 
-    auto fixed = [&](const GamesSpacing& s) { return s.top + gamesBelowCovers(s, rows, update, m); };
+    auto fixed = [&](const GamesSpacing& s) { return s.top + gamesBelowCovers(s, rows, update, m, centred); };
     const float normal = fixed(kGamesNormal), tight = fixed(kGamesTight);
     const float comfort = std::min(preferredH, m.comfortCoverH);
     if (available - normal >= comfort) {

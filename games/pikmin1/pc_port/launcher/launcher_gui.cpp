@@ -1420,8 +1420,8 @@ struct Hub {
     // o dos con los dos editores (HD textures baja a la segunda).
     float editorRows() const
     {
-        // Con algún editor, Content va en una segunda fila.
-        return (!state.mapEditor.empty() || !state.modelMaker.empty()) ? 2.0f : 1.0f;
+        // Con el editor de mapas, Content va en una segunda fila.
+        return !state.mapEditor.empty() ? 2.0f : 1.0f;
     }
 
     // Borde inferior de las páginas Games y Move Install.
@@ -1447,6 +1447,17 @@ struct Hub {
     // Filas de botones de la columna más alta.
     float gamesRows() const { return std::max(columnRows(0), columnRows(1)); }
 
+    // Botones centrados bajo los dos juegos: el creador de modelos (uno para
+    // los dos juegos, con alguno instalado) y Update (con Pikmin 1).
+    bool showModelMaker() const
+    {
+        return !state.modelMaker.empty() && (state.games[0].installed || state.games[1].installed);
+    }
+    int centredRows() const
+    {
+        return (showModelMaker() ? 1 : 0) + (state.games[int(HubGame::Pikmin1)].installed ? 1 : 0);
+    }
+
     // Una página que no cabe se dibuja dentro de una región con scroll que
     // ocupa de `top` al borde inferior; devuelve dónde empieza su contenido.
     float beginPageScroll(const char* id, float top, ImVec2 size)
@@ -1470,8 +1481,8 @@ struct Hub {
     void drawGames(float top, ImVec2 size, float dt, float t)
     {
         const float rows = gamesRows();
-        const bool hasUpdate = state.games[int(HubGame::Pikmin1)].installed;
-        const GamesLayout layout = fitGames(size.x, pageBottom(size) - top, rows, hasUpdate);
+        const float centred = float(centredRows());
+        const GamesLayout layout = fitGames(size.x, pageBottom(size) - top, rows, centred > 0.0f, {}, std::max(1.0f, centred));
         if (layout.scroll) top = beginPageScroll("##games", top, size);
         drawGamesBody(top, size, dt, t, layout);
         if (layout.scroll) endPageScroll(top, layout.content);
@@ -1514,23 +1525,12 @@ struct Hub {
                 ImGui::SetCursorScreenPos(ImVec2(centre - wideW * 0.5f, below + buttonsGap));
                 if (glassButton("Install", role::kGameWide, 44.0f)) choose(HubAction::Install, HubGame(i));
             } else {
+                // El creador de modelos va centrado bajo los dos juegos (es de los dos).
                 const bool editor = !isPikmin2 && !state.mapEditor.empty();
-                const bool models = !isPikmin2 && !state.modelMaker.empty();
-                if (editor && models) {
-                    // Los dos editores arriba; HD textures y Characters (instalar
-                    // un personaje del creador) en la segunda fila.
+                if (editor) {
+                    // Editor de mapas y HD textures arriba; Content debajo.
                     ImGui::SetCursorScreenPos(ImVec2(left, below + buttonsGap));
                     if (glassButton("Map editor", role::kGameTool, 44.0f)) choose(HubAction::MapEditor, HubGame(i));
-                    ImGui::SetCursorScreenPos(ImVec2(right, below + buttonsGap));
-                    if (glassButton("Model maker", role::kGameTool, 44.0f)) choose(HubAction::ModelMaker, HubGame(i));
-                    ImGui::SetCursorScreenPos(ImVec2(left, below + buttonsGap + 44.0f + 10.0f));
-                    if (glassButton("HD textures", role::kGameTool, 44.0f)) choose(HubAction::TexturePack, HubGame(i));
-                    ImGui::SetCursorScreenPos(ImVec2(right, below + buttonsGap + 44.0f + 10.0f));
-                    if (glassButton("Content", role::kGameTool, 44.0f)) choose(HubAction::InstallCharacter, HubGame(i));
-                } else if (editor || models) {
-                    ImGui::SetCursorScreenPos(ImVec2(left, below + buttonsGap));
-                    if (editor && glassButton("Map editor", role::kGameTool, 44.0f)) choose(HubAction::MapEditor, HubGame(i));
-                    if (models && glassButton("Model maker", role::kGameTool, 44.0f)) choose(HubAction::ModelMaker, HubGame(i));
                     ImGui::SetCursorScreenPos(ImVec2(right, below + buttonsGap));
                     if (glassButton("HD textures", role::kGameTool, 44.0f)) choose(HubAction::TexturePack, HubGame(i));
                     ImGui::SetCursorScreenPos(ImVec2(left, below + buttonsGap + 44.0f + 10.0f));
@@ -1568,10 +1568,18 @@ struct Hub {
             ImGui::PopID();
         }
 
-        // Un solo Update, centrado entre los dos juegos y debajo de sus botones.
+        // Centrados entre los dos juegos y debajo de sus botones: el creador de
+        // modelos (de los dos juegos) y un solo Update.
+        float centreY = cardY + layout.coverH + layout.space.name + buttonsGap + 44.0f + layout.space.update
+                      + (gamesRows() - 1.0f) * (44.0f + 10.0f);
+        if (showModelMaker()) {
+            ImGui::SetCursorScreenPos(ImVec2((size.x - wideW) * 0.5f, centreY));
+            if (glassButton("Model maker", role::kGameWide, 44.0f))
+                choose(HubAction::ModelMaker, state.games[0].installed ? HubGame::Pikmin1 : HubGame::Pikmin2);
+            centreY += 44.0f + 10.0f;
+        }
         if (state.games[int(HubGame::Pikmin1)].installed) {
-            const float y = cardY + layout.coverH + layout.space.name + buttonsGap + 44.0f + layout.space.update
-                          + (gamesRows() - 1.0f) * (44.0f + 10.0f);
+            const float y = centreY;
             // Con versión nueva en GitHub el botón lo dice ("Update to 1.0").
             std::string updateLabel = "Update";
             if (releaseCheck && releaseCheck->done) {

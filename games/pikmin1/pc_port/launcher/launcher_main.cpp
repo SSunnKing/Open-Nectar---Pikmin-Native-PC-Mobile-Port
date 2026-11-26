@@ -1562,11 +1562,15 @@ int main(int argc, char** argv)
                     break;
                 }
             }
-            for (const fs::path& dir : { pikmin1Directory, platform::executablePath().parent_path() }) {
-                if (!dir.empty() && fs::is_regular_file(dir / kModelMakerExecutable)) {
-                    hubState.modelMaker = (dir / kModelMakerExecutable).string();
-                    break;
-                }
+        }
+        // Creador de modelos: uno para los dos juegos (en una instalación o
+        // junto al launcher); el botón sale con cualquiera de los dos instalado.
+        for (const fs::path& dir : { pikmin1Available ? pikmin1Directory : fs::path(),
+                                     hubState.games[1].installed ? fs::path(hubState.games[1].directory) : fs::path(),
+                                     platform::executablePath().parent_path() }) {
+            if (!dir.empty() && fs::is_regular_file(dir / kModelMakerExecutable)) {
+                hubState.modelMaker = (dir / kModelMakerExecutable).string();
+                break;
             }
         }
         auto window = std::make_unique<pikmin::launcher::HubWindow>();
@@ -1624,8 +1628,10 @@ int main(int argc, char** argv)
                         continue;
                     }
                     if (choice.action == pikmin::launcher::HubAction::ModelMaker) {
-                        // Como el editor de mapas: en la carpeta del juego (assets/ y Load/Models).
-                        if (!hubState.modelMaker.empty()) play(hubState.games[0].directory, hubState.modelMaker);
+                        // En la carpeta de un juego instalado (Pikmin 1 si está); el
+                        // creador encuentra el otro por pikmin2_dir / pikmin1_dir.
+                        const bool p1 = hubState.games[0].installed;
+                        if (!hubState.modelMaker.empty()) play(hubState.games[p1 ? 0 : 1].directory, hubState.modelMaker);
                         continue;
                     }
                     if (choice.action == pikmin::launcher::HubAction::TexturePack) {
