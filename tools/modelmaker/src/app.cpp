@@ -123,44 +123,44 @@ bool App::init(const std::string& openPath, std::string& error)
 bool App::setupGame(std::string& error)
 {
 	gameReady_ = false;
+	p1Ready_   = false;
 	std::string why;
-	// El launcher nos abre en la carpeta del juego; si no, la del editor de mapas.
+	// Pikmin: el launcher nos abre en su carpeta; si no, la del editor de mapas.
 	std::string assets = nm::resolveAssetsDir((fs::current_path() / "assets").string(), why);
 	if (assets.empty() && !cfg_.assetsDir.empty()) assets = nm::resolveAssetsDir(cfg_.assetsDir, why);
 	if (assets.empty()) assets = nm::guessAssetsDir();
-	if (assets.empty()) {
-		error = L("No encuentro el juego. Elige la carpeta donde está instalado Pikmin.", "Can't find the game. Choose the folder where Pikmin is installed.");
+	if (!assets.empty()) {
+		std::vector<Anim> anims;
+		if (loadAnimBundle(assets + "/dataDir/pikis/bluModel.anm", anims, why)) {
+			animsP1_   = std::move(anims);
+			assetsDir_ = assets;
+			p1Ready_   = true;
+			// Hoja, capullo y flor, para ver dónde los pondrá el juego.
+			static const char* const kLeaves[3] = { "leaf", "bud", "flower" };
+			for (int i = 0; i < 3; ++i) {
+				std::string ignored;
+				leavesP1_[i].load(assets + "/dataDir/pikis/happas/" + kLeaves[i] + ".mod", ignored);
+			}
+			if (cfg_.assetsDir != assets) {
+				cfg_.assetsDir = assets;
+				cfg_.save();
+			}
+		}
+	}
+	// Pikmin 2 (su pikis.szs): sus Pikmin nuevos, o todo si no hay Pikmin.
+	std::string p2Why;
+	p2Ready_ = setupPikmin2(p2Why);
+	if (!p1Ready_ && !p2Ready_) {
+		error = L("No encuentro el juego. Elige la carpeta donde está instalado Pikmin (o instala Pikmin 2 desde el launcher).",
+		          "Can't find the game. Choose the folder where Pikmin is installed (or install Pikmin 2 from the launcher).");
 		return false;
 	}
-	std::vector<Anim> anims;
-	if (!loadAnimBundle(assets + "/dataDir/pikis/bluModel.anm", anims, error)) return false;
-	anims_     = std::move(anims);
-	assetsDir_ = assets;
+	if (!targetAvailable(target_)) target_ = T_CAPTAIN;
 	if (!loadReference(error)) return false;
-	// Hoja, capullo y flor, para ver dónde los pondrá el juego.
-	static const char* const kLeaves[3] = { "leaf", "bud", "flower" };
-	for (int i = 0; i < 3; ++i) {
-		std::string ignored;
-		leaves_[i].load(assets + "/dataDir/pikis/happas/" + kLeaves[i] + ".mod", ignored);
-		for (GLuint t : leafTex_[i])
-			if (t) glDeleteTextures(1, &t);
-		leafTex_[i].clear();
-		for (const nectar::Image& img : leaves_[i].materialTex) leafTex_[i].push_back(uploadTexture(img, false));
-	}
 	// Las tarjetas de inicio son retratos de los modelos reales, no dibujos
 	// aproximados. Si faltase un asset, la pantalla conserva su fallback.
 	std::string portraitError;
 	buildStartPortraits(portraitError);
-	if (cfg_.assetsDir != assets) {
-		cfg_.assetsDir = assets;
-		cfg_.save();
-	}
-	animOrder_.clear();
-	for (const KnownAnim& k : kKnownAnims)
-		for (std::size_t i = 0; i < anims_.size(); ++i)
-			if (anims_[i].name == k.file) animOrder_.push_back(int(i));
-	for (std::size_t i = 0; i < anims_.size(); ++i)
-		if (std::find(animOrder_.begin(), animOrder_.end(), int(i)) == animOrder_.end()) animOrder_.push_back(int(i));
 
 	gameReady_ = true;
 	refreshInstalled();
@@ -168,18 +168,96 @@ bool App::setupGame(std::string& error)
 	return true;
 }
 
-// El modelo del juego que se reemplaza. Los tres Pikmin comparten esqueleto,
-// pero no geometría: rojo tiene nariz, amarillo orejas y azul branquias.
+bool App::setupPikmin2(std::string& error)
+{
+	p2Arc_.clear();
+	p2Dir_ = pikmin2Dir();
+	if (p2Dir_.empty()) {
+		error = "Pikmin 2 not found";
+		return false;
+	}
+	std::ifstream in(fs::u8path(p2Dir_) / "assets" / "user" / "Kando" / "piki" / "pikis.szs", std::ios::binary);
+	const std::vector<unsigned char> szs((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	p2Arc_ = nectar::decompressYaz0(szs);
+	if (p2Arc_.size() < 4 || std::memcmp(p2Arc_.data(), "RARC", 4) != 0) {
+		p2Arc_.clear();
+		error = "pikis.szs can't be read";
+		return false;
+	}
+	// Sus animaciones, con el esqueleto de Olimar (el de todos sus Pikmin).
+	OlimarRig rig;
+	std::vector<unsigned char> bytes;
+	nectar::BmdModel bmd;
+	if (!nectar::readRarc(p2Arc_, "orima1.bmd", bytes, error) || !nectar::loadBmd(bytes, bmd, error) || !rig.loadBmd(bmd, error)
+	    || !loadBcaAnims(p2Arc_, rig, animsP2_, error)) {
+		p2Arc_.clear();
+		return false;
+	}
+	static const char* const kLeaves[3] = { "leaf.bmd", "bud.bmd", "flower.bmd" };
+	for (int i = 0; i < 3; ++i) {
+		std::string ignored;
+		nectar::BmdModel leaf;
+		if (nectar::readRarc(p2Arc_, kLeaves[i], bytes, ignored) && nectar::loadBmd(bytes, leaf, ignored)) leavesP2_[i].loadBmd(leaf, ignored);
+	}
+	return true;
+}
+
+void App::useAnims(bool p2)
+{
+	const std::string current = anim_ >= 0 && std::size_t(anim_) < anims_.size() ? anims_[std::size_t(anim_)].name : std::string();
+	anims_                    = p2 ? animsP2_ : animsP1_;
+	animOrder_.clear();
+	for (const KnownAnim& k : kKnownAnims)
+		for (std::size_t i = 0; i < anims_.size(); ++i)
+			if (anims_[i].name == k.file) animOrder_.push_back(int(i));
+	for (std::size_t i = 0; i < anims_.size(); ++i)
+		if (std::find(animOrder_.begin(), animOrder_.end(), int(i)) == animOrder_.end()) animOrder_.push_back(int(i));
+	// La misma animación si la hay en este juego; si no, en reposo.
+	if (anim_ >= 0) {
+		anim_ = -1;
+		for (std::size_t i = 0; i < anims_.size(); ++i)
+			if (anims_[i].name == current) anim_ = int(i);
+	}
+	frame_ = 0;
+}
+
+bool App::loadRigFor(int target, OlimarRig& rig, bool& fromP2, std::string& error)
+{
+	// Los Pikmin "de los tres" se ven de rojo, como en Pikmin 1.
+	static const char* const kMods[T_COUNT] = { "pikis/nv3Model.mod", "pikis/redModel.mod", "pikis/yelModel.mod", "pikis/bluModel.mod",
+		                                        "pikis/redModel.mod", nullptr,              nullptr,              nullptr };
+	static const char* const kBmds[T_COUNT] = { "orima1.bmd",         "piki_p2_red.bmd",  "piki_p2_yellow.bmd", "piki_p2_blue.bmd",
+		                                        "piki_p2_red.bmd",    "piki_p2_black.bmd", "piki_p2_white.bmd", "piki_kochappy.bmd" };
+	if (target < 0 || target >= T_COUNT) target = T_CAPTAIN;
+	if (p1Ready_ && kMods[target]) {
+		fromP2 = false;
+		return rig.load(assetsDir_ + "/dataDir", kMods[target], error);
+	}
+	if (!p2Ready_) {
+		error = L("Este modelo es de Pikmin 2, que no está instalado.", "This model is from Pikmin 2, which is not installed.");
+		return false;
+	}
+	fromP2 = true;
+	std::vector<unsigned char> bytes;
+	nectar::BmdModel bmd;
+	return nectar::readRarc(p2Arc_, kBmds[target], bytes, error) && nectar::loadBmd(bytes, bmd, error) && rig.loadBmd(bmd, error);
+}
+
 bool App::loadReference(std::string& error)
 {
 	OlimarRig rig;
-	const char* model = "pikis/nv3Model.mod";
-	// Morado y blanco (de Pikmin 2): el esqueleto Pikmin, con el rojo de referencia.
-	if (target_ == T_RED || target_ == T_ALL || target_ == T_PURPLE || target_ == T_WHITE) model = "pikis/redModel.mod";
-	else if (target_ == T_YELLOW) model = "pikis/yelModel.mod";
-	else if (target_ == T_BLUE) model = "pikis/bluModel.mod";
-	if (!rig.load(assetsDir_ + "/dataDir", model, error)) return false;
+	bool fromP2 = false;
+	if (!loadRigFor(target_, rig, fromP2, error)) return false;
 	olimar_ = std::move(rig);
+	// Animaciones y hojas del mismo juego que el modelo.
+	useAnims(fromP2);
+	for (int i = 0; i < 3; ++i) {
+		leaves_[i] = fromP2 ? leavesP2_[i] : leavesP1_[i];
+		for (GLuint t : leafTex_[i])
+			if (t) glDeleteTextures(1, &t);
+		leafTex_[i].clear();
+		for (const nectar::Image& img : leaves_[i].materialTex) leafTex_[i].push_back(uploadTexture(img, false));
+	}
 	for (GLuint t : olimarTex_)
 		if (t) glDeleteTextures(1, &t);
 	olimarTex_.clear();
@@ -192,7 +270,7 @@ bool App::loadReference(std::string& error)
 void App::speciesColour(float out[3]) const
 {
 	static const float kColours[T_COUNT][3] = { { 1, 1, 1 },          { 1.0f, 0.12f, 0.0f }, { 1.0f, 0.82f, 0.0f }, { 0.0f, 0.2f, 1.0f },
-		                                        { 1.0f, 0.12f, 0.0f }, { 0.55f, 0.2f, 0.85f }, { 0.95f, 0.95f, 1.0f } };
+		                                        { 1.0f, 0.12f, 0.0f }, { 0.55f, 0.2f, 0.85f }, { 0.95f, 0.95f, 1.0f }, { 0.88f, 0.43f, 0.37f } };
 	for (int i = 0; i < 3; ++i) out[i] = kColours[target_][i];
 }
 
@@ -246,7 +324,7 @@ void App::setTarget(int target)
 	resetCamera();
 }
 
-std::string App::customDir() const { return (fs::path(cfg_.gameDir()) / "Load" / "Models" / "Custom").string(); }
+std::string App::customDir() const { return (fs::path(workDir()) / "Load" / "Models" / "Custom").string(); }
 std::string App::projectPath() const { return (fs::path(customDir()) / "olimar_project.json").string(); }
 
 void App::say(const std::string& text, bool error)
@@ -549,10 +627,9 @@ bool App::buildStartPortraits(std::string& error)
 		portrait = 0;
 	}
 	OlimarRig captain, redPikmin, yellowPikmin, bluePikmin;
-	if (!captain.load(assetsDir_ + "/dataDir", "pikis/nv3Model.mod", error)
-	    || !redPikmin.load(assetsDir_ + "/dataDir", "pikis/redModel.mod", error)
-	    || !yellowPikmin.load(assetsDir_ + "/dataDir", "pikis/yelModel.mod", error)
-	    || !bluePikmin.load(assetsDir_ + "/dataDir", "pikis/bluModel.mod", error))
+	bool fromP2 = false;
+	if (!loadRigFor(T_CAPTAIN, captain, fromP2, error) || !loadRigFor(T_RED, redPikmin, fromP2, error)
+	    || !loadRigFor(T_YELLOW, yellowPikmin, fromP2, error) || !loadRigFor(T_BLUE, bluePikmin, fromP2, error))
 		return false;
 
 	auto portrait = [&](int slot, const OlimarRig& source, const float tint[3], bool addLeaf) {
@@ -616,6 +693,15 @@ bool App::buildStartPortraits(std::string& error)
 	portrait(1, redPikmin, red, false);
 	portrait(2, yellowPikmin, yellow, false);
 	portrait(3, bluePikmin, blue, false);
+	if (p2Ready_) {
+		const int more[3]          = { T_PURPLE, T_WHITE, T_BULBMIN };
+		const float tints[3][3]    = { { 0.55f, 0.2f, 0.85f }, { 0.95f, 0.95f, 1.0f }, { 0.88f, 0.43f, 0.37f } };
+		for (int k = 0; k < 3; ++k) {
+			OlimarRig rig;
+			std::string ignored;
+			if (loadRigFor(more[k], rig, fromP2, ignored)) portrait(4 + k, rig, tints[k], false);
+		}
+	}
 	return startPortrait_[0] && startPortrait_[1] && startPortrait_[2] && startPortrait_[3];
 }
 
@@ -782,14 +868,19 @@ void App::drawStartScreen(float width, float height)
 	ImGui::PopStyleColor();
 	ImGui::Dummy(ImVec2(0, 26));
 
-	const char* names[4] = { "Olimar", L("Pikmin rojo", "Red Pikmin"), L("Pikmin amarillo", "Yellow Pikmin"), L("Pikmin azul", "Blue Pikmin") };
-	const char* desc[4] = { L("Capitán", "Captain"), L("Fuego", "Fire"), L("Electricidad", "Electricity"), L("Agua", "Water") };
-	const ImU32 colours[4] = { IM_COL32(222, 217, 174, 255), IM_COL32(225, 75, 62, 255), IM_COL32(242, 202, 70, 255), IM_COL32(67, 132, 230, 255) };
-	const int targets[4] = { T_CAPTAIN, T_RED, T_YELLOW, T_BLUE };
+	// Los de los dos juegos y, con Pikmin 2 instalado, sus Pikmin nuevos.
+	const char* names[7] = { "Olimar", L("Pikmin rojo", "Red Pikmin"), L("Pikmin amarillo", "Yellow Pikmin"), L("Pikmin azul", "Blue Pikmin"),
+		                     L("Pikmin morado", "Purple Pikmin"), L("Pikmin blanco", "White Pikmin"), "Bulbmin" };
+	const char* desc[7] = { L("Capitán", "Captain"), L("Fuego", "Fire"), L("Electricidad", "Electricity"), L("Agua", "Water"),
+		                    L("Fuerza (Pikmin 2)", "Strength (Pikmin 2)"), L("Veneno (Pikmin 2)", "Poison (Pikmin 2)"), "Pikmin 2" };
+	const ImU32 colours[7] = { IM_COL32(222, 217, 174, 255), IM_COL32(225, 75, 62, 255), IM_COL32(242, 202, 70, 255), IM_COL32(67, 132, 230, 255),
+		                       IM_COL32(150, 70, 220, 255),  IM_COL32(240, 240, 250, 255), IM_COL32(225, 110, 95, 255) };
+	const int targets[7] = { T_CAPTAIN, T_RED, T_YELLOW, T_BLUE, T_PURPLE, T_WHITE, T_BULBMIN };
+	const int cards      = p2Ready_ ? 7 : 4;
 	const float gap = 16.0f;
-	const float cardW = (contentW - gap * 3.0f) * 0.25f;
+	const float cardW = (contentW - gap * float(cards - 1)) / float(cards);
 	const float cardH = std::clamp(height * 0.32f, 230.0f, 300.0f);
-	for (int i = 0; i < 4; ++i) {
+	for (int i = 0; i < cards; ++i) {
 		ImGui::PushID(i);
 		const ImVec2 p = ImGui::GetCursorScreenPos();
 		ImGui::InvisibleButton("card", ImVec2(cardW, cardH));
@@ -826,7 +917,7 @@ void App::drawStartScreen(float width, float height)
 			showStart_ = false;
 			resetCamera();
 		}
-		if (i != 3) ImGui::SameLine(0, gap);
+		if (i != cards - 1) ImGui::SameLine(0, gap);
 		ImGui::PopID();
 	}
 	ImGui::Dummy(ImVec2(0, 22));
@@ -922,7 +1013,7 @@ void App::drawWorkflow(float x, float y, float width, float height)
 	ImGui::Dummy(ImVec2(0, 8));
 	const char* targetNames[T_COUNT] = { "Olimar", L("Pikmin rojo", "Red Pikmin"), L("Pikmin amarillo", "Yellow Pikmin"), L("Pikmin azul", "Blue Pikmin"),
 		                                 L("Todos los Pikmin", "All Pikmin"), L("Pikmin morado (Pikmin 2)", "Purple Pikmin (Pikmin 2)"),
-		                                 L("Pikmin blanco (Pikmin 2)", "White Pikmin (Pikmin 2)") };
+		                                 L("Pikmin blanco (Pikmin 2)", "White Pikmin (Pikmin 2)"), L("Bulbmin (Pikmin 2)", "Bulbmin (Pikmin 2)") };
 	ImGui::SetWindowFontScale(1.18f);
 	ImGui::TextUnformatted(targetNames[target_]);
 	ImGui::SetWindowFontScale(1.0f);
@@ -945,7 +1036,13 @@ void App::drawWorkflow(float x, float y, float width, float height)
 	ImGui::SetNextItemWidth(-1);
 	int t = target_;
 	ImGui::BeginDisabled(working_);
-	if (ImGui::Combo("##workflowtarget", &t, targetNames, T_COUNT)) setTarget(t);
+	// Los de Pikmin 2, solo con Pikmin 2 instalado.
+	if (ImGui::BeginCombo("##workflowtarget", targetNames[t])) {
+		for (int k = 0; k < T_COUNT; ++k) {
+			if (ImGui::Selectable(targetNames[k], k == t, targetAvailable(k) ? 0 : ImGuiSelectableFlags_Disabled) && k != t) setTarget(k);
+		}
+		ImGui::EndCombo();
+	}
 	ImGui::EndDisabled();
 	if (hasModel_) {
 		const ImU32 col = exportDirty_ ? IM_COL32(232, 188, 72, 255) : export_.ok() ? IM_COL32(125, 211, 99, 255) : IM_COL32(231, 91, 75, 255);
@@ -1499,6 +1596,9 @@ void App::editCreation(const std::string& dir, const nectar::CharacterInfo& info
 	else if (info.target == nectar::kTargetPikminYellow) target = T_YELLOW;
 	else if (info.target == nectar::kTargetPikminBlue) target = T_BLUE;
 	else if (info.target == nectar::kTargetPikminAll) target = T_ALL;
+	else if (info.target == nectar::kTargetPikminPurple) target = T_PURPLE;
+	else if (info.target == nectar::kTargetPikminWhite) target = T_WHITE;
+	else if (info.target == nectar::kTargetPikminBulbmin) target = T_BULBMIN;
 	std::string source;
 	try {
 		if (!text.empty()) source = json::parse(text).value("source", "");
@@ -1533,7 +1633,7 @@ void App::editCreation(const std::string& dir, const nectar::CharacterInfo& info
 	// Se abre otro: el de ahora deja de contar (y cambiar de objetivo no
 	// tiene que simplificarlo).
 	hasModel_ = false;
-	setTarget(target);
+	setTarget(targetAvailable(target) ? target : T_CAPTAIN);
 	try {
 		if (!text.empty()) targetTris_ = json::parse(text).value("targetTris", targetTris_);
 	} catch (const std::exception&) {
@@ -1610,7 +1710,8 @@ bool App::loadProject(std::string& source, int& target)
 	try {
 		const json j = json::parse(f);
 		source       = j.value("source", "");
-		target       = std::clamp(j.value("target", 0), 0, 4);
+		target       = std::clamp(j.value("target", 0), 0, int(T_COUNT) - 1);
+		if (!targetAvailable(target)) target = T_CAPTAIN; // de Pikmin 2, sin Pikmin 2
 	} catch (const std::exception&) {
 		return false;
 	}
@@ -1622,18 +1723,36 @@ bool App::loadProject(std::string& source, int& target)
 
 void App::refreshInstalled()
 {
-	installed_ = isPikmin() ? nectar::listPikminModels(cfg_.gameDir()) : nectar::listCharacters(cfg_.gameDir());
-	creations_ = nectar::listCharacters(cfg_.gameDir());
-	for (const nectar::CharacterInfo& c : nectar::listPikminModels(cfg_.gameDir())) creations_.push_back(c);
+	// Los de los dos juegos (el mismo personaje en los dos, una vez).
+	installed_.clear();
+	creations_.clear();
+	auto add = [](std::vector<nectar::CharacterInfo>& list, const std::vector<nectar::CharacterInfo>& more) {
+		for (const nectar::CharacterInfo& c : more) {
+			bool known = false;
+			for (const nectar::CharacterInfo& o : list) known = known || o.id == c.id;
+			if (!known) list.push_back(c);
+		}
+	};
+	for (const std::string& game : { pikmin1Dir(), p2Ready_ ? p2Dir_ : std::string() }) {
+		if (game.empty()) continue;
+		add(installed_, isPikmin() ? nectar::listPikminModels(game) : nectar::listCharacters(game));
+		add(creations_, nectar::listCharacters(game));
+		add(creations_, nectar::listPikminModels(game));
+	}
 }
 
 namespace {
-const char* const kTargets[7] = { // como App::Target nectar::kTargetCaptain,    nectar::kTargetPikminRed,    nectar::kTargetPikminYellow,
-	                                         nectar::kTargetPikminBlue, nectar::kTargetPikminAll,    nectar::kTargetPikminPurple,
-	                                         nectar::kTargetPikminWhite };
-bool pikmin2Only(const std::string& target) { return target == nectar::kTargetPikminPurple || target == nectar::kTargetPikminWhite; }
+// En el orden de App::Target.
+const char* const kTargets[] = { nectar::kTargetCaptain,     nectar::kTargetPikminRed,    nectar::kTargetPikminYellow, nectar::kTargetPikminBlue,
+	                             nectar::kTargetPikminAll,   nectar::kTargetPikminPurple, nectar::kTargetPikminWhite,  nectar::kTargetPikminBulbmin };
+static_assert(sizeof(kTargets) / sizeof(kTargets[0]) == 8, "kTargets follows App::Target");
+bool pikmin2Only(const std::string& target)
+{
+	return target == nectar::kTargetPikminPurple || target == nectar::kTargetPikminWhite || target == nectar::kTargetPikminBulbmin;
+}
 const char* targetLabel(const std::string& target)
 {
+	if (target == nectar::kTargetPikminBulbmin) return "Bulbmin";
 	if (target == nectar::kTargetPikminPurple) return L("morados", "purple");
 	if (target == nectar::kTargetPikminWhite) return L("blancos", "white");
 	if (target == nectar::kTargetPikminRed) return L("rojos", "red");
@@ -1726,25 +1845,19 @@ bool App::characterFiles(nectar::CharacterFiles& files, std::string& error)
 
 std::string App::pikmin2Dir() const
 {
+	// La que recuerda el launcher, la carpeta donde nos abrió (si es Pikmin 2)
+	// o ../pikmin2 junto a Pikmin.
 	std::error_code ec;
-	fs::path dir = nectar::paths::readStoredPath(nectar::paths::configFile("pikmin2_dir"));
-	if (dir.empty() || !fs::is_directory(dir, ec)) dir = fs::path(cfg_.gameDir()).parent_path() / "pikmin2";
-	return fs::is_directory(dir / "assets", ec) || fs::is_directory(dir / "Load", ec) ? dir.u8string() : std::string();
+	const auto ok = [&](const fs::path& dir) {
+		return !dir.empty() && fs::is_regular_file(dir / "assets" / "user" / "Kando" / "piki" / "pikis.szs", ec);
+	};
+	for (const fs::path& dir : { nectar::paths::readStoredPath(nectar::paths::configFile("pikmin2_dir")), fs::current_path(ec),
+	                             p1Ready_ ? fs::path(cfg_.gameDir()).parent_path() / "pikmin2" : fs::path() })
+		if (ok(dir)) return dir.u8string();
+	return std::string();
 }
 
-std::vector<std::string> App::installDirs(bool p2Only) const
-{
-	std::vector<std::string> dirs;
-	const int game = p2Only ? 1 : installGame_;
-	if (game != 1) dirs.push_back(cfg_.gameDir());
-	if (game != 0) {
-		const std::string p2 = pikmin2Dir();
-		if (!p2.empty()) dirs.push_back(p2);
-	}
-	return dirs;
-}
-
-void App::installAsCharacter()
+void App::installAsCharacter(int game)
 {
 	nectar::CharacterFiles files;
 	std::string error, dir;
@@ -1752,39 +1865,32 @@ void App::installAsCharacter()
 		say(std::string(L("No se pudo instalar: ", "Could not install: ")) + error, true);
 		return;
 	}
-	const std::vector<std::string> dirs = installDirs(pikmin2Only(files.info.target));
-	if (dirs.empty()) {
-		say(L("No encuentro Pikmin 2: elige su carpeta en el launcher.", "Pikmin 2 was not found: choose its folder in the launcher."), true);
+	const std::string gameDir = game == 0 ? pikmin1Dir() : (p2Ready_ ? p2Dir_ : std::string());
+	if (gameDir.empty() || (game == 0 && pikmin2Only(files.info.target))) {
+		say(game == 0 ? L("Este modelo solo existe en Pikmin 2.", "This model only exists in Pikmin 2.")
+		              : L("No encuentro Pikmin 2: instálalo o elige su carpeta en el launcher.", "Pikmin 2 was not found: install it or choose its folder in the launcher."),
+		    true);
 		return;
 	}
-	bool intoPikmin1 = false;
-	for (const std::string& game : dirs) {
-		std::string at;
-		if (!nectar::installCharacter(game, files, at, error)) {
-			say(std::string(L("No se pudo instalar: ", "Could not install: ")) + error, true);
-			return;
-		}
-		if (game == cfg_.gameDir()) {
-			intoPikmin1 = true;
-			dir         = at;
-		}
+	if (!nectar::installCharacter(gameDir, files, dir, error)) {
+		say(std::string(L("No se pudo instalar: ", "Could not install: ")) + error, true);
+		return;
 	}
 	refreshInstalled();
 	if (isPikmin()) {
-		if (intoPikmin1) {
+		if (game == 0) {
 			files.info.dir = dir;
 			useNowInGame(files.info);
 		} else {
 			say(std::string("\"") + files.info.name
-			    + L("\" instalado en Pikmin 2: elígelo en Opciones > Gráficos (modelo de cada Pikmin).",
-			        "\" installed in Pikmin 2: pick it in Options > Graphics (each Pikmin's model)."));
+			    + L("\" guardado en Pikmin 2: elígelo en Opciones > Gráficos (modelo de cada Pikmin).",
+			        "\" saved to Pikmin 2: pick it in Options > Graphics (each Pikmin's model)."));
 		}
 		return;
 	}
-	say(std::string(L("\"", "\"")) + files.info.name
-	    + (dirs.size() > 1 ? L("\" ya está en el selector de capitán de los dos juegos.", "\" is now in both games' captain selector.")
-	       : intoPikmin1   ? L("\" ya está en el selector de capitán del juego.", "\" is now in the game's captain selector.")
-	                       : L("\" ya está en el selector de capitanes de Pikmin 2.", "\" is now in Pikmin 2's Captains screen.")));
+	say(std::string("\"") + files.info.name
+	    + (game == 0 ? L("\" ya está en el selector de capitán de Pikmin.", "\" is now in Pikmin's captain selector.")
+	                 : L("\" ya está en el selector de capitanes de Pikmin 2.", "\" is now in Pikmin 2's Captains screen.")));
 }
 
 void App::exportCharacter()
@@ -1814,18 +1920,17 @@ void App::installPack(const std::string& path)
 	}
 	nectar::CharacterInfo info;
 	std::string error;
-	// El primer juego dice qué es; los morados y blancos, solo en Pikmin 2.
-	std::vector<std::string> dirs = installDirs(false);
-	if (dirs.empty()) {
-		say(L("No encuentro Pikmin 2: elige su carpeta en el launcher.", "Pikmin 2 was not found: choose its folder in the launcher."), true);
-		return;
-	}
+	// En los juegos instalados; el primero dice qué es (los de Pikmin 2 no van a Pikmin).
+	std::vector<std::string> dirs;
+	if (p1Ready_) dirs.push_back(pikmin1Dir());
+	if (p2Ready_) dirs.push_back(p2Dir_);
+	if (dirs.empty()) return;
 	if (!nectar::installCharacterPack(dirs[0], path, info, error)) {
 		say(std::string(L("No se pudo instalar: ", "Could not install: ")) + error, true);
 		return;
 	}
 	for (std::size_t i = 1; i < dirs.size(); i++) {
-		if (pikmin2Only(info.target) && dirs[i] == cfg_.gameDir()) continue;
+		if (pikmin2Only(info.target) && dirs[i] == pikmin1Dir()) continue;
 		nectar::CharacterInfo again;
 		if (!nectar::installCharacterPack(dirs[i], path, again, error)) {
 			say(std::string(L("No se pudo instalar: ", "Could not install: ")) + error, true);
@@ -1881,26 +1986,22 @@ void App::drawCharacters()
 				ImGui::EndCombo();
 			}
 		}
-		// En qué juego (docs/PLAN_P2_CAPITANES_PROPIOS.md). Morado y blanco: solo Pikmin 2.
-		{
-			const bool p2Only   = target_ == T_PURPLE || target_ == T_WHITE;
-			const char* games[] = { "Pikmin", "Pikmin 2", L("Los dos", "Both") };
-			int game            = p2Only ? 1 : installGame_;
-			ImGui::TextUnformatted(L("Instalar en:", "Install in:"));
-			ImGui::SameLine();
-			ImGui::SetNextItemWidth(-1);
-			ImGui::BeginDisabled(p2Only);
-			if (ImGui::Combo("##installgame", &game, games, 3) && !p2Only) installGame_ = game;
-			ImGui::EndDisabled();
-			if (game != 0 && pikmin2Dir().empty())
-				hint(L("No encuentro Pikmin 2: elige su carpeta en el launcher.", "Pikmin 2 was not found: choose its folder in the launcher."));
-		}
-		bool replacing = false;
-		for (const nectar::CharacterInfo& c : installed_) replacing = replacing || c.id == editingId_;
+		// Un botón por juego (docs/PLAN_P2_CAPITANES_PROPIOS.md): los de los dos
+		// juegos se guardan en cualquiera; morado, blanco y Bulbmin, en Pikmin 2.
+		const bool canP1 = p1Ready_ && !targetP2Only(target_);
+		const bool canP2 = p2Ready_;
 		ImGui::BeginDisabled(exportDirty_ || !export_.ok() || working_);
-		if (bigButton(replacing ? (isPikmin() ? L("Reemplazar y usar ya", "Replace and use now") : L("Reemplazar ese personaje", "Replace that character"))
-		                        : (isPikmin() ? L("Instalar y usar ya", "Install and use now") : L("Instalar como personaje nuevo", "Install as a new character"))))
-			installAsCharacter();
+		const float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+		ImGui::BeginDisabled(!canP1);
+		if (bigButton(L("Guardar en Pikmin", "Save to Pikmin"), half)) installAsCharacter(0);
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		ImGui::BeginDisabled(!canP2);
+		if (bigButton(L("Guardar en Pikmin 2", "Save to Pikmin 2"), half)) installAsCharacter(1);
+		ImGui::EndDisabled();
+		if (!p1Ready_) hint(L("Pikmin no está instalado.", "Pikmin is not installed."));
+		else if (targetP2Only(target_)) hint(L("Este Pikmin solo existe en Pikmin 2.", "This Pikmin only exists in Pikmin 2."));
+		if (!p2Ready_) hint(L("Pikmin 2 no está instalado (o el launcher no sabe dónde).", "Pikmin 2 is not installed (or the launcher doesn't know where)."));
 		if (ImGui::Button(L("Exportar archivo .nectarchar…", "Export .nectarchar file…"), ImVec2(-1, 0))) exportCharacter();
 		ImGui::EndDisabled();
 	}
@@ -1926,7 +2027,10 @@ void App::drawCharacters()
 			ImGui::Text(L("¿Quitar \"%s\" del juego?", "Remove \"%s\" from the game?"), c.name.c_str());
 			if (ImGui::Button(L("Sí, quitar", "Yes, remove"))) {
 				std::string error;
-				if (nectar::removeCharacter(cfg_.gameDir(), removeId_, error)) say(std::string(L("Quitado: ", "Removed: ")) + c.name);
+				bool removed = false;
+				for (const std::string& game : { pikmin1Dir(), p2Ready_ ? p2Dir_ : std::string() })
+					if (!game.empty() && nectar::removeCharacter(game, removeId_, error)) removed = true;
+				if (removed) say(std::string(L("Quitado: ", "Removed: ")) + c.name);
 				else say(error, true);
 				ImGui::CloseCurrentPopup();
 				ImGui::EndPopup();

@@ -8,6 +8,8 @@
 #include "nectar_assets/image.h"
 
 #include <string>
+
+#include "nectar_assets/bmd.h"
 #include <vector>
 
 namespace mm {
@@ -54,6 +56,12 @@ struct OlimarRig {
 	/// `mod`: el modelo de referencia (pikis/nv3Model.mod para Olimar,
 	/// pikis/redModel.mod para los Pikmin: los tres colores comparten rig).
 	bool load(const std::string& dataDir, const std::string& mod, std::string& error);
+	/// Lo mismo desde un .bmd de Pikmin 2 (orima1, piki_p2_*, piki_kochappy):
+	/// sus huesos, por nombre, al orden de arriba (el de la cara es la cabeza;
+	/// los que no tenga, como las manos del Bulbmin, van con el torso).
+	bool loadBmd(const nectar::BmdModel& bmd, std::string& error);
+	/// Hueso del .bmd de cada articulación (tras loadBmd).
+	std::vector<int> bmdJoint;
 	/// Centro de lo que pesa en `joint` (para saber hacia dónde va un brazo).
 	Vec3 jointCentroid(int joint) const;
 	Vec3 pivot(int joint) const { return translationOf(bind[std::size_t(joint)]); }
@@ -67,6 +75,8 @@ struct LeafModel {
 	std::vector<nectar::Image> materialTex;
 	std::vector<nectar::Rgba8> materialColour;
 	bool load(const std::string& path, std::string& error);
+	/// Desde happa_model/*.bmd de Pikmin 2 (un solo hueso: su espacio es el de la punta).
+	bool loadBmd(const nectar::BmdModel& bmd, std::string& error);
 };
 
 struct AnimParam {
@@ -84,6 +94,9 @@ struct Anim {
 	int frames = 0;
 	std::vector<float> sData, rData, tData;
 	std::vector<AnimJoint> joints;
+	/// Animaciones de Pikmin 2 (.bca): por fotograma y articulación, escala,
+	/// rotación (radianes) y traslación ya en el orden de OlimarRig.
+	std::vector<float> full;
 
 	/// Matrices del mundo de cada articulación en el fotograma `frame`
 	/// (raíz sobre la identidad), como BaseShape::updateAnim.
@@ -91,5 +104,8 @@ struct Anim {
 };
 
 bool loadAnimBundle(const std::string& path, std::vector<Anim>& out, std::string& error);
+/// Las animaciones .bca de la carpeta motion/ de pikis.szs (ya descomprimido),
+/// para un esqueleto cargado con OlimarRig::loadBmd.
+bool loadBcaAnims(const std::vector<unsigned char>& rarc, const OlimarRig& rig, std::vector<Anim>& out, std::string& error);
 
 } // namespace mm

@@ -301,9 +301,27 @@ void Anim::pose(float frame, const std::vector<int>& parent, std::vector<Mat34>&
 {
 	world.assign(parent.size(), Mat34());
 	if (frames > 0) frame = std::fmod(std::max(frame, 0.0f), float(frames));
+	// .bca de Pikmin 2: un valor por fotograma (entre dos, mezclados).
+	const std::size_t perFrame = std::size_t(kJoints) * 9;
+	const bool bca             = frames > 0 && full.size() == std::size_t(frames) * perFrame;
+	const int f0               = int(frame), f1 = (f0 + 1) % std::max(frames, 1);
+	const float k              = frame - float(f0);
 	for (std::size_t j = 0; j < parent.size(); ++j) {
 		Vec3 s { 1, 1, 1 }, r, t;
-		if (j < joints.size()) {
+		if (bca && j < std::size_t(kJoints)) {
+			const float* a = &full[std::size_t(f0) * perFrame + j * 9];
+			const float* b = &full[std::size_t(f1) * perFrame + j * 9];
+			auto mix       = [&](int i) { return a[i] + (b[i] - a[i]) * k; };
+			auto mixAngle  = [&](int i) {
+                float d = b[i] - a[i];
+                while (d > kPi) d -= 2 * kPi;
+                while (d < -kPi) d += 2 * kPi;
+                return a[i] + d * k;
+			};
+			s = { mix(0), mix(1), mix(2) };
+			r = { mixAngle(3), mixAngle(4), mixAngle(5) };
+			t = { mix(6), mix(7), mix(8) };
+		} else if (j < joints.size()) {
 			const AnimJoint& a = joints[j];
 			float* sv[3]       = { &s.x, &s.y, &s.z };
 			float* rv[3]       = { &r.x, &r.y, &r.z };
@@ -371,6 +389,186 @@ bool loadAnimBundle(const std::string& path, std::vector<Anim>& out, std::string
 	}
 	if (out.empty()) {
 		error = path + ": no animations";
+		return false;
+	}
+	return true;
+}
+
+// ── Pikmin 2 (.bmd y .bca) ──────────────────────────────────────────────────
+
+namespace {
+
+Mat34 mat34Of(const nectar::BmdMtx& m)
+{
+	Mat34 o;
+	for (int r = 0; r < 3; ++r)
+		for (int c = 0; c < 4; ++c) o.m[r][c] = m[std::size_t(r * 4 + c)];
+	return o;
+}
+
+int bmdJointNamed(const nectar::BmdModel& bmd, const char* name)
+{
+	for (std::size_t i = 0; i < bmd.jointNames.size(); ++i)
+		if (bmd.jointNames[i] == name) return int(i);
+	return -1;
+}
+
+nectar::Image imageOf(const nectar::BmdTexture& t)
+{
+	nectar::Image img;
+	img.width  = t.width;
+	img.height = t.height;
+	img.rgba   = t.rgba;
+	return img;
+}
+
+void addBmdTriangles(const nectar::BmdModel& bmd, const std::vector<int>& p1Of, std::vector<SkinVertex>& verts, std::vector<int>& triMaterial,
+                     std::vector<nectar::Image>& materialTex, std::vector<nectar::Rgba8>& materialColour)
+{
+	materialTex.assign(bmd.shapes.size(), {});
+	materialColour.assign(bmd.shapes.size(), nectar::Rgba8 { 255, 255, 255, 255 });
+	for (std::size_t si = 0; si < bmd.shapes.size(); ++si) {
+		const nectar::BmdShape& shape = bmd.shapes[si];
+		if (shape.texture >= 0) materialTex[si] = imageOf(bmd.texture(shape.texture));
+		for (std::size_t v = 0; v + 2 < shape.tris.size(); v += 3) {
+			for (int k = 0; k < 3; ++k) {
+				const nectar::BmdVertex& in = shape.tris[v + std::size_t(k)];
+				SkinVertex out;
+				out.p  = { in.pos[0], in.pos[1], in.pos[2] };
+				out.n  = { in.nrm[0], in.nrm[1], in.nrm[2] };
+				out.uv = { in.uv[0], in.uv[1] };
+				for (int c = 0; c < 4; ++c) out.col[c] = shape.hasColor ? in.col[c] / 255.0f : 1.0f;
+				for (int i = 0; i < 4; ++i) {
+					const int j   = in.joints[i];
+					out.joint[i]  = j >= 0 && std::size_t(j) < p1Of.size() && p1Of[std::size_t(j)] >= 0 ? p1Of[std::size_t(j)] : 0;
+					out.weight[i] = in.weights[i];
+				}
+				verts.push_back(out);
+			}
+			triMaterial.push_back(int(si));
+		}
+	}
+}
+
+} // namespace
+
+bool OlimarRig::loadBmd(const nectar::BmdModel& bmd, std::string& error)
+{
+	const int spine = bmdJointNamed(bmd, "sebonjnt");
+	bmdJoint.assign(kJoints, -1);
+	for (int j = 0; j < kJoints; ++j) {
+		const char* name = kPackBones[j] ? kPackBones[j] : "headjnt"; // la cara va con la cabeza
+		int k            = bmdJointNamed(bmd, name);
+		if (k < 0) k = spine;
+		if (k < 0) {
+			error = std::string("the model has no joint ") + name;
+			return false;
+		}
+		bmdJoint[std::size_t(j)] = k;
+	}
+	// Del hueso del .bmd a la articulación (la primera que lo usa, sin la cara).
+	std::vector<int> p1Of(bmd.jointNames.size(), -1);
+	for (int j = 0; j < kJoints; ++j)
+		if (j != J_FACE && p1Of[std::size_t(bmdJoint[std::size_t(j)])] < 0) p1Of[std::size_t(bmdJoint[std::size_t(j)])] = j;
+	bind.assign(kJoints, Mat34());
+	parent.assign(kJoints, -1);
+	for (int j = 0; j < kJoints; ++j) {
+		const int k              = bmdJoint[std::size_t(j)];
+		bind[std::size_t(j)]     = mat34Of(bmd.world[std::size_t(k)]);
+		const int up             = std::size_t(k) < bmd.parent.size() ? bmd.parent[std::size_t(k)] : -1;
+		parent[std::size_t(j)]   = j == J_FACE ? J_HEAD : up >= 0 ? p1Of[std::size_t(up)] : -1;
+		if (parent[std::size_t(j)] >= j) parent[std::size_t(j)] = -1; // los padres, antes
+	}
+	verts.clear();
+	triMaterial.clear();
+	addBmdTriangles(bmd, p1Of, verts, triMaterial, materialTex, materialColour);
+	if (verts.empty()) {
+		error = "the model has no triangles";
+		return false;
+	}
+	min = max = verts[0].p;
+	bodyTop   = 0;
+	for (const SkinVertex& v : verts) {
+		min = vmin(min, v.p);
+		max = vmax(max, v.p);
+		int main = 0;
+		for (int i = 1; i < 4; ++i)
+			if (v.weight[i] > v.weight[main]) main = i;
+		const int j = v.joint[main];
+		if (j != J_ANT1 && j != J_ANT2 && j != J_ANT3) bodyTop = std::max(bodyTop, v.p.y);
+	}
+	return true;
+}
+
+bool LeafModel::loadBmd(const nectar::BmdModel& bmd, std::string& error)
+{
+	verts.clear();
+	triMaterial.clear();
+	std::vector<int> p1Of(bmd.jointNames.size(), 0);
+	addBmdTriangles(bmd, p1Of, verts, triMaterial, materialTex, materialColour);
+	if (verts.empty()) error = "the leaf has no triangles";
+	return !verts.empty();
+}
+
+bool loadBcaAnims(const std::vector<unsigned char>& rarc, const OlimarRig& rig, std::vector<Anim>& out, std::string& error)
+{
+	out.clear();
+	if (rig.bmdJoint.size() != std::size_t(kJoints)) {
+		error = "no Pikmin 2 skeleton";
+		return false;
+	}
+	// Las de la tabla de animaciones conocidas y unas cuantas más de Pikmin 2.
+	static const char* const kFiles[] = { "wait.bca", "walk.bca", "run2.bca", "jump.bca", "fall.bca", "damage.bca", "punch.bca",
+		                                  "fue.bca",  "akubi.bca", "chatting.bca", "nigeru.bca", "dead.bca" };
+	for (const char* file : kFiles) {
+		std::vector<unsigned char> b;
+		std::string why;
+		if (!nectar::readRarc(rarc, file, b, why) || b.size() < 0x44 || std::memcmp(b.data(), "J3D1bca1", 8) != 0) continue;
+		auto be16 = [&](std::size_t o) { return o + 2 <= b.size() ? std::uint16_t(b[o] << 8 | b[o + 1]) : std::uint16_t(0); };
+		auto be32 = [&](std::size_t o) { return o + 4 <= b.size() ? std::uint32_t(be16(o)) << 16 | be16(o + 2) : 0u; };
+		auto beF  = [&](std::size_t o) {
+            const std::uint32_t v = be32(o);
+            float f;
+            std::memcpy(&f, &v, 4);
+            return f;
+		};
+		const std::size_t anf = 0x20; // ANF1, el único bloque
+		if (std::memcmp(&b[anf], "ANF1", 4) != 0) continue;
+		const int frames   = be16(anf + 0xA), joints = be16(anf + 0xC);
+		const std::size_t jo = anf + be32(anf + 0x14), so = anf + be32(anf + 0x18), ro = anf + be32(anf + 0x1C), to = anf + be32(anf + 0x20);
+		if (frames <= 0 || joints <= 0) continue;
+		Anim a;
+		a.path   = std::string("motion/") + file;
+		a.name   = std::string(file).substr(0, std::strlen(file) - 4);
+		a.frames = frames;
+		a.full.assign(std::size_t(frames) * std::size_t(kJoints) * 9, 0.0f);
+		for (int f = 0; f < frames; ++f) {
+			for (int j = 0; j < kJoints; ++j) {
+				float* v = &a.full[(std::size_t(f) * kJoints + std::size_t(j)) * 9];
+				v[0] = v[1] = v[2] = 1.0f;
+				if (j == J_FACE) continue; // sin animación propia: la de la cabeza
+				const int k = rig.bmdJoint[std::size_t(j)];
+				if (k < 0 || k >= joints) continue;
+				// Manos que el modelo no tiene: van con el torso (su mismo valor).
+				const std::size_t e = jo + std::size_t(k) * 36;
+				for (int axis = 0; axis < 3; ++axis) {
+					const std::size_t c = e + std::size_t(axis) * 12;
+					auto value          = [&](std::size_t comp, std::size_t base, bool rot) {
+                        const int count = be16(c + comp * 4), index = be16(c + comp * 4 + 2);
+                        const int at    = index + (count > 1 ? std::min(f, count - 1) : 0);
+                        if (rot) return float(std::int16_t(be16(base + std::size_t(at) * 2))) * kPi / 32768.0f;
+                        return beF(base + std::size_t(at) * 4);
+					};
+					v[axis]     = value(0, so, false);
+					v[3 + axis] = value(1, ro, true);
+					v[6 + axis] = value(2, to, false);
+				}
+			}
+		}
+		out.push_back(std::move(a));
+	}
+	if (out.empty()) {
+		error = "pikis.szs has no animations";
 		return false;
 	}
 	return true;

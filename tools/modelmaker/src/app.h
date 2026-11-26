@@ -68,7 +68,9 @@ private:
 	ImVec2 viewOrigin_, viewSize_;
 	DynamicMesh modelMesh_, olimarMesh_;
 	std::vector<GLuint> modelTex_, olimarTex_;
-	GLuint startPortrait_[4] = {}; ///< Olimar y los tres Pikmin, renderizados desde los assets del juego
+	/// Olimar, los tres Pikmin y (con Pikmin 2) morado, blanco y Bulbmin,
+	/// renderizados desde los assets de los juegos.
+	GLuint startPortrait_[7] = {};
 	int anim_      = -1; ///< -1: pose de reposo, con los puntos para editar
 	float frame_   = 0;
 	bool playing_  = true;
@@ -83,7 +85,12 @@ private:
 	// A quién reemplaza el modelo: un capitán (Olimar o un personaje propio)
 	// o los Pikmin de un color (o los tres, teñidos por el juego).
 	// Morado y blanco solo existen en Pikmin 2.
-	enum Target { T_CAPTAIN, T_RED, T_YELLOW, T_BLUE, T_ALL, T_PURPLE, T_WHITE, T_COUNT };
+	enum Target { T_CAPTAIN, T_RED, T_YELLOW, T_BLUE, T_ALL, T_PURPLE, T_WHITE, T_BULBMIN, T_COUNT };
+	/// Morado, blanco y Bulbmin: solo existen en Pikmin 2.
+	static bool targetP2Only(int t) { return t == T_PURPLE || t == T_WHITE || t == T_BULBMIN; }
+	/// Se puede elegir: los de los dos juegos con cualquiera instalado; los de
+	/// Pikmin 2, con Pikmin 2.
+	bool targetAvailable(int t) const { return targetP2Only(t) ? p2Ready_ : (p1Ready_ || p2Ready_); }
 	int target_ = T_CAPTAIN;
 	LeafModel leaves_[3]; ///< hoja, capullo, flor (los pone el juego en la punta del tallo)
 	std::vector<GLuint> leafTex_[3];
@@ -150,13 +157,25 @@ private:
 
 	bool characterFiles(nectar::CharacterFiles& files, std::string& error);
 	bool renderPortrait(std::vector<std::uint8_t>& png);
-	void installAsCharacter();
-	/// Dónde se instala (docs/PLAN_P2_CAPITANES_PROPIOS.md): 0 Pikmin, 1 Pikmin 2, 2 los dos.
-	int installGame_ = 0;
-	/// Carpeta de Pikmin 2 (la que recuerda el launcher, o ../pikmin2); "" si no se encuentra.
+	/// Guarda en Pikmin (game 0) o en Pikmin 2 (game 1).
+	void installAsCharacter(int game);
+	/// Los dos juegos (docs/PLAN_P2_CAPITANES_PROPIOS.md): Pikmin si se
+	/// encontraron sus assets; Pikmin 2 por su carpeta (la que recuerda el
+	/// launcher, ../pikmin2 o la carpeta donde se abrió) y su pikis.szs.
+	bool p1Ready_ = false, p2Ready_ = false;
+	std::string p2Dir_;
+	std::vector<unsigned char> p2Arc_; ///< pikis.szs ya descomprimido
+	std::vector<Anim> animsP1_, animsP2_;
+	LeafModel leavesP1_[3], leavesP2_[3];
 	std::string pikmin2Dir() const;
-	/// Carpetas de los juegos en que se instala ahora (morado y blanco, solo Pikmin 2).
-	std::vector<std::string> installDirs(bool p2Only) const;
+	std::string pikmin1Dir() const { return p1Ready_ ? cfg_.gameDir() : std::string(); }
+	/// Carpeta de trabajo (proyecto del creador): Pikmin, o Pikmin 2 sin él.
+	std::string workDir() const { return p1Ready_ ? cfg_.gameDir() : p2Dir_; }
+	/// El modelo de referencia de un objetivo: el de Pikmin 1 si está y el
+	/// objetivo existe en él; si no, el .bmd de Pikmin 2. `fromP2` dice cuál.
+	bool loadRigFor(int target, OlimarRig& rig, bool& fromP2, std::string& error);
+	bool setupPikmin2(std::string& error);
+	void useAnims(bool p2);
 	void exportCharacter();
 	void installPack(const std::string& path);
 	void refreshInstalled();

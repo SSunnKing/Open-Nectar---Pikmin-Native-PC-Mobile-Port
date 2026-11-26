@@ -21,6 +21,7 @@ add_library(nectar_assets STATIC
     src/mesh_mod.cpp
     src/charpack.cpp
     src/nhm.cpp
+    src/bmd.cpp
     # Decodificador de texturas del launcher, reutilizado tal cual.
     ${NECTAR_P1_DIR}/pc_port/launcher/bti_decode.cpp
 )
