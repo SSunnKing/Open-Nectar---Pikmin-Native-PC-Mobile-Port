@@ -26,6 +26,7 @@ constexpr const char* kTargetPikminYellow = "pikmin_yellow";
 constexpr const char* kTargetPikminBlue   = "pikmin_blue";
 constexpr const char* kTargetPikminPurple = "pikmin_purple"; ///< solo Pikmin 2
 constexpr const char* kTargetPikminWhite  = "pikmin_white";  ///< solo Pikmin 2
+constexpr const char* kTargetPikminBulbmin = "pikmin_bulbmin"; ///< solo Pikmin 2
 constexpr const char* kTargetPikminAll    = "pikmin_all"; ///< todos los colores, teñido de su color
 
 struct CharacterInfo {

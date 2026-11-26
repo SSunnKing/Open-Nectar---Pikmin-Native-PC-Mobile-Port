@@ -70,7 +70,8 @@ Affine34 affineFromRows(const float m[16]);
 
 /// Matrices de piel del pack (12 floats por hueso, en el orden de
 /// model.bones) sobre un esqueleto animado del juego:
-///  - boneJoint[i]: hueso del juego al que va el hueso i del pack;
+///  - boneJoint[i]: hueso del juego al que va el hueso i del pack (varios
+///    pueden ir al mismo: el primero fija su posición y los demás lo siguen);
 ///  - anim[j]: matriz del hueso j del juego en este fotograma (en el espacio
 ///    en que se vaya a dibujar, p. ej. el de la cámara);
 ///  - bind[j]: su pose de reposo en espacio del modelo;

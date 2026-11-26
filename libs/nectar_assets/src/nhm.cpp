@@ -181,10 +181,15 @@ void nhmSkinMatrices(const NhmModel& model, const std::vector<int>& boneJoint, c
 	// Reposo del pack: el del juego con el origen de cada hueso del pack (la
 	// rotación es siempre la del juego).
 	std::vector<Affine34> packBind(bind), packAnim(count);
+	// Si varios huesos del pack van al mismo del juego (las manos de un pack
+	// sobre el Bulbmin, que no tiene), el primero fija su posición y los demás
+	// lo siguen rígidos.
+	std::vector<bool> placed(count, false);
 	for (std::size_t i = 0; i < model.bones.size(); ++i) {
 		const int j = i < boneJoint.size() ? boneJoint[i] : -1;
-		if (j < 0 || std::size_t(j) >= count) continue;
-		const Affine34 own = affineInverse(affineFromRows(model.bones[i].inverseBind));
+		if (j < 0 || std::size_t(j) >= count || placed[std::size_t(j)]) continue;
+		placed[std::size_t(j)] = true;
+		const Affine34 own     = affineInverse(affineFromRows(model.bones[i].inverseBind));
 		for (int row = 0; row < 3; ++row) packBind[std::size_t(j)].m[row][3] = own.m[row][3];
 	}
 	for (std::size_t j = 0; j < count; ++j) {

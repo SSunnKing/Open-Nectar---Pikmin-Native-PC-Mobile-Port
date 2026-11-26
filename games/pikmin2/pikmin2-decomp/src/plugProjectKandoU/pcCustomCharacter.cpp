@@ -136,6 +136,13 @@ const Skeleton* skeleton(J3DModelData* data, const std::string& path, const Pack
 				break;
 			}
 		}
+		// Un hueso que el modelo no tiene (las manos en el Bulbmin) va con el torso.
+		if (s.boneJoint[i] < 0) {
+			for (u16 j = 0; j < count; j++) {
+				const char* name = names->getName(j);
+				if (name && std::strcmp(name, "sebonjnt") == 0) s.boneJoint[i] = j;
+			}
+		}
 		if (s.boneJoint[i] < 0) {
 			std::printf("[P2 Characters] %s: the model has no joint '%s'\n", path.c_str(), p.model.bones[i].name.c_str());
 			all = false;

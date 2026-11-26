@@ -19,10 +19,10 @@ struct Pack {
 std::vector<Pack> sPacks;
 bool sScanned = false;
 
-const char* const kKeys[PC_P2_PIKMIN_MODEL_COLOURS] = { "blue", "red", "yellow", "purple", "white" };
+const char* const kKeys[PC_P2_PIKMIN_MODEL_COLOURS] = { "blue", "red", "yellow", "purple", "white", "bulbmin" };
 // Tinte de los "pikmin_all" (como los colores de los Pikmin del juego).
 const unsigned char kTint[PC_P2_PIKMIN_MODEL_COLOURS][3] = {
-	{ 70, 120, 255 }, { 255, 70, 50 }, { 255, 225, 50 }, { 150, 70, 220 }, { 245, 245, 255 },
+	{ 70, 120, 255 }, { 255, 70, 50 }, { 255, 225, 50 }, { 150, 70, 220 }, { 245, 245, 255 }, { 225, 110, 95 },
 };
 
 void ensure()

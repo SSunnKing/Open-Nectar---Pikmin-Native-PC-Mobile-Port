@@ -84,6 +84,7 @@ std::string pikminDetail(const std::string& target)
     if (target == nectar::kTargetPikminBlue) return "Blue Pikmin";
     if (target == nectar::kTargetPikminPurple) return "Purple Pikmin";
     if (target == nectar::kTargetPikminWhite) return "White Pikmin";
+    if (target == nectar::kTargetPikminBulbmin) return "Bulbmin";
     return "All Pikmin";
 }
 

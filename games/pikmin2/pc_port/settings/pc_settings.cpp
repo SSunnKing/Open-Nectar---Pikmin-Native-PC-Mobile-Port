@@ -1295,7 +1295,7 @@ void saveConfig() {
     out << "p2Captain1Id = " << sConfig.p2Captain1Id << "\n";
     out << "p2Captain2Id = " << sConfig.p2Captain2Id << "\n";
     {
-        static const char* const kKeys[PC_P2_PIKMIN_MODEL_COLOURS] = { "Blue", "Red", "Yellow", "Purple", "White" };
+        static const char* const kKeys[PC_P2_PIKMIN_MODEL_COLOURS] = { "Blue", "Red", "Yellow", "Purple", "White", "Bulbmin" };
         for (int c = 0; c < PC_P2_PIKMIN_MODEL_COLOURS; c++) out << "pikminModel" << kKeys[c] << " = " << sConfig.pikminModel[c] << "\n";
     }
 #endif
@@ -1606,6 +1606,7 @@ void loadConfig() {
         else if (key == "pikminModelYellow") sConfig.pikminModel[2] = val;
         else if (key == "pikminModelPurple") sConfig.pikminModel[3] = val;
         else if (key == "pikminModelWhite") sConfig.pikminModel[4] = val;
+        else if (key == "pikminModelBulbmin") sConfig.pikminModel[5] = val;
         else if (key == "p2Captain2Id") sConfig.p2Captain2Id = val;
         else if (key == "p2Captain2") {
             sConfig.p2Captain2 = atoi(val.c_str());
@@ -2833,8 +2834,8 @@ void advancedRowChange(int row, bool left, bool right) {
 void graphicsRowChange(int row, bool left, bool right, bool ok) {
     // Modelos de Pikmin: el del juego y los de Load/Pikmin para ese color. Se
     // aplican al cargar los Pikmin (la próxima zona o cueva).
-    if (row >= 14 && row <= 18) {
-        static const int kColour[5] = { 1, 2, 0, 3, 4 }; // rojo, amarillo, azul, morado, blanco
+    if (row >= 14 && row <= 19) {
+        static const int kColour[6] = { 1, 2, 0, 3, 4, 5 }; // rojo, amarillo, azul, morado, blanco, Bulbmin
         const int color = kColour[row - 14];
         if (row == 14) pc_p2_pikmin_models_refresh(); // instalados con el juego abierto
         const int count = pc_p2_pikmin_models_count(color);
@@ -6068,7 +6069,7 @@ int  sCapSelChoice[2] = { PC_P2_CHAR_OLIMAR, -1 }; // -1 = original (solo capit�
 bool sCsCoop        = false;
 int  sCsCursor[2]   = { 0, 0 };
 bool sCsReady[2]    = { false, false };
-enum { CS_Left, CS_Right, CS_Up, CS_Down, CS_A, CS_B, CS_Start, CS_InputCount };
+enum { CS_Left, CS_Right, CS_Up, CS_Down, CS_A, CS_B, CS_Start, CS_PagePrev, CS_PageNext, CS_InputCount };
 bool sCsHeld[2][CS_InputCount];
 
 const int kCsPanelW = 636;
@@ -6089,39 +6090,44 @@ const Colour kCsRed(235, 70, 60, 255);
 const Colour kCsBlue(70, 130, 245, 255);
 
 // Tarjetas: las 9 de serie y después los personajes del creador de modelos
-// (pc_p2_selector_*). Se ven tres filas; las demás, desplazándose.
-int sCsScroll = 0;
+// (pc_p2_selector_*), en páginas de 9 como el selector de Pikmin 1. Las
+// páginas se pasan con LB/RB, Q/E o las flechas de debajo de la rejilla.
+const int kCsPerPage = kCsCols * 3;
+int sCsPage = 0;
 int csCount() { return pc_p2_selector_count(); }
-int csRows() { return (csCount() + kCsCols - 1) / kCsCols; }
-bool csVisible(int card)
-{
-    const int row = card / kCsCols;
-    return card >= 0 && card < csCount() && row >= sCsScroll && row < sCsScroll + 3;
-}
-// Desplaza la rejilla para que se vea la tarjeta.
-void csShow(int card)
-{
-    const int row = card / kCsCols;
-    if (row < sCsScroll) sCsScroll = row;
-    if (row >= sCsScroll + 3) sCsScroll = row - 2;
-    sCsScroll = std::max(0, std::min(sCsScroll, std::max(0, csRows() - 3)));
-}
-// Mueve un cursor por la rejilla. Abajo desde la última fila: toStart.
+int csPages() { return (csCount() + kCsPerPage - 1) / kCsPerPage; }
+int csPageCount(int page) { return std::min(kCsPerPage, csCount() - page * kCsPerPage); }
+bool csVisible(int card) { return card >= 0 && card < csCount() && card / kCsPerPage == sCsPage; }
+// La página de la tarjeta.
+void csShow(int card) { sCsPage = std::max(0, std::min(card / kCsPerPage, csPages() - 1)); }
+// Mueve un cursor por la rejilla de su página. Abajo desde la última fila: toStart.
 void csMove(int& card, int dx, int dy, bool* toStart)
 {
-    const int count = csCount();
-    int row = card / kCsCols, col = card % kCsCols;
+    csShow(card);
+    const int inPage = csPageCount(sCsPage), rows = (inPage + kCsCols - 1) / kCsCols;
+    const int slot   = card - sCsPage * kCsPerPage;
+    int row = slot / kCsCols, col = slot % kCsCols;
     if (dx) {
-        const int rowLen = std::min(kCsCols, count - row * kCsCols);
+        const int rowLen = std::min(kCsCols, inPage - row * kCsCols);
         col              = (col + dx + rowLen) % rowLen;
     }
     if (dy < 0 && row > 0) row--;
     if (dy > 0) {
-        if (row + 1 < csRows()) row++;
+        if (row + 1 < rows) row++;
         else if (toStart) *toStart = true;
     }
-    card = std::min(row * kCsCols + col, count - 1);
-    csShow(card);
+    card = sCsPage * kCsPerPage + std::min(row * kCsCols + col, inPage - 1);
+}
+// Página siguiente o anterior (da la vuelta); el cursor pasa a la misma casilla
+// de la página nueva (o a la última si es más corta). false con una sola página.
+bool csTurnPage(int* cursor, int dir)
+{
+    const int pages = csPages();
+    if (pages <= 1) return false;
+    const int slot = cursor ? *cursor % kCsPerPage : 0;
+    sCsPage        = (sCsPage + dir + pages) % pages;
+    if (cursor) *cursor = sCsPage * kCsPerPage + std::min(slot, csPageCount(sCsPage) - 1);
+    return true;
 }
 bool csValid(int character) { return (character >= -1 && character < PC_P2_CHAR_COUNT) || pc_p2_character_is_custom(character); }
 
@@ -6139,11 +6145,14 @@ int csSideX(int panelX, int captain) { return csLeft(panelX) + captain * (kCsSid
 int csGridX(int panelX) { return csLeft(panelX) + kCsSideW + kCsSpace; }
 int csTop(int panelY) { return panelY + 70; }
 int csCardX(int panelX, int index) { return csGridX(panelX) + (index % kCsCols) * (kCsCardW + kCsGap); }
-int csCardY(int panelY, int index) { return csTop(panelY) + (index / kCsCols - sCsScroll) * (kCsCardH + kCsGap); }
+int csCardY(int panelY, int index) { return csTop(panelY) + (index % kCsPerPage / kCsCols) * (kCsCardH + kCsGap); }
 int csStartX(int panelX) { return panelX + kCsPanelW / 2 - kCsStartW / 2; }
 int csStartY(int panelY) { return csTop(panelY) + kCsGridH + 14; }
+// Flechas de página, debajo de las esquinas de la rejilla (a los lados de Start).
+const int kCsArrowW = 30;
+int csArrowX(int panelX, int dir) { return dir < 0 ? csGridX(panelX) : csGridX(panelX) + kCsGridW - kCsArrowW; }
 
-enum { CS_HIT_NONE = 0, CS_HIT_CARD, CS_HIT_SIDE, CS_HIT_START };
+enum { CS_HIT_NONE = 0, CS_HIT_CARD, CS_HIT_SIDE, CS_HIT_START, CS_HIT_PAGE };
 
 // Same hit test as a touch, from a 0-1 window position.
 int csPointerHit(float nx, float ny, int* which)
@@ -6171,6 +6180,15 @@ int csPointerHit(float nx, float ny, int* which)
         if (x >= px && x <= px + kCsSideW && y >= py && y <= py + kCsSideH) {
             *which = captain;
             return CS_HIT_SIDE;
+        }
+    }
+    if (csPages() > 1) {
+        for (int dir = -1; dir <= 1; dir += 2) {
+            const float ax = float(csArrowX(panelX, dir)), ay = float(csStartY(panelY));
+            if (x >= ax && x <= ax + kCsArrowW && y >= ay && y <= ay + kCsStartH) {
+                *which = dir;
+                return CS_HIT_PAGE;
+            }
         }
     }
     const float sx = float(csStartX(panelX)), sy = float(csStartY(panelY));
@@ -6255,6 +6273,8 @@ void csCoopPressed(int player, bool pressed[CS_InputCount])
         pressed[CS_A]     = menuOkKey();
         pressed[CS_B]     = menuCancelKey();
         pressed[CS_Start] = keyWentDown(SDL_SCANCODE_TAB);
+        pressed[CS_PagePrev] = keyWentDown(SDL_SCANCODE_Q);
+        pressed[CS_PageNext] = keyWentDown(SDL_SCANCODE_E);
     }
     SDL_GameController* ctl = player == 0 ? pc_window_get_controller() : pc_window_get_controller_p2();
     bool held[CS_InputCount] = {};
@@ -6266,6 +6286,8 @@ void csCoopPressed(int player, bool pressed[CS_InputCount])
         held[CS_A]     = pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_A));
         held[CS_B]     = pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_B));
         held[CS_Start] = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_START);
+        held[CS_PagePrev] = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+        held[CS_PageNext] = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
     }
     for (int i = 0; i < CS_InputCount; i++) {
         if (held[i] && !sCsHeld[player][i]) pressed[i] = true;
@@ -6327,7 +6349,9 @@ void pcCaptainSelectCoopInput()
             clicked = menuMouseNorm(&nx, &ny);
         }
         int which = 0;
-        if (clicked && csPointerHit(nx, ny, &which) == CS_HIT_CARD) sCsCursor[owner] = which;
+        const int hit = clicked ? csPointerHit(nx, ny, &which) : CS_HIT_NONE;
+        if (hit == CS_HIT_CARD) sCsCursor[owner] = which;
+        if (hit == CS_HIT_PAGE) csTurnPage(sCsReady[owner] ? nullptr : &sCsCursor[owner], which);
     }
     csHover(nullptr, sCsReady[owner] ? nullptr : &sCsCursor[owner]);
     bool pressed[2][CS_InputCount];
@@ -6349,6 +6373,7 @@ void pcCaptainSelectCoopInput()
             }
             continue;
         }
+        if (in[CS_PagePrev] || in[CS_PageNext]) csTurnPage(sCsReady[p] ? nullptr : &sCsCursor[p], in[CS_PageNext] ? 1 : -1);
         if (sCsReady[p]) continue;
         int& cursor = sCsCursor[p];
         if (in[CS_Left]) csMove(cursor, -1, 0, nullptr);
@@ -6431,6 +6456,13 @@ void pcCaptainSelectInput()
                 csSetActive(captain);
             }
         }
+        for (int dir = -1; dir <= 1 && csPages() > 1; dir += 2) {
+            const float ax = float(csArrowX(panelX, dir)), ay = float(csStartY(panelY));
+            if (x >= ax && x <= ax + kCsArrowW && y >= ay && y <= ay + kCsStartH) {
+                sCapSelStart = false;
+                csTurnPage(&sCapSelIndex, dir);
+            }
+        }
         const float sx = float(csStartX(panelX)), sy = float(csStartY(panelY));
         if (x >= sx && x <= sx + kCsStartW && y >= sy && y <= sy + kCsStartH) {
             sCapSelStart = true;
@@ -6460,18 +6492,20 @@ void pcCaptainSelectInput()
     sLWasHeld     = lHeld;
     sRWasHeld     = rHeld;
 
+    // L/R y Q/E: con más de una página, la pasan (como en Pikmin 1); si no,
+    // cambian de capitán.
     if (prevCaptain || nextCaptain) {
         sCapSelStart = false;
-        csSetActive(prevCaptain ? 0 : 1);
+        if (!csTurnPage(&sCapSelIndex, nextCaptain ? 1 : -1)) csSetActive(prevCaptain ? 0 : 1);
     }
 
     if (sCapSelStart) {
         if (up) {
             // A la última fila que se ve, en la columna de la tarjeta que tenía el foco.
-            sCapSelStart = false;
-            const int row = std::min(csRows() - 1, sCsScroll + 2);
-            sCapSelIndex  = std::min(row * kCsCols + sCapSelIndex % kCsCols, csCount() - 1);
-            csShow(sCapSelIndex);
+            sCapSelStart     = false;
+            const int inPage = csPageCount(sCsPage);
+            const int row    = (inPage - 1) / kCsCols;
+            sCapSelIndex     = sCsPage * kCsPerPage + std::min(row * kCsCols + sCapSelIndex % kCsCols, inPage - 1);
         }
     } else {
         if (left) csMove(sCapSelIndex, -1, 0, nullptr);
@@ -6500,6 +6534,9 @@ void pcCaptainSelectInput()
         } else if (hit == CS_HIT_SIDE) {
             sCapSelStart = false;
             csSetActive(which);
+        } else if (hit == CS_HIT_PAGE) {
+            sCapSelStart = false;
+            csTurnPage(&sCapSelIndex, which);
         } else if (hit == CS_HIT_START) {
             sCapSelStart = true;
             accept = true;
@@ -6529,7 +6566,7 @@ void pc_captain_select_open(void)
     sCapSelArmed     = false;
     sCapSelResult    = PC_CAPSEL_PENDING;
     pc_p2_custom_characters_scan(); // los instalados desde la última vez
-    sCsScroll        = 0;
+    sCsPage          = 0;
     sCapSelChoice[0] = p2SavedCaptain(0);
     sCapSelChoice[1] = p2SavedCaptain(1);
     if (!csValid(sCapSelChoice[0]) || sCapSelChoice[0] < 0) sCapSelChoice[0] = PC_P2_CHAR_OLIMAR;
@@ -6545,7 +6582,10 @@ void pc_captain_select_open(void)
         sCsReady[p]  = false;
         for (int i = 0; i < CS_InputCount; i++) sCsHeld[p][i] = true;
     }
-    if (sCsCoop) sCapSelStart = false;
+    if (sCsCoop) {
+        sCapSelStart = false;
+        csShow(sCsCursor[0]); // la página del cursor del jugador 1
+    }
     sCsCardCount     = 0;
     pc_menu_edge_reset();
 }
@@ -6668,10 +6708,18 @@ void pc_captain_select_draw(void)
         }
     }
 
-    // Más personajes arriba o abajo de las tres filas que se ven.
-    if (sCsScroll > 0) csCenteredText(csGridX(panelX) + kCsGridW / 2, csTop(panelY) - 14, kCsGridW, "^ more ^", dim, 10, 13);
-    if (sCsScroll + 3 < csRows())
-        csCenteredText(csGridX(panelX) + kCsGridW / 2, csTop(panelY) + kCsGridH - 1, kCsGridW, "v more v", dim, 10, 13);
+    // Páginas: el número encima de la rejilla y las flechas a los lados de Start.
+    if (csPages() > 1) {
+        char pageLabel[32];
+        snprintf(pageLabel, sizeof(pageLabel), "Page %d / %d", sCsPage + 1, csPages());
+        csCenteredText(csGridX(panelX) + kCsGridW / 2, csTop(panelY) - 15, kCsGridW, pageLabel, dim, 10, 13);
+        for (int dir = -1; dir <= 1; dir += 2) {
+            const int ax = csArrowX(panelX, dir), ay = csStartY(panelY);
+            if (atlas) pc_settings_p2d_plate(ax, ay, kCsArrowW, kCsStartH, 1);
+            else csFill(gfx, ax, ay, kCsArrowW, kCsStartH, Colour(26, 30, 48, 220));
+            f1Text(ax + kCsArrowW / 2 - f1TextW(dir < 0 ? "<" : ">", 14) / 2, ay + 9, dir < 0 ? "<" : ">", white, 14, 20);
+        }
+    }
 
     // Botón Start (co-op: se enciende con los dos listos).
     const bool pcStartLit = sCsCoop ? sCsReady[0] && sCsReady[1] : sCapSelStart;
@@ -6693,7 +6741,8 @@ void pc_captain_select_draw(void)
 #if PIKI_PC_TOUCH
                  : pc_touch_visible() ? "Tap a card: pick    Tap a captain: switch    Start: go"
 #endif
-                         : "A: pick    L/R: switch captain    Start: go    B: back",
+                         : csPages() > 1 ? "A: pick    L/R: page    Start: go    B: back"
+                                         : "A: pick    L/R: switch captain    Start: go    B: back",
                  dim, kCsPanelW - 60);
 }
 
@@ -8650,8 +8699,9 @@ void graphicsRowValue(int i, char* value, size_t n) {
     case 15:
     case 16:
     case 17:
-    case 18: {
-        static const int kColour[5] = { 1, 2, 0, 3, 4 };
+    case 18:
+    case 19: {
+        static const int kColour[6] = { 1, 2, 0, 3, 4, 5 };
         const char* name = pc_p2_pikmin_models_name_of(kColour[i - 14], sPending.pikminModel[kColour[i - 14]].c_str());
         snprintf(value, n, "%s", *name ? name : "Game");
         break;
@@ -8840,6 +8890,7 @@ const GroupRow kGraphicsRows[] = {
     { SRC_GFX, 16, "Blue Pikmin Model", "Game: the original Blue Pikmin. Or a model made with the model maker and installed for this game. Applies from the next area." },
     { SRC_GFX, 17, "Purple Pikmin Model", "Game: the original Purple Pikmin. Or a model made with the model maker and installed for this game. Applies from the next area." },
     { SRC_GFX, 18, "White Pikmin Model", "Game: the original White Pikmin. Or a model made with the model maker and installed for this game. Applies from the next area." },
+    { SRC_GFX, 19, "Bulbmin Model", "Game: the original Bulbmin. Or a model made with the model maker and installed for this game. Applies from the next area." },
 #endif
 };
 

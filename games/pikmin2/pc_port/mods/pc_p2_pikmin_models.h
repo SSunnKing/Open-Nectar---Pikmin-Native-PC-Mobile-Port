@@ -4,10 +4,10 @@
 /* Pikmin 2: modelos de Pikmin del creador de modelos (Load/Pikmin), uno por
    color, elegido en Opciones > Gráficos (se guarda por id en
    pikmin_settings.conf), como pc_pikmin_models de Pikmin 1. `color` es el
-   EPikiKind del juego: 0 azul, 1 rojo, 2 amarillo, 3 morado, 4 blanco. Un
+   EPikiKind del juego: 0 azul, 1 rojo, 2 amarillo, 3 morado, 4 blanco, 5 Bulbmin. Un
    pack "pikmin_all" vale para todos y se tiñe del color. */
 
-#define PC_P2_PIKMIN_MODEL_COLOURS 5
+#define PC_P2_PIKMIN_MODEL_COLOURS 6
 
 /// Vuelve a leer Load/Pikmin.
 void pc_p2_pikmin_models_refresh(void);
